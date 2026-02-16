@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app: #0f1115;
+  --bg-panel: #16181d;
+  --bg-card: #1c1e24;
+  --bg-hover: #252830;
+
+  --border-subtle: #2d313a;
+  --border-active: #3f4451;
+
+  --text-primary: #ecedee;
+  --text-secondary: #9aa0a6;
+  --text-tertiary: #5f6368;
+
+  --accent-primary: #7c4dff;
+  --accent-hover: #9e75ff;
+  --accent-subtle: rgba(124, 77, 255, 0.1);
+
+  --status-backlog: #5f6368;
+  --status-todo: #3498db;
+  --status-inprogress: #f1c40f;
+  --status-review: #9b59b6;
+  --status-done: #2ecc71;
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --bg-app: #f0f2f5;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #e8eaed;
+
+  --border-subtle: #dadce0;
+  --border-active: #bdc1c6;
+
+  --text-primary: #202124;
+  --text-secondary: #5f6368;
+  --text-tertiary: #9aa0a6;
+
+  --accent-primary: #6200ee;
+  --accent-hover: #7c4dff;
+  --accent-subtle: rgba(98, 0, 238, 0.08);
+}
+
+@layer base {
+  body {
+    @apply bg-bg-app text-primary font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-semibold text-primary;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all duration-200 text-sm border border-transparent;
+  }
+
+  .btn-primary {
+    @apply bg-accent-primary text-white hover:bg-accent-hover hover:-translate-y-px;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-secondary hover:bg-bg-hover hover:text-primary;
+  }
+
+  .input {
+    @apply bg-bg-panel border border-border-subtle text-primary px-3 py-2 rounded-md w-full transition-colors focus:outline-none focus:border-accent-primary;
+  }
+
+  .card {
+    @apply bg-bg-card border border-border-subtle rounded-lg p-4;
+  }
+}
+
+/* Scrollbar utilities */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-active);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #505560;
+}

@@ -1,0 +1,347 @@
+import React, { useState, useEffect } from 'react';
+import { api } from '../api';
+import { Paperclip, Pencil, Trash2, X } from 'lucide-react';
+
+export function TaskDetailModal({ task, onClose, onUpdate }) {
+    const [loading, setLoading] = useState(false);
+    const [activities, setActivities] = useState([]);
+    const [comment, setComment] = useState('');
+    const [profiles, setProfiles] = useState([]);
+    const [attachments, setAttachments] = useState([]);
+    const [uploading, setUploading] = useState(false);
+
+    // Edit state
+    const [isEditing, setIsEditing] = useState(false);
+    const [formData, setFormData] = useState({ ...task });
+
+    useEffect(() => {
+        loadActivity();
+        loadAttachments();
+        api.getProfiles().then(setProfiles).catch(console.error);
+        const interval = setInterval(loadActivity, 3000);
+        return () => clearInterval(interval);
+    }, [task.id]);
+
+    const loadActivity = async () => {
+        try {
+            const data = await api.getActivity(task.id);
+            setActivities(data);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const loadAttachments = async () => {
+        try {
+            const data = await api.listAttachments(task.id);
+            setAttachments(data);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setUploading(true);
+        try {
+            await api.uploadAttachment(task.id, file);
+            loadAttachments();
+            loadActivity();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setUploading(false);
+            e.target.value = '';
+        }
+    };
+
+    const handleDeleteAttachment = async (id, filename) => {
+        if (!confirm(`Delete attachment "${filename}"?`)) return;
+        try {
+            await api.deleteAttachment(id);
+            loadAttachments();
+            loadActivity();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const formatSize = (bytes) => {
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    };
+
+    const handleSave = async () => {
+        setLoading(true);
+        try {
+            await api.updateTask(task.id, {
+                title: formData.title,
+                description: formData.description,
+                priority: formData.priority,
+                assignee: formData.assignee,
+                tags: typeof formData.tags === 'string' ? formData.tags.split(',') : formData.tags
+            });
+            setIsEditing(false);
+            onUpdate();
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleComment = async (e) => {
+        e.preventDefault();
+        if (!comment.trim()) return;
+        try {
+            await api.addComment(task.id, { comment: comment });
+            setComment('');
+            loadActivity();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!confirm("Delete this task?")) return;
+        try {
+            await api.deleteTask(task.id);
+            onUpdate();
+            onClose();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const priorityColors = {
+        critical: '#ef4444',
+        high: '#f97316',
+        medium: '#eab308',
+        low: '#6b7280',
+    };
+
+    return (
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+            <div
+                className="w-full max-w-3xl rounded-lg shadow-xl flex flex-col"
+                onClick={e => e.stopPropagation()}
+                style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', border: '1px solid var(--border-subtle)', maxHeight: '85vh' }}
+            >
+                {/* Header */}
+                <div className="p-5 flex justify-between items-start" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <div className="flex-1">
+                        {isEditing ? (
+                            <input
+                                className="input mb-2 font-bold text-lg"
+                                value={formData.title}
+                                onChange={e => setFormData({ ...formData, title: e.target.value })}
+                            />
+                        ) : (
+                            <h2 className="text-xl font-bold cursor-pointer" onClick={() => setIsEditing(true)}>
+                                {task.title}
+                            </h2>
+                        )}
+                        <div className="flex gap-2 items-center mt-1 text-xs">
+                            <span className="px-2 py-0.5 rounded" style={{
+                                backgroundColor: task.status === 'done' ? 'rgba(46,204,113,0.15)' : 'var(--bg-panel)',
+                                color: task.status === 'done' ? '#2ecc71' : 'var(--text-secondary)'
+                            }}>
+                                {task.status?.replace('_', ' ')}
+                            </span>
+                            <span className="px-2 py-0.5 rounded" style={{
+                                backgroundColor: `${priorityColors[task.priority]}20`,
+                                color: priorityColors[task.priority]
+                            }}>
+                                {task.priority}
+                            </span>
+                            <span style={{ color: 'var(--text-tertiary)' }}>#{task.id}</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setIsEditing(v => !v)}
+                            className="p-2 rounded hover:bg-bg-hover"
+                            style={{ color: isEditing ? 'var(--accent-primary)' : 'var(--text-secondary)' }}
+                            title="Edit task"
+                        >
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                            onClick={handleDelete}
+                            className="p-2 rounded hover:bg-bg-hover"
+                            style={{ color: 'var(--text-secondary)' }}
+                            title="Delete task"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={onClose} className="p-2 rounded hover:bg-bg-hover" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-hidden flex" style={{ minHeight: 0 }}>
+                    {/* Main Content */}
+                    <div className="flex-1 p-5 overflow-y-auto" style={{ borderRight: '1px solid var(--border-subtle)' }}>
+                        {/* Description */}
+                        <div className="mb-5">
+                            <label className="block text-xs font-semibold uppercase mb-2" style={{ color: 'var(--text-secondary)' }}>Description</label>
+                            {isEditing ? (
+                                <textarea
+                                    className="input w-full h-32"
+                                    value={formData.description}
+                                    onChange={e => setFormData({ ...formData, description: e.target.value })}
+                                    placeholder="Add a description..."
+                                />
+                            ) : (
+                                <div
+                                    className="text-sm whitespace-pre-wrap cursor-pointer min-h-[3rem] rounded p-2"
+                                    style={{ color: task.description ? 'var(--text-primary)' : 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}
+                                    onClick={() => setIsEditing(true)}
+                                >
+                                    {task.description || "Click to add description..."}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Fields grid */}
+                        <div className="grid grid-cols-2 gap-4 mb-5">
+                            <div>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Priority</label>
+                                {isEditing ? (
+                                    <select className="input" value={formData.priority} onChange={e => setFormData({ ...formData, priority: e.target.value })}>
+                                        <option value="low">Low</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="high">High</option>
+                                        <option value="critical">Critical</option>
+                                    </select>
+                                ) : (
+                                    <div className="text-sm capitalize" style={{ color: priorityColors[task.priority] }}>{task.priority}</div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Assignee</label>
+                                {isEditing ? (
+                                    <select className="input" value={formData.assignee} onChange={e => setFormData({ ...formData, assignee: e.target.value })}>
+                                        <option value="">Unassigned</option>
+                                        {profiles.map(p => (
+                                            <option key={p.id} value={p.name}>{p.display_name} ({p.role})</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div className="text-sm">{task.assignee || "Unassigned"}</div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Tags</label>
+                                {isEditing ? (
+                                    <input
+                                        className="input"
+                                        value={Array.isArray(formData.tags) ? formData.tags.join(', ') : formData.tags}
+                                        onChange={e => setFormData({ ...formData, tags: e.target.value })}
+                                        placeholder="comma-separated"
+                                    />
+                                ) : (
+                                    <div className="flex gap-1 flex-wrap">
+                                        {(task.tags || []).length > 0 ? task.tags.map((t, i) => (
+                                            <span key={i} className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>{t}</span>
+                                        )) : <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>No tags</span>}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Created</label>
+                                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{new Date(task.created_at).toLocaleString()}</div>
+                                <label className="block text-xs font-semibold uppercase mb-1 mt-2" style={{ color: 'var(--text-secondary)' }}>Updated</label>
+                                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{new Date(task.updated_at).toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        {isEditing && (
+                            <div className="flex gap-2 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                                <button onClick={handleSave} className="btn btn-primary" disabled={loading}>Save Changes</button>
+                                <button onClick={() => { setIsEditing(false); setFormData({ ...task }); }} className="btn btn-ghost">Cancel</button>
+                            </div>
+                        )}
+
+                        {/* Attachments */}
+                        <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <div className="flex items-center justify-between mb-3">
+                                <label className="block text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)' }}>Attachments ({attachments.length})</label>
+                                <label className="text-xs font-semibold px-3 py-1 rounded cursor-pointer" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
+                                    {uploading ? 'Uploading…' : '+ Upload'}
+                                    <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
+                                </label>
+                            </div>
+                            {attachments.length === 0 ? (
+                                <div className="text-xs py-3 text-center rounded" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}>
+                                    No attachments yet
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {attachments.map(att => (
+                                        <div key={att.id} className="flex items-center gap-3 p-2 rounded text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
+                                            <Paperclip className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
+                                            <div className="flex-1 min-w-0">
+                                                <a
+                                                    href={api.getAttachmentDownloadUrl(att.id)}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-sm font-medium truncate block"
+                                                    style={{ color: 'var(--accent-primary)' }}
+                                                >
+                                                    {att.filename}
+                                                </a>
+                                                <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                                                    {formatSize(att.size_bytes)} · {att.uploaded_by} · {new Date(att.created_at).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={() => handleDeleteAttachment(att.id, att.filename)}
+                                                className="p-1 rounded text-xs"
+                                                style={{ color: 'var(--text-tertiary)' }}
+                                                title="Delete"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Sidebar / Activity */}
+                    <div className="w-80 flex flex-col" style={{ backgroundColor: 'var(--bg-panel)' }}>
+                        <div className="p-4 font-semibold text-sm" style={{ borderBottom: '1px solid var(--border-subtle)' }}>Activity</div>
+
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                            {activities.map(act => (
+                                <div key={act.id} className="text-sm">
+                                    <div className="flex justify-between items-baseline mb-0.5">
+                                        <span className="font-semibold text-xs">{act.actor}</span>
+                                        <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                    <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                        <span style={{ color: 'var(--accent-primary)' }}>{act.action}</span>: {act.detail}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="p-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <form onSubmit={handleComment}>
+                                <input
+                                    className="input text-sm"
+                                    placeholder="Add a comment..."
+                                    value={comment}
+                                    onChange={e => setComment(e.target.value)}
+                                />
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
