@@ -1,0 +1,61 @@
+meta {
+  name: "Direct SSE Mimic (IDE Style)"
+  type: "http"
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/sse
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  mcp-protocol-version: 2025-06-18
+  Accept: application/json, text/event-stream
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "clientInfo": {
+        "name": "bruno-mimic-v2",
+        "version": "2.0.0"
+      },
+      "protocolVersion": "2025-06-18",
+      "capabilities": {}
+    }
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setVar("directSessionId", res.headers['mcp-session-id']);
+  }
+}
+
+tests {
+  test("Handshake successful (200 OK)", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Contains mandatory mcp-session-id header", function() {
+    expect(res.headers['mcp-session-id']).to.be.a('string');
+  });
+
+  test("Protocol version matches request", function() {
+    expect(res.body.result.protocolVersion).to.equal("2025-06-18");
+  });
+
+  test("Server provides basic capabilities", function() {
+    expect(res.body.result.capabilities).to.be.an('object');
+    expect(res.body.result.capabilities.tools).to.be.an('object');
+  });
+
+  test("Server identifies correctly", function() {
+    expect(res.body.result.serverInfo.name).to.equal("AgentIRA");
+  });
+}

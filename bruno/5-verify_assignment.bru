@@ -1,0 +1,37 @@
+meta {
+  name: "5-VerifyRemoval"
+  type: "http"
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/sse
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 5,
+    "method": "tools/call",
+    "params": {
+      "name": "update_task",
+      "arguments": {
+        "task_id": "{{taskId}}",
+        "assignee": "abc"
+      }
+    }
+  }
+}
+
+tests {
+  test("Update task assignee successful", function() {
+    expect(res.status).to.equal(200);
+  });
+}

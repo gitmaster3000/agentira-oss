@@ -1,0 +1,32 @@
+meta {
+  name: "2-ListTools"
+  type: "http"
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/sse
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }
+}
+
+tests {
+  test("List tools successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result.tools).to.be.an('array');
+  });
+}
