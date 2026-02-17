@@ -29,12 +29,19 @@ from backend import services
 actor_ctx = contextvars.ContextVar("actor", default="system")
 
 # ΓöÇΓöÇ Logging Setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+import os
+
+# Base directory for the project
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "mcp_server.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler("../mcp_server.log"),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -89,19 +96,45 @@ class ASGILoggingMiddleware:
         
         logger.info(f"REQ: {method} {path}")
 
-        # Propagation: Extract actor from token if available
-        actor = "system"
+        # Enforcement: Require valid profile for protected endpoints
+        protected_paths = ["/sse", "/messages/"]
+        # Normalize path for matching (standardize trailing slashes)
+        check_path = path if path.endswith("/") else path + "/"
+        is_protected = any(check_path.startswith(p if p.endswith("/") else p + "/") for p in protected_paths)
+        
         auth_header = headers.get("authorization")
+        actor = "system"
+        is_authenticated = False
+        
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            profile = await self.verifier.verify_token(token)
-            if profile:
-                actor = profile.client_id
-                logger.info(f"Resolved actor from token: {actor}")
-            else:
-                logger.warning("Token verification failed in middleware")
-        else:
-            logger.debug("No Authorization header found, defaulting to 'system'")
+            try:
+                # Use services directly for speed and reliability in middleware
+                # and avoid AccessToken model property confusion
+                profile_dict = services.validate_api_key(token)
+                if profile_dict:
+                    actor = profile_dict.get("name", "unknown")
+                    is_authenticated = True
+                    logger.info(f"Resolved actor from token: {actor}")
+            except Exception as e:
+                logger.warning(f"Middleware token validation failed: {e}")
+            
+        if is_protected and not is_authenticated:
+            logger.warning(f"Unauthorized access attempt to {path}")
+            async def unauthorized_res(scope, receive, send):
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")]
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b'{"error": "Unauthorized", "message": "Valid Bearer token required"}'
+                })
+            return await unauthorized_res(scope, receive, send)
+
+        if not is_authenticated:
+            logger.debug(f"Allowing public/system access to unprotected path: {path}")
         
         token_reset = actor_ctx.set(actor)
         try:
