@@ -33,7 +33,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler("../mcp_server.log"),
+        logging.FileHandler("logs/mcp_server.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -300,102 +300,49 @@ async def list_permissions() -> list[dict]:
 
 # ── Starlette App Lifecycle ──────────────────────────────────────────────
 
-# Create the session manager for streamable-http transport
-session_manager = StreamableHTTPSessionManager(
-    app=mcp._mcp_server,
-    json_response=True, # Client expects JSON-RPC responses for HTTP Stream
-    security_settings=mcp.settings.transport_security
-)
-
 @contextlib.asynccontextmanager
 async def combined_lifespan(app_instance) -> AsyncIterator[None]:
-    """Unified lifespan for session management."""
-    # services.bootstrap() removed - run scripts/bootstrap_db.py manually
+    """Unified lifespan for the MCP server."""
+    logger.info("AgentIRA MCP Server lifespan starting")
     
-    # Start the session manager's task group (manages HTTP Stream sessions)
-    async with session_manager.run():
-        logger.info("StreamableHTTP session manager integrated into lifespan")
+    # Trigger sub-app lifespan if it has one
+    async with mcp_app.router.lifespan_context(mcp_app):
+        logger.info("AgentIRA MCP Sub-app lifespan started")
         yield
+        logger.info("AgentIRA MCP Sub-app lifespan ending")
+    
+    logger.info("AgentIRA MCP Server lifespan ending")
 
 # ── Starlette App Configuration ──────────────────────────────────────────
 
-# 1. Message Fallback
-async def messages_fallback(request):
-    """Fallback for clients using /messages without trailing slash."""
-    logger.info("Hit /messages fallback (no trailing slash)")
-    return JSONResponse(
-        {"error": "Method Not Allowed", "message": "Please use /messages/ with a trailing slash"}, 
-        status_code=405
-    )
+# Create the FastMCP SSE application
+# This app handles both GET (SSE) and POST (JSON-RPC) correctly in a single context.
+mcp_app = mcp.sse_app()
 
-# 2. HTTP Stream Handler (ASGI Wrapper)
-async def http_stream_handler(scope, receive, send):
-    """Bridge for session manager to handle HTTP Stream transport."""
-    await session_manager.handle_request(scope, receive, send)
-
-# 3. Unified /sse Endpoint
-# We must handle GET, POST, and DELETE on /sse in a single route to avoid 405 Method Not Allowed
-# because Starlette's Route matches path first.
-sse_starlette_app = mcp.sse_app()
-
-class ASGIResponder(Response):
-    """
-    A Starlette Response that wraps an ASGI application.
-    This allows us to return an ASGI app (like sse_starlette_app or session_manager)
-    from a route handler, and have Starlette await it properly.
-    """
-    def __init__(self, app_instance, status_code: int = 200, media_type: str | None = None):
-         self.app_instance = app_instance
-         self.status_code = status_code
-         self.media_type = media_type
-
-    async def __call__(self, scope, receive, send) -> None:
-        await self.app_instance(scope, receive, send)
-
-async def unified_sse_handler(request):
-    """
-    Handle all /sse traffic:
-    - GET: hand off to FastMCP's SSE transport (standard SSE)
-    - POST/DELETE: hand off to SessionManager (HTTP Stream transport)
-    """
-    logger.debug(f"Unified SSE Handler hit: {request.method} {request.url.path}")
-    if request.method == "GET":
-        # Dispatch to the FastMCP SSE app
-        # Return as an ASGIResponder so Starlette calls it with (scope, receive, send)
-        return ASGIResponder(sse_starlette_app)
-    elif request.method in ("POST", "DELETE"):
-        # Dispatch to HTTP Stream Manager
-        logger.debug("Dispatching to session_manager")
-        return ASGIResponder(session_manager.handle_request)
-    else:
-        logger.warning(f"Method not allowed in unified handler: {request.method}")
-        return JSONResponse({"error": "Method Not Allowed"}, status_code=405)
-
-# 4. Create the Starlette App
+# ── Create the Starlette App ──────────────────────────────────────────
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.middleware import Middleware
 
-app = Starlette(
+root_app = Starlette(
     debug=True,
     lifespan=combined_lifespan,
     middleware=[
         Middleware(ASGILoggingMiddleware),
     ],
     routes=[
-        # Unified handler for /sse (GET/POST/DELETE)
-        Route("/sse", unified_sse_handler, methods=["GET", "POST", "DELETE"]),
-        
-        # Standalone HTTP Stream endpoint (some clients use this directly)
-        Mount("/messages/", http_stream_handler),
-        
-        # Fallbacks
-        Route("/messages", messages_fallback, methods=["POST"]),
+        # Mount the MCP SSE application at /
+        # GET /sse -> The EventStream (defined in sub-app)
+        # POST /messages -> The JSON-RPC endpoint (defined in sub-app)
+        Mount("/", app=mcp_app),
     ],
 )
 
+# Alias 'app' for uvicorn
+app = root_app
+
 if __name__ == "__main__":
-    logger.info("Starting Simplified AgentIRA MCP Server on 127.0.0.1:8000")
-    # Enable reload=True for development to ensure code changes (like the _receive fix) apply immediately.
-    # Note: When using reload, we must pass the app as an import string.
-    uvicorn.run("backend.mcp_server:app", host="127.0.0.1", port=8000, log_level="debug", reload=True)
+    logger.info("Starting Consolidated AgentIRA MCP Server on 127.0.0.1:8000")
+    import uvicorn
+    # Use reload=True with reload_dirs specifically for the backend folder.
+    uvicorn.run("backend.mcp_server:app", host="127.0.0.1", port=8000, log_level="debug", reload=True, reload_dirs=["backend"])
