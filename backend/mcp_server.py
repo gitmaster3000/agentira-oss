@@ -17,6 +17,7 @@ from mcp.server.auth.provider import TokenVerifier, AccessToken
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse, Response
@@ -302,38 +303,29 @@ async def list_permissions() -> list[dict]:
 
 # ΓöÇΓöÇ Starlette App Lifecycle ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
+
 # Create the session manager for streamable-http transport
+# This handles the "Legacy/IDE" connection style (POST /sse directly)
 session_manager = StreamableHTTPSessionManager(
     app=mcp._mcp_server,
-    json_response=True, # Client expects JSON-RPC responses for HTTP Stream
+    json_response=True,
     security_settings=mcp.settings.transport_security
 )
 
 @contextlib.asynccontextmanager
 async def combined_lifespan(app_instance) -> AsyncIterator[None]:
-    """Unified lifespan for session management."""
-    # services.bootstrap() removed - run scripts/bootstrap_db.py manually
-    
-    # Start the session manager's task group (manages HTTP Stream sessions)
+    """Unified lifespan for server (manages both transports)."""
+    # Start the session manager (for IDE/HTTP)
     async with session_manager.run():
-        logger.info("StreamableHTTP session manager integrated into lifespan")
-        yield
+        logger.info("StreamableHTTP session manager started")
+        # Start the FastMCP app (for Shim/SSE)
+        async with sse_starlette_app.router.lifespan_context(sse_starlette_app):
+            logger.info("FastMCP SSE sub-app lifespan started")
+            yield
 
 # ΓöÇΓöÇ Starlette App Configuration ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-# 1. Message Fallback
-async def messages_fallback(request):
-    """Fallback for clients using /messages without trailing slash."""
-    logger.info("Hit /messages fallback (no trailing slash)")
-    return JSONResponse(
-        {"error": "Method Not Allowed", "message": "Please use /messages/ with a trailing slash"}, 
-        status_code=405
-    )
 
-# 2. HTTP Stream Handler (ASGI Wrapper)
-async def http_stream_handler(scope, receive, send):
-    """Bridge for session manager to handle HTTP Stream transport."""
-    await session_manager.handle_request(scope, receive, send)
 
 # 3. Unified /sse Endpoint
 # We must handle GET, POST, and DELETE on /sse in a single route to avoid 405 Method Not Allowed
@@ -356,19 +348,23 @@ class ASGIResponder(Response):
 
 async def unified_sse_handler(request):
     """
-    Handle all /sse traffic:
-    - GET: hand off to FastMCP's SSE transport (standard SSE)
-    - POST/DELETE: hand off to SessionManager (HTTP Stream transport)
+    Handle all /sse traffic and route to Single Source of Truth (sse_starlette_app).
+    - GET /sse: call sse_starlette_app directly (it handles GET /sse).
+    - POST /sse: rewrite to /messages/ and call sse_starlette_app.
+    - DELETE /sse: rewrite to /messages/ and call sse_starlette_app.
     """
     logger.debug(f"Unified SSE Handler hit: {request.method} {request.url.path}")
+    
     if request.method == "GET":
-        # Dispatch to the FastMCP SSE app
-        # Return as an ASGIResponder so Starlette calls it with (scope, receive, send)
+        # Shim/Standard SSE Handshake
         return ASGIResponder(sse_starlette_app)
+        
     elif request.method in ("POST", "DELETE"):
-        # Dispatch to HTTP Stream Manager
-        logger.debug("Dispatching to session_manager")
+        # IDE/Legacy HTTP-like Interaction
+        # Dispatch to StreamableHTTPSessionManager which allows POST init / sessionless-like behavior
+        logger.debug("Dispatching POST/DELETE /sse to session_manager")
         return ASGIResponder(session_manager.handle_request)
+        
     else:
         logger.warning(f"Method not allowed in unified handler: {request.method}")
         return JSONResponse({"error": "Method Not Allowed"}, status_code=405)
@@ -385,14 +381,12 @@ app = Starlette(
         Middleware(ASGILoggingMiddleware),
     ],
     routes=[
-        # Unified handler for /sse (GET/POST/DELETE)
+        # 1. Intercept /sse for compatibility (IDE uses POST /sse, Std uses GET /sse)
         Route("/sse", unified_sse_handler, methods=["GET", "POST", "DELETE"]),
         
-        # Standalone HTTP Stream endpoint (some clients use this directly)
-        Mount("/messages/", http_stream_handler),
-        
-        # Fallbacks
-        Route("/messages", messages_fallback, methods=["POST"]),
+        # 2. Mount the Single Source of Truth app at root
+        # This handles /messages/ (Standard Shim/Clients) and GET /sse (if hit directly)
+        Mount("/", app=sse_starlette_app),
     ],
 )
 

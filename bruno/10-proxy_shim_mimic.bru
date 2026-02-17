@@ -1,0 +1,42 @@
+meta {
+  name: "Proxy Shim Mimic (POST /messages/)"
+  type: "http"
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/messages/
+  body: json
+  auth: bearer
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  X-Proxy-Workspace: C:\Users\ali_f\AppData\Local\Programs\Antigravity
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "clientInfo": {
+        "name": "bruno-shim-mimic",
+        "version": "1.0.0"
+      },
+      "protocolVersion": "2025-06-18",
+      "capabilities": {}
+    }
+  }
+}
+
+tests {
+  test("Shim Endpoint Exists (POST /messages/ returns 400 w/o session)", function() {
+    // We expect 400 because we didn't provide ?sessionId=...
+    // If it returns 404 or 405, the endpoint is missing/broken.
+    expect(res.status).to.equal(400);
+  });
+}
