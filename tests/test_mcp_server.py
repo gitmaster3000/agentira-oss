@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from backend.mcp_server import AgentIRAVerifier, ASGILoggingMiddleware, SSEHandler
+from backend.mcp_server import AgentIRAVerifier, ASGILoggingMiddleware, unified_sse_handler
 
 # ── AgentIRAVerifier Tests ───────────────────────────────────────────────
 
@@ -56,56 +56,53 @@ async def test_logging_middleware_non_http():
 # ── SSEHandler Tests ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_sse_handler_get_method_not_allowed():
-    """Test that GET requests to SSEHandler return 405."""
-    handler = SSEHandler()
-    scope = {"type": "http", "method": "GET"}
-    receive = AsyncMock()
-    send = AsyncMock()
+async def test_unified_sse_handler_get():
+    """Test that GET requests to unified_sse_handler are dispatched."""
+    request = MagicMock()
+    request.method = "GET"
+    request.url.path = "/sse"
     
-    await handler(scope, receive, send)
-    
-    # Check that a 405 response was started
-    # Note: JSONResponse might add more headers/formatting, using ANY for flexibility
-    from unittest.mock import ANY
-    send.assert_any_call({
-        "type": "http.response.start",
-        "status": 405,
-        "headers": ANY
-    })
+    with patch("backend.mcp_server.ASGIResponder") as mock_responder:
+        await unified_sse_handler(request)
+        mock_responder.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_sse_handler_post_delegation():
-    """Test that POST requests are delegated to the session manager."""
-    handler = SSEHandler()
-    scope = {"type": "http", "method": "POST"}
-    receive = AsyncMock()
-    send = AsyncMock()
+async def test_unified_sse_handler_post():
+    """Test that POST requests are dispatched to the session manager."""
+    request = MagicMock()
+    request.method = "POST"
+    request.url.path = "/sse"
     
-    with patch("backend.mcp_server.session_manager.handle_request", new_callable=AsyncMock) as mock_handle:
-        await handler(scope, receive, send)
-        mock_handle.assert_called_once_with(scope, receive, send)
+    with patch("backend.mcp_server.ASGIResponder") as mock_responder:
+        await unified_sse_handler(request)
+        mock_responder.assert_called_once()
 
 # ── New Tool Tests ───────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_create_project_tool():
     """Test the create_project tool call."""
-    from backend.mcp_server import create_project
+    from backend.mcp_server import create_project, actor_ctx
     ctx = MagicMock()
-    ctx.client_id = "test-user"
     
     with patch("backend.services.create_project") as mock_service:
-        await create_project("New Project", "Desc", ctx=ctx)
-        mock_service.assert_called_once_with("New Project", "Desc", actor="test-user")
+        token = actor_ctx.set("test-user")
+        try:
+            await create_project("New Project", "Desc", ctx=ctx)
+            mock_service.assert_called_once_with("New Project", "Desc", actor="test-user")
+        finally:
+            actor_ctx.reset(token)
 
 @pytest.mark.asyncio
 async def test_list_tasks_tool():
     """Test the list_tasks tool call."""
-    from backend.mcp_server import list_tasks
+    from backend.mcp_server import list_tasks, actor_ctx
     ctx = MagicMock()
-    ctx.client_id = "test-user"
     
     with patch("backend.services.list_tasks") as mock_service:
-        await list_tasks(project_id="123", status="todo", ctx=ctx)
-        mock_service.assert_called_once_with("123", "todo", None, None, actor="test-user")
+        token = actor_ctx.set("test-user")
+        try:
+            await list_tasks(project_id="123", status="todo", ctx=ctx)
+            mock_service.assert_called_once_with("123", "todo", None, None, actor="test-user")
+        finally:
+            actor_ctx.reset(token)

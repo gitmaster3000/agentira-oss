@@ -80,11 +80,9 @@ class ASGILoggingMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        method = scope.get("method", "UNKNOWN")
-        path = scope.get("path", "/")
-        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", []) if isinstance(k, bytes) and isinstance(v, bytes)}
-        query_bytes = scope.get("query_string", b"")
-        query = query_bytes.decode() if isinstance(query_bytes, bytes) else str(query_bytes)
+        method = scope.get("method")
+        path = scope.get("path")
+        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
         
         logger.info(f"REQ: {method} {path}")
 

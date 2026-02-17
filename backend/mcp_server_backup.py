@@ -1,4 +1,4 @@
-﻿"""
+"""
 AgentIRA MCP Server - Standard Protocol-Compliant Implementation.
 
 This module provides a dual-transport MCP server (SSE and HTTP Stream) with 
@@ -7,6 +7,7 @@ authenticated access to AgentIRA's tools and resources.
 
 import logging
 import sys
+print("!!! MCP SERVER MODULE EXECUTING !!!")
 import traceback
 import contextlib
 from typing import Any, AsyncIterator
@@ -24,23 +25,23 @@ from starlette.requests import Request
 from starlette.routing import Route, Mount
 from backend import services
 
-# ΓöÇΓöÇ Global Context ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Global Context ──────────────────────────────────────────────────────
 actor_ctx = contextvars.ContextVar("actor", default="system")
 
-# ΓöÇΓöÇ Logging Setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Logging Setup ───────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler("../mcp_server.log"),
+        logging.FileHandler("logs/mcp_server.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger("mcp_server")
 logger.setLevel(logging.DEBUG)
 
-# ΓöÇΓöÇ Auth Implementation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Auth Implementation ──────────────────────────────────────────────────
 
 class AgentIRAVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
@@ -58,7 +59,7 @@ class AgentIRAVerifier(TokenVerifier):
             logger.warning(f"Token verification failed: {e}")
             return None
 
-# ΓöÇΓöÇ FastMCP Setup ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── FastMCP Setup ────────────────────────────────────────────────────────
 
 auth_settings = AuthSettings(
     issuer_url="http://127.0.0.1:8000",
@@ -80,13 +81,15 @@ class ASGILoggingMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        method = scope.get("method", "UNKNOWN")
-        path = scope.get("path", "/")
-        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", []) if isinstance(k, bytes) and isinstance(v, bytes)}
-        query_bytes = scope.get("query_string", b"")
-        query = query_bytes.decode() if isinstance(query_bytes, bytes) else str(query_bytes)
+        method = scope.get("method")
+        path = scope.get("path")
+        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+        query = scope.get("query_string", b"").decode()
         
-        logger.info(f"REQ: {method} {path}")
+        # Systematic Capture Logging
+        with open("logs/capture_trace.log", "a") as f:
+            f.write(f"\n>>> REQ: {method} {path}?{query}\n")
+            f.write(f"HEADERS: {headers}\n")
 
         # Propagation: Extract actor from token if available
         actor = "system"
@@ -106,16 +109,22 @@ class ASGILoggingMiddleware:
         try:
             async def logging_send(message):
                 if message["type"] == "http.response.start":
-                    logger.info(f"RES: {message['status']} (Handled {method} {path})")
+                    status = message["status"]
+                    logger.info(f"RES: {status} (Handled {method} {path})")
+                    with open("logs/capture_trace.log", "a") as f:
+                        f.write(f"<<< RES: {status}\n")
                 await send(message)
             await self.app(scope, receive, logging_send)
         except Exception:
-            logger.error(f"ERR: {method} {path} failed:\n{traceback.format_exc()}")
+            err = traceback.format_exc()
+            logger.error(f"ERR: {method} {path} failed:\n{err}")
+            with open("logs/capture_trace.log", "a") as f:
+                f.write(f"!!! ERR: {err}\n")
             raise
         finally:
             actor_ctx.reset(token_reset)
 
-# ΓöÇΓöÇ Tool Definitions ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Tool Definitions ─────────────────────────────────────────────────────
 
 @mcp.tool()
 async def get_me(ctx: Context) -> str:
@@ -136,7 +145,7 @@ async def login(name: str, password: str) -> str:
         res["api_key"] = p.api_key
         return res
 
-# ΓöÇΓöÇ Project Tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Project Tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def create_project(name: str, description: str = "", ctx: Context = None) -> dict:
@@ -192,7 +201,7 @@ async def remove_project_member(project_id: str, profile_name: str) -> bool:
     """Remove a user from a project."""
     return services.remove_project_member(project_id, profile_name)
 
-# ΓöÇΓöÇ Task Tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Task Tools ───────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def create_task(
@@ -270,7 +279,7 @@ async def delete_task(task_id: str) -> bool:
     """Delete a task."""
     return services.delete_task(task_id)
 
-# ΓöÇΓöÇ Collaboration Tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Collaboration Tools ───────────────────────────────────────────────────
 
 @mcp.tool()
 async def add_comment(task_id: str, comment: str, ctx: Context = None) -> dict:
@@ -283,7 +292,7 @@ async def get_activity(task_id: str) -> list[dict]:
     """Get activity history and comments for a task."""
     return services.get_activity(task_id)
 
-# ΓöÇΓöÇ Metadata Tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Metadata Tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def list_statuses() -> list[dict]:
@@ -300,7 +309,9 @@ async def list_permissions() -> list[dict]:
     """List all available permissions."""
     return services.list_permissions()
 
-# ΓöÇΓöÇ Starlette App Lifecycle ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ── Starlette App Lifecycle ──────────────────────────────────────────────
+
+# ── Starlette App Lifecycle ──────────────────────────────────────────────
 
 # Create the session manager for streamable-http transport
 session_manager = StreamableHTTPSessionManager(
@@ -311,15 +322,27 @@ session_manager = StreamableHTTPSessionManager(
 
 @contextlib.asynccontextmanager
 async def combined_lifespan(app_instance) -> AsyncIterator[None]:
-    """Unified lifespan for session management."""
-    # services.bootstrap() removed - run scripts/bootstrap_db.py manually
-    
-    # Start the session manager's task group (manages HTTP Stream sessions)
-    async with session_manager.run():
-        logger.info("StreamableHTTP session manager integrated into lifespan")
-        yield
+    """Unified lifespan for session management and sub-app."""
+    logger.info("AgentIRA MCP Server lifespan starting")
 
-# ΓöÇΓöÇ Starlette App Configuration ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+    # 1. Start the session manager (for POST/JSON-RPC)
+    async with session_manager.run():
+        logger.info("StreamableHTTP session manager started")
+        
+        # 2. Start the SSE sub-app (for GET/SSE)
+        # This ensures FastMCP internal state is ready
+        async with mcp_app.router.lifespan_context(mcp_app):
+            logger.info("FastMCP SSE sub-app lifespan started")
+            yield
+            logger.info("FastMCP SSE sub-app lifespan ending")
+            
+    logger.info("AgentIRA MCP Server lifespan ending")
+
+# ── Starlette App Configuration ──────────────────────────────────────────
+
+# Create the FastMCP SSE application
+# This app handles GET (SSE) and default POST (Wrapped JSON-RPC)
+mcp_app = mcp.sse_app()
 
 # 1. Message Fallback
 async def messages_fallback(request):
@@ -335,11 +358,7 @@ async def http_stream_handler(scope, receive, send):
     """Bridge for session manager to handle HTTP Stream transport."""
     await session_manager.handle_request(scope, receive, send)
 
-# 3. Unified /sse Endpoint
-# We must handle GET, POST, and DELETE on /sse in a single route to avoid 405 Method Not Allowed
-# because Starlette's Route matches path first.
-sse_starlette_app = mcp.sse_app()
-
+# 3. ASGI Responder Wrapper
 class ASGIResponder(Response):
     """
     A Starlette Response that wraps an ASGI application.
@@ -354,50 +373,41 @@ class ASGIResponder(Response):
     async def __call__(self, scope, receive, send) -> None:
         await self.app_instance(scope, receive, send)
 
+# 4. Unified Handler for /sse
 async def unified_sse_handler(request):
     """
-    Handle all /sse traffic:
-    - GET: hand off to FastMCP's SSE transport (standard SSE)
-    - POST/DELETE: hand off to SessionManager (HTTP Stream transport)
+    Handle all /sse traffic via FastMCP's built-in SSE app.
+    This ensures session consistency and full protocol support.
+    Wait: FastMCP's sse_app() returns 202 for POSTs and wraps responses.
+    Our proxy shim (mcp_proxy.py) already has the fix to unwrap these.
+    Direct SSE clients (standard) handle this wrapping natively.
     """
     logger.debug(f"Unified SSE Handler hit: {request.method} {request.url.path}")
-    if request.method == "GET":
-        # Dispatch to the FastMCP SSE app
-        # Return as an ASGIResponder so Starlette calls it with (scope, receive, send)
-        return ASGIResponder(sse_starlette_app)
-    elif request.method in ("POST", "DELETE"):
-        # Dispatch to HTTP Stream Manager
-        logger.debug("Dispatching to session_manager")
-        return ASGIResponder(session_manager.handle_request)
-    else:
-        logger.warning(f"Method not allowed in unified handler: {request.method}")
-        return JSONResponse({"error": "Method Not Allowed"}, status_code=405)
+    return ASGIResponder(mcp_app)
 
-# 4. Create the Starlette App
+# ── Create the Starlette App ──────────────────────────────────────────
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.middleware import Middleware
 
-app = Starlette(
+root_app = Starlette(
     debug=True,
     lifespan=combined_lifespan,
     middleware=[
         Middleware(ASGILoggingMiddleware),
     ],
     routes=[
-        # Unified handler for /sse (GET/POST/DELETE)
+        # Mount the MCP SSE application at / (so endpoint becomes /sse and /messages)
         Route("/sse", unified_sse_handler, methods=["GET", "POST", "DELETE"]),
-        
-        # Standalone HTTP Stream endpoint (some clients use this directly)
-        Mount("/messages/", http_stream_handler),
-        
-        # Fallbacks
-        Route("/messages", messages_fallback, methods=["POST"]),
+        Mount("/", app=mcp_app), 
     ],
 )
 
+# Alias 'app' for uvicorn
+app = root_app
+
 if __name__ == "__main__":
-    logger.info("Starting Simplified AgentIRA MCP Server on 127.0.0.1:8000")
-    # Enable reload=True for development to ensure code changes (like the _receive fix) apply immediately.
-    # Note: When using reload, we must pass the app as an import string.
-    uvicorn.run("backend.mcp_server:app", host="127.0.0.1", port=8000, log_level="debug", reload=True)
+    logger.info("Starting Hybrid AgentIRA MCP Server on 127.0.0.1:8000")
+    import uvicorn
+    # Use reload=True with reload_dirs specifically for the backend folder.
+    uvicorn.run("backend.mcp_server:app", host="127.0.0.1", port=8000, log_level="debug", reload=True, reload_dirs=["backend"])

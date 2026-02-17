@@ -98,7 +98,6 @@ async def run_proxy():
                     async for msg_wrapper in read_stream:
                         try:
                             # Extract the raw JSONRPCMessage if it's wrapped in a SessionMessage
-                            # This depends on the SDK version, but usually it's msg_wrapper.message
                             message = msg_wrapper.message if hasattr(msg_wrapper, "message") else msg_wrapper
                             
                             # Use Pydantic serialization for the JSONRPCMessage
