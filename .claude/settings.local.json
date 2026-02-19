@@ -11,7 +11,12 @@
       "mcp__agentira__add_comment",
       "mcp__agentira__move_task",
       "Bash(git checkout:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "mcp__agentira__get_task"
     ]
   },
   "enableAllProjectMcpServers": true,
