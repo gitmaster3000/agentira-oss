@@ -160,27 +160,46 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="p-8">
                         {/* Title */}
-                        <div className="mb-8">
-                            {isEditing ? (
-                                <input
-                                    className="bg-bg-app border border-border-subtle text-xl font-bold text-text-primary p-2 rounded w-full focus:outline-none focus:border-accent-primary"
-                                    value={formData.title}
-                                    onChange={e => setFormData({ ...formData, title: e.target.value })}
-                                    autoFocus
-                                />
-                            ) : (
-                                <h1
-                                    className="text-2xl font-bold text-text-primary cursor-pointer hover:bg-bg-hover/50 p-1 -ml-1 rounded transition-colors"
+                        <div className="mb-8 flex items-start justify-between group">
+                            <div className="flex-1 mr-4">
+                                {isEditing ? (
+                                    <input
+                                        className="bg-bg-app border border-border-subtle text-xl font-bold text-text-primary p-2 rounded w-full focus:outline-none focus:border-accent-primary"
+                                        value={formData.title}
+                                        onChange={e => setFormData({ ...formData, title: e.target.value })}
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <h1 className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors">
+                                        {task.title}
+                                    </h1>
+                                )}
+                            </div>
+                            {!isEditing && (
+                                <button
                                     onClick={() => setIsEditing(true)}
+                                    className="p-1.5 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs"
+                                    title="Edit task"
                                 >
-                                    {task.title}
-                                </h1>
+                                    <Pencil className="w-3.5 h-3.5" /> Edit
+                                </button>
                             )}
                         </div>
 
                         {/* Description */}
                         <div className="mb-8">
-                            <label className="text-xs font-bold uppercase text-text-tertiary mb-3 block">Description</label>
+                            <div className="flex items-center justify-between mb-3 group/desc">
+                                <label className="text-xs font-bold uppercase text-text-tertiary block">Description</label>
+                                {!isEditing && (
+                                    <button
+                                        onClick={() => setIsEditing(true)}
+                                        className="p-1 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded transition-colors opacity-0 group-hover/desc:opacity-100 flex items-center gap-1 text-xs"
+                                        title="Edit description"
+                                    >
+                                        <Pencil className="w-3.5 h-3.5" /> Edit
+                                    </button>
+                                )}
+                            </div>
                             {isEditing ? (
                                 <textarea
                                     className="bg-bg-app border border-border-subtle text-sm text-text-primary p-3 rounded w-full h-48 focus:outline-none focus:border-accent-primary resize-none"
@@ -189,10 +208,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     placeholder="Add a more detailed description..."
                                 />
                             ) : (
-                                <div
-                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors"
-                                    onClick={() => setIsEditing(true)}
-                                >
+                                <div className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px]">
                                     {task.description || "No description provided."}
                                 </div>
                             )}

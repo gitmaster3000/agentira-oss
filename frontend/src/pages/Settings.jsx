@@ -562,7 +562,7 @@ export function Settings() {
             {/* ── API Key Modal ──────────────────────────────────────────── */}
             {newBotKey && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-lg mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <div className="w-full max-w-lg mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-green-500/15 text-green-400 flex items-center justify-center"><Key className="w-5 h-5" /></div>
                             <div>
@@ -592,7 +592,7 @@ export function Settings() {
             {/* ── Custom Prompt Modal ────────────────────────────────────── */}
             {promptState && (
                 <div className="fixed inset-0 flex items-center justify-center z-[100] bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
                         <div>
                             <h3 className="font-bold text-lg">{promptState.title}</h3>
                             <p className="text-xs text-secondary">{promptState.description}</p>
@@ -619,7 +619,7 @@ export function Settings() {
             {/* ── Custom Confirmation Modal ──────────────────────────────── */}
             {confirmState && (
                 <div className="fixed inset-0 flex items-center justify-center z-[100] bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
                         <div>
                             <h3 className="font-bold text-lg">{confirmState.title}</h3>
                             <p className="text-xs text-secondary mt-1">{confirmState.description}</p>
