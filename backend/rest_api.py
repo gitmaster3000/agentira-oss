@@ -409,6 +409,32 @@ def api_delete_attachment(attachment_id: str):
     return {"ok": True}
 
 
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@app.get("/api/notifications")
+def api_list_notifications(actor: str, unread_only: bool = True):
+    """List notifications for the given actor (profile name)."""
+    with services._session() as db:
+        prof = services._get_profile_by_name(db, actor)
+        if not prof:
+            raise HTTPException(404, "Profile not found")
+        return services.list_notifications(prof.id, unread_only=unread_only)
+
+@app.patch("/api/notifications/{notification_id}/read")
+def api_mark_notification_read(notification_id: str):
+    if not services.mark_notification_read(notification_id):
+        raise HTTPException(404, "Notification not found")
+    return {"ok": True}
+
+
+# ── Project Activity ──────────────────────────────────────────────────────────
+
+@app.get("/api/projects/{project_id}/activity")
+def api_get_project_activity(project_id: str, limit: int = 50):
+    """Get recent activity across all tasks in a project."""
+    return services.get_project_activity(project_id, limit=limit)
+
+
 # ── Profiles ──────────────────────────────────────────────────────────────
 
 @app.post("/api/profiles")

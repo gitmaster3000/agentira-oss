@@ -568,6 +568,30 @@ def get_activity(task_id: str) -> list[dict]:
         return [_activity_to_dict(a) for a in activities]
 
 
+def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:
+    """Return recent activity across all tasks in a project, newest first."""
+    with _session() as db:
+        activities = (
+            db.query(Activity)
+            .filter(Activity.project_id == project_id)
+            .order_by(Activity.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": a.id,
+                "project_id": a.project_id,
+                "task_id": a.task_id,
+                "actor": a.actor,
+                "action": a.action,
+                "detail": a.detail,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in activities
+        ]
+
+
 def get_changes_since(task_id: str, since: str) -> dict:
     from datetime import datetime, timezone
 
