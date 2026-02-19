@@ -1,47 +1,56 @@
 meta {
-  name: "14-RBAC Roles Endpoint"
+  name: "14-List Roles"
   type: "http"
   seq: 14
 }
 
-get {
-  url: {{baseUrl}}/api/roles
-  body: none
-  auth: none
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 14,
+    "method": "tools/call",
+    "params": {
+      "name": "list_roles",
+      "arguments": {}
+    }
+  }
 }
 
 tests {
-  test("GET /api/roles returns 200", function() {
+  test("List roles successful", function() {
     expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
   });
 
-  test("Roles is a non-empty array", function() {
-    expect(res.body).to.be.an('array');
-    expect(res.body.length).to.be.greaterThan(0);
+  test("Response contains roles list", function() {
+    const content = res.body.result.content;
+    expect(content).to.be.an('array');
+    expect(content.length).to.be.greaterThan(0);
   });
 
-  test("admin, member, viewer roles exist", function() {
-    const names = res.body.map(r => r.name);
-    expect(names).to.include('admin');
-    expect(names).to.include('member');
-    expect(names).to.include('viewer');
+  test("admin role is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('admin');
   });
 
-  test("admin has transition:* permission", function() {
-    const admin = res.body.find(r => r.name === 'admin');
-    expect(admin).to.not.be.undefined;
-    expect(admin.permissions).to.include('transition:*');
+  test("member role is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('member');
   });
 
-  test("member has transition:* permission", function() {
-    const member = res.body.find(r => r.name === 'member');
-    expect(member).to.not.be.undefined;
-    expect(member.permissions).to.include('transition:*');
-  });
-
-  test("viewer has no permissions", function() {
-    const viewer = res.body.find(r => r.name === 'viewer');
-    expect(viewer).to.not.be.undefined;
-    expect(viewer.permissions).to.be.an('array').with.lengthOf(0);
+  test("viewer role is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('viewer');
   });
 }

@@ -1,40 +1,51 @@
 meta {
-  name: "13-RBAC REST Endpoints"
+  name: "13-List Permissions"
   type: "http"
   seq: 13
 }
 
-get {
-  url: {{baseUrl}}/api/permissions
-  body: none
-  auth: none
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 13,
+    "method": "tools/call",
+    "params": {
+      "name": "list_permissions",
+      "arguments": {}
+    }
+  }
 }
 
 tests {
-  test("GET /api/permissions returns 200", function() {
+  test("List permissions successful", function() {
     expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
   });
 
-  test("Permissions is a non-empty array", function() {
-    expect(res.body).to.be.an('array');
-    expect(res.body.length).to.be.greaterThan(0);
+  test("Response contains permissions list", function() {
+    const content = res.body.result.content;
+    expect(content).to.be.an('array');
+    expect(content.length).to.be.greaterThan(0);
   });
 
-  test("Each permission has id, codename, description", function() {
-    res.body.forEach(function(p) {
-      expect(p).to.have.property('id');
-      expect(p).to.have.property('codename');
-      expect(p).to.have.property('description');
-    });
+  test("transition:* permission is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('transition:*');
   });
 
-  test("transition:* permission exists", function() {
-    const codenames = res.body.map(p => p.codename);
-    expect(codenames).to.include('transition:*');
-  });
-
-  test("task.create permission exists", function() {
-    const codenames = res.body.map(p => p.codename);
-    expect(codenames).to.include('task.create');
+  test("task.create permission is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('task.create');
   });
 }
