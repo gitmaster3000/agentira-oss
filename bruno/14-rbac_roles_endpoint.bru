@@ -1,0 +1,47 @@
+meta {
+  name: "14-RBAC Roles Endpoint"
+  type: "http"
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/roles
+  body: none
+  auth: none
+}
+
+tests {
+  test("GET /api/roles returns 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Roles is a non-empty array", function() {
+    expect(res.body).to.be.an('array');
+    expect(res.body.length).to.be.greaterThan(0);
+  });
+
+  test("admin, member, viewer roles exist", function() {
+    const names = res.body.map(r => r.name);
+    expect(names).to.include('admin');
+    expect(names).to.include('member');
+    expect(names).to.include('viewer');
+  });
+
+  test("admin has transition:* permission", function() {
+    const admin = res.body.find(r => r.name === 'admin');
+    expect(admin).to.not.be.undefined;
+    expect(admin.permissions).to.include('transition:*');
+  });
+
+  test("member has transition:* permission", function() {
+    const member = res.body.find(r => r.name === 'member');
+    expect(member).to.not.be.undefined;
+    expect(member.permissions).to.include('transition:*');
+  });
+
+  test("viewer has no permissions", function() {
+    const viewer = res.body.find(r => r.name === 'viewer');
+    expect(viewer).to.not.be.undefined;
+    expect(viewer.permissions).to.be.an('array').with.lengthOf(0);
+  });
+}

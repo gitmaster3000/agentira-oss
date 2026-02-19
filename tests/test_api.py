@@ -329,3 +329,19 @@ def test_member_lacks_close_permission():
     roles = services.list_roles()
     member = next(r for r in roles if r["name"] == "member")
     assert "transition:review:done" not in member["permissions"]
+
+
+def test_list_permissions():
+    """list_permissions must return all seeded permissions as a non-empty list."""
+    perms = services.list_permissions()
+    assert isinstance(perms, list)
+    assert len(perms) > 0
+    codenames = [p["codename"] for p in perms]
+    assert "transition:*" in codenames
+    assert "task.create" in codenames
+    assert "project.view_all" in codenames
+    # Every entry must have id, codename, and description keys
+    for p in perms:
+        assert "id" in p
+        assert "codename" in p
+        assert "description" in p
