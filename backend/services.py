@@ -709,36 +709,6 @@ def create_role(name: str) -> dict:
         return {"id": r.id, "name": r.name, "permissions": []}
 
 
-def grant_role_permission(role_name: str, codename: str) -> bool:
-    with _session() as db:
-        role = db.query(Role).filter(Role.name == role_name).first()
-        perm = db.query(Permission).filter(Permission.codename == codename).first()
-        if not role or not perm:
-            return False
-        
-        # Check if already exists
-        existing = db.query(RolePermission).filter_by(role_id=role.id, permission_id=perm.id).first()
-        if not existing:
-            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
-            db.commit()
-        return True
-
-
-def revoke_role_permission(role_name: str, codename: str) -> bool:
-    with _session() as db:
-        role = db.query(Role).filter(Role.name == role_name).first()
-        perm = db.query(Permission).filter(Permission.codename == codename).first()
-        if not role or not perm:
-            return False
-        
-        existing = db.query(RolePermission).filter_by(role_id=role.id, permission_id=perm.id).first()
-        if existing:
-            db.delete(existing)
-            db.commit()
-            return True
-        return False
-
-
 def list_permissions() -> list[dict]:
     with _session() as db:
         perms = db.query(Permission).order_by(Permission.codename).all()
@@ -1072,12 +1042,12 @@ def _seed_defaults(db: Session) -> None:
     db.flush()
 
     # CRUD + Scope permissions
-    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*"]:
+    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*", "*"]:
         if not db.query(Permission).filter(Permission.codename == perm).first():
             db.add(Permission(codename=perm))
     db.flush()
 
-    # Admin gets wildcard (handled in auth.py via 'system' bypass, but also grant all explicitly)
+    # Admin gets full wildcard "*" so check_transition always bypasses for admin
     admin = db.query(Role).filter(Role.name == "admin").first()
     for perm in db.query(Permission).all():
         existing = db.query(RolePermission).filter_by(role_id=admin.id, permission_id=perm.id).first()
