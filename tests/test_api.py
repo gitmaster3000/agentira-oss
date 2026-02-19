@@ -181,16 +181,16 @@ def test_list_tasks_scoping():
     assert t2["id"] in ids
 
 
-def test_move_task_member_denied_close():
-    """Member should NOT be able to move review -> done by default."""
+def test_move_task_member_can_close():
+    """Member with transition:* can move review -> done."""
     services.create_profile("alice", role="member")
     p = services.create_project("P")
     t = services.create_task(p["id"], "T")
     services.move_task(t["id"], "todo", actor="system")
     services.move_task(t["id"], "in_progress", actor="system")
     services.move_task(t["id"], "review", actor="system")
-    with pytest.raises(PermissionError):
-        services.move_task(t["id"], "done", actor="alice")
+    moved = services.move_task(t["id"], "done", actor="alice")
+    assert moved["status"] == "done"
 
 
 def test_move_task_admin_can_close():

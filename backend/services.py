@@ -700,21 +700,6 @@ def list_roles() -> list[dict]:
         return result
 
 
-def create_role(name: str) -> dict:
-    with _session() as db:
-        r = Role(name=name)
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        return {"id": r.id, "name": r.name, "permissions": []}
-
-
-def list_permissions() -> list[dict]:
-    with _session() as db:
-        perms = db.query(Permission).order_by(Permission.codename).all()
-        return [{"id": p.id, "codename": p.codename, "description": p.description} for p in perms]
-
-
 def create_permission(codename: str, description: str = None) -> dict:
     with _session() as db:
         # Check if already exists
@@ -744,15 +729,15 @@ def create_role(name: str, description: str = None, permissions: list[str] = [])
         for codename in permissions:
             perm = db.query(Permission).filter(Permission.codename == codename).first()
             if perm:
-                role.permissions.append(perm)
-        
+                db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+
         db.commit()
         db.refresh(role)
         return {
             "id": role.id,
             "name": role.name,
             "description": role.description,
-            "permissions": [p.codename for p in role.permissions]
+            "permissions": [rp.permission.codename for rp in role.permissions]
         }
 
 
@@ -766,18 +751,12 @@ def delete_role(role_id: str) -> bool:
         return True
 
 
-def list_permissions() -> list[dict]:
-    with _session() as db:
-        perms = db.query(Permission).order_by(Permission.codename).all()
-        return [{"id": p.id, "codename": p.codename, "description": p.description} for p in perms]
-
-
-def grant_role_permission(role_name: str, codename: str) -> dict:
+def grant_role_permission(role_name: str, codename: str) -> bool:
     """Grant a permission to a role. Creates the permission if it doesn't exist."""
     with _session() as db:
         role = db.query(Role).filter(Role.name == role_name).first()
         if not role:
-            raise ValueError(f"Role '{role_name}' not found")
+            return False
 
         perm = db.query(Permission).filter(Permission.codename == codename).first()
         if not perm:
@@ -790,7 +769,7 @@ def grant_role_permission(role_name: str, codename: str) -> dict:
             db.add(RolePermission(role_id=role.id, permission_id=perm.id))
             db.commit()
 
-        return {"role": role.name, "permission": codename}
+        return True
 
 
 def revoke_role_permission(role_name: str, codename: str) -> bool:
