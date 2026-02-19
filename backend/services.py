@@ -700,6 +700,12 @@ def list_roles() -> list[dict]:
         return result
 
 
+def list_permissions() -> list[dict]:
+    with _session() as db:
+        perms = db.query(Permission).order_by(Permission.codename).all()
+        return [{"id": p.id, "codename": p.codename, "description": p.description} for p in perms]
+
+
 def create_permission(codename: str, description: str = None) -> dict:
     with _session() as db:
         # Check if already exists
