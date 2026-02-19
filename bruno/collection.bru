@@ -1,0 +1,17 @@
+meta {
+  name: "AgentIRA MCP"
+  type: "http"
+  version: "1"
+}
+
+auth {
+  mode: "bearer"
+}
+
+auth:bearer {
+  token: "{{apiKey}}"
+}
+
+vars:pre-request {
+  baseUrl: "http://127.0.0.1:8000"
+}

@@ -1,0 +1,37 @@
+meta {
+  name: "11-Auth Token Validation"
+  type: "http"
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  Accept: application/json
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "get_me",
+      "arguments": {}
+    }
+  }
+}
+
+tests {
+  test("Authenticated tool call returns 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Result contains actor identity", function() {
+    expect(res.body.result.content[0].text).to.contain("Client ID:");
+  });
+}

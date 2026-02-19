@@ -1,0 +1,30 @@
+meta {
+  name: "Auth Failure Cases"
+  type: "http"
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+}
+
+headers {
+  Accept: application/json
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {}
+  }
+}
+
+tests {
+  test("Missing Auth returns 401", function() {
+    expect(res.status).to.equal(401);
+    expect(res.body.error).to.equal("Unauthorized");
+  });
+}

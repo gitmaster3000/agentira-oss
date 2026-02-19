@@ -1,0 +1,47 @@
+meta {
+  name: "1.5-VerifyIdentity"
+  type: "http"
+  seq: 1.5
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 16,
+    "method": "tools/call",
+    "params": {
+      "name": "get_me",
+      "arguments": {}
+    }
+  }
+}
+
+script:post-response {
+  // Extract profile name from get_me response and persist for subsequent requests
+  if (res.body.result && res.body.result.content && res.body.result.content[0].text) {
+    const text = res.body.result.content[0].text;
+    const match = text.match(/Client ID:\s*(.+?)\.?\s*$/);
+    if (match && match[1]) {
+      bru.setVar("myProfileName", match[1]);
+    }
+  }
+}
+
+tests {
+  test("Verify identity successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
+    expect(res.body.result.content[0].text).to.contain("Client ID:");
+  });
+}

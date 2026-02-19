@@ -1,119 +1,136 @@
 """
-AgentIRA MCP Server - Standard Protocol-Compliant Implementation.
+AgentIRA MCP Server — Streamable HTTP Transport.
 
-This module provides a dual-transport MCP server (SSE and HTTP Stream) with 
-authenticated access to AgentIRA's tools and resources.
+Single transport, single endpoint. All agents (Claude Code, Cursor, any IDE,
+custom bots) connect via POST /mcp with their unique Bearer API key.
+
+No initialization handshake state to lose. No session-drop bugs.
+GET /mcp is reserved for server-initiated push notifications (future use).
 """
 
 import logging
 import sys
 import traceback
 import contextlib
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 import uvicorn
 import contextvars
+import os
+
 from mcp.server.fastmcp import FastMCP, Context
-from mcp.server.auth.provider import TokenVerifier, AccessToken
-from mcp.server.auth.settings import AuthSettings
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response, JSONResponse
 from starlette.requests import Request
-from starlette.routing import Route, Mount
+from starlette.routing import Route
+
 from backend import services
 
-# ── Global Context ──────────────────────────────────────────────────────
+# ── Global Actor Context ──────────────────────────────────────────────────────
+# Set per-request by the auth middleware; read by tool handlers.
 actor_ctx = contextvars.ContextVar("actor", default="system")
 
-# ── Logging Setup ───────────────────────────────────────────────────────
+# ── Logging Setup ─────────────────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "mcp_server.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler("../mcp_server.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout),
+    ],
 )
 logger = logging.getLogger("mcp_server")
 logger.setLevel(logging.DEBUG)
 
-# ── Auth Implementation ──────────────────────────────────────────────────
+# ── FastMCP — used for tool registration only, not for transport ───────────────
+mcp = FastMCP("AgentIRA")
 
-class AgentIRAVerifier(TokenVerifier):
-    async def verify_token(self, token: str) -> AccessToken | None:
-        try:
-            profile = services.validate_api_key(token)
-            if not profile:
-                return None
-            logger.info(f"Verified token for user: {profile.get('name', 'unknown')}")
-            return AccessToken(
-                token=token,
-                client_id=profile.get("name", "anonymous"),
-                scopes=["all"], 
-            )
-        except Exception as e:
-            logger.warning(f"Token verification failed: {e}")
-            return None
-
-# ── FastMCP Setup ────────────────────────────────────────────────────────
-
-auth_settings = AuthSettings(
-    issuer_url="http://127.0.0.1:8000",
-    resource_server_url="http://127.0.0.1:8000",
-    required_scopes=["all"]
-)
-
-mcp = FastMCP(
-    "AgentIRA",
-    # Note: Auth handles in middleware
-)
-
+# ── Auth + Logging Middleware ──────────────────────────────────────────────────
 class ASGILoggingMiddleware:
+    """
+    Per-request middleware that:
+    1. Validates the Bearer token and resolves the actor identity.
+    2. Rejects unauthenticated requests to /mcp with 401.
+    3. Sets actor_ctx so tool handlers can identify who is calling.
+    4. Logs every request/response.
+    """
+
     def __init__(self, app):
         self.app = app
-        self.verifier = AgentIRAVerifier()
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
 
-        method = scope.get("method")
-        path = scope.get("path")
-        headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-        
+        method = scope.get("method", "UNKNOWN")
+        path = scope.get("path", "/")
+        headers = {
+            k.decode().lower(): v.decode()
+            for k, v in scope.get("headers", [])
+            if isinstance(k, bytes) and isinstance(v, bytes)
+        }
+
         logger.info(f"REQ: {method} {path}")
 
-        # Propagation: Extract actor from token if available
+        is_protected = path == "/mcp" or path.startswith("/mcp/")
+
+        auth_header = headers.get("authorization", "")
         actor = "system"
-        auth_header = headers.get("authorization")
-        if auth_header and auth_header.startswith("Bearer "):
+        is_authenticated = False
+
+        if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            profile = await self.verifier.verify_token(token)
-            if profile:
-                actor = profile.client_id
-                logger.info(f"Resolved actor from token: {actor}")
-            else:
-                logger.warning("Token verification failed in middleware")
-        else:
-            logger.debug("No Authorization header found, defaulting to 'system'")
-        
+            try:
+                profile_dict = services.validate_api_key(token)
+                if profile_dict:
+                    actor = profile_dict.get("name", "unknown")
+                    is_authenticated = True
+                    logger.info(f"Resolved actor from token: {actor}")
+            except Exception as e:
+                logger.warning(f"Token validation failed: {e}")
+
+        if is_protected and not is_authenticated:
+            logger.warning(f"Unauthorized access attempt to {path}")
+
+            async def _unauthorized(scope, receive, send):
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b'{"error":"Unauthorized","message":"Valid Bearer token required"}',
+                })
+
+            return await _unauthorized(scope, receive, send)
+
+        if not is_authenticated:
+            logger.debug(f"Public access to: {path}")
+
         token_reset = actor_ctx.set(actor)
         try:
-            async def logging_send(message):
+            async def _logging_send(message):
                 if message["type"] == "http.response.start":
-                    logger.info(f"RES: {message['status']} (Handled {method} {path})")
+                    logger.info(f"RES: {message['status']} ({method} {path})")
                 await send(message)
-            await self.app(scope, receive, logging_send)
+
+            await self.app(scope, receive, _logging_send)
         except Exception:
             logger.error(f"ERR: {method} {path} failed:\n{traceback.format_exc()}")
             raise
         finally:
             actor_ctx.reset(token_reset)
 
-# ── Tool Definitions ─────────────────────────────────────────────────────
+
+# ── Tool Definitions ───────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def get_me(ctx: Context) -> str:
@@ -126,15 +143,14 @@ async def login(name: str, password: str) -> str:
     """Login with username and password to get your API Key."""
     user = services.authenticate_user(name, password)
     if not user:
-         return {'error': 'Invalid credentials'}
-    
+        return {"error": "Invalid credentials"}
     with services._session() as db:
         p = db.query(services.Profile).filter(services.Profile.name == name).first()
         res = services._profile_to_dict(p)
         res["api_key"] = p.api_key
         return res
 
-# ── Project Tools ────────────────────────────────────────────────────────
+# ── Project Tools ──────────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def create_project(name: str, description: str = "", ctx: Context = None) -> dict:
@@ -143,20 +159,11 @@ async def create_project(name: str, description: str = "", ctx: Context = None) 
     try:
         logger.info(f"Tool create_project called with name='{name}', actor='{actor}'")
         res = services.create_project(name, description, actor=actor)
-        
-        # Automatically add the creator as a member so they can create tasks
-        if actor != "system":
-            try:
-                services.add_project_member(res["id"], actor, actor="system")
-                logger.info(f"Added creator {actor} as member to project {res['id']}")
-            except Exception as em:
-                logger.warning(f"Failed to add creator as member: {em}")
-
         logger.debug(f"Tool create_project success: {res}")
         return res
     except Exception as e:
         logger.error(f"Tool create_project failed: {e}\n{traceback.format_exc()}")
-        raise e
+        raise
 
 @mcp.tool()
 async def list_projects(ctx: Context = None) -> list[dict]:
@@ -190,7 +197,7 @@ async def remove_project_member(project_id: str, profile_name: str) -> bool:
     """Remove a user from a project."""
     return services.remove_project_member(project_id, profile_name)
 
-# ── Task Tools ───────────────────────────────────────────────────────────
+# ── Task Tools ─────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def create_task(
@@ -201,7 +208,7 @@ async def create_task(
     priority: str = "medium",
     assignee: str = "",
     tags: list[str] = None,
-    ctx: Context = None
+    ctx: Context = None,
 ) -> dict:
     """Create a new task in a project."""
     actor = actor_ctx.get()
@@ -214,7 +221,7 @@ async def create_task(
         return res
     except Exception as e:
         logger.error(f"Tool create_task failed: {e}\n{traceback.format_exc()}")
-        raise e
+        raise
 
 @mcp.tool()
 async def list_tasks(
@@ -222,7 +229,7 @@ async def list_tasks(
     status: str = None,
     assignee: str = None,
     priority: str = None,
-    ctx: Context = None
+    ctx: Context = None,
 ) -> list[dict]:
     """List tasks matching filters."""
     actor = actor_ctx.get()
@@ -241,7 +248,7 @@ async def get_task(task_id: str) -> dict | None:
         return res
     except Exception as e:
         logger.error(f"Tool get_task failed: {e}\n{traceback.format_exc()}")
-        raise e
+        raise
 
 @mcp.tool()
 async def update_task(
@@ -251,7 +258,7 @@ async def update_task(
     priority: str = None,
     assignee: str = None,
     tags: list[str] = None,
-    ctx: Context = None
+    ctx: Context = None,
 ) -> dict:
     """Update task metadata."""
     actor = actor_ctx.get()
@@ -268,7 +275,7 @@ async def delete_task(task_id: str) -> bool:
     """Delete a task."""
     return services.delete_task(task_id)
 
-# ── Collaboration Tools ───────────────────────────────────────────────────
+# ── Collaboration Tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def add_comment(task_id: str, comment: str, ctx: Context = None) -> dict:
@@ -281,7 +288,7 @@ async def get_activity(task_id: str) -> list[dict]:
     """Get activity history and comments for a task."""
     return services.get_activity(task_id)
 
-# ── Metadata Tools ────────────────────────────────────────────────────────
+# ── Metadata Tools ─────────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def list_statuses() -> list[dict]:
@@ -298,104 +305,60 @@ async def list_permissions() -> list[dict]:
     """List all available permissions."""
     return services.list_permissions()
 
-# ── Starlette App Lifecycle ──────────────────────────────────────────────
-
-# Create the session manager for streamable-http transport
+# ── Transport: Streamable HTTP ─────────────────────────────────────────────────
+# json_response=True → plain JSON body on POST (simpler, Bruno-compatible).
+# Switch to False when enabling server-push notifications via GET /mcp.
 session_manager = StreamableHTTPSessionManager(
     app=mcp._mcp_server,
-    json_response=True, # Client expects JSON-RPC responses for HTTP Stream
-    security_settings=mcp.settings.transport_security
+    json_response=True,
+    security_settings=None,
 )
 
-@contextlib.asynccontextmanager
-async def combined_lifespan(app_instance) -> AsyncIterator[None]:
-    """Unified lifespan for session management."""
-    # services.bootstrap() removed - run scripts/bootstrap_db.py manually
-    
-    # Start the session manager's task group (manages HTTP Stream sessions)
-    async with session_manager.run():
-        logger.info("StreamableHTTP session manager integrated into lifespan")
-        yield
 
-# ── Starlette App Configuration ──────────────────────────────────────────
+class _ASGIAdapter(Response):
+    """Wrap an ASGI app so it can be returned from a Starlette route handler."""
 
-# 1. Message Fallback
-async def messages_fallback(request):
-    """Fallback for clients using /messages without trailing slash."""
-    logger.info("Hit /messages fallback (no trailing slash)")
-    return JSONResponse(
-        {"error": "Method Not Allowed", "message": "Please use /messages/ with a trailing slash"}, 
-        status_code=405
-    )
-
-# 2. HTTP Stream Handler (ASGI Wrapper)
-async def http_stream_handler(scope, receive, send):
-    """Bridge for session manager to handle HTTP Stream transport."""
-    await session_manager.handle_request(scope, receive, send)
-
-# 3. Unified /sse Endpoint
-# We must handle GET, POST, and DELETE on /sse in a single route to avoid 405 Method Not Allowed
-# because Starlette's Route matches path first.
-sse_starlette_app = mcp.sse_app()
-
-class ASGIResponder(Response):
-    """
-    A Starlette Response that wraps an ASGI application.
-    This allows us to return an ASGI app (like sse_starlette_app or session_manager)
-    from a route handler, and have Starlette await it properly.
-    """
-    def __init__(self, app_instance, status_code: int = 200, media_type: str | None = None):
-         self.app_instance = app_instance
-         self.status_code = status_code
-         self.media_type = media_type
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
 
     async def __call__(self, scope, receive, send) -> None:
-        await self.app_instance(scope, receive, send)
+        await self.asgi_app(scope, receive, send)
 
-async def unified_sse_handler(request):
+
+async def mcp_handler(request: Request):
     """
-    Handle all /sse traffic:
-    - GET: hand off to FastMCP's SSE transport (standard SSE)
-    - POST/DELETE: hand off to SessionManager (HTTP Stream transport)
+    Single MCP endpoint — Streamable HTTP transport.
+
+    POST /mcp  →  tool call / JSON-RPC request  →  JSON response
+    GET  /mcp  →  server-initiated notifications  →  SSE stream (future)
+    DELETE /mcp →  session cleanup
     """
-    logger.debug(f"Unified SSE Handler hit: {request.method} {request.url.path}")
-    if request.method == "GET":
-        # Dispatch to the FastMCP SSE app
-        # Return as an ASGIResponder so Starlette calls it with (scope, receive, send)
-        return ASGIResponder(sse_starlette_app)
-    elif request.method in ("POST", "DELETE"):
-        # Dispatch to HTTP Stream Manager
-        logger.debug("Dispatching to session_manager")
-        return ASGIResponder(session_manager.handle_request)
-    else:
-        logger.warning(f"Method not allowed in unified handler: {request.method}")
-        return JSONResponse({"error": "Method Not Allowed"}, status_code=405)
+    return _ASGIAdapter(session_manager.handle_request)
 
-# 4. Create the Starlette App
-from starlette.applications import Starlette
-from starlette.routing import Route, Mount
-from starlette.middleware import Middleware
 
+@contextlib.asynccontextmanager
+async def lifespan(app_instance) -> AsyncIterator[None]:
+    async with session_manager.run():
+        logger.info("AgentIRA MCP Server ready — endpoint: POST /mcp (Streamable HTTP)")
+        yield
+
+
+# ── Starlette Application ──────────────────────────────────────────────────────
 app = Starlette(
     debug=True,
-    lifespan=combined_lifespan,
-    middleware=[
-        Middleware(ASGILoggingMiddleware),
-    ],
+    lifespan=lifespan,
+    middleware=[Middleware(ASGILoggingMiddleware)],
     routes=[
-        # Unified handler for /sse (GET/POST/DELETE)
-        Route("/sse", unified_sse_handler, methods=["GET", "POST", "DELETE"]),
-        
-        # Standalone HTTP Stream endpoint (some clients use this directly)
-        Mount("/messages/", http_stream_handler),
-        
-        # Fallbacks
-        Route("/messages", messages_fallback, methods=["POST"]),
+        Route("/mcp", mcp_handler, methods=["GET", "POST", "DELETE"]),
     ],
 )
 
 if __name__ == "__main__":
-    logger.info("Starting Simplified AgentIRA MCP Server on 127.0.0.1:8000")
-    # Enable reload=True for development to ensure code changes (like the _receive fix) apply immediately.
-    # Note: When using reload, we must pass the app as an import string.
-    uvicorn.run("backend.mcp_server:app", host="127.0.0.1", port=8000, log_level="debug", reload=True)
+    logger.info("Starting AgentIRA MCP Server on 127.0.0.1:8000")
+    uvicorn.run(
+        "backend.mcp_server:app",
+        host="127.0.0.1",
+        port=8000,
+        log_level="debug",
+        reload=True,
+    )
