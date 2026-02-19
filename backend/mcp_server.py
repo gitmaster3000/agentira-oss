@@ -294,6 +294,11 @@ async def get_activity(task_id: str) -> list[dict]:
     """Get activity history and comments for a task."""
     return services.get_activity(task_id)
 
+@mcp.tool()
+async def get_task_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
+    """Get activity history for a task with pagination and structured diffs."""
+    return services.get_activity(task_id, limit=limit, offset=offset)
+
 # ── Notification Tools ─────────────────────────────────────────────────────────
 
 @mcp.tool()

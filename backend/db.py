@@ -31,3 +31,15 @@ def init_db():
     """Create all tables."""
     from backend.models import Project, Task, Activity  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    run_migrations()
+
+
+def run_migrations():
+    """Apply incremental schema changes to existing databases."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(activities)"))
+        existing = {row[1] for row in result}
+        if "diff" not in existing:
+            conn.execute(text("ALTER TABLE activities ADD COLUMN diff TEXT"))
+            conn.commit()
