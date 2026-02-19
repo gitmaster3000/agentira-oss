@@ -70,12 +70,20 @@ def _project_to_dict(p: Project) -> dict:
 
 
 def _activity_to_dict(a: Activity) -> dict:
+    import json
+    diff = None
+    if a.diff:
+        try:
+            diff = json.loads(a.diff)
+        except Exception:
+            diff = a.diff
     return {
         "id": a.id,
         "task_id": a.task_id,
         "actor": a.actor,
         "action": a.action,
         "detail": a.detail,
+        "diff": diff,
         "created_at": a.created_at.isoformat(),
     }
 
@@ -133,7 +141,8 @@ def _log_activity(
     detail: str,
     project_id: str | None = None,
     task_id: str | None = None,
-    notify_users: list[str] = []
+    notify_users: list[str] = [],
+    diff: str | None = None,
 ) -> Activity:
     """Centralized audit logging and notification dispatch."""
     activity = Activity(
@@ -141,7 +150,8 @@ def _log_activity(
         task_id=task_id,
         actor=actor,
         action=action,
-        detail=detail
+        detail=detail,
+        diff=diff,
     )
     db.add(activity)
     
@@ -463,27 +473,37 @@ def update_task(
         if not task:
             raise ValueError(f"Task {task_id} not found")
 
+        import json
         changes = []
-        if title is not None:
+        diff = {}
+        if title is not None and title != task.title:
+            diff["title"] = {"from": task.title, "to": title}
             task.title = title
             changes.append(f"title → {title}")
-        if description is not None:
+        if description is not None and description != task.description:
+            diff["description"] = {"from": task.description[:80], "to": description[:80]}
             task.description = description
             changes.append("description updated")
-        if priority is not None:
+        if priority is not None and priority != task.priority.value:
+            diff["priority"] = {"from": task.priority.value, "to": priority}
             task.priority = TaskPriority(priority)
             changes.append(f"priority → {priority}")
-        if assignee is not None:
+        if assignee is not None and assignee != task.assignee:
+            diff["assignee"] = {"from": task.assignee, "to": assignee}
             task.assignee = assignee
             changes.append(f"assignee → {assignee}")
         if tags is not None:
+            old_tags = task.tags.split(",") if task.tags else []
+            if old_tags != tags:
+                diff["tags"] = {"from": old_tags, "to": tags}
+                changes.append(f"tags → {tags}")
             task.tags = ",".join(tags)
-            changes.append(f"tags → {tags}")
 
         if changes:
             _log_activity(
                 db, actor, "task.update", "; ".join(changes),
                 project_id=task.project_id, task_id=task_id,
+                diff=json.dumps(diff) if diff else None,
                 notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
             )
 
@@ -514,9 +534,11 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
         new_status_id = _get_status_id(db, new_status)
         task.status_id = new_status_id
         
+        import json
         _log_activity(
             db, actor, "task.move", f"{old} → {new_status}",
             project_id=task.project_id, task_id=task_id,
+            diff=json.dumps({"status": {"from": old, "to": new_status}}),
             notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
         )
         
@@ -564,15 +586,41 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         return _activity_to_dict(act)
 
 
-def get_activity(task_id: str) -> list[dict]:
+def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
     with _session() as db:
         activities = (
             db.query(Activity)
             .filter(Activity.task_id == task_id)
             .order_by(Activity.created_at.desc())
+            .offset(offset)
+            .limit(limit)
             .all()
         )
         return [_activity_to_dict(a) for a in activities]
+
+
+def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:
+    """Return recent activity across all tasks in a project, newest first."""
+    with _session() as db:
+        activities = (
+            db.query(Activity)
+            .filter(Activity.project_id == project_id)
+            .order_by(Activity.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": a.id,
+                "project_id": a.project_id,
+                "task_id": a.task_id,
+                "actor": a.actor,
+                "action": a.action,
+                "detail": a.detail,
+                "created_at": a.created_at.isoformat(),
+            }
+            for a in activities
+        ]
 
 
 def get_changes_since(task_id: str, since: str) -> dict:
@@ -659,45 +707,6 @@ def list_roles() -> list[dict]:
         return result
 
 
-def create_role(name: str) -> dict:
-    with _session() as db:
-        r = Role(name=name)
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        return {"id": r.id, "name": r.name, "permissions": []}
-
-
-def grant_role_permission(role_name: str, codename: str) -> bool:
-    with _session() as db:
-        role = db.query(Role).filter(Role.name == role_name).first()
-        perm = db.query(Permission).filter(Permission.codename == codename).first()
-        if not role or not perm:
-            return False
-        
-        # Check if already exists
-        existing = db.query(RolePermission).filter_by(role_id=role.id, permission_id=perm.id).first()
-        if not existing:
-            db.add(RolePermission(role_id=role.id, permission_id=perm.id))
-            db.commit()
-        return True
-
-
-def revoke_role_permission(role_name: str, codename: str) -> bool:
-    with _session() as db:
-        role = db.query(Role).filter(Role.name == role_name).first()
-        perm = db.query(Permission).filter(Permission.codename == codename).first()
-        if not role or not perm:
-            return False
-        
-        existing = db.query(RolePermission).filter_by(role_id=role.id, permission_id=perm.id).first()
-        if existing:
-            db.delete(existing)
-            db.commit()
-            return True
-        return False
-
-
 def list_permissions() -> list[dict]:
     with _session() as db:
         perms = db.query(Permission).order_by(Permission.codename).all()
@@ -733,15 +742,15 @@ def create_role(name: str, description: str = None, permissions: list[str] = [])
         for codename in permissions:
             perm = db.query(Permission).filter(Permission.codename == codename).first()
             if perm:
-                role.permissions.append(perm)
-        
+                db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+
         db.commit()
         db.refresh(role)
         return {
             "id": role.id,
             "name": role.name,
             "description": role.description,
-            "permissions": [p.codename for p in role.permissions]
+            "permissions": [rp.permission.codename for rp in role.permissions]
         }
 
 
@@ -755,18 +764,12 @@ def delete_role(role_id: str) -> bool:
         return True
 
 
-def list_permissions() -> list[dict]:
-    with _session() as db:
-        perms = db.query(Permission).order_by(Permission.codename).all()
-        return [{"id": p.id, "codename": p.codename, "description": p.description} for p in perms]
-
-
-def grant_role_permission(role_name: str, codename: str) -> dict:
+def grant_role_permission(role_name: str, codename: str) -> bool:
     """Grant a permission to a role. Creates the permission if it doesn't exist."""
     with _session() as db:
         role = db.query(Role).filter(Role.name == role_name).first()
         if not role:
-            raise ValueError(f"Role '{role_name}' not found")
+            return False
 
         perm = db.query(Permission).filter(Permission.codename == codename).first()
         if not perm:
@@ -779,7 +782,7 @@ def grant_role_permission(role_name: str, codename: str) -> dict:
             db.add(RolePermission(role_id=role.id, permission_id=perm.id))
             db.commit()
 
-        return {"role": role.name, "permission": codename}
+        return True
 
 
 def revoke_role_permission(role_name: str, codename: str) -> bool:
@@ -1031,12 +1034,12 @@ def _seed_defaults(db: Session) -> None:
     db.flush()
 
     # CRUD + Scope permissions
-    for perm in ["task.create", "task.delete", "project.manage", "project.view_all"]:
+    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*"]:
         if not db.query(Permission).filter(Permission.codename == perm).first():
             db.add(Permission(codename=perm))
     db.flush()
 
-    # Admin gets wildcard (handled in auth.py via 'system' bypass, but also grant all explicitly)
+    # Admin gets all permissions explicitly
     admin = db.query(Role).filter(Role.name == "admin").first()
     for perm in db.query(Permission).all():
         existing = db.query(RolePermission).filter_by(role_id=admin.id, permission_id=perm.id).first()
@@ -1045,10 +1048,8 @@ def _seed_defaults(db: Session) -> None:
 
     # Permissions for Members & Bots
     member_perms = [
-        "transition:backlog:todo", "transition:todo:in_progress",
-        "transition:in_progress:review", "transition:review:in_progress",
-        "transition:todo:backlog", "transition:in_progress:backlog",
-        "task.create", "task.delete", 
+        "transition:*",
+        "task.create", "task.delete",
         # project.manage intentionally omitted (only admins manage projects)
     ]
 

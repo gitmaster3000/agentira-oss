@@ -288,6 +288,42 @@ async def get_activity(task_id: str) -> list[dict]:
     """Get activity history and comments for a task."""
     return services.get_activity(task_id)
 
+@mcp.tool()
+async def get_task_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
+    """Get activity history for a task with pagination and structured diffs."""
+    return services.get_activity(task_id, limit=limit, offset=offset)
+
+# ── Notification Tools ─────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def get_notifications(unread_only: bool = True, ctx: Context = None) -> list[dict]:
+    """Get your notifications. Set unread_only=False to see all notifications."""
+    actor = actor_ctx.get()
+    with services._session() as db:
+        prof = services._get_profile_by_name(db, actor)
+        if not prof:
+            return []
+        return services.list_notifications(prof.id, unread_only=unread_only)
+
+@mcp.tool()
+async def mark_notification_read(notification_id: str) -> bool:
+    """Mark a notification as read by its ID."""
+    return services.mark_notification_read(notification_id)
+
+# ── Attachment Tools ────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def list_attachments(task_id: str) -> list[dict]:
+    """List all attachments for a task."""
+    return services.list_attachments(task_id)
+
+# ── Project Activity Tools ──────────────────────────────────────────────────────
+
+@mcp.tool()
+async def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:
+    """Get recent activity across all tasks in a project. Use limit to control how many entries to return."""
+    return services.get_project_activity(project_id, limit=limit)
+
 # ── Metadata Tools ─────────────────────────────────────────────────────────────
 
 @mcp.tool()
