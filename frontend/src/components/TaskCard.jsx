@@ -31,7 +31,7 @@ export function TaskCard({ task, onUpdate, onDelete }) {
         <div
             draggable
             onDragStart={handleDragStart}
-            onClick={() => onUpdate(task)}
+            onClick={(e) => { e.stopPropagation(); onUpdate(task); }}
             className={`card mb-3 cursor-pointer hover:bg-bg-hover transition-colors group relative ${borderColor}`}
             style={{
                 backgroundColor: 'var(--bg-card)',

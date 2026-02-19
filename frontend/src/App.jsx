@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { Settings } from './pages/Settings';
+import { TaskPage } from './pages/TaskPage';
 
 function Welcome() {
     return (
@@ -41,6 +42,7 @@ export default function App() {
                         <Route index element={<Welcome />} />
                         <Route path="board/:projectId" element={<Board />} />
                         <Route path="settings" element={<Settings />} />
+                        <Route path="tasks/:taskId" element={<TaskPage />} />
                     </Route>
                 </Routes>
             </BrowserRouter>

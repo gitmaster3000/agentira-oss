@@ -24,6 +24,7 @@ export async function request(endpoint, options = {}) {
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
+        console.error(`API Error on ${endpoint}:`, err);
         throw new Error(err.detail || err.message || `API request failed (${res.status})`);
     }
 

@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
 import { CreateTaskModal } from '../components/CreateTaskModal';
-import { TaskDetailModal } from '../components/TaskDetailModal';
+import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { UserPlus, X, Plus } from 'lucide-react';
 
 const COLUMNS = [
@@ -109,7 +109,8 @@ export function Board() {
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [showCreate, setShowCreate] = useState(false);
-    const [selectedTask, setSelectedTask] = useState(null);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const selectedTaskId = searchParams.get('selectedTask');
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
     const addBtnRef = useRef(null);
@@ -182,11 +183,16 @@ export function Board() {
     const memberNames = new Set(members.map(m => m.name));
     const availableProfiles = profiles.filter(p => !memberNames.has(p.name));
 
+    // Derive selectedTask from the ID in the URL
+    const selectedTask = board && selectedTaskId
+        ? Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId))
+        : null;
+
     if (loading) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Loading board...</div>;
     if (!board) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Project not found</div>;
 
     return (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full relative overflow-hidden">
             {/* Header */}
             <header className="p-4 flex justify-between items-start" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                 <div className="flex-1">
@@ -267,7 +273,11 @@ export function Board() {
                                     <TaskCard
                                         key={task.id}
                                         task={task}
-                                        onUpdate={(t) => setSelectedTask(t)}
+                                        onUpdate={(t) => {
+                                            const newParams = new URLSearchParams(searchParams);
+                                            newParams.set('selectedTask', t.id);
+                                            setSearchParams(newParams);
+                                        }}
                                         onDelete={loadBoard}
                                     />
                                 ))}
@@ -286,10 +296,19 @@ export function Board() {
             )}
 
             {selectedTask && (
-                <TaskDetailModal
+                <TaskDetailPanel
                     task={selectedTask}
-                    onClose={() => setSelectedTask(null)}
-                    onUpdate={() => { loadBoard(); setSelectedTask(null); }}
+                    onClose={() => {
+                        const newParams = new URLSearchParams(searchParams);
+                        newParams.delete('selectedTask');
+                        setSearchParams(newParams);
+                    }}
+                    onUpdate={() => {
+                        loadBoard();
+                        const newParams = new URLSearchParams(searchParams);
+                        newParams.delete('selectedTask');
+                        setSearchParams(newParams);
+                    }}
                 />
             )}
         </div>
