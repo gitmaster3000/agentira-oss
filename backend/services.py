@@ -1042,12 +1042,12 @@ def _seed_defaults(db: Session) -> None:
     db.flush()
 
     # CRUD + Scope permissions
-    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*", "*"]:
+    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*"]:
         if not db.query(Permission).filter(Permission.codename == perm).first():
             db.add(Permission(codename=perm))
     db.flush()
 
-    # Admin gets full wildcard "*" so check_transition always bypasses for admin
+    # Admin gets all permissions explicitly
     admin = db.query(Role).filter(Role.name == "admin").first()
     for perm in db.query(Permission).all():
         existing = db.query(RolePermission).filter_by(role_id=admin.id, permission_id=perm.id).first()
