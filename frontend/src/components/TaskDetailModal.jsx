@@ -17,7 +17,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     useEffect(() => {
         loadActivity();
         loadAttachments();
-        api.getProfiles().then(setProfiles).catch(console.error);
+        api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
         const interval = setInterval(loadActivity, 3000);
         return () => clearInterval(interval);
     }, [task.id]);

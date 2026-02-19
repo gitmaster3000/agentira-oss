@@ -13,8 +13,8 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     });
 
     useEffect(() => {
-        api.getProfiles().then(setProfiles).catch(console.error);
-    }, []);
+        api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
+    }, [projectId]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
