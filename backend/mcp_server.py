@@ -159,12 +159,6 @@ async def create_project(name: str, description: str = "", ctx: Context = None) 
     try:
         logger.info(f"Tool create_project called with name='{name}', actor='{actor}'")
         res = services.create_project(name, description, actor=actor)
-        if actor != "system":
-            try:
-                services.add_project_member(res["id"], actor, actor="system")
-                logger.info(f"Added creator {actor} as member to project {res['id']}")
-            except Exception as em:
-                logger.warning(f"Failed to add creator as member: {em}")
         logger.debug(f"Tool create_project success: {res}")
         return res
     except Exception as e:

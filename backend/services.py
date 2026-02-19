@@ -199,6 +199,13 @@ def create_project(name: str, description: str = "", actor: str = "system") -> d
         project = Project(name=name, description=description)
         db.add(project)
         db.flush()
+
+        # Auto-add creator as a project member
+        if actor and actor != "system":
+            creator = _get_profile_by_name(db, actor)
+            if creator:
+                db.add(ProjectMember(project_id=project.id, profile_id=creator.id))
+
         _log_activity(db, actor, "project.create", f"Created project: {name}", project_id=project.id)
         db.commit()
         db.refresh(project)
