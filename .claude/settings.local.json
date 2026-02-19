@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "mcp__agentira__list_statuses",
+      "Bash(powershell -command:*)",
+      "mcp__agentira__create_task",
+      "mcp__agentira__get_activity",
+      "mcp__agentira__list_tasks",
+      "mcp__agentira__update_task",
+      "mcp__agentira__add_comment",
+      "mcp__agentira__move_task",
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "agentira"
+  ]
+}

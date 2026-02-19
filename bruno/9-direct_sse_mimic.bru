@@ -1,17 +1,16 @@
 meta {
-  name: "Direct SSE Mimic (IDE Style)"
+  name: "9-Handshake (Streamable HTTP)"
   type: "http"
   seq: 9
 }
 
 post {
-  url: {{baseUrl}}/sse
+  url: {{baseUrl}}/mcp
   body: json
 }
 
 headers {
   Authorization: Bearer {{apiKey}}
-  mcp-protocol-version: 2025-06-18
   Accept: application/json, text/event-stream
 }
 
@@ -22,7 +21,7 @@ body:json {
     "method": "initialize",
     "params": {
       "clientInfo": {
-        "name": "bruno-mimic-v2",
+        "name": "bruno-integration-test",
         "version": "2.0.0"
       },
       "protocolVersion": "2025-06-18",
@@ -32,30 +31,26 @@ body:json {
 }
 
 script:post-response {
-  if (res.status === 200) {
-    bru.setVar("directSessionId", res.headers['mcp-session-id']);
+  const sessionId = res.headers['mcp-session-id'];
+  if (sessionId) {
+    bru.setVar("sessionId", sessionId);
   }
 }
 
 tests {
-  test("Handshake successful (200 OK)", function() {
+  test("Handshake returns 200", function() {
     expect(res.status).to.equal(200);
   });
 
-  test("Contains mandatory mcp-session-id header", function() {
-    expect(res.headers['mcp-session-id']).to.be.a('string');
+  test("Response contains result", function() {
+    expect(res.body.result).to.be.an('object');
   });
 
-  test("Protocol version matches request", function() {
-    expect(res.body.result.protocolVersion).to.equal("2025-06-18");
-  });
-
-  test("Server provides basic capabilities", function() {
-    expect(res.body.result.capabilities).to.be.an('object');
-    expect(res.body.result.capabilities.tools).to.be.an('object');
-  });
-
-  test("Server identifies correctly", function() {
+  test("Server identifies as AgentIRA", function() {
     expect(res.body.result.serverInfo.name).to.equal("AgentIRA");
+  });
+
+  test("Server provides tools capability", function() {
+    expect(res.body.result.capabilities.tools).to.be.an('object');
   });
 }

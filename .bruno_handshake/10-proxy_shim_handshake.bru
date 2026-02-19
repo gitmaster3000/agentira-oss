@@ -1,0 +1,24 @@
+meta {
+  name: "10-Server Push Stream (GET /mcp)"
+  type: "http"
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/mcp
+}
+
+headers {
+  Authorization: Bearer {{apiKey}}
+  Accept: text/event-stream
+  mcp-session-id: {{sessionId}}
+}
+
+tests {
+  test("GET /mcp accepted (server push endpoint ready)", function() {
+    // 200 = SSE stream opened, 404 = not yet implemented
+    // Either is acceptable; what matters is it is NOT 401 or 405
+    expect(res.status).not.to.equal(401);
+    expect(res.status).not.to.equal(405);
+  });
+}

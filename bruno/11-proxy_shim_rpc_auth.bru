@@ -1,50 +1,37 @@
 meta {
-  name: "Proxy Shim Step 2: RPC Auth (POST /messages/)"
+  name: "11-Auth Token Validation"
   type: "http"
   seq: 11
 }
 
 post {
-  url: {{baseUrl}}/messages/
+  url: {{baseUrl}}/mcp
   body: json
 }
 
 headers {
   Authorization: Bearer {{apiKey}}
   Accept: application/json
-  Content-Type: application/json
 }
 
 body:json {
   {
     "jsonrpc": "2.0",
     "id": 1,
-    "method": "initialize",
+    "method": "tools/call",
     "params": {
-      "clientInfo": {
-        "name": "bruno-shim-tester",
-        "version": "1.0.0"
-      },
-      "protocolVersion": "2025-06-18",
-      "capabilities": {}
+      "name": "get_me",
+      "arguments": {}
     }
   }
 }
 
 tests {
-  test("Endpoint exists (responds with status)", function() {
-    // It should NOT be 404 or 405
-    expect(res.status).to.be.oneOf([200, 400]);
+  test("Authenticated tool call returns 200", function() {
+    expect(res.status).to.equal(200);
   });
 
-  test("Missing Session ID handled correctly (400)", function() {
-    // Since we didn't provide ?sessionId=...
-    // The MCP app returns 400 Bad Request
-    expect(res.status).to.equal(400);
-  });
-
-  test("Error message is descriptive", function() {
-    // We expect some indication that the session ID is missing if possible
-    // Note: FastMCP might just return 400 without body for this specific case
+  test("Result contains actor identity", function() {
+    expect(res.body.result.content[0].text).to.contain("Client ID:");
   });
 }

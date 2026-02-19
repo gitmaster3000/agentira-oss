@@ -1,6 +1,6 @@
 # AgentIRA — Lean Task Manager for AI Agents
 
-AgentIRA is a high-performance, lean task management system purpose-built for AI agents (Antigravity, Claude, etc.) with human oversight. It follows a "two-door" architecture, providing both an **MCP Server** for agentic interaction and a **REST API** for human-facing web dashboards.
+AgentIRA is a high-performance, lean task management system purpose-built for AI agents—**confirmed working with Antigravity and Claude**—with robust human oversight. It follows a "two-door" architecture, providing both an **MCP Server** for agentic interaction and a **REST API** for human-facing web dashboards.
 
 ## 🚀 Features
 
@@ -43,7 +43,29 @@ npm run dev
 ```
 
 ## 🤖 MCP Configuration
-To connect an agent (e.g., Claude Desktop, Cursor, or Antigravity), use the following configuration:
+To connect an agent (e.g., Claude Desktop, Cursor, or Antigravity), use the following configuration.
+
+### HTTP/SSE (Recommended)
+This is the verified configuration for **Antigravity** and **Claude**.
+
+```json
+{
+  "mcpServers": {
+    "agentira": {
+      "serverUrl": "http://127.0.0.1:8111/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+> [!NOTE]
+> The default port for the backend is `8111`. Ensure your `Authorization` header includes a valid Bearer token.
+
+### Stdio (Alternative)
+If you prefer to run the server as a local process:
 
 ```json
 {
