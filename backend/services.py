@@ -1072,7 +1072,7 @@ def _seed_defaults(db: Session) -> None:
     db.flush()
 
     # CRUD + Scope permissions
-    for perm in ["task.create", "task.delete", "project.manage", "project.view_all"]:
+    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*"]:
         if not db.query(Permission).filter(Permission.codename == perm).first():
             db.add(Permission(codename=perm))
     db.flush()
@@ -1086,10 +1086,8 @@ def _seed_defaults(db: Session) -> None:
 
     # Permissions for Members & Bots
     member_perms = [
-        "transition:backlog:todo", "transition:todo:in_progress",
-        "transition:in_progress:review", "transition:review:in_progress",
-        "transition:todo:backlog", "transition:in_progress:backlog",
-        "task.create", "task.delete", 
+        "transition:*",
+        "task.create", "task.delete",
         # project.manage intentionally omitted (only admins manage projects)
     ]
 
