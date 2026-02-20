@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Trash2, Paperclip } from 'lucide-react';
 import { api } from '../api';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -13,6 +13,27 @@ export function TaskCard({ task, onUpdate, onDelete }) {
     };
 
     const borderColor = priorityColors[task.priority] || 'border-l-4 border-l-gray-500';
+
+    const [hasAttachments, setHasAttachments] = useState(false);
+
+    useEffect(() => {
+        let isMounted = true;
+        // Future proofing: if the backend adds attachments_count directly to task serialization
+        if (task.attachments_count !== undefined) {
+            setHasAttachments(task.attachments_count > 0);
+            return;
+        }
+
+        // Fallback: fetch from API
+        api.listAttachments(task.id)
+            .then(atts => {
+                if (isMounted && atts && atts.length > 0) {
+                    setHasAttachments(true);
+                }
+            })
+            .catch(err => console.error('Failed to load attachments for card:', err));
+        return () => { isMounted = false; };
+    }, [task.id, task.attachments_count]);
 
     const handleDragStart = (e) => {
         e.dataTransfer.setData('taskId', task.id);
@@ -65,10 +86,17 @@ export function TaskCard({ task, onUpdate, onDelete }) {
             </div>
 
             <div className="flex justify-between items-center mt-2">
-                <span className={`text-xs px-1.5 py-0.5 rounded capitalize ${task.priority === 'critical' ? 'bg-red-900 text-red-100' : 'bg-bg-panel text-secondary'
-                    }`}>
-                    {task.priority}
-                </span>
+                <div className="flex items-center gap-2">
+                    <span className={`text-xs px-1.5 py-0.5 rounded capitalize ${task.priority === 'critical' ? 'bg-red-900 text-red-100' : 'bg-bg-panel text-secondary'
+                        }`}>
+                        {task.priority}
+                    </span>
+                    {hasAttachments && (
+                        <span className="text-text-tertiary" title="Has attachments">
+                            <Paperclip className="w-3.5 h-3.5" />
+                        </span>
+                    )}
+                </div>
                 {task.assignee && (
                     <span className="text-xs text-secondary bg-bg-panel px-1.5 py-0.5 rounded" title={task.assignee}>
                         {task.assignee.slice(0, 2).toUpperCase()}
