@@ -92,6 +92,41 @@ def test_upload_attachment_unknown_task_raises():
         services.add_attachment("nonexistent", "x.txt", b"x", "text/plain", uploaded_by="system")
 
 
+def test_attachment_dict_has_download_url():
+    services.create_profile("dlurl1", role="member")
+    p = services.create_project("DL URL Project", actor="dlurl1")
+    t = services.create_task(p["id"], "DL URL Task", actor="dlurl1")
+
+    att = services.add_attachment(t["id"], "report.pdf", b"pdf content", "application/pdf", uploaded_by="dlurl1")
+
+    assert "download_url" in att
+    assert att["download_url"] == f"/api/attachments/{att['id']}/download"
+
+
+def test_get_attachment_bytes_round_trip():
+    """Upload content then download it via get_attachment_bytes — must match exactly."""
+    services.create_profile("roundtrip1", role="member")
+    p = services.create_project("Round Trip Project", actor="roundtrip1")
+    t = services.create_task(p["id"], "Round Trip Task", actor="roundtrip1")
+
+    content = b"binary content \x00\x01\x02"
+    att = services.add_attachment(t["id"], "data.bin", content, "application/octet-stream", uploaded_by="roundtrip1")
+
+    result = services.get_attachment_bytes(att["id"])
+    assert result is not None
+    meta, downloaded_bytes = result
+
+    assert downloaded_bytes == content
+    assert meta["filename"] == "data.bin"
+    assert meta["size_bytes"] == len(content)
+    assert meta["uploaded_by"] == "roundtrip1"
+
+
+def test_get_attachment_bytes_nonexistent():
+    result = services.get_attachment_bytes("doesnotexist")
+    assert result is None
+
+
 # ── Notification ownership tests ────────────────────────────────────────────────
 
 def test_mark_notification_read_correct_owner():

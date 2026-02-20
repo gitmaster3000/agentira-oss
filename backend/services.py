@@ -130,6 +130,7 @@ def _attachment_to_dict(a: Attachment) -> dict:
         "content_type": a.content_type,
         "size_bytes": a.size_bytes,
         "uploaded_by": a.uploaded_by,
+        "download_url": f"/api/attachments/{a.id}/download",
         "created_at": a.created_at.isoformat(),
     }
 
@@ -903,6 +904,19 @@ def get_attachment(attachment_id: str) -> tuple[dict, str] | None:
         if not a:
             return None
         return _attachment_to_dict(a), a.file_path
+
+
+def get_attachment_bytes(attachment_id: str) -> tuple[dict, bytes] | None:
+    """Return attachment metadata and raw file bytes. Used by MCP download tool."""
+    with _session() as db:
+        a = db.get(Attachment, attachment_id)
+        if not a:
+            return None
+        if not os.path.exists(a.file_path):
+            return None
+        with open(a.file_path, "rb") as f:
+            file_bytes = f.read()
+        return _attachment_to_dict(a), file_bytes
 
 
 def delete_attachment(attachment_id: str) -> bool:

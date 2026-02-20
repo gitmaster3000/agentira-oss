@@ -49,4 +49,11 @@ tests {
     const allText = res.body.result.content.map(c => c.text).join('\n');
     expect(allText).to.contain('bruno_proof.txt');
   });
+
+  test("Capture attachment ID for download test", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    const parsed = JSON.parse(allText);
+    bru.setVar("attachmentId", parsed.id);
+    expect(parsed.id).to.be.a('string');
+  });
 }
