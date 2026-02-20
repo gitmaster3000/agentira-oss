@@ -127,7 +127,7 @@ export function AttachmentsSection({ taskId }) {
                                         {attachment.filename}
                                     </div>
                                     <div className="text-xs text-text-tertiary flex items-center gap-2">
-                                        <span>{formatSize(attachment.size)}</span>
+                                        <span>{formatSize(attachment.size_bytes)}</span>
                                         <span>•</span>
                                         <span>{attachment.uploaded_by}</span>
                                         <span>•</span>
