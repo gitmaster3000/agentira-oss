@@ -421,9 +421,12 @@ def api_list_notifications(actor: str, unread_only: bool = True):
         return services.list_notifications(prof.id, unread_only=unread_only)
 
 @app.patch("/api/notifications/{notification_id}/read")
-def api_mark_notification_read(notification_id: str):
-    if not services.mark_notification_read(notification_id):
-        raise HTTPException(404, "Notification not found")
+def api_mark_notification_read(notification_id: str, actor: str):
+    with services._session() as db:
+        prof = services._get_profile_by_name(db, actor)
+        actor_profile_id = prof.id if prof else None
+    if not services.mark_notification_read(notification_id, actor_profile_id=actor_profile_id):
+        raise HTTPException(404, "Notification not found or not yours")
     return {"ok": True}
 
 

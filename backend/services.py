@@ -192,10 +192,12 @@ def list_notifications(profile_id: str, unread_only: bool = True) -> list[dict]:
         ]
 
 
-def mark_notification_read(notification_id: str) -> bool:
+def mark_notification_read(notification_id: str, actor_profile_id: str | None = None) -> bool:
     with _session() as db:
         n = db.get(Notification, notification_id)
         if not n:
+            return False
+        if actor_profile_id and n.profile_id != actor_profile_id:
             return False
         n.read = True
         db.commit()
