@@ -43,7 +43,7 @@ def _session() -> Session:
     return SessionLocal()
 
 
-def _task_to_dict(t: Task) -> dict:
+def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
     return {
         "id": t.id,
         "project_id": t.project_id,
@@ -55,7 +55,27 @@ def _task_to_dict(t: Task) -> dict:
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
+        "attachments_count": attachments_count,
     }
+
+
+def _batch_attachment_counts(db: Session, task_ids: list[str]) -> dict[str, int]:
+    """Return {task_id: count} for all given task IDs in a single query."""
+    from sqlalchemy import func
+    if not task_ids:
+        return {}
+    rows = (
+        db.query(Attachment.task_id, func.count(Attachment.id))
+        .filter(Attachment.task_id.in_(task_ids))
+        .group_by(Attachment.task_id)
+        .all()
+    )
+    return {task_id: count for task_id, count in rows}
+
+
+def _attachment_count(db: Session, task_id: str) -> int:
+    from sqlalchemy import func
+    return db.query(func.count(Attachment.id)).filter(Attachment.task_id == task_id).scalar() or 0
 
 
 def _project_to_dict(p: Project) -> dict:
@@ -382,7 +402,7 @@ def create_task(
                 broker.notify(target_prof.id)
 
         db.refresh(task)
-        return _task_to_dict(task)
+        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
 
 
 def list_tasks(
@@ -435,13 +455,16 @@ def list_tasks(
             q = q.filter(Task.priority == TaskPriority(priority))
             
         tasks = q.order_by(Task.updated_at.desc()).all()
-        return [_task_to_dict(t) for t in tasks]
+        counts = _batch_attachment_counts(db, [t.id for t in tasks])
+        return [_task_to_dict(t, attachments_count=counts.get(t.id, 0)) for t in tasks]
 
 
 def get_task(task_id: str) -> dict | None:
     with _session() as db:
         t = db.get(Task, task_id)
-        return _task_to_dict(t) if t else None
+        if not t:
+            return None
+        return _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
 
 
 def update_task(
@@ -489,7 +512,7 @@ def update_task(
                 broker.notify(target_prof.id)
 
         db.refresh(task)
-        return _task_to_dict(task)
+        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
 
 
 def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
@@ -502,7 +525,7 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
 
         old = task.status.name
         if old == new_status:
-            return _task_to_dict(task)
+            return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
 
         check_transition(db, actor, old, new_status)
 
@@ -522,7 +545,7 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
                 broker.notify(target_prof.id)
 
         db.refresh(task)
-        return _task_to_dict(task)
+        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
 
 
 def delete_task(task_id: str) -> bool:
@@ -612,7 +635,7 @@ def get_changes_since(task_id: str, since: str) -> dict:
         )
 
         return {
-            "task": _task_to_dict(task),
+            "task": _task_to_dict(task, attachments_count=_attachment_count(db, task.id)),
             "new_activities": [_activity_to_dict(a) for a in new_activities],
             "has_changes": len(new_activities) > 0,
         }
@@ -630,8 +653,9 @@ def get_board(project_id: str) -> dict:
         board: dict[str, list[dict]] = {s.name: [] for s in statuses}
 
         tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.updated_at.desc()).all()
+        counts = _batch_attachment_counts(db, [t.id for t in tasks])
         for t in tasks:
-            board[t.status.name].append(_task_to_dict(t))
+            board[t.status.name].append(_task_to_dict(t, attachments_count=counts.get(t.id, 0)))
 
         return {
             "project": _project_to_dict(project),

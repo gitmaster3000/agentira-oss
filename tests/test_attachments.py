@@ -60,6 +60,33 @@ def test_list_attachments_returns_uploaded():
     assert filenames == {"a.txt", "b.txt"}
 
 
+def test_attachments_count_in_get_task():
+    services.create_profile("counter1", role="member")
+    p = services.create_project("Count Project", actor="counter1")
+    t = services.create_task(p["id"], "Count task", actor="counter1")
+
+    assert services.get_task(t["id"])["attachments_count"] == 0
+
+    services.add_attachment(t["id"], "f1.txt", b"x", "text/plain", uploaded_by="counter1")
+    services.add_attachment(t["id"], "f2.txt", b"y", "text/plain", uploaded_by="counter1")
+
+    assert services.get_task(t["id"])["attachments_count"] == 2
+
+
+def test_attachments_count_in_list_tasks():
+    services.create_profile("counter2", role="member")
+    p = services.create_project("Count List Project", actor="counter2")
+    t1 = services.create_task(p["id"], "Task A", actor="counter2")
+    t2 = services.create_task(p["id"], "Task B", actor="counter2")
+
+    services.add_attachment(t1["id"], "a.txt", b"a", "text/plain", uploaded_by="counter2")
+
+    tasks = services.list_tasks(project_id=p["id"], actor="counter2")
+    counts = {t["id"]: t["attachments_count"] for t in tasks}
+    assert counts[t1["id"]] == 1
+    assert counts[t2["id"]] == 0
+
+
 def test_upload_attachment_unknown_task_raises():
     with pytest.raises(ValueError, match="not found"):
         services.add_attachment("nonexistent", "x.txt", b"x", "text/plain", uploaded_by="system")
