@@ -32,6 +32,12 @@ export function Settings() {
     const [copied, setCopied] = useState(false);
     const [loadingConfig, setLoadingConfig] = useState(false);
 
+    // Prompt/Confirmation states
+    const [promptState, setPromptState] = useState(null); // { title: string, description: string, value: string, onConfirm: (val: string) => void }
+    const [confirmState, setConfirmState] = useState(null); // { title: string, description: string, onConfirm: () => void }
+
+    const isAdmin = user?.role === 'admin' || user?.role?.name === 'admin';
+
     useEffect(() => {
         if (!user) {
             navigate('/login');
@@ -41,10 +47,10 @@ export function Settings() {
     }, [user, navigate]);
 
     useEffect(() => {
-        if (activeTab === 'permissions' && user.role === 'admin') {
+        if (activeTab === 'permissions' && isAdmin) {
             loadPermissionData();
         }
-    }, [activeTab]);
+    }, [activeTab, isAdmin]);
 
     async function loadGeneralData() {
         setLoading(true);
@@ -62,7 +68,7 @@ export function Settings() {
             console.error('Failed to load bots:', err);
         }
 
-        if (user.role === 'admin') {
+        if (isAdmin) {
             try {
                 const profilesData = await api.getProfiles();
                 setProfiles(profilesData);
@@ -104,16 +110,25 @@ export function Settings() {
 
     // ... handleCreateBot, handleCopyKey, handleCopyConfig, handleDeleteBot, handleDeleteProfile unchanged ...
     async function handleCreateBot() {
-        const name = prompt("Enter a name for your new bot:");
-        if (!name) return;
-        try {
-            const res = await api.createServiceAccount(name);
-            setNewBotKey({ name: res.name || name, api_key: res.api_key });
-            setCopied(false);
-            await loadGeneralData();
-        } catch (err) {
-            alert(err.message);
-        }
+        setPromptState({
+            title: "Create New Bot",
+            description: "Enter a name for your new service account:",
+            value: "",
+            onConfirm: async (name) => {
+                if (!name) return;
+                try {
+                    const res = await api.createServiceAccount(name);
+                    setNewBotKey({ name: res.name || name, api_key: res.api_key });
+                    setCopied(false);
+                    await loadGeneralData();
+                } catch (err) {
+                    alert(err.message);
+                } finally {
+                    setPromptState(null);
+                }
+            },
+            onCancel: () => setPromptState(null)
+        });
     }
 
     async function handleCopyKey() {
@@ -151,49 +166,95 @@ export function Settings() {
     }
 
     async function handleDeleteBot(id, name) {
-        if (!confirm(`Delete bot "${name}"?`)) return;
-        try {
-            await api.deleteServiceAccount(id);
-            loadGeneralData();
-        } catch (err) {
-            alert(err.message);
-        }
+        setConfirmState({
+            title: "Delete Bot",
+            description: `Are you sure you want to delete bot "${name}"? This cannot be undone.`,
+            onConfirm: async () => {
+                try {
+                    await api.deleteServiceAccount(id);
+                    await loadGeneralData();
+                } catch (err) {
+                    alert(err.message);
+                } finally {
+                    setConfirmState(null);
+                }
+            },
+            onCancel: () => setConfirmState(null)
+        });
     }
 
     async function handleDeleteProfile(id, name) {
-        if (!confirm(`Delete profile "${name}"?`)) return;
-        try {
-            await api.deleteProfile(id);
-            loadGeneralData();
-        } catch (err) {
-            alert(err.message);
-        }
+        setConfirmState({
+            title: "Delete Profile",
+            description: `Are you sure you want to delete profile "${name}"?`,
+            onConfirm: async () => {
+                try {
+                    await api.deleteProfile(id);
+                    await loadGeneralData();
+                } catch (err) {
+                    alert(err.message);
+                } finally {
+                    setConfirmState(null);
+                }
+            },
+            onCancel: () => setConfirmState(null)
+        });
     }
 
     async function handleCreatePermission() {
-        const codename = prompt("Enter permission codename (e.g. 'project:manage'):");
-        if (!codename) return;
-        const description = prompt("Enter permission description:");
-
-        try {
-            await api.createPermission({ codename, description });
-            await loadPermissionData();
-        } catch (err) {
-            alert(err.message);
-        }
+        setPromptState({
+            title: "Create Permission",
+            description: "Enter permission codename (e.g. 'project:manage'):",
+            value: "",
+            onConfirm: async (codename) => {
+                if (!codename) return;
+                setPromptState({
+                    title: "Permission Description",
+                    description: `Enter description for '${codename}':`,
+                    value: "",
+                    onConfirm: async (description) => {
+                        try {
+                            await api.createPermission({ codename, description });
+                            await loadPermissionData();
+                        } catch (err) {
+                            alert(err.message);
+                        } finally {
+                            setPromptState(null);
+                        }
+                    },
+                    onCancel: () => setPromptState(null)
+                });
+            },
+            onCancel: () => setPromptState(null)
+        });
     }
 
     async function handleCreateRole() {
-        const name = prompt("Enter role name (e.g. 'auditor'):");
-        if (!name) return;
-        const description = prompt("Enter role description:");
-
-        try {
-            await api.createRole({ name, description });
-            await loadPermissionData();
-        } catch (err) {
-            alert(err.message);
-        }
+        setPromptState({
+            title: "Create Role",
+            description: "Enter role name (e.g. 'auditor'):",
+            value: "",
+            onConfirm: async (name) => {
+                if (!name) return;
+                setPromptState({
+                    title: "Role Description",
+                    description: `Enter description for role '${name}':`,
+                    value: "",
+                    onConfirm: async (description) => {
+                        try {
+                            await api.createRole({ name, description });
+                            await loadPermissionData();
+                        } catch (err) {
+                            alert(err.message);
+                        } finally {
+                            setPromptState(null);
+                        }
+                    },
+                    onCancel: () => setPromptState(null)
+                });
+            },
+            onCancel: () => setPromptState(null)
+        });
     }
 
     const roleBadge = (role) => ({
@@ -213,7 +274,7 @@ export function Settings() {
                         <Lock className="w-5 h-5" /> Settings
                     </h2>
 
-                    {user.role === 'admin' && (
+                    {isAdmin && (
                         <nav className="flex gap-4 mt-2">
                             <button
                                 onClick={() => setActiveTab('general')}
@@ -300,7 +361,7 @@ export function Settings() {
                         </section>
 
                         {/* ── Admin: All Profiles ────────────────────────────────────── */}
-                        {user.role === 'admin' && (
+                        {isAdmin && (
                             <section className="grid gap-3">
                                 <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
                                     <Shield className="w-4 h-4" /> All Profiles
@@ -501,7 +562,7 @@ export function Settings() {
             {/* ── API Key Modal ──────────────────────────────────────────── */}
             {newBotKey && (
                 <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-lg mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                    <div className="w-full max-w-lg mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-green-500/15 text-green-400 flex items-center justify-center"><Key className="w-5 h-5" /></div>
                             <div>
@@ -523,6 +584,49 @@ export function Settings() {
                         </div>
                         <div className="flex justify-end pt-2">
                             <button onClick={() => setNewBotKey(null)} className="px-4 py-2 text-sm rounded bg-white/10 hover:bg-white/15">Done</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Custom Prompt Modal ────────────────────────────────────── */}
+            {promptState && (
+                <div className="fixed inset-0 flex items-center justify-center z-[100] bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <div>
+                            <h3 className="font-bold text-lg">{promptState.title}</h3>
+                            <p className="text-xs text-secondary">{promptState.description}</p>
+                        </div>
+                        <input
+                            autoFocus
+                            type="text"
+                            value={promptState.value}
+                            onChange={(e) => setPromptState({ ...promptState, value: e.target.value })}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') promptState.onConfirm(promptState.value);
+                                if (e.key === 'Escape') promptState.onCancel();
+                            }}
+                            className="w-full bg-black/20 border rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-purple-500/50 transition-all border-border-subtle"
+                        />
+                        <div className="flex justify-end gap-3 pt-2">
+                            <button onClick={promptState.onCancel} className="px-4 py-2 text-sm rounded bg-white/5 hover:bg-white/10">Cancel</button>
+                            <button onClick={() => promptState.onConfirm(promptState.value)} className="px-4 py-2 text-sm rounded bg-purple-600 hover:bg-purple-500 text-white font-medium">Confirm</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Custom Confirmation Modal ──────────────────────────────── */}
+            {confirmState && (
+                <div className="fixed inset-0 flex items-center justify-center z-[100] bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-md mx-4 rounded-xl shadow-2xl p-6 space-y-4 border bg-bg-card" style={{ borderColor: 'var(--border-subtle)' }}>
+                        <div>
+                            <h3 className="font-bold text-lg">{confirmState.title}</h3>
+                            <p className="text-xs text-secondary mt-1">{confirmState.description}</p>
+                        </div>
+                        <div className="flex justify-end gap-3 pt-2">
+                            <button onClick={confirmState.onCancel} className="px-4 py-2 text-sm rounded bg-white/5 hover:bg-white/10">Cancel</button>
+                            <button onClick={confirmState.onConfirm} className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-500 text-white font-medium">Delete</button>
                         </div>
                     </div>
                 </div>

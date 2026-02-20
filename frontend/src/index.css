@@ -26,6 +26,12 @@
   --status-done: #2ecc71;
 
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Layout Variables */
+  --navbar-height: 56px;
+  --sidebar-w-expanded: 240px;
+  --sidebar-w-collapsed: 64px;
+  --panel-width: 600px;
 }
 
 :root[data-theme="light"] {
@@ -100,4 +106,81 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: #505560;
+}
+
+/* Animations */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Jira-style utility classes */
+.text-text-primary {
+  color: var(--text-primary);
+}
+
+.text-text-secondary {
+  color: var(--text-secondary);
+}
+
+.text-text-tertiary {
+  color: var(--text-tertiary);
+}
+
+.bg-bg-panel {
+  background-color: var(--bg-panel);
+}
+
+.bg-bg-app {
+  background-color: var(--bg-app);
+}
+
+.bg-bg-card {
+  background-color: var(--bg-card);
+}
+
+.bg-bg-hover {
+  background-color: var(--bg-hover);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--border-active);
 }

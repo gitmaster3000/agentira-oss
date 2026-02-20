@@ -10,16 +10,31 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         const stored = localStorage.getItem('agentira_user');
         if (stored) {
-            setUser(JSON.parse(stored));
+            try {
+                const parsed = JSON.parse(stored);
+                // Ensure role is a string
+                if (parsed && typeof parsed.role === 'object' && parsed.role.name) {
+                    parsed.role = parsed.role.name;
+                }
+                setUser(parsed);
+            } catch (e) {
+                console.error('Failed to parse stored user:', e);
+                localStorage.removeItem('agentira_user');
+            }
         }
         setLoading(false);
     }, []);
 
     const login = async (username, password) => {
         const data = await api.login(username, password);
-        setUser(data.user);
-        localStorage.setItem('agentira_user', JSON.stringify(data.user));
-        return data.user;
+        let userToStore = data.user;
+        // Normalize role if it's an object
+        if (userToStore && typeof userToStore.role === 'object' && userToStore.role.name) {
+            userToStore = { ...userToStore, role: userToStore.role.name };
+        }
+        setUser(userToStore);
+        localStorage.setItem('agentira_user', JSON.stringify(userToStore));
+        return userToStore;
     };
 
     const logout = () => {
