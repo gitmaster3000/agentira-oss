@@ -147,6 +147,12 @@ export function Board() {
         return () => clearInterval(interval);
     }, [projectId]);
 
+    useEffect(() => {
+        const handleOpenCreateTask = () => setShowCreate(true);
+        window.addEventListener('open-create-task', handleOpenCreateTask);
+        return () => window.removeEventListener('open-create-task', handleOpenCreateTask);
+    }, []);
+
     const handleAddMember = useCallback(async (name) => {
         console.log('[Board] handleAddMember:', name);
         try {
@@ -192,11 +198,11 @@ export function Board() {
     if (!board) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Project not found</div>;
 
     return (
-        <div className="flex h-full overflow-hidden w-full">
-            {/* Main Board Area */}
+        <div className="flex flex-row h-full overflow-hidden w-full relative">
+            {/* Main Content Area: Header + Columns */}
             <div className="flex flex-col flex-1 overflow-hidden min-w-0">
                 {/* Header */}
-                <header className="p-4 flex justify-between items-start" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                <header className="p-4 flex justify-between items-start shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <div className="flex-1">
                         <h2 className="text-xl font-bold">{board.project.name}</h2>
                         <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
@@ -247,58 +253,50 @@ export function Board() {
                             )}
                         </div>
                     </div>
-                    <button onClick={() => setShowCreate(true)} className="btn btn-primary flex items-center gap-1.5">
-                        <Plus className="w-4 h-4" /> New Task
-                    </button>
                 </header>
 
-                {/* Board Columns */}
-                <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-                    <div className="flex gap-4 h-full min-w-max">
-                        {COLUMNS.map(col => (
-                            <div
-                                key={col.id}
-                                className="w-72 flex flex-col rounded-lg border"
-                                style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}
-                                onDragOver={e => e.preventDefault()}
-                                onDrop={e => handleDrop(e, col.id)}
-                            >
-                                <div className="p-3 font-semibold text-sm flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                    {col.label}
-                                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
-                                        {board.columns[col.id]?.length || 0}
-                                    </span>
-                                </div>
+                {/* Main Content Area: Columns */}
+                <div className="flex flex-1 overflow-hidden min-w-0 relative">
+                    {/* Board Columns Container */}
+                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+                        <div className="flex gap-4 h-full min-w-max">
+                            {COLUMNS.map(col => (
+                                <div
+                                    key={col.id}
+                                    className="w-72 flex flex-col rounded-lg border"
+                                    style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}
+                                    onDragOver={e => e.preventDefault()}
+                                    onDrop={e => handleDrop(e, col.id)}
+                                >
+                                    <div className="p-3 font-semibold text-sm flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                        {col.label}
+                                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
+                                            {board.columns[col.id]?.length || 0}
+                                        </span>
+                                    </div>
 
-                                <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
-                                    {board.columns[col.id]?.map(task => (
-                                        <TaskCard
-                                            key={task.id}
-                                            task={task}
-                                            onUpdate={(t) => {
-                                                const newParams = new URLSearchParams(searchParams);
-                                                newParams.set('selectedTask', t.id);
-                                                setSearchParams(newParams);
-                                            }}
-                                            onDelete={loadBoard}
-                                        />
-                                    ))}
+                                    <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
+                                        {board.columns[col.id]?.map(task => (
+                                            <TaskCard
+                                                key={task.id}
+                                                task={task}
+                                                onUpdate={(t) => {
+                                                    const newParams = new URLSearchParams(searchParams);
+                                                    newParams.set('selectedTask', t.id);
+                                                    setSearchParams(newParams);
+                                                }}
+                                                onDelete={loadBoard}
+                                            />
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
-                {/* End Main Board Area */}
             </div>
 
-            {showCreate && (
-                <CreateTaskModal
-                    projectId={projectId}
-                    onClose={() => setShowCreate(false)}
-                    onCreated={loadBoard}
-                />
-            )}
-
+            {/* Task Detail Panel - pushes the entire board content (Header + Columns) */}
             {selectedTask && (
                 <TaskDetailPanel
                     task={selectedTask}
@@ -313,6 +311,14 @@ export function Board() {
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
                     }}
+                />
+            )}
+
+            {showCreate && (
+                <CreateTaskModal
+                    projectId={projectId}
+                    onClose={() => setShowCreate(false)}
+                    onCreated={loadBoard}
                 />
             )}
         </div>

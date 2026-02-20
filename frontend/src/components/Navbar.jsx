@@ -10,7 +10,8 @@ import {
     Settings,
     LogOut,
     Search,
-    Briefcase
+    Briefcase,
+    CheckSquare
 } from 'lucide-react';
 
 export function Navbar({ onNewProject }) {
@@ -20,8 +21,10 @@ export function Navbar({ onNewProject }) {
     const [projects, setProjects] = useState([]);
     const [isProjectOpen, setIsProjectOpen] = useState(false);
     const [isUserOpen, setIsUserOpen] = useState(false);
+    const [isCreateOpen, setIsCreateOpen] = useState(false);
     const projectRef = useRef(null);
     const userRef = useRef(null);
+    const createRef = useRef(null);
 
     const activeProject = projects.find(p => p.id === projectId);
 
@@ -42,6 +45,9 @@ export function Navbar({ onNewProject }) {
             }
             if (userRef.current && !userRef.current.contains(event.target)) {
                 setIsUserOpen(false);
+            }
+            if (createRef.current && !createRef.current.contains(event.target)) {
+                setIsCreateOpen(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -110,8 +116,47 @@ export function Navbar({ onNewProject }) {
                     )}
                 </div>
             </div>
-
             <div className="flex items-center gap-3">
+                {/* Create Dropdown */}
+                <div
+                    className="relative"
+                    ref={createRef}
+                >
+                    <button
+                        onClick={() => setIsCreateOpen(!isCreateOpen)}
+                        className="btn btn-primary flex items-center gap-1.5"
+                        title="Create"
+                    >
+                        <span className="hidden sm:inline whitespace-nowrap">Create</span>
+                        <ChevronDown className={`w-4 h-4 transition-transform ${isCreateOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isCreateOpen && (
+                        <div className="absolute top-full right-0 mt-1 w-48 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-1 z-[60]">
+                            {projectId && (
+                                <button
+                                    onClick={() => {
+                                        window.dispatchEvent(new CustomEvent('open-create-task'));
+                                        setIsCreateOpen(false);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                                >
+                                    <CheckSquare className="w-4 h-4 text-accent-primary" /> Task
+                                </button>
+                            )}
+                            <button
+                                onClick={() => {
+                                    onNewProject();
+                                    setIsCreateOpen(false);
+                                }}
+                                className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                            >
+                                <Briefcase className="w-4 h-4 text-accent-primary" /> Project
+                            </button>
+                        </div>
+                    )}
+                </div>
+
                 {/* Search Bar */}
                 <div className="hidden md:flex items-center relative group">
                     <Search className="w-4 h-4 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
