@@ -10,7 +10,8 @@ import {
     Clock,
     User,
     Tag,
-    AlertCircle
+    AlertCircle,
+    Pencil
 } from 'lucide-react';
 
 export function TaskDetailPanel({ task, onClose, onUpdate }) {
@@ -122,15 +123,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
 
     return (
         <>
-            {/* Backdrop */}
-            <div
-                className="absolute inset-0 bg-black/40 z-[100] animate-fade-in"
-                onClick={onClose}
-            />
-
             {/* Panel */}
             <div
-                className="absolute top-0 right-0 h-full w-full sm:w-[500px] md:w-[600px] lg:w-[700px] bg-bg-card border-l border-border-subtle shadow-2xl z-[110] flex flex-col animate-slide-in"
+                className="h-full w-full sm:w-[450px] md:w-[500px] lg:w-[600px] xl:w-[700px] bg-bg-card border-l border-border-subtle shadow-2xl z-10 flex flex-col flex-shrink-0 animate-slide-in overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}

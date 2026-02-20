@@ -192,99 +192,103 @@ export function Board() {
     if (!board) return <div className="p-8 text-center" style={{ color: 'var(--text-secondary)' }}>Project not found</div>;
 
     return (
-        <div className="flex flex-col h-full relative overflow-hidden">
-            {/* Header */}
-            <header className="p-4 flex justify-between items-start" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                <div className="flex-1">
-                    <h2 className="text-xl font-bold">{board.project.name}</h2>
-                    <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
+        <div className="flex h-full overflow-hidden w-full">
+            {/* Main Board Area */}
+            <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+                {/* Header */}
+                <header className="p-4 flex justify-between items-start" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <div className="flex-1">
+                        <h2 className="text-xl font-bold">{board.project.name}</h2>
+                        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
 
-                    {/* Members row */}
-                    <div className="flex items-center gap-1">
-                        {members.map(m => (
-                            <div
-                                key={m.id}
-                                className="relative group"
-                                title={`${m.display_name} (@${m.name})`}
-                            >
+                        {/* Members row */}
+                        <div className="flex items-center gap-1">
+                            {members.map(m => (
                                 <div
-                                    className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold cursor-default"
-                                    style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)', borderColor: 'var(--bg-panel)' }}
+                                    key={m.id}
+                                    className="relative group"
+                                    title={`${m.display_name} (@${m.name})`}
                                 >
-                                    {(m.display_name || m.name)[0]?.toUpperCase()}
+                                    <div
+                                        className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold cursor-default"
+                                        style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)', borderColor: 'var(--bg-panel)' }}
+                                    >
+                                        {(m.display_name || m.name)[0]?.toUpperCase()}
+                                    </div>
+                                    <button
+                                        onClick={() => handleRemoveMember(m.name)}
+                                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex shadow"
+                                        title={`Remove ${m.display_name}`}
+                                    >
+                                        <X className="w-2.5 h-2.5" />
+                                    </button>
                                 </div>
-                                <button
-                                    onClick={() => handleRemoveMember(m.name)}
-                                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex shadow"
-                                    title={`Remove ${m.display_name}`}
-                                >
-                                    <X className="w-2.5 h-2.5" />
-                                </button>
+                            ))}
+
+                            {/* Add member button */}
+                            <button
+                                ref={addBtnRef}
+                                onClick={() => { console.log('[Board] Add button clicked, available:', availableProfiles.length); setShowAddMember(v => !v); }}
+                                className="w-8 h-8 rounded-full border-2 border-dashed flex items-center justify-center transition-colors hover:bg-white/10"
+                                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-tertiary)' }}
+                                title="Add member"
+                            >
+                                <UserPlus className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Portal dropdown */}
+                            {showAddMember && (
+                                <AddMemberDropdown
+                                    anchorRef={addBtnRef}
+                                    profiles={availableProfiles}
+                                    onAdd={handleAddMember}
+                                    onClose={() => setShowAddMember(false)}
+                                />
+                            )}
+                        </div>
+                    </div>
+                    <button onClick={() => setShowCreate(true)} className="btn btn-primary flex items-center gap-1.5">
+                        <Plus className="w-4 h-4" /> New Task
+                    </button>
+                </header>
+
+                {/* Board Columns */}
+                <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+                    <div className="flex gap-4 h-full min-w-max">
+                        {COLUMNS.map(col => (
+                            <div
+                                key={col.id}
+                                className="w-72 flex flex-col rounded-lg border"
+                                style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}
+                                onDragOver={e => e.preventDefault()}
+                                onDrop={e => handleDrop(e, col.id)}
+                            >
+                                <div className="p-3 font-semibold text-sm flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                    {col.label}
+                                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
+                                        {board.columns[col.id]?.length || 0}
+                                    </span>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
+                                    {board.columns[col.id]?.map(task => (
+                                        <TaskCard
+                                            key={task.id}
+                                            task={task}
+                                            onUpdate={(t) => {
+                                                const newParams = new URLSearchParams(searchParams);
+                                                newParams.set('selectedTask', t.id);
+                                                setSearchParams(newParams);
+                                            }}
+                                            onDelete={loadBoard}
+                                        />
+                                    ))}
+                                </div>
                             </div>
                         ))}
-
-                        {/* Add member button */}
-                        <button
-                            ref={addBtnRef}
-                            onClick={() => { console.log('[Board] Add button clicked, available:', availableProfiles.length); setShowAddMember(v => !v); }}
-                            className="w-8 h-8 rounded-full border-2 border-dashed flex items-center justify-center transition-colors hover:bg-white/10"
-                            style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-tertiary)' }}
-                            title="Add member"
-                        >
-                            <UserPlus className="w-3.5 h-3.5" />
-                        </button>
-
-                        {/* Portal dropdown */}
-                        {showAddMember && (
-                            <AddMemberDropdown
-                                anchorRef={addBtnRef}
-                                profiles={availableProfiles}
-                                onAdd={handleAddMember}
-                                onClose={() => setShowAddMember(false)}
-                            />
-                        )}
                     </div>
                 </div>
-                <button onClick={() => setShowCreate(true)} className="btn btn-primary flex items-center gap-1.5">
-                    <Plus className="w-4 h-4" /> New Task
-                </button>
-            </header>
-
-            {/* Board Columns */}
-            <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-                <div className="flex gap-4 h-full min-w-max">
-                    {COLUMNS.map(col => (
-                        <div
-                            key={col.id}
-                            className="w-72 flex flex-col rounded-lg border"
-                            style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}
-                            onDragOver={e => e.preventDefault()}
-                            onDrop={e => handleDrop(e, col.id)}
-                        >
-                            <div className="p-3 font-semibold text-sm flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                                {col.label}
-                                <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
-                                    {board.columns[col.id]?.length || 0}
-                                </span>
-                            </div>
-
-                            <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
-                                {board.columns[col.id]?.map(task => (
-                                    <TaskCard
-                                        key={task.id}
-                                        task={task}
-                                        onUpdate={(t) => {
-                                            const newParams = new URLSearchParams(searchParams);
-                                            newParams.set('selectedTask', t.id);
-                                            setSearchParams(newParams);
-                                        }}
-                                        onDelete={loadBoard}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                {/* End Main Board Area */}
             </div>
 
             {showCreate && (
