@@ -51,6 +51,7 @@ bruno/test_results*.txt
 data/
 agentira.egg-info/
 .agent/
+.claude/
 .pytest_cache/
 .gemini/
 validate_key.py

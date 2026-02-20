@@ -373,7 +373,7 @@ def api_get_board(project_id: str):
 async def api_upload_attachment(
     task_id: str,
     file: UploadFile = File(...),
-    uploaded_by: str = Form("admin"),
+    uploaded_by: str = Form("system"),
 ):
     try:
         file_bytes = await file.read()

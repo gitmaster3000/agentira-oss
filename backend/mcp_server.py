@@ -329,6 +329,16 @@ async def upload_attachment(task_id: str, filename: str, content_base64: str, co
     file_bytes = base64.b64decode(content_base64)
     return services.add_attachment(task_id, filename, file_bytes, content_type, uploaded_by=actor)
 
+@mcp.tool()
+async def download_attachment(attachment_id: str) -> dict:
+    """Download an attachment by ID. Returns metadata and base64-encoded file content."""
+    import base64
+    result = services.get_attachment_bytes(attachment_id)
+    if not result:
+        return {"error": "Attachment not found or file missing on disk"}
+    meta, file_bytes = result
+    return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
+
 # ── Project Activity Tools ──────────────────────────────────────────────────────
 
 @mcp.tool()
