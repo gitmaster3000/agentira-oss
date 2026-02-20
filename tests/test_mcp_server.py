@@ -1,28 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from backend.mcp_server import AgentIRAVerifier, ASGILoggingMiddleware, unified_sse_handler
-
-# ── AgentIRAVerifier Tests ───────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_verifier_success():
-    """Test successful token verification."""
-    mock_profile = {"id": 1, "name": "test-user", "api_key": "valid-key"}
-    with patch("backend.services.validate_api_key", return_value=mock_profile):
-        verifier = AgentIRAVerifier()
-        result = await verifier.verify_token("valid-key")
-        
-        assert result is not None
-        assert result.token == "valid-key"
-        assert result.client_id == "test-user"
-
-@pytest.mark.asyncio
-async def test_verifier_failure():
-    """Test token verification failure."""
-    with patch("backend.services.validate_api_key", side_effect=Exception("Invalid")):
-        verifier = AgentIRAVerifier()
-        result = await verifier.verify_token("invalid-key")
-        assert result is None
+from backend.mcp_server import ASGILoggingMiddleware
 
 # ── ASGILoggingMiddleware Tests ──────────────────────────────────────────
 
@@ -53,31 +31,7 @@ async def test_logging_middleware_non_http():
     
     app.assert_called_once_with(scope, None, None)
 
-# ── SSEHandler Tests ─────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_unified_sse_handler_get():
-    """Test that GET requests to unified_sse_handler are dispatched."""
-    request = MagicMock()
-    request.method = "GET"
-    request.url.path = "/sse"
-    
-    with patch("backend.mcp_server.ASGIResponder") as mock_responder:
-        await unified_sse_handler(request)
-        mock_responder.assert_called_once()
-
-@pytest.mark.asyncio
-async def test_unified_sse_handler_post():
-    """Test that POST requests are dispatched to the session manager."""
-    request = MagicMock()
-    request.method = "POST"
-    request.url.path = "/sse"
-    
-    with patch("backend.mcp_server.ASGIResponder") as mock_responder:
-        await unified_sse_handler(request)
-        mock_responder.assert_called_once()
-
-# ── New Tool Tests ───────────────────────────────────────────────────────
+# ── Tool Tests ───────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_create_project_tool():

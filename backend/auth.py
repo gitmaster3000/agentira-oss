@@ -54,8 +54,12 @@ def check_transition(db: Session, actor: str, from_status: str, to_status: str) 
     if from_status == to_status:
         return
 
+    perms = get_permissions(db, actor)
+    if "*" in perms or "transition:*" in perms:
+        return
+
     codename = f"transition:{from_status}:{to_status}"
-    if not has_permission(db, actor, codename):
+    if codename not in perms:
         raise PermissionError(
             f"'{actor}' lacks permission '{codename}' to move from '{from_status}' to '{to_status}'."
         )

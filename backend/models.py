@@ -171,6 +171,7 @@ class Activity(Base):
     actor: Mapped[str] = mapped_column(String(120), default="system")
     action: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. project.create, task.assign
     detail: Mapped[str] = mapped_column(Text, default="")
+    diff: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON: {"field": {"from": x, "to": y}}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="activities")

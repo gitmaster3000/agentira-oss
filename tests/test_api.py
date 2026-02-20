@@ -181,16 +181,16 @@ def test_list_tasks_scoping():
     assert t2["id"] in ids
 
 
-def test_move_task_member_denied_close():
-    """Member should NOT be able to move review -> done by default."""
+def test_move_task_member_can_close():
+    """Member with transition:* can move review -> done."""
     services.create_profile("alice", role="member")
     p = services.create_project("P")
     t = services.create_task(p["id"], "T")
     services.move_task(t["id"], "todo", actor="system")
     services.move_task(t["id"], "in_progress", actor="system")
     services.move_task(t["id"], "review", actor="system")
-    with pytest.raises(PermissionError):
-        services.move_task(t["id"], "done", actor="alice")
+    moved = services.move_task(t["id"], "done", actor="alice")
+    assert moved["status"] == "done"
 
 
 def test_move_task_admin_can_close():
@@ -329,3 +329,19 @@ def test_member_lacks_close_permission():
     roles = services.list_roles()
     member = next(r for r in roles if r["name"] == "member")
     assert "transition:review:done" not in member["permissions"]
+
+
+def test_list_permissions():
+    """list_permissions must return all seeded permissions as a non-empty list."""
+    perms = services.list_permissions()
+    assert isinstance(perms, list)
+    assert len(perms) > 0
+    codenames = [p["codename"] for p in perms]
+    assert "transition:*" in codenames
+    assert "task.create" in codenames
+    assert "project.view_all" in codenames
+    # Every entry must have id, codename, and description keys
+    for p in perms:
+        assert "id" in p
+        assert "codename" in p
+        assert "description" in p

@@ -46,7 +46,8 @@ Thumbs.db
 frontend/
 throwaway/
 scratchpad/
-bruno/
+bruno/environments/
+bruno/test_results*.txt
 data/
 agentira.egg-info/
 .agent/
