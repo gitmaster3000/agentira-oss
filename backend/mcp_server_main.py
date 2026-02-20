@@ -33,7 +33,7 @@ logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
-        logging.FileHandler("../mcp_server.log"),
+        logging.FileHandler("mcp_server.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )

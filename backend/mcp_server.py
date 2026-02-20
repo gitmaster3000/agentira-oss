@@ -309,7 +309,11 @@ async def get_notifications(unread_only: bool = True, ctx: Context = None) -> li
 @mcp.tool()
 async def mark_notification_read(notification_id: str) -> bool:
     """Mark a notification as read by its ID."""
-    return services.mark_notification_read(notification_id)
+    actor = actor_ctx.get()
+    with services._session() as db:
+        prof = services._get_profile_by_name(db, actor)
+        actor_profile_id = prof.id if prof else None
+    return services.mark_notification_read(notification_id, actor_profile_id=actor_profile_id)
 
 # ── Attachment Tools ────────────────────────────────────────────────────────────
 
@@ -317,6 +321,14 @@ async def mark_notification_read(notification_id: str) -> bool:
 async def list_attachments(task_id: str) -> list[dict]:
     """List all attachments for a task."""
     return services.list_attachments(task_id)
+
+@mcp.tool()
+async def upload_attachment(task_id: str, filename: str, content_base64: str, content_type: str = "application/octet-stream") -> dict:
+    """Upload a file attachment to a task. Encode file content as base64 and pass it as content_base64."""
+    import base64
+    actor = actor_ctx.get()
+    file_bytes = base64.b64decode(content_base64)
+    return services.add_attachment(task_id, filename, file_bytes, content_type, uploaded_by=actor)
 
 # ── Project Activity Tools ──────────────────────────────────────────────────────
 
@@ -398,4 +410,5 @@ if __name__ == "__main__":
         port=8000,
         log_level="debug",
         reload=True,
+        reload_dirs=[os.path.join(BASE_DIR, "backend")],
     )
