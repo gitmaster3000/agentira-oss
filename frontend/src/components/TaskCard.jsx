@@ -14,13 +14,13 @@ export function TaskCard({ task, onUpdate, onDelete }) {
 
     const borderColor = priorityColors[task.priority] || 'border-l-4 border-l-gray-500';
 
-    const [hasAttachments, setHasAttachments] = useState(false);
+    const [attachmentsCount, setAttachmentsCount] = useState(0);
 
     useEffect(() => {
         let isMounted = true;
         // Future proofing: if the backend adds attachments_count directly to task serialization
         if (task.attachments_count !== undefined) {
-            setHasAttachments(task.attachments_count > 0);
+            setAttachmentsCount(task.attachments_count);
             return;
         }
 
@@ -28,7 +28,7 @@ export function TaskCard({ task, onUpdate, onDelete }) {
         api.listAttachments(task.id)
             .then(atts => {
                 if (isMounted && atts && atts.length > 0) {
-                    setHasAttachments(true);
+                    setAttachmentsCount(atts.length);
                 }
             })
             .catch(err => console.error('Failed to load attachments for card:', err));
@@ -91,9 +91,9 @@ export function TaskCard({ task, onUpdate, onDelete }) {
                         }`}>
                         {task.priority}
                     </span>
-                    {hasAttachments && (
-                        <span className="text-text-tertiary" title="Has attachments">
-                            <Paperclip className="w-3.5 h-3.5" />
+                    {attachmentsCount > 0 && (
+                        <span className="flex items-center gap-1 text-[10px] text-text-tertiary font-medium bg-bg-panel px-1.5 py-0.5 rounded" title={`${attachmentsCount} attachment(s)`}>
+                            <Paperclip className="w-3 h-3" /> {attachmentsCount}
                         </span>
                     )}
                 </div>
