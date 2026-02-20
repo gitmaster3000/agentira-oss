@@ -307,9 +307,6 @@ export function Board() {
                     }}
                     onUpdate={() => {
                         loadBoard();
-                        const newParams = new URLSearchParams(searchParams);
-                        newParams.delete('selectedTask');
-                        setSearchParams(newParams);
                     }}
                 />
             )}
