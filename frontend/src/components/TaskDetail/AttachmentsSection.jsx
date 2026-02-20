@@ -63,6 +63,28 @@ export function AttachmentsSection({ taskId }) {
         }
     };
 
+    const handleDownload = async (attachment) => {
+        try {
+            const downloadUrl = api.getAttachmentDownloadUrl?.(attachment.id) || `/api/attachments/${attachment.id}/download`;
+            const response = await fetch(downloadUrl);
+            if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
+
+            const blob = await response.blob();
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = blobUrl;
+            a.download = attachment.filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(blobUrl);
+            a.remove();
+        } catch (err) {
+            console.error('[AttachmentsSection] Download error:', err);
+            alert('Failed to download attachment: ' + err.message);
+        }
+    };
+
     const formatSize = (bytes) => {
         if (!bytes) return '0 B';
         const k = 1024;
@@ -139,16 +161,13 @@ export function AttachmentsSection({ taskId }) {
                             </div>
 
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
-                                <a
-                                    href={api.getAttachmentDownloadUrl?.(attachment.id) || `${api.API_BASE}/attachments/${attachment.id}/download`}
-                                    download={attachment.filename}
-                                    target="_blank"
-                                    rel="noreferrer"
+                                <button
+                                    onClick={() => handleDownload(attachment)}
                                     className="p-1.5 text-text-tertiary hover:text-accent-primary hover:bg-bg-hover rounded-md transition-colors"
                                     title="Download"
                                 >
                                     <Download className="w-4 h-4" />
-                                </a>
+                                </button>
                                 <button
                                     onClick={() => setAttachmentToDelete(attachment)}
                                     className="p-1.5 text-text-tertiary hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
