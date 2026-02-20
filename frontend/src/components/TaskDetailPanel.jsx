@@ -13,12 +13,15 @@ import {
     AlertCircle,
     Pencil
 } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
+import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
 
 export function TaskDetailPanel({ task, onClose, onUpdate }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
     const [activities, setActivities] = useState([]);
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [comment, setComment] = useState('');
     const [profiles, setProfiles] = useState([]);
     const [attachments, setAttachments] = useState([]);
@@ -104,13 +107,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     };
 
     const handleDelete = async () => {
-        if (!confirm("Delete this task?")) return;
         try {
             await api.deleteTask(task.id);
             onUpdate();
-            onClose();
         } catch (err) {
             alert(err.message);
+            setIsConfirmingDelete(false);
         }
     };
 
@@ -125,7 +127,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
         <>
             {/* Panel */}
             <div
-                className="h-full w-full sm:w-[450px] md:w-[500px] lg:w-[600px] xl:w-[700px] bg-bg-card border-l border-border-subtle shadow-2xl z-10 flex flex-col flex-shrink-0 animate-slide-in overflow-hidden"
+                className="h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col flex-shrink-0 animate-slide-in shadow-2xl overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -165,35 +167,20 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                         autoFocus
                                     />
                                 ) : (
-                                    <h1 className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors">
+                                    <h1
+                                        className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors cursor-pointer hover:bg-bg-hover"
+                                        onClick={() => setIsEditing(true)}
+                                    >
                                         {task.title}
                                     </h1>
                                 )}
                             </div>
-                            {!isEditing && (
-                                <button
-                                    onClick={() => setIsEditing(true)}
-                                    className="p-1.5 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded transition-colors opacity-0 group-hover:opacity-100 flex items-center gap-1 text-xs"
-                                    title="Edit task"
-                                >
-                                    <Pencil className="w-3.5 h-3.5" /> Edit
-                                </button>
-                            )}
                         </div>
 
                         {/* Description */}
                         <div className="mb-8">
                             <div className="flex items-center justify-between mb-3 group/desc">
                                 <label className="text-xs font-bold uppercase text-text-tertiary block">Description</label>
-                                {!isEditing && (
-                                    <button
-                                        onClick={() => setIsEditing(true)}
-                                        className="p-1 text-text-tertiary hover:text-text-primary hover:bg-bg-hover rounded transition-colors opacity-0 group-hover/desc:opacity-100 flex items-center gap-1 text-xs"
-                                        title="Edit description"
-                                    >
-                                        <Pencil className="w-3.5 h-3.5" /> Edit
-                                    </button>
-                                )}
                             </div>
                             {isEditing ? (
                                 <textarea
@@ -203,7 +190,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     placeholder="Add a more detailed description..."
                                 />
                             ) : (
-                                <div className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px]">
+                                <div
+                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors"
+                                    onClick={() => setIsEditing(true)}
+                                >
                                     {task.description || "No description provided."}
                                 </div>
                             )}
@@ -301,6 +291,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             </div>
                         )}
 
+                        {/* Attachments Section */}
+                        <div className="mb-8">
+                            <AttachmentsSection taskId={task.id} />
+                        </div>
+
                         {/* Comments / Activity Section */}
                         <div className="space-y-6">
                             <div className="flex items-center gap-2 text-text-primary mb-4">
@@ -349,19 +344,60 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                     </div>
                 </div>
 
-                {/* Footer / Delete */}
+                {/* Footer / Actions */}
                 <div className="p-4 border-t border-border-subtle flex justify-between items-center bg-bg-panel/50">
-                    <button
-                        onClick={handleDelete}
-                        className="flex items-center gap-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded transition-all"
-                    >
-                        <Trash2 className="w-4 h-4" /> Delete Task
-                    </button>
-                    <div className="text-[10px] text-text-tertiary italic">
-                        All changes are logged in the activity feed.
+                    <div>
+                        <button
+                            onClick={() => setIsConfirmingDelete(true)}
+                            className="flex items-center gap-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded transition-all"
+                            title="Delete Task"
+                        >
+                            <Trash2 className="w-4 h-4" /> Delete
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        {isEditing ? (
+                            <>
+                                <button
+                                    onClick={() => {
+                                        setFormData(task);
+                                        setIsEditing(false);
+                                    }}
+                                    className="btn btn-ghost text-xs py-1.5"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleSave}
+                                    disabled={loading}
+                                    className="btn btn-primary text-xs py-1.5"
+                                >
+                                    {loading ? 'Saving...' : 'Save'}
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={() => setIsEditing(true)}
+                                className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover px-3 py-1.5 rounded transition-all"
+                                title="Edit Task"
+                            >
+                                <Pencil className="w-3.5 h-3.5" /> Edit
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {isConfirmingDelete && (
+                <ConfirmModal
+                    title="Delete Task"
+                    message={`Are you sure you want to delete task "${task.title}"? This action cannot be undone.`}
+                    confirmText="Delete"
+                    onConfirm={handleDelete}
+                    onCancel={() => setIsConfirmingDelete(false)}
+                />
+            )}
         </>
     );
 }

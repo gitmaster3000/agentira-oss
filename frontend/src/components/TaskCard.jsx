@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { api } from '../api';
+import { ConfirmModal } from './ConfirmModal';
 
 export function TaskCard({ task, onUpdate, onDelete }) {
+    const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const priorityColors = {
         low: 'border-l-4 border-l-blue-400',
         medium: 'border-l-4 border-l-yellow-400',
@@ -18,12 +20,12 @@ export function TaskCard({ task, onUpdate, onDelete }) {
 
     const handleDeleteClick = async (e) => {
         e.stopPropagation();
-        if (!confirm(`Delete task "${task.title}"?`)) return;
         try {
             await api.deleteTask(task.id);
             if (onDelete) onDelete();
         } catch (err) {
             alert(err.message);
+            setIsConfirmingDelete(false);
         }
     };
 
@@ -40,13 +42,23 @@ export function TaskCard({ task, onUpdate, onDelete }) {
         >
             {/* Delete button — visible on hover */}
             <button
-                onClick={handleDeleteClick}
-                className="absolute top-1.5 right-1.5 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true); }}
+                className="absolute top-1.5 right-1.5 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}
                 title="Delete task"
             >
                 <Trash2 className="w-3.5 h-3.5" />
             </button>
+
+            {isConfirmingDelete && (
+                <ConfirmModal
+                    title="Delete Task"
+                    message={`Are you sure you want to delete task "${task.title}"?`}
+                    confirmText="Delete"
+                    onConfirm={handleDeleteClick}
+                    onCancel={(e) => { e?.stopPropagation(); setIsConfirmingDelete(false); }}
+                />
+            )}
 
             <div className="flex justify-between items-start mb-1">
                 <h4 className="font-medium text-sm text-primary line-clamp-2 pr-6">{task.title}</h4>
