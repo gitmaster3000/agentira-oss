@@ -72,14 +72,13 @@ export function Navbar({ onNewProject }) {
                 <div className="relative" ref={projectRef}>
                     <button
                         onClick={() => setIsProjectOpen(!isProjectOpen)}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-bg-hover transition-colors text-sm font-medium"
-                        style={{ color: 'var(--text-secondary)' }}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-sm font-medium"
                     >
                         <Briefcase className="w-4 h-4" />
                         <span className="text-text-primary whitespace-nowrap max-w-[150px] truncate">
                             {activeProject ? activeProject.name : 'Select Project'}
                         </span>
-                        <ChevronDown className={`w-4 h-4 transition-transform ${isProjectOpen ? 'rotate-180' : ''}`} />
+                        <ChevronDown className="w-3 h-3" />
                     </button>
 
                     {isProjectOpen && (
@@ -93,21 +92,20 @@ export function Navbar({ onNewProject }) {
                                             navigate(`/board/${p.id}`);
                                             setIsProjectOpen(false);
                                         }}
-                                        className="w-full text-left px-3 py-2 text-sm hover:bg-bg-hover flex items-center gap-3"
-                                        style={{ color: p.id === projectId ? 'var(--accent-primary)' : 'var(--text-primary)' }}
+                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-bg-hover flex items-center gap-3 transition-colors ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                                     >
-                                        <div className="w-6 h-6 rounded bg-accent-subtle flex items-center justify-center text-[10px] font-bold">
+                                        <div className="w-6 h-6 rounded border border-border-subtle bg-bg-panel flex items-center justify-center text-[10px] font-bold text-text-secondary">
                                             {p.name[0].toUpperCase()}
                                         </div>
                                         <span className="truncate flex-1">{p.name}</span>
-                                        {p.id === projectId && <div className="w-1.5 h-1.5 rounded-full bg-accent-primary" />}
+                                        {p.id === projectId && <div className="w-1.5 h-1.5 rounded-full bg-text-primary" />}
                                     </button>
                                 ))}
                             </div>
                             <div className="border-t border-border-subtle mt-1 pt-1">
                                 <button
                                     onClick={() => { onNewProject(); setIsProjectOpen(false); }}
-                                    className="w-full text-left px-3 py-2 text-sm text-accent-primary hover:bg-bg-hover flex items-center gap-2"
+                                    className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
                                 >
                                     <Plus className="w-4 h-4" /> Create Project
                                 </button>
@@ -124,11 +122,11 @@ export function Navbar({ onNewProject }) {
                 >
                     <button
                         onClick={() => setIsCreateOpen(!isCreateOpen)}
-                        className="btn btn-primary flex items-center gap-1.5"
-                        title="Create"
+                        className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
+                        title="Create new"
                     >
-                        <span className="hidden sm:inline whitespace-nowrap">Create</span>
-                        <ChevronDown className={`w-4 h-4 transition-transform ${isCreateOpen ? 'rotate-180' : ''}`} />
+                        <Plus className="w-5 h-5" />
+                        <ChevronDown className="w-3 h-3" />
                     </button>
 
                     {isCreateOpen && (
@@ -168,9 +166,9 @@ export function Navbar({ onNewProject }) {
                 </div>
 
                 <div className="flex items-center gap-1 border-l border-border-subtle pl-3 ml-2">
-                    <button className="p-2 rounded-md hover:bg-bg-hover text-text-secondary relative">
+                    <button className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary relative">
                         <Bell className="w-5 h-5" />
-                        <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-bg-panel" />
+                        <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-bg-panel" />
                     </button>
                     <ThemeToggle />
 
