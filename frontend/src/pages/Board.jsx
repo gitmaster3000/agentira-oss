@@ -113,6 +113,7 @@ export function Board() {
     const selectedTaskId = searchParams.get('selectedTask');
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
+    const [isPanelEditing, setIsPanelEditing] = useState(false);
     const addBtnRef = useRef(null);
 
     const loadBoard = async () => {
@@ -281,6 +282,10 @@ export function Board() {
                                                 key={task.id}
                                                 task={task}
                                                 onUpdate={(t) => {
+                                                    if (isPanelEditing && selectedTaskId && String(t.id) !== String(selectedTaskId)) {
+                                                        if (!confirm('You have unsaved changes. Discard and switch tasks?')) return;
+                                                    }
+                                                    setIsPanelEditing(false);
                                                     const newParams = new URLSearchParams(searchParams);
                                                     newParams.set('selectedTask', t.id);
                                                     setSearchParams(newParams);
@@ -301,6 +306,10 @@ export function Board() {
                 <TaskDetailPanel
                     task={selectedTask}
                     onClose={() => {
+                        if (isPanelEditing) {
+                            if (!confirm('You have unsaved changes. Discard and close?')) return;
+                        }
+                        setIsPanelEditing(false);
                         const newParams = new URLSearchParams(searchParams);
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
@@ -308,6 +317,7 @@ export function Board() {
                     onUpdate={() => {
                         loadBoard();
                     }}
+                    onEditingChange={setIsPanelEditing}
                 />
             )}
 

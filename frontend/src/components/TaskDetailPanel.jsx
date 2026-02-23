@@ -16,7 +16,7 @@ import {
 import { ConfirmModal } from './ConfirmModal';
 import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
 
-export function TaskDetailPanel({ task, onClose, onUpdate }) {
+export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -30,6 +30,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState({ ...task });
+
+    // Notify parent of edit state changes
+    const toggleEditing = (val) => {
+        setIsEditing(val);
+        if (onEditingChange) onEditingChange(val);
+    };
 
     useEffect(() => {
         loadActivity();
@@ -85,7 +91,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                 assignee: formData.assignee,
                 tags: typeof formData.tags === 'string' ? formData.tags.split(',').map(t => t.trim()) : formData.tags
             });
-            setIsEditing(false);
+            toggleEditing(false);
             onUpdate();
         } catch (err) {
             alert(err.message);
@@ -169,7 +175,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 ) : (
                                     <h1
                                         className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors cursor-pointer hover:bg-bg-hover"
-                                        onClick={() => setIsEditing(true)}
+                                        onClick={() => toggleEditing(true)}
                                     >
                                         {task.title}
                                     </h1>
@@ -192,7 +198,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             ) : (
                                 <div
                                     className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors"
-                                    onClick={() => setIsEditing(true)}
+                                    onClick={() => toggleEditing(true)}
                                 >
                                     {task.description || "No description provided."}
                                 </div>
@@ -284,7 +290,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                         {/* Action Buttons for Edit Mode */}
                         {isEditing && (
                             <div className="flex justify-end gap-2 mb-8">
-                                <button onClick={() => { setIsEditing(false); setFormData({ ...task }); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors">Cancel</button>
+                                <button onClick={() => { toggleEditing(false); setFormData({ ...task }); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors">Cancel</button>
                                 <button onClick={handleSave} className="bg-accent-primary text-white text-sm font-semibold px-6 py-2 rounded shadow-lg hover:bg-accent-hover transition-all" disabled={loading}>
                                     {loading ? 'Saving...' : 'Save Changes'}
                                 </button>
@@ -362,7 +368,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 <button
                                     onClick={() => {
                                         setFormData(task);
-                                        setIsEditing(false);
+                                        toggleEditing(false);
                                     }}
                                     className="btn btn-ghost text-xs py-1.5"
                                 >
@@ -378,7 +384,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             </>
                         ) : (
                             <button
-                                onClick={() => setIsEditing(true)}
+                                onClick={() => toggleEditing(true)}
                                 className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover px-3 py-1.5 rounded transition-all"
                                 title="Edit Task"
                             >
