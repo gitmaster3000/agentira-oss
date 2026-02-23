@@ -5,6 +5,7 @@ import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { UserPlus, X, Plus } from 'lucide-react';
 
 const COLUMNS = [
@@ -114,6 +115,7 @@ export function Board() {
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
     const [isPanelEditing, setIsPanelEditing] = useState(false);
+    const [pendingAction, setPendingAction] = useState(null);
     const addBtnRef = useRef(null);
 
     const loadBoard = async () => {
@@ -283,7 +285,13 @@ export function Board() {
                                                 task={task}
                                                 onUpdate={(t) => {
                                                     if (isPanelEditing && selectedTaskId && String(t.id) !== String(selectedTaskId)) {
-                                                        if (!confirm('You have unsaved changes. Discard and switch tasks?')) return;
+                                                        setPendingAction(() => () => {
+                                                            setIsPanelEditing(false);
+                                                            const newParams = new URLSearchParams(searchParams);
+                                                            newParams.set('selectedTask', t.id);
+                                                            setSearchParams(newParams);
+                                                        });
+                                                        return;
                                                     }
                                                     setIsPanelEditing(false);
                                                     const newParams = new URLSearchParams(searchParams);
@@ -307,9 +315,14 @@ export function Board() {
                     task={selectedTask}
                     onClose={() => {
                         if (isPanelEditing) {
-                            if (!confirm('You have unsaved changes. Discard and close?')) return;
+                            setPendingAction(() => () => {
+                                setIsPanelEditing(false);
+                                const newParams = new URLSearchParams(searchParams);
+                                newParams.delete('selectedTask');
+                                setSearchParams(newParams);
+                            });
+                            return;
                         }
-                        setIsPanelEditing(false);
                         const newParams = new URLSearchParams(searchParams);
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
@@ -326,6 +339,18 @@ export function Board() {
                     projectId={projectId}
                     onClose={() => setShowCreate(false)}
                     onCreated={loadBoard}
+                />
+            )}
+
+            {pendingAction && (
+                <ConfirmModal
+                    title="Unsaved Changes"
+                    message="You have unsaved edits. Are you sure you want to discard them?"
+                    confirmText="Discard"
+                    cancelText="Keep Editing"
+                    isDanger={true}
+                    onConfirm={() => { pendingAction(); setPendingAction(null); }}
+                    onCancel={() => setPendingAction(null)}
                 />
             )}
         </div>

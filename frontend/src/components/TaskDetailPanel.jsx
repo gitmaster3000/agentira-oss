@@ -38,6 +38,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
     };
 
     useEffect(() => {
+        // Reset edit state when switching to a different task
+        setIsEditing(false);
+        setFormData({ ...task });
+        if (onEditingChange) onEditingChange(false);
+    }, [task.id]);
+
+    useEffect(() => {
         loadActivity();
         loadAttachments();
         if (task.project_id) {
