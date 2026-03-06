@@ -78,6 +78,7 @@ class ASGILoggingMiddleware:
         }
 
         logger.info(f"REQ: {method} {path}")
+        logger.info(f"Headers: {headers}")
 
         is_protected = path == "/mcp" or path.startswith("/mcp/")
 

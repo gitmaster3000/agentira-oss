@@ -15,6 +15,7 @@ from backend.models import (
 )
 from backend.auth import has_permission
 from backend.notifications import broker
+from backend import agent_notifier
 
 import os
 import hashlib
@@ -116,6 +117,7 @@ def _profile_to_dict(p: Profile) -> dict:
         "display_name": p.display_name or p.name,
         "role": p.role.name,
         "avatar_url": p.avatar_url,
+        "webhook_url": p.webhook_url,
         "extra_permissions": extra,
         "projects": [pm.project_id for pm in p.project_memberships],
         "created_at": p.created_at.isoformat(),
@@ -418,6 +420,7 @@ def create_task(
             target_prof = _get_profile_by_name(db, assignee)
             if target_prof:
                 broker.notify(target_prof.id)
+                agent_notifier.notify(target_prof.webhook_url, "task.assigned", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -538,6 +541,7 @@ def update_task(
             target_prof = _get_profile_by_name(db, assignee)
             if target_prof:
                 broker.notify(target_prof.id)
+                agent_notifier.notify(target_prof.webhook_url, "task.assigned", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -573,6 +577,7 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
             target_prof = _get_profile_by_name(db, task.assignee)
             if target_prof:
                 broker.notify(target_prof.id)
+                agent_notifier.notify(target_prof.webhook_url, "task.moved", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -607,6 +612,7 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
             target_prof = _get_profile_by_name(db, task.assignee)
             if target_prof:
                 broker.notify(target_prof.id)
+                agent_notifier.notify(target_prof.webhook_url, "task.commented", _task_to_dict(task), actor)
 
         db.refresh(act)
         return _activity_to_dict(act)
@@ -1005,7 +1011,7 @@ def get_service_account(profile_id: str) -> dict | None:
         return res
 
 
-def update_profile(profile_id: str, display_name: Optional[str] = None, role: Optional[str] = None, avatar_url: Optional[str] = None) -> dict:
+def update_profile(profile_id: str, display_name: Optional[str] = None, role: Optional[str] = None, avatar_url: Optional[str] = None, webhook_url: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Profile, profile_id)
         if not p:
@@ -1021,6 +1027,8 @@ def update_profile(profile_id: str, display_name: Optional[str] = None, role: Op
             p.role_id = _get_role_id(db, role)
         if avatar_url is not None:
             p.avatar_url = avatar_url
+        if webhook_url is not None:
+            p.webhook_url = webhook_url
             
         db.commit()
         db.refresh(p)

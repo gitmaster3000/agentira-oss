@@ -44,7 +44,10 @@ logger = setup_logging()
 
 
 async def get_api_key() -> Optional[str]:
-    """Discover the API key from environment or local workspace file."""
+    """Discover the API key from args, environment, or local workspace file."""
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+        
     ev = os.environ.get("AGENTIRA_API_KEY")
     if ev:
         return ev
@@ -73,63 +76,62 @@ async def run_proxy():
         logger.error("CRITICAL: No API key found.")
         sys.exit(1)
 
-    mcp_url = "http://127.0.0.1:8000/mcp"
+    mcp_base_url = "http://127.0.0.1:8000"
     auth_headers = {
         "Authorization": f"Bearer {api_key}",
         "X-Proxy-Workspace": os.getcwd(),
+        "Accept": "application/json",
+        "Content-Type": "application/json"
     }
 
-    logger.info("--- STARTING MCP PROXY SHIM (Streamable HTTP) ---")
-
-    try:
-        async with streamablehttp_client(mcp_url, headers=auth_headers) as (read_stream, write_stream, _):
-            logger.info(f"CONNECTED to AgentIRA MCP at {mcp_url}")
-
-            async def forward_to_server():
-                try:
-                    while True:
-                        line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
-                        if not line:
-                            logger.info("Stdin closed")
-                            break
-                        raw_line = line.strip()
-                        if not raw_line:
-                            continue
-                        try:
-                            data = json.loads(raw_line)
-                            message = JSONRPCMessage.model_validate(data)
-                            session_msg = SessionMessage(message=message)
-                            await write_stream.send(session_msg)
-                            logger.debug(f"FWD -> SERVER: {raw_line[:120]}")
-                        except Exception as e:
-                            logger.error(f"Failed to process stdin: {e}")
-                except Exception as e:
-                    logger.error(f"forward_to_server error: {e}")
-
-            async def forward_to_client():
-                try:
-                    async for msg_wrapper in read_stream:
-                        try:
-                            message = msg_wrapper.message if hasattr(msg_wrapper, "message") else msg_wrapper
-                            if hasattr(message, "model_dump_json"):
-                                output = message.model_dump_json()
-                            elif hasattr(message, "json"):
-                                output = message.json()
-                            else:
-                                output = json.dumps(message)
-                            sys.stdout.write(output + "\n")
-                            sys.stdout.flush()
-                            logger.debug(f"FWD <- SERVER: {output[:120]}")
-                        except Exception as e:
-                            logger.error(f"Serialize error: {e}")
-                except Exception as e:
-                    logger.error(f"forward_to_client error: {e}")
-
-            await asyncio.gather(forward_to_server(), forward_to_client())
-
-    except Exception as e:
-        logger.error(f"Proxy runtime error: {e}")
-        logger.error(traceback.format_exc())
+    logger.info("--- STARTING MCP PROXY SHIM (Simple POST) ---")
+    
+    import httpx
+    
+    mcp_post_url = f"{mcp_base_url}/mcp"
+    logger.info(f"CONNECTED to AgentIRA MCP POST endpoint at {mcp_post_url}")
+    
+    current_session_id = None
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while True:
+            try:
+                line = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
+                if not line:
+                    logger.info("Stdin closed")
+                    break
+                raw_line = line.strip()
+                if not raw_line:
+                    continue
+                
+                logger.debug(f"FWD -> CLOUD: {raw_line[:120]}")
+                
+                # Prepare headers for this specific request
+                headers = auth_headers.copy()
+                if current_session_id:
+                    headers["mcp-session-id"] = current_session_id
+                    
+                response = await client.post(mcp_post_url, headers=headers, content=raw_line)
+                
+                if response.status_code >= 400:
+                    logger.error(f"Cloud POST failed: {response.status_code} - {response.text}")
+                    continue
+                
+                # Capture session ID from response headers if it's there
+                sid = response.headers.get("mcp-session-id")
+                if sid:
+                    if sid != current_session_id:
+                        logger.info(f"Captured new session ID: {sid}")
+                        current_session_id = sid
+                
+                output = response.text.strip()
+                sys.stdout.write(output + "\n")
+                sys.stdout.flush()
+                logger.debug(f"FWD <- CLOUD: {output[:120]}")
+                
+            except Exception as e:
+                logger.error(f"Proxy loop error: {e}")
+                logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -91,6 +91,7 @@ class Profile(Base):
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
+    webhook_url: Mapped[str] = mapped_column(String(500), default="")
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

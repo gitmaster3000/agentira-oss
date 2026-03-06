@@ -57,6 +57,7 @@ class ProfileUpdate(BaseModel):
     display_name: Optional[str] = None
     role: Optional[str] = None
     avatar_url: Optional[str] = None
+    webhook_url: Optional[str] = None
 
 class ProfileSignup(BaseModel):
     name: str
@@ -461,7 +462,7 @@ def api_get_profile(profile_id: str):
 @app.patch("/api/profiles/{profile_id}")
 def api_update_profile(profile_id: str, body: ProfileUpdate):
     try:
-        return services.update_profile(profile_id, display_name=body.display_name, role=body.role, avatar_url=body.avatar_url)
+        return services.update_profile(profile_id, display_name=body.display_name, role=body.role, avatar_url=body.avatar_url, webhook_url=body.webhook_url)
     except ValueError as e:
         raise HTTPException(404, str(e))
 

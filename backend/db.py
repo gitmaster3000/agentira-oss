@@ -43,3 +43,9 @@ def run_migrations():
         if "diff" not in existing:
             conn.execute(text("ALTER TABLE activities ADD COLUMN diff TEXT"))
             conn.commit()
+
+        result = conn.execute(text("PRAGMA table_info(profiles)"))
+        existing = {row[1] for row in result}
+        if "webhook_url" not in existing:
+            conn.execute(text("ALTER TABLE profiles ADD COLUMN webhook_url VARCHAR(500) DEFAULT ''"))
+            conn.commit()

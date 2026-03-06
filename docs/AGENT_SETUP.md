@@ -49,21 +49,66 @@ Direct connection via the standard protocol (no shim required).
 
 ---
 
-## 🧩 3. Claude Desktop / OpenClaw
-Add to your configuration file (usually `claude_desktop_config.json` or equivalent).
+## 🧩 3. Claude Desktop
+Add to your configuration file (usually `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "agentira": {
-      "url": "http://127.0.0.1:8000/sse",
-      "headers": {
-        "Authorization": "Bearer your_api_key_here"
+      "command": "python",
+      "args": ["-m", "backend.mcp_server"],
+      "env": {
+        "AGENTIRA_API_KEY": "your_api_key_here"
       }
     }
   }
 }
 ```
+
+---
+
+## 🦞 4. OpenClaw
+OpenClaw doesn't natively support the `mcpServers` block in its main config. Instead, it uses the official **mcporter** skill. We recommend configuring this strictly per-agent so each agent has its own secure identity.
+
+1. Install the `mcporter` CLI globally:
+   ```bash
+   npm install -g mcporter
+   ```
+2. Navigate to your specific agent's workspace directory (e.g., `C:\openclaw team\architect`).
+3. Create a `mcporter.json` file inside that directory to define the Agentira MCP HTTP bridge:
+   ```json
+   {
+     "mcpServers": {
+       "agentira": {
+         "command": "npx",
+         "args": [
+           "-y",
+           "@nimbletools/mcp-http-bridge",
+           "--endpoint",
+           "http://127.0.0.1:8000/mcp",
+           "--token",
+           "your_agent_specific_api_key_here"
+         ],
+         "env": {}
+       }
+     }
+   }
+   ```
+4. Update your global `~/.openclaw/openclaw.json` to tell the agent to load that specific config:
+   ```json
+   "list": [
+     {
+       "id": "architect",
+       "skills": {
+         "mcporter": {
+           "configPath": "C:\\openclaw team\\architect\\mcporter.json"
+         }
+       }
+     }
+   ]
+   ```
+5. Your OpenClaw agent can now uniquely authenticate and call Agentira tools natively.
 
 ---
 
