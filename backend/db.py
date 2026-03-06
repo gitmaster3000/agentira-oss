@@ -49,3 +49,12 @@ def run_migrations():
         if "webhook_url" not in existing:
             conn.execute(text("ALTER TABLE profiles ADD COLUMN webhook_url VARCHAR(500) DEFAULT ''"))
             conn.commit()
+        if "notification_transport" not in existing:
+            conn.execute(text("ALTER TABLE profiles ADD COLUMN notification_transport VARCHAR(20)"))
+            conn.commit()
+
+        result = conn.execute(text("PRAGMA table_info(projects)"))
+        existing = {row[1] for row in result}
+        if "webhook_config" not in existing:
+            conn.execute(text("ALTER TABLE projects ADD COLUMN webhook_config TEXT"))
+            conn.commit()

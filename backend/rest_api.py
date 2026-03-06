@@ -67,6 +67,14 @@ class ProfileSignup(BaseModel):
 class ServiceAccountCreate(BaseModel):
     name: str
 
+class WebhookRuleSchema(BaseModel):
+    event: str
+    receivers: str  # "assignee" | "bots" | "members"
+
+class WebhookConfigUpdate(BaseModel):
+    enabled: bool = True
+    rules: list[WebhookRuleSchema] = Field(default_factory=list)
+
 # ── App ──────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="AgentIRA", version="0.1.0", description="Lean task manager for AI agents")
@@ -437,6 +445,32 @@ def api_mark_notification_read(notification_id: str, actor: str):
 def api_get_project_activity(project_id: str, limit: int = 50):
     """Get recent activity across all tasks in a project."""
     return services.get_project_activity(project_id, limit=limit)
+
+
+@app.get("/api/projects/{project_id}/webhook-config")
+def api_get_webhook_config(project_id: str):
+    """Return the project's webhook subscription config.
+
+    If not configured, returns DEFAULT_WEBHOOK_RULES so callers always have
+    a displayable/editable structure.
+    """
+    result = services.get_webhook_config(project_id)
+    if result is None:
+        raise HTTPException(404, "Project not found")
+    return result
+
+
+@app.put("/api/projects/{project_id}/webhook-config")
+def api_put_webhook_config(project_id: str, body: WebhookConfigUpdate):
+    """Save per-project webhook subscription config."""
+    try:
+        return services.set_webhook_config(
+            project_id,
+            enabled=body.enabled,
+            rules=[{"event": r.event, "receivers": r.receivers} for r in body.rules],
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 # ── Profiles ──────────────────────────────────────────────────────────────

@@ -26,6 +26,12 @@ class TaskPriority(str, enum.Enum):
     CRITICAL = "critical"
 
 
+class NotificationTransport(str, enum.Enum):
+    WEBHOOK = "webhook"
+    SSE     = "sse"    # Phase 2 — column exists, dispatch logic ships later
+    POLL    = "poll"
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────
 
 class Role(Base):
@@ -92,6 +98,9 @@ class Profile(Base):
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
     webhook_url: Mapped[str] = mapped_column(String(500), default="")
+    notification_transport: Mapped[str | None] = mapped_column(
+        SAEnum(NotificationTransport), nullable=True, default=None
+    )
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -134,6 +143,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
+    webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     tasks: Mapped[list["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")

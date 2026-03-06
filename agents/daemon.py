@@ -17,14 +17,16 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import queue
 import signal
 import sys
-import time
+import threading
 import traceback
 from datetime import datetime, timezone
 
 from agents.config import DaemonConfig
 from agents.agentira_client import AgentiraClient
+from agents.webhook_receiver import WebhookReceiver
 
 # ── Logging setup ────────────────────────────────────────────────────────
 
@@ -60,47 +62,58 @@ class AgentiraDaemon:
     def __init__(self, config: DaemonConfig) -> None:
         self.config = config
         self._running = False
+        self._wake_event = threading.Event()
+        self._webhook_queue: queue.Queue = queue.Queue()
         self.client = AgentiraClient(
             base_url=config.api_url,
             api_key=config.api_key,
             bot_name=config.bot_name,
         )
+        self._receiver = WebhookReceiver(
+            port=config.webhook_port,
+            event_queue=self._webhook_queue,
+            wake_event=self._wake_event,
+            token=config.webhook_token,
+        )
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
     def run(self) -> None:
-        """Start the main polling loop.  Blocks until shutdown signal."""
+        """Start the main loop.  Blocks until shutdown signal."""
         self._running = True
         self._install_signal_handlers()
+        self._receiver.start()
 
         logger.info(
-            "Daemon started — bot=%s  poll=%ds  dry_run=%s",
+            "Daemon started — bot=%s  poll=%ds  webhook_port=%s  dry_run=%s",
             self.config.bot_name,
             self.config.poll_interval,
+            self.config.webhook_port or "disabled",
             self.config.dry_run,
         )
 
-        while self._running:
-            try:
-                self.poll_and_execute()
-            except KeyboardInterrupt:
-                break
-            except Exception:
-                logger.error("Unhandled error in poll cycle:\n%s", traceback.format_exc())
+        # Initial poll on startup
+        self._run_cycle()
 
-            if self._running:
-                logger.debug("Sleeping %ds until next poll…", self.config.poll_interval)
-                # Sleep in small increments so we can respond to signals quickly
-                for _ in range(self.config.poll_interval):
-                    if not self._running:
-                        break
-                    time.sleep(1)
+        while self._running:
+            # Interrupt-aware sleep: wake early on webhook push or signal
+            woken_by_webhook = self._wake_event.wait(timeout=self.config.poll_interval)
+            if not self._running:
+                break
+            self._wake_event.clear()
+
+            if woken_by_webhook:
+                logger.debug("Woken by webhook push — draining queue")
+                self._drain_webhook_queue()
+
+            self._run_cycle()
 
         self.shutdown()
 
     def shutdown(self) -> None:
         """Clean up resources."""
         self._running = False
+        self._receiver.stop()
         logger.info("Daemon shutting down.")
         self.client.close()
 
@@ -115,6 +128,27 @@ class AgentiraDaemon:
         self._running = False
 
     # ── Core loop ────────────────────────────────────────────────────────
+
+    def _drain_webhook_queue(self) -> None:
+        """Log webhook push payloads (events wake the loop; execution is via poll)."""
+        while not self._webhook_queue.empty():
+            try:
+                payload = self._webhook_queue.get_nowait()
+                logger.debug(
+                    "Webhook event dequeued: %s task=%s",
+                    payload.get("event"), payload.get("task_id"),
+                )
+            except queue.Empty:
+                break
+
+    def _run_cycle(self) -> None:
+        """Run one poll-and-execute cycle, with error isolation."""
+        try:
+            self.poll_and_execute()
+        except KeyboardInterrupt:
+            self._running = False
+        except Exception:
+            logger.error("Unhandled error in poll cycle:\n%s", traceback.format_exc())
 
     def poll_and_execute(self) -> None:
         """Single poll cycle: find a task, execute it, report back."""

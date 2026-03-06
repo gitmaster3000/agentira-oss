@@ -315,13 +315,14 @@ def add_project_member(project_id: str, profile_name: str, actor: str = "system"
         if not existing:
             db.add(ProjectMember(project_id=p.id, profile_id=prof.id))
             _log_activity(
-                db, actor, "project.member.add", 
+                db, actor, "project.member.add",
                 f"Added {profile_name} to project {p.name}",
                 project_id=p.id,
                 notify_users=[profile_name]
             )
             db.commit()
             broker.notify(prof.id)
+            agent_notifier.dispatch_project(db, "project.member.add", _project_to_dict(p), actor)
 
         return _project_to_dict(p)
 
@@ -420,7 +421,7 @@ def create_task(
             target_prof = _get_profile_by_name(db, assignee)
             if target_prof:
                 broker.notify(target_prof.id)
-                agent_notifier.notify(target_prof.webhook_url, "task.assigned", _task_to_dict(task), actor)
+        agent_notifier.dispatch(db, "task.assigned", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -541,7 +542,7 @@ def update_task(
             target_prof = _get_profile_by_name(db, assignee)
             if target_prof:
                 broker.notify(target_prof.id)
-                agent_notifier.notify(target_prof.webhook_url, "task.assigned", _task_to_dict(task), actor)
+        agent_notifier.dispatch(db, "task.updated", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -577,7 +578,7 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
             target_prof = _get_profile_by_name(db, task.assignee)
             if target_prof:
                 broker.notify(target_prof.id)
-                agent_notifier.notify(target_prof.webhook_url, "task.moved", _task_to_dict(task), actor)
+        agent_notifier.dispatch(db, "task.moved", _task_to_dict(task), actor)
 
         db.refresh(task)
         return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
@@ -612,7 +613,7 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
             target_prof = _get_profile_by_name(db, task.assignee)
             if target_prof:
                 broker.notify(target_prof.id)
-                agent_notifier.notify(target_prof.webhook_url, "task.commented", _task_to_dict(task), actor)
+        agent_notifier.dispatch(db, "task.commented", _task_to_dict(task), actor)
 
         db.refresh(act)
         return _activity_to_dict(act)
@@ -629,6 +630,41 @@ def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
             .all()
         )
         return [_activity_to_dict(a) for a in activities]
+
+
+def get_webhook_config(project_id: str) -> dict | None:
+    """Return the project's webhook config, falling back to DEFAULT_WEBHOOK_RULES."""
+    with _session() as db:
+        p = db.get(Project, project_id)
+        if not p:
+            return None
+        if p.webhook_config:
+            import json
+            try:
+                return json.loads(p.webhook_config)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return {"enabled": True, "rules": agent_notifier.DEFAULT_WEBHOOK_RULES}
+
+
+def set_webhook_config(project_id: str, enabled: bool, rules: list[dict]) -> dict:
+    """Validate and save webhook config for a project."""
+    import json
+    _valid_receivers = {"assignee", "bots", "members"}
+    for rule in rules:
+        if "event" not in rule or "receivers" not in rule:
+            raise ValueError("Each rule must have 'event' and 'receivers' keys")
+        if rule["receivers"] not in _valid_receivers:
+            raise ValueError(f"Invalid receivers '{rule['receivers']}'; must be one of {_valid_receivers}")
+
+    with _session() as db:
+        p = db.get(Project, project_id)
+        if not p:
+            raise ValueError(f"Project {project_id} not found")
+        cfg = {"enabled": enabled, "rules": rules}
+        p.webhook_config = json.dumps(cfg)
+        db.commit()
+        return cfg
 
 
 def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:

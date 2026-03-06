@@ -35,6 +35,13 @@ class DaemonConfig(BaseSettings):
     bot_name: str = ""
     """Bot profile name. Auto-resolved from API key on startup if blank."""
 
+    # ── Webhook receiver ─────────────────────────────────────────────────
+    webhook_port: int = 0
+    """Port for the inbound webhook receiver.  0 = disabled (poll-only mode)."""
+
+    webhook_token: str = ""
+    """Shared secret for X-Agentira-Token validation.  Empty = no auth (localhost-safe)."""
+
     # ── Polling ──────────────────────────────────────────────────────────
     poll_interval: int = 120
     """Seconds between task polls.  Default: 120 (2 minutes)."""
