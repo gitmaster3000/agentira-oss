@@ -141,9 +141,27 @@ class AgentiraDaemon:
             except queue.Empty:
                 break
 
+    def _poll_notifications(self) -> None:
+        """Consume unread notifications — durable fallback for missed webhooks.
+
+        The notification DB row is written before the webhook fires, so any
+        event missed due to network failure or daemon restart is recovered here.
+        """
+        try:
+            notifications = self.client.get_notifications(unread_only=True)
+            if not notifications:
+                return
+            logger.info("Notification poll: %d unread", len(notifications))
+            for n in notifications:
+                logger.info("Notification [%s] %s", n.get("type"), n.get("title"))
+                self.client.mark_notification_read(n["id"])
+        except Exception as exc:
+            logger.warning("Notification poll failed: %s", exc)
+
     def _run_cycle(self) -> None:
         """Run one poll-and-execute cycle, with error isolation."""
         try:
+            self._poll_notifications()
             self.poll_and_execute()
         except KeyboardInterrupt:
             self._running = False
@@ -212,9 +230,8 @@ class AgentiraDaemon:
             self.client.add_comment(task_id, "🏁 [DRY RUN] Execution skipped — dry_run mode enabled.")
             return
 
-        # Execute via ZeroClaw
         try:
-            result = self._run_zeroclaw(prompt)
+            result = self._run(prompt, task)
             result_text = result.text if hasattr(result, "text") else str(result)
             success = result.success if hasattr(result, "success") else True
 
@@ -240,18 +257,103 @@ class AgentiraDaemon:
                 f"❌ **Daemon error during execution:**\n```\n{str(e)[:800]}\n```",
             )
 
-    def _run_zeroclaw(self, prompt: str) -> object:
-        """Connect to the local ZeroClaw agent and execute the prompt."""
+    def _run(self, prompt: str, task: dict) -> object:
+        """Dispatch to the configured executor backend.
+
+        'zeroclaw'  — local ZeroClaw SDK
+        'http'      — OpenAI-compatible HTTP endpoint (OpenClaw, any LLM gateway)
+        """
+        executor = self.config.executor
+        logger.debug("Executor: %s", executor)
+        if executor == "http":
+            return self._run_http(prompt, task)
+        if executor == "cli":
+            return self._run_cli(prompt, task)
+        return self._run_zeroclaw(prompt, task)
+
+    def _run_zeroclaw(self, prompt: str, task: dict) -> object:  # noqa: ARG002
+        """Execute prompt via local ZeroClaw agent."""
         from zeroclaw import ZeroClaw
         from cmdop.models.agent import AgentRunOptions
 
         client = ZeroClaw.local(port=self.config.zeroclaw_port)
         try:
             options = AgentRunOptions(max_turns=self.config.max_agent_turns)
-            result = client.agent.run(prompt, options=options)
-            return result
+            return client.agent.run(prompt, options=options)
         finally:
             client.close()
+
+    def _run_http(self, prompt: str, task: dict) -> object:
+        """Execute prompt via any OpenAI-compatible HTTP endpoint.
+
+        Works with OpenClaw (/v1/chat/completions), ZeroClaw HTTP mode,
+        or any other OpenAI-compatible agent gateway.
+
+        Config: executor_url, executor_token, executor_model.
+        The model field is used by the gateway to route to the right agent.
+        """
+        import json
+        import urllib.request
+
+        model = self.config.executor_model or task.get("assignee", "main")
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+
+        req = urllib.request.Request(
+            self.config.executor_url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.config.executor_token}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read())
+
+        text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        class _Result:
+            success = True
+
+        result = _Result()
+        result.text = text
+        return result
+
+    def _run_cli(self, prompt: str, task: dict) -> object:
+        """Execute prompt via a local CLI agent (prompt → stdin, stdout → result).
+
+        Works with OpenClaw CLI, ZeroClaw CLI, or any agent binary on the same machine.
+
+        Config: executor_command — supports {assignee} placeholder for agent routing.
+        Example: "openclaw chat --agent {assignee}"
+        """
+        import subprocess
+        import shlex
+
+        command = self.config.executor_command.format(
+            assignee=task.get("assignee", "main"),
+        )
+        logger.debug("CLI executor: %s", command)
+
+        proc = subprocess.run(
+            shlex.split(command),
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        class _Result:
+            pass
+
+        result = _Result()
+        result.success = proc.returncode == 0
+        result.text    = proc.stdout.strip() if proc.returncode == 0 else proc.stderr.strip()
+        result.error   = proc.stderr.strip() if proc.returncode != 0 else ""
+        return result
 
     @staticmethod
     def _build_prompt(title: str, description: str) -> str:

@@ -47,14 +47,30 @@ class DaemonConfig(BaseSettings):
     """Seconds between task polls.  Default: 120 (2 minutes)."""
 
     # ── Agent execution ──────────────────────────────────────────────────
+    executor: str = "zeroclaw"
+    """Executor backend: 'zeroclaw' or 'http' (any OpenAI-compatible endpoint)."""
+
     zeroclaw_port: int = 42617
     """Port of the local ZeroClaw agent daemon."""
+
+    executor_url: str = ""
+    """HTTP executor: OpenAI-compatible endpoint URL (e.g. http://127.0.0.1:18789/v1/chat/completions)."""
+
+    executor_token: str = ""
+    """HTTP executor: bearer token for the endpoint."""
+
+    executor_model: str = ""
+    """HTTP executor: model/agent name. Falls back to task.assignee if blank."""
+
+    executor_command: str = ""
+    """CLI executor: command to run (e.g. 'openclaw chat --agent mastercoder').
+    The prompt is written to the process stdin. Use {assignee} for dynamic agent routing."""
 
     max_agent_turns: int = 20
     """Maximum tool-call turns per task execution."""
 
     dry_run: bool = False
-    """If True, log what would be done but don't call ZeroClaw."""
+    """If True, log what would be done but don't call the executor."""
 
     # ── Logging ──────────────────────────────────────────────────────────
     log_level: str = "INFO"
