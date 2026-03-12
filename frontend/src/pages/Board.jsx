@@ -5,6 +5,7 @@ import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { UserPlus, X, Plus, Search, ChevronDown } from 'lucide-react';
 
 const COLUMNS = [
@@ -152,6 +153,8 @@ export function Board() {
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('');
     const [filterAssignee, setFilterAssignee] = useState('');
+    const panelEditingRef = useRef(false);
+    const [pendingAction, setPendingAction] = useState(null);
 
     const loadBoard = async () => {
         try {
@@ -381,6 +384,16 @@ export function Board() {
                                                 key={task.id}
                                                 task={task}
                                                 onUpdate={(t) => {
+                                                    if (panelEditingRef.current && String(t.id) !== String(selectedTaskId)) {
+                                                        setPendingAction(() => () => {
+                                                            panelEditingRef.current = false;
+                                                            const newParams = new URLSearchParams(searchParams);
+                                                            newParams.set('selectedTask', t.id);
+                                                            setSearchParams(newParams);
+                                                        });
+                                                        return;
+                                                    }
+                                                    panelEditingRef.current = false;
                                                     const newParams = new URLSearchParams(searchParams);
                                                     newParams.set('selectedTask', t.id);
                                                     setSearchParams(newParams);
@@ -400,6 +413,15 @@ export function Board() {
                 <TaskDetailPanel
                     task={selectedTask}
                     onClose={() => {
+                        if (panelEditingRef.current) {
+                            setPendingAction(() => () => {
+                                panelEditingRef.current = false;
+                                const newParams = new URLSearchParams(searchParams);
+                                newParams.delete('selectedTask');
+                                setSearchParams(newParams);
+                            });
+                            return;
+                        }
                         const newParams = new URLSearchParams(searchParams);
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
@@ -407,6 +429,7 @@ export function Board() {
                     onUpdate={() => {
                         loadBoard();
                     }}
+                    onEditingChange={(v) => { panelEditingRef.current = v; }}
                 />
             )}
 
@@ -415,6 +438,17 @@ export function Board() {
                     projectId={projectId}
                     onClose={() => setShowCreate(false)}
                     onCreated={loadBoard}
+                />
+            )}
+
+            {pendingAction && (
+                <ConfirmModal
+                    title="Unsaved Changes"
+                    message="You have unsaved changes. Are you sure you want to discard them?"
+                    confirmText="Discard"
+                    cancelText="Keep Editing"
+                    onConfirm={() => { pendingAction(); setPendingAction(null); }}
+                    onCancel={() => setPendingAction(null)}
                 />
             )}
         </div>
