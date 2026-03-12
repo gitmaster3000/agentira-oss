@@ -241,7 +241,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
         <>
             {/* Panel */}
             <div
-                className="h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col flex-shrink-0 animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg"
+                className="absolute top-0 right-0 h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}

@@ -69,9 +69,7 @@ export function AppSwitcher() {
                                 navigate(p.path);
                                 setOpen(false);
                             }}
-                            className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-bg-hover ${
-                                activeProduct === p.id ? 'bg-bg-hover' : ''
-                            }`}
+                            className="w-full text-left px-4 py-3 flex items-center gap-3 transition-colors hover:bg-bg-hover text-text-secondary hover:text-text-primary"
                         >
                             <div
                                 className="w-10 h-10 rounded-lg flex items-center justify-center"

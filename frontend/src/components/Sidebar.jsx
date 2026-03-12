@@ -31,7 +31,7 @@ export function Sidebar() {
 
     return (
         <aside
-            className={`flex flex-col border-r bg-bg-panel transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-[72px]' : 'w-64'}`}
+            className={`flex flex-col border-r bg-bg-panel transition-all duration-300 ease-in-out absolute top-0 left-0 h-full z-20 ${isCollapsed ? 'w-[72px]' : 'w-64 shadow-xl'}`}
         >
             {/* Toggle */}
             <button

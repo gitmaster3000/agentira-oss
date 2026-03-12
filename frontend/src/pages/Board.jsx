@@ -358,14 +358,12 @@ export function Board() {
                 </header>
 
                 {/* Main Content Area: Columns */}
-                <div className="flex flex-1 overflow-hidden min-w-0 relative">
-                    {/* Board Columns Container */}
-                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
-                        <div className="flex gap-2 sm:gap-3 lg:gap-4 h-full min-w-max">
+                <div className="flex-1 overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
+                        <div className="h-full" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '12px', minWidth: '1148px', width: '100%', marginRight: selectedTask ? 470 : 0 }}>
                             {COLUMNS.map(col => (
                                 <div
                                     key={col.id}
-                                    className="w-60 sm:w-64 lg:w-72 flex flex-col rounded-md h-full overflow-hidden"
+                                    className="flex flex-col rounded-md h-full overflow-hidden"
                                     style={{ backgroundColor: 'var(--bg-surface-purple)' }}
                                     onDragOver={e => e.preventDefault()}
                                     onDrop={e => handleDrop(e, col.id)}
@@ -394,7 +392,6 @@ export function Board() {
                                 </div>
                             ))}
                         </div>
-                    </div>
                 </div>
             </div>
 

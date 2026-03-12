@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
@@ -12,12 +12,22 @@ import {
     LogOut,
     Search,
     Briefcase,
-    CheckSquare
+    CheckSquare,
+    Pencil,
+    Cpu,
 } from 'lucide-react';
+
+const PRODUCTS = {
+    studio: { name: 'Studio', icon: Pencil, color: '#d0bcff', path: '/' },
+    forge:  { name: 'Forge',  icon: Cpu,    color: '#80cbc4', path: '/forge' },
+};
 
 export function Navbar({ onNewProject }) {
     const { user, logout } = useAuth();
     const { projectId } = useParams();
+    const location = useLocation();
+    const activeProduct = PRODUCTS[location.pathname.startsWith('/forge') ? 'forge' : 'studio'];
+    const ActiveIcon = activeProduct.icon;
     const navigate = useNavigate();
     const [projects, setProjects] = useState([]);
     const [isProjectOpen, setIsProjectOpen] = useState(false);
@@ -64,9 +74,14 @@ export function Navbar({ onNewProject }) {
         <header className="h-16 border-b bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
             <div className="flex items-center gap-5">
                 {/* Logo */}
-                <Link to="/" className="flex items-center gap-2.5 font-medium text-lg hover:opacity-80 transition-opacity">
-                    <span className="w-9 h-9 rounded-md flex items-center justify-center text-white font-bold" style={{ backgroundColor: 'var(--accent-primary)' }}>A</span>
-                    <span className="hidden md:inline text-title-md">Agentira</span>
+                <Link to={activeProduct.path} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+                    <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: activeProduct.color + '1a' }}>
+                        <ActiveIcon className="w-5 h-5" style={{ color: activeProduct.color }} />
+                    </span>
+                    <div className="hidden md:flex flex-col leading-tight">
+                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>Flowty</span>
+                        <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{activeProduct.name}</span>
+                    </div>
                 </Link>
 
                 {/* Project Switcher */}
