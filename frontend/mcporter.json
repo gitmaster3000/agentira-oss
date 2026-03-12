@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+        "agentira": {
+            "url": "http://127.0.0.1:8000/mcp",
+            "headers": {
+                "Authorization": "Bearer f78dbec8db2a11bef576951251770eb1722a17a4df1000e302e401304eca8de3"
+            }
+        }
+    }
+}

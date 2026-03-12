@@ -23,6 +23,25 @@ import {
     Check
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
+
+function formatBranchDisplay(val) {
+    if (!val) return '';
+    // https://github.com/owner/repo/tree/branch-name → branch-name
+    const treeMatch = val.match(/\/tree\/(.+)$/);
+    if (treeMatch) return treeMatch[1];
+    // strip protocol for other URLs
+    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
+    return val;
+}
+
+function formatPrDisplay(val) {
+    if (!val) return '';
+    // https://github.com/owner/repo/pull/5 → repo#5
+    const prMatch = val.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
+    if (prMatch) return `${prMatch[1]}#${prMatch[2]}`;
+    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
+    return val;
+}
 import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
 
 export function TaskDetailPanel({ task, onClose, onUpdate }) {
@@ -42,7 +61,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     const [branchValue, setBranchValue] = useState(task.branch || '');
     const [editingPrUrl, setEditingPrUrl] = useState(false);
     const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
-    const [copied, setCopied] = useState(false);
+    const [copiedField, setCopiedField] = useState(null);
 
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
@@ -109,10 +128,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
         }
     };
 
-    const copyToClipboard = (text) => {
+    const copyToClipboard = (text, field) => {
         navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        setCopiedField(field);
+        setTimeout(() => setCopiedField(null), 800);
     };
 
     const toggleDodItem = async (index) => {
@@ -468,29 +487,25 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 ) : (
                                     <div className="flex items-center gap-1.5">
                                         {branchValue ? (
-                                            <span
-                                                className="text-sm font-mono bg-bg-app px-2 py-1 rounded border border-border-subtle/30 text-text-primary cursor-pointer hover:border-border-subtle transition-colors truncate"
-                                                onClick={() => setEditingBranch(true)}
-                                                title="Click to edit"
-                                            >
-                                                {branchValue}
-                                            </span>
+                                            <>
+                                                {branchValue.startsWith('http') ? (
+                                                    <a href={branchValue} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-primary hover:underline truncate">
+                                                        {formatBranchDisplay(branchValue)}
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-sm font-mono text-text-primary truncate">{branchValue}</span>
+                                                )}
+                                                <button onClick={() => setEditingBranch(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
+                                                    <Pencil className="w-3 h-3" />
+                                                </button>
+                                                <button onClick={() => copyToClipboard(branchValue, 'branch')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
+                                                    {copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                                                </button>
+                                            </>
                                         ) : (
-                                            <span
-                                                className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary"
-                                                onClick={() => setEditingBranch(true)}
-                                            >
+                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingBranch(true)}>
                                                 No branch set
                                             </span>
-                                        )}
-                                        {branchValue && (
-                                            <button
-                                                onClick={() => copyToClipboard(`git checkout -b ${branchValue}`)}
-                                                className="p-1 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors"
-                                                title="Copy checkout command"
-                                            >
-                                                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                                            </button>
                                         )}
                                     </div>
                                 )}
@@ -513,27 +528,18 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     <div className="flex items-center gap-1.5">
                                         {prUrlValue ? (
                                             <>
-                                                <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                                <a
-                                                    href={prUrlValue}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-sm text-accent-primary hover:underline truncate"
-                                                >
-                                                    {prUrlValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
+                                                    {formatPrDisplay(prUrlValue)}
                                                 </a>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); setEditingPrUrl(true); }}
-                                                    className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors"
-                                                >
+                                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
                                                     <Pencil className="w-3 h-3" />
+                                                </button>
+                                                <button onClick={() => copyToClipboard(prUrlValue, 'pr')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
+                                                    {copiedField === 'pr' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                                                 </button>
                                             </>
                                         ) : (
-                                            <span
-                                                className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary"
-                                                onClick={() => setEditingPrUrl(true)}
-                                            >
+                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingPrUrl(true)}>
                                                 No PR linked
                                             </span>
                                         )}

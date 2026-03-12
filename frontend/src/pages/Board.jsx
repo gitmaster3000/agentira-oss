@@ -114,6 +114,7 @@ export function Board() {
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
     const addBtnRef = useRef(null);
+    const [filterText, setFilterText] = useState('');
 
     const loadBoard = async () => {
         try {
@@ -202,13 +203,14 @@ export function Board() {
             {/* Main Content Area: Header + Columns */}
             <div className="flex flex-col flex-1 overflow-hidden min-w-0">
                 {/* Header */}
-                <header className="p-4 flex justify-between items-start shrink-0" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <div className="flex-1">
-                        <h2 className="text-xl font-bold">{board.project.name}</h2>
-                        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
+                <header className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <div className="flex-1 min-w-0">
+                        <h2 className="text-xl font-bold truncate">{board.project.name}</h2>
+                        <p className="text-sm mb-3 truncate" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
 
-                        {/* Members row */}
-                        <div className="flex items-center gap-1">
+                        {/* Members row & Filter */}
+                        <div className="flex flex-wrap items-center gap-4 mt-2">
+                            <div className="flex items-center gap-1">
                             {members.map(m => (
                                 <div
                                     key={m.id}
@@ -251,6 +253,16 @@ export function Board() {
                                     onClose={() => setShowAddMember(false)}
                                 />
                             )}
+                            </div>
+                            
+                            <input
+                                type="text"
+                                placeholder="Filter tasks..."
+                                className="px-3 py-1.5 rounded-md text-sm border bg-transparent"
+                                style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+                                value={filterText}
+                                onChange={e => setFilterText(e.target.value)}
+                            />
                         </div>
                     </div>
                 </header>
@@ -258,8 +270,8 @@ export function Board() {
                 {/* Main Content Area: Columns */}
                 <div className="flex flex-1 overflow-hidden min-w-0 relative">
                     {/* Board Columns Container */}
-                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-                        <div className="flex gap-4 h-full min-w-max">
+                    <div className="flex-1 flex overflow-x-auto overflow-y-hidden px-4 pt-4 pb-0">
+                        <div className="flex gap-4 h-full min-w-max pb-4">
                             {COLUMNS.map(col => (
                                 <div
                                     key={col.id}
@@ -276,7 +288,7 @@ export function Board() {
                                     </div>
 
                                     <div className="flex-1 overflow-y-auto p-2 scrollbar-hide">
-                                        {board.columns[col.id]?.map(task => (
+                                        {board.columns[col.id]?.filter(t => !filterText || t.title.toLowerCase().includes(filterText.toLowerCase())).map(task => (
                                             <TaskCard
                                                 key={task.id}
                                                 task={task}
