@@ -7,6 +7,10 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { Settings } from './pages/Settings';
 import { TaskPage } from './pages/TaskPage';
+import { ForgeLayout } from './pages/forge/ForgeLayout';
+import { ForgeOverview } from './pages/forge/ForgeOverview';
+import { AgentsDashboard } from './pages/forge/AgentsDashboard';
+import { RunsDashboard } from './pages/forge/RunsDashboard';
 
 function Welcome() {
     return (
@@ -34,6 +38,7 @@ export default function App() {
                     <Route path="/login" element={<Login />} />
                     <Route path="/signup" element={<Signup />} />
 
+                    {/* Studio routes */}
                     <Route path="/" element={
                         <RequireAuth>
                             <Layout />
@@ -43,6 +48,17 @@ export default function App() {
                         <Route path="board/:projectId" element={<Board />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
+                    </Route>
+
+                    {/* Forge routes */}
+                    <Route path="/forge" element={
+                        <RequireAuth>
+                            <ForgeLayout />
+                        </RequireAuth>
+                    }>
+                        <Route index element={<ForgeOverview />} />
+                        <Route path="agents" element={<AgentsDashboard />} />
+                        <Route path="runs" element={<RunsDashboard />} />
                     </Route>
                 </Routes>
             </BrowserRouter>
