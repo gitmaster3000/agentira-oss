@@ -108,10 +108,10 @@ function FilterDropdown({ label, value, options, onChange }) {
         <div className="relative" ref={ref}>
             <button
                 onClick={() => setOpen(v => !v)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm transition-colors ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-label-lg transition-colors ${
                     value
                         ? 'border-accent-primary text-text-primary bg-bg-app'
-                        : 'border-border-subtle text-text-secondary bg-bg-app hover:border-border-active hover:text-text-primary'
+                        : 'text-text-secondary bg-bg-app hover:border-border-active hover:text-text-primary'
                 }`}
             >
                 <span>{selectedLabel}</span>
@@ -255,10 +255,10 @@ export function Board() {
             {/* Main Content Area: Header + Columns */}
             <div className="flex flex-col flex-1 overflow-hidden min-w-0">
                 {/* Header */}
-                <header className="p-4 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
                     <div className="flex-1 min-w-0">
-                        <h2 className="text-xl font-bold truncate">{board.project.name}</h2>
-                        <p className="text-sm mb-3 truncate" style={{ color: 'var(--text-secondary)' }}>{board.project.description || "No description"}</p>
+                        <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
+                        <p className="text-body-sm mb-3 truncate text-text-secondary">{board.project.description || "No description"}</p>
 
                         {/* Members row & Filter */}
                         <div className="flex flex-wrap items-center gap-4 mt-2">
@@ -314,7 +314,7 @@ export function Board() {
                                     <input
                                         type="text"
                                         placeholder="Search tasks..."
-                                        className="bg-bg-app border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all text-text-primary"
+                                        className="bg-bg-app border rounded-xl pl-9 pr-3 py-2 text-body-md w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all text-text-primary"
                                         value={searchQuery}
                                         onChange={e => setSearchQuery(e.target.value)}
                                     />
@@ -360,19 +360,19 @@ export function Board() {
                 {/* Main Content Area: Columns */}
                 <div className="flex flex-1 overflow-hidden min-w-0 relative">
                     {/* Board Columns Container */}
-                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-                        <div className="flex gap-4 h-full min-w-max">
+                    <div className="flex-1 overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
+                        <div className="flex gap-2 sm:gap-3 lg:gap-4 h-full min-w-max">
                             {COLUMNS.map(col => (
                                 <div
                                     key={col.id}
-                                    className="w-72 flex flex-col rounded-lg border h-full overflow-hidden"
-                                    style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-surface-purple)' }}
+                                    className="w-60 sm:w-64 lg:w-72 flex flex-col rounded-md h-full overflow-hidden"
+                                    style={{ backgroundColor: 'var(--bg-surface-purple)' }}
                                     onDragOver={e => e.preventDefault()}
                                     onDrop={e => handleDrop(e, col.id)}
                                 >
-                                    <div className="p-3 font-semibold text-sm flex justify-between items-center" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                    <div className="px-4 py-3 font-medium text-title-sm flex justify-between items-center border-b">
                                         {col.label}
-                                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
+                                        <span className="text-label-sm px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
                                             {filteredColumns[col.id]?.length || 0}
                                         </span>
                                     </div>

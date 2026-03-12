@@ -13,9 +13,8 @@ export function ThemeToggle() {
     return (
         <button
             onClick={() => setDark(d => !d)}
-            className="p-1.5 rounded-md border border-border-subtle text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
             title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-            style={{ backgroundColor: 'transparent' }}
         >
             {dark ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

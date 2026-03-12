@@ -137,7 +137,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-1.5 rounded-md transition-colors hover:bg-bg-hover"
+                        className="p-1.5 rounded-xl transition-colors hover:bg-bg-hover"
                         style={{ color: 'var(--text-tertiary)' }}
                     >
                         <X className="w-5 h-5" />
@@ -238,7 +238,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                                         <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                                            className="p-0.5 rounded hover:bg-red-500/10 transition-colors"
+                                            className="p-0.5 rounded-lg hover:bg-red-500/10 transition-colors"
                                             style={{ color: 'var(--text-tertiary)' }}
                                         >
                                             <Trash2 className="w-3 h-3" />
