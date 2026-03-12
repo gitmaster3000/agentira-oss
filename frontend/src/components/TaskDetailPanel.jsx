@@ -11,7 +11,16 @@ import {
     User,
     Tag,
     AlertCircle,
-    Pencil
+    Pencil,
+    CheckSquare,
+    Square,
+    Plus,
+    GitCommit,
+    GitPullRequest,
+    GitBranch,
+    ExternalLink,
+    Copy,
+    Check
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
@@ -26,6 +35,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     const [profiles, setProfiles] = useState([]);
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
+    const [commits, setCommits] = useState([]);
+    const [dodItems, setDodItems] = useState(task.dod_items || []);
+    const [newDodText, setNewDodText] = useState('');
+    const [editingBranch, setEditingBranch] = useState(false);
+    const [branchValue, setBranchValue] = useState(task.branch || '');
+    const [editingPrUrl, setEditingPrUrl] = useState(false);
+    const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
+    const [copied, setCopied] = useState(false);
 
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
@@ -34,6 +51,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     useEffect(() => {
         loadActivity();
         loadAttachments();
+        loadCommits();
+        setDodItems(task.dod_items || []);
+        setBranchValue(task.branch || '');
+        setPrUrlValue(task.pr_url || '');
         if (task.project_id) {
             api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
         }
@@ -56,6 +77,78 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
             if (Array.isArray(data)) setAttachments(data);
         } catch (err) {
             // Attachments endpoint may not exist yet — silently ignore
+        }
+    };
+
+    const loadCommits = async () => {
+        try {
+            const data = await api.listTaskCommits(task.id);
+            if (Array.isArray(data)) setCommits(data);
+        } catch (err) {
+            // Git integration may not exist yet
+        }
+    };
+
+    const saveBranch = async (val) => {
+        setEditingBranch(false);
+        if (val !== (task.branch || '')) {
+            try {
+                await api.updateTask(task.id, { branch: val });
+                onUpdate();
+            } catch (err) { console.error('Failed to save branch:', err); }
+        }
+    };
+
+    const savePrUrl = async (val) => {
+        setEditingPrUrl(false);
+        if (val !== (task.pr_url || '')) {
+            try {
+                await api.updateTask(task.id, { pr_url: val });
+                onUpdate();
+            } catch (err) { console.error('Failed to save PR URL:', err); }
+        }
+    };
+
+    const copyToClipboard = (text) => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const toggleDodItem = async (index) => {
+        const updated = dodItems.map((item, i) =>
+            i === index ? { ...item, checked: !item.checked } : item
+        );
+        setDodItems(updated);
+        try {
+            await api.updateTask(task.id, { dod_items: updated });
+            onUpdate();
+        } catch (err) {
+            console.error('Failed to update DOD:', err);
+        }
+    };
+
+    const addDodItem = async () => {
+        if (!newDodText.trim()) return;
+        const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
+        setDodItems(updated);
+        setNewDodText('');
+        try {
+            await api.updateTask(task.id, { dod_items: updated });
+            onUpdate();
+        } catch (err) {
+            console.error('Failed to add DOD item:', err);
+        }
+    };
+
+    const removeDodItem = async (index) => {
+        const updated = dodItems.filter((_, i) => i !== index);
+        setDodItems(updated);
+        try {
+            await api.updateTask(task.id, { dod_items: updated });
+            onUpdate();
+        } catch (err) {
+            console.error('Failed to remove DOD item:', err);
         }
     };
 
@@ -83,7 +176,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                 description: formData.description,
                 priority: formData.priority,
                 assignee: formData.assignee,
-                tags: typeof formData.tags === 'string' ? formData.tags.split(',').map(t => t.trim()) : formData.tags
+                tags: typeof formData.tags === 'string' ? formData.tags.split(',').map(t => t.trim()) : formData.tags,
+                branch: branchValue || undefined,
+                pr_url: prUrlValue || undefined,
             });
             setIsEditing(false);
             onUpdate();
@@ -290,6 +385,204 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 </button>
                             </div>
                         )}
+
+                        {/* Definition of Done */}
+                        <div className="mb-8">
+                            <div className="flex items-center justify-between mb-3">
+                                <label className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
+                                    <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
+                                </label>
+                                {dodItems.length > 0 && (
+                                    <span className="text-xs text-text-tertiary">
+                                        {dodItems.filter(i => i.checked).length}/{dodItems.length}
+                                    </span>
+                                )}
+                            </div>
+
+                            {dodItems.length > 0 && (
+                                <div className="w-full bg-bg-app rounded-full h-1.5 mb-3">
+                                    <div
+                                        className="h-1.5 rounded-full transition-all duration-300"
+                                        style={{
+                                            width: `${dodItems.length ? (dodItems.filter(i => i.checked).length / dodItems.length) * 100 : 0}%`,
+                                            backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            <div className="space-y-1">
+                                {dodItems.map((item, i) => (
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
+                                        <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 text-text-secondary hover:text-accent-primary transition-colors">
+                                            {item.checked
+                                                ? <CheckSquare className="w-4 h-4 text-green-500" />
+                                                : <Square className="w-4 h-4" />
+                                            }
+                                        </button>
+                                        <span className={`text-sm flex-1 ${item.checked ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>
+                                            {item.text}
+                                        </span>
+                                        <button
+                                            onClick={() => removeDodItem(i)}
+                                            className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all p-0.5"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-2">
+                                <input
+                                    className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded focus:outline-none focus:border-accent-primary"
+                                    placeholder="Add DOD item..."
+                                    value={newDodText}
+                                    onChange={(e) => setNewDodText(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && addDodItem()}
+                                />
+                                <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Git Integration */}
+                        <div className="mb-8">
+                            <label className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-3">
+                                <GitBranch className="w-3.5 h-3.5" /> Git
+                            </label>
+
+                            {/* Branch field */}
+                            <div className="mb-3">
+                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
+                                {editingBranch ? (
+                                    <input
+                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded font-mono text-text-primary focus:outline-none focus:border-accent-primary"
+                                        value={branchValue}
+                                        onChange={e => setBranchValue(e.target.value)}
+                                        onBlur={() => saveBranch(branchValue)}
+                                        onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {branchValue ? (
+                                            <span
+                                                className="text-sm font-mono bg-bg-app px-2 py-1 rounded border border-border-subtle/30 text-text-primary cursor-pointer hover:border-border-subtle transition-colors truncate"
+                                                onClick={() => setEditingBranch(true)}
+                                                title="Click to edit"
+                                            >
+                                                {branchValue}
+                                            </span>
+                                        ) : (
+                                            <span
+                                                className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary"
+                                                onClick={() => setEditingBranch(true)}
+                                            >
+                                                No branch set
+                                            </span>
+                                        )}
+                                        {branchValue && (
+                                            <button
+                                                onClick={() => copyToClipboard(`git checkout -b ${branchValue}`)}
+                                                className="p-1 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors"
+                                                title="Copy checkout command"
+                                            >
+                                                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* PR URL field */}
+                            <div className="mb-4">
+                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
+                                {editingPrUrl ? (
+                                    <input
+                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
+                                        value={prUrlValue}
+                                        onChange={e => setPrUrlValue(e.target.value)}
+                                        onBlur={() => savePrUrl(prUrlValue)}
+                                        onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
+                                        placeholder="https://github.com/..."
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {prUrlValue ? (
+                                            <>
+                                                <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                                <a
+                                                    href={prUrlValue}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-sm text-accent-primary hover:underline truncate"
+                                                >
+                                                    {prUrlValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                                                </a>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setEditingPrUrl(true); }}
+                                                    className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors"
+                                                >
+                                                    <Pencil className="w-3 h-3" />
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <span
+                                                className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary"
+                                                onClick={() => setEditingPrUrl(true)}
+                                            >
+                                                No PR linked
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Read-only commit/PR list */}
+                            {commits.length > 0 && (
+                                <>
+                                    <div className="text-[10px] font-bold uppercase text-text-secondary mb-1.5">
+                                        Commits & PRs ({commits.length})
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        {commits.map((c) => (
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-bg-app border border-border-subtle/30 text-sm">
+                                                {c.kind === 'pr'
+                                                    ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                                    : <GitCommit className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
+                                                }
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-text-primary truncate text-xs">
+                                                        {c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}
+                                                        {c.message}
+                                                    </div>
+                                                    <div className="text-[10px] text-text-tertiary">
+                                                        {c.author}{c.branch ? ` on ${c.branch}` : ''}
+                                                        {c.kind === 'pr' && c.pr_state && (
+                                                            <span className={`ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium ${
+                                                                c.pr_state === 'merged' ? 'bg-purple-500/20 text-purple-400' :
+                                                                c.pr_state === 'open' ? 'bg-green-500/20 text-green-400' :
+                                                                'bg-red-500/20 text-red-400'
+                                                            }`}>
+                                                                {c.pr_state}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {c.url && (
+                                                    <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0">
+                                                        <ExternalLink className="w-3 h-3" />
+                                                    </a>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
                         {/* Attachments Section */}
                         <div className="mb-8">

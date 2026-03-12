@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
+import { AppSwitcher } from './AppSwitcher';
 import {
     ChevronDown,
     Plus,
@@ -63,6 +64,8 @@ export function Navbar({ onNewProject }) {
         <header className="h-14 border-b border-border-subtle bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
             <div className="flex items-center gap-6">
                 {/* Logo */}
+                <AppSwitcher />
+
                 <Link to="/" className="flex items-center gap-2 font-bold text-lg hover:opacity-80 transition-opacity">
                     <span className="w-8 h-8 rounded bg-accent-primary flex items-center justify-center text-white">A</span>
                     <span className="hidden md:inline">Agentira</span>

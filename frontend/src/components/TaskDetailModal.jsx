@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Paperclip, Pencil, Trash2, X } from 'lucide-react';
+import {
+    Paperclip, Pencil, Trash2, X,
+    GitBranch, GitCommit, GitPullRequest, ExternalLink, Copy, Check,
+    CheckSquare, Square, Plus
+} from 'lucide-react';
 
 export function TaskDetailModal({ task, onClose, onUpdate }) {
     const [loading, setLoading] = useState(false);
@@ -9,6 +13,14 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     const [profiles, setProfiles] = useState([]);
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
+    const [commits, setCommits] = useState([]);
+    const [dodItems, setDodItems] = useState(task.dod_items || []);
+    const [newDodText, setNewDodText] = useState('');
+    const [editingBranch, setEditingBranch] = useState(false);
+    const [branchValue, setBranchValue] = useState(task.branch || '');
+    const [editingPrUrl, setEditingPrUrl] = useState(false);
+    const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
+    const [copied, setCopied] = useState(false);
 
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
@@ -17,6 +29,10 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     useEffect(() => {
         loadActivity();
         loadAttachments();
+        loadCommits();
+        setDodItems(task.dod_items || []);
+        setBranchValue(task.branch || '');
+        setPrUrlValue(task.pr_url || '');
         api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
         const interval = setInterval(loadActivity, 3000);
         return () => clearInterval(interval);
@@ -38,6 +54,58 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const loadCommits = async () => {
+        try {
+            const data = await api.listTaskCommits(task.id);
+            if (Array.isArray(data)) setCommits(data);
+        } catch (err) {}
+    };
+
+    const copyToClipboard = (text) => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const saveBranch = async (val) => {
+        setEditingBranch(false);
+        if (val !== (task.branch || '')) {
+            await api.updateTask(task.id, { branch: val });
+            onUpdate();
+        }
+    };
+
+    const savePrUrl = async (val) => {
+        setEditingPrUrl(false);
+        if (val !== (task.pr_url || '')) {
+            await api.updateTask(task.id, { pr_url: val });
+            onUpdate();
+        }
+    };
+
+    const toggleDodItem = async (index) => {
+        const updated = dodItems.map((item, i) => i === index ? { ...item, checked: !item.checked } : item);
+        setDodItems(updated);
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
+    };
+
+    const addDodItem = async () => {
+        if (!newDodText.trim()) return;
+        const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
+        setDodItems(updated);
+        setNewDodText('');
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
+    };
+
+    const removeDodItem = async (index) => {
+        const updated = dodItems.filter((_, i) => i !== index);
+        setDodItems(updated);
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
     };
 
     const handleUpload = async (e) => {
@@ -263,6 +331,111 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 <button onClick={() => { setIsEditing(false); setFormData({ ...task }); }} className="btn btn-ghost">Cancel</button>
                             </div>
                         )}
+
+                        {/* Definition of Done */}
+                        <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <div className="flex items-center justify-between mb-3">
+                                <label className="text-xs font-bold uppercase flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                                    <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
+                                </label>
+                                {dodItems.length > 0 && (
+                                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                        {dodItems.filter(i => i.checked).length}/{dodItems.length}
+                                    </span>
+                                )}
+                            </div>
+                            {dodItems.length > 0 && (
+                                <div className="w-full rounded-full h-1.5 mb-3" style={{ backgroundColor: 'var(--bg-app)' }}>
+                                    <div className="h-1.5 rounded-full transition-all duration-300" style={{
+                                        width: `${(dodItems.filter(i => i.checked).length / dodItems.length) * 100}%`,
+                                        backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
+                                    }} />
+                                </div>
+                            )}
+                            <div className="space-y-1">
+                                {dodItems.map((item, i) => (
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
+                                        <button onClick={() => toggleDodItem(i)} className="flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
+                                            {item.checked ? <CheckSquare className="w-4 h-4 text-green-500" /> : <Square className="w-4 h-4" />}
+                                        </button>
+                                        <span className="text-sm flex-1" style={{ color: item.checked ? 'var(--text-tertiary)' : 'var(--text-primary)', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.text}</span>
+                                        <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all p-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-2 mt-2">
+                                <input className="flex-1 text-sm p-1.5 rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                    placeholder="Add DOD item..." value={newDodText} onChange={(e) => setNewDodText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addDodItem()} />
+                                <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-tertiary)' }}>
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Git Integration */}
+                        <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <label className="text-xs font-bold uppercase flex items-center gap-1.5 mb-3" style={{ color: 'var(--text-primary)' }}>
+                                <GitBranch className="w-3.5 h-3.5" /> Git
+                            </label>
+                            <div className="mb-3">
+                                <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Branch</div>
+                                {editingBranch ? (
+                                    <input className="w-full px-2 py-1.5 text-sm font-mono rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        value={branchValue} onChange={e => setBranchValue(e.target.value)} onBlur={() => saveBranch(branchValue)} onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)} autoFocus />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {branchValue ? (
+                                            <span className="text-sm font-mono px-2 py-1 rounded cursor-pointer truncate" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }} onClick={() => setEditingBranch(true)}>{branchValue}</span>
+                                        ) : (
+                                            <span className="text-xs italic cursor-pointer" style={{ color: 'var(--text-tertiary)' }} onClick={() => setEditingBranch(true)}>No branch set</span>
+                                        )}
+                                        {branchValue && (
+                                            <button onClick={() => copyToClipboard(`git checkout -b ${branchValue}`)} className="p-1 rounded hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-tertiary)' }} title="Copy checkout command">
+                                                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="mb-3">
+                                <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Pull Request</div>
+                                {editingPrUrl ? (
+                                    <input className="w-full px-2 py-1.5 text-sm rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        value={prUrlValue} onChange={e => setPrUrlValue(e.target.value)} onBlur={() => savePrUrl(prUrlValue)} onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)} placeholder="https://github.com/..." autoFocus />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {prUrlValue ? (
+                                            <>
+                                                <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm truncate" style={{ color: 'var(--accent-primary)' }}>{prUrlValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')}</a>
+                                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 transition-colors" style={{ color: 'var(--text-tertiary)' }}><Pencil className="w-3 h-3" /></button>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs italic cursor-pointer" style={{ color: 'var(--text-tertiary)' }} onClick={() => setEditingPrUrl(true)}>No PR linked</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            {commits.length > 0 && (
+                                <>
+                                    <div className="text-[10px] font-bold uppercase mb-1.5" style={{ color: 'var(--text-secondary)' }}>Commits & PRs ({commits.length})</div>
+                                    <div className="space-y-1.5">
+                                        {commits.map((c) => (
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded text-sm" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)' }}>
+                                                {c.kind === 'pr' ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" /> : <GitCommit className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>{c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}{c.message}</div>
+                                                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{c.author}{c.branch ? ` on ${c.branch}` : ''}</div>
+                                                </div>
+                                                {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}><ExternalLink className="w-3 h-3" /></a>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
                         {/* Attachments */}
                         <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>

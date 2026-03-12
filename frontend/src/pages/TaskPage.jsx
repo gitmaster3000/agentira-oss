@@ -10,7 +10,18 @@ import {
     AlertCircle,
     MessageSquare,
     Trash2,
-    Calendar
+    Calendar,
+    GitBranch,
+    GitCommit,
+    GitPullRequest,
+    ExternalLink,
+    Copy,
+    Check,
+    Pencil,
+    CheckSquare,
+    Square,
+    Plus,
+    X
 } from 'lucide-react';
 
 export function TaskPage() {
@@ -22,16 +33,46 @@ export function TaskPage() {
     const [comment, setComment] = useState('');
     const [profiles, setProfiles] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [commits, setCommits] = useState([]);
+    const [dodItems, setDodItems] = useState([]);
+    const [newDodText, setNewDodText] = useState('');
+    const [editingBranch, setEditingBranch] = useState(false);
+    const [branchValue, setBranchValue] = useState('');
+    const [editingPrUrl, setEditingPrUrl] = useState(false);
+    const [prUrlValue, setPrUrlValue] = useState('');
+    const [copied, setCopied] = useState(false);
+
+    const loadTask = async () => {
+        try {
+            const data = await api.getTask(taskId);
+            setTask(data);
+            setDodItems(data.dod_items || []);
+            setBranchValue(data.branch || '');
+            setPrUrlValue(data.pr_url || '');
+        } catch (err) { console.error(err); }
+    };
+
+    const loadCommits = async () => {
+        try {
+            const data = await api.listTaskCommits(taskId);
+            if (Array.isArray(data)) setCommits(data);
+        } catch (err) {}
+    };
 
     useEffect(() => {
         const load = async () => {
             try {
                 const data = await api.getTask(taskId);
                 setTask(data);
+                setDodItems(data.dod_items || []);
+                setBranchValue(data.branch || '');
+                setPrUrlValue(data.pr_url || '');
                 const actData = await api.getActivity(taskId);
                 setActivities(actData);
                 const profData = await api.getProjectMembers(data.project_id);
                 setProfiles(profData);
+                const commitData = await api.listTaskCommits(taskId);
+                if (Array.isArray(commitData)) setCommits(commitData);
             } catch (err) {
                 console.error(err);
             } finally {
@@ -40,6 +81,48 @@ export function TaskPage() {
         };
         load();
     }, [taskId]);
+
+    const copyToClipboard = (text) => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const saveBranch = async (val) => {
+        setEditingBranch(false);
+        if (task && val !== (task.branch || '')) {
+            await api.updateTask(taskId, { branch: val });
+            loadTask();
+        }
+    };
+
+    const savePrUrl = async (val) => {
+        setEditingPrUrl(false);
+        if (task && val !== (task.pr_url || '')) {
+            await api.updateTask(taskId, { pr_url: val });
+            loadTask();
+        }
+    };
+
+    const toggleDodItem = async (index) => {
+        const updated = dodItems.map((item, i) => i === index ? { ...item, checked: !item.checked } : item);
+        setDodItems(updated);
+        await api.updateTask(taskId, { dod_items: updated });
+    };
+
+    const addDodItem = async () => {
+        if (!newDodText.trim()) return;
+        const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
+        setDodItems(updated);
+        setNewDodText('');
+        await api.updateTask(taskId, { dod_items: updated });
+    };
+
+    const removeDodItem = async (index) => {
+        const updated = dodItems.filter((_, i) => i !== index);
+        setDodItems(updated);
+        await api.updateTask(taskId, { dod_items: updated });
+    };
 
     const handleComment = async (e) => {
         e.preventDefault();
@@ -181,14 +264,172 @@ export function TaskPage() {
                             </div>
                         </div>
 
+                        {/* Definition of Done */}
                         <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
-                            <h3 className="text-xs font-bold uppercase text-text-tertiary mb-4">Timestamps</h3>
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
+                                    <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
+                                </h3>
+                                {dodItems.length > 0 && (
+                                    <span className="text-xs text-text-secondary">
+                                        {dodItems.filter(i => i.checked).length}/{dodItems.length}
+                                    </span>
+                                )}
+                            </div>
+
+                            {dodItems.length > 0 && (
+                                <div className="w-full bg-bg-app rounded-full h-1.5 mb-3">
+                                    <div
+                                        className="h-1.5 rounded-full transition-all duration-300"
+                                        style={{
+                                            width: `${dodItems.length ? (dodItems.filter(i => i.checked).length / dodItems.length) * 100 : 0}%`,
+                                            backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
+                                        }}
+                                    />
+                                </div>
+                            )}
+
+                            <div className="space-y-1">
+                                {dodItems.map((item, i) => (
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
+                                        <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 text-text-secondary hover:text-accent-primary transition-colors">
+                                            {item.checked ? <CheckSquare className="w-4 h-4 text-green-500" /> : <Square className="w-4 h-4" />}
+                                        </button>
+                                        <span className={`text-sm flex-1 ${item.checked ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{item.text}</span>
+                                        <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all p-0.5">
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="flex items-center gap-2 mt-2">
+                                <input
+                                    className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded focus:outline-none focus:border-accent-primary"
+                                    placeholder="Add DOD item..."
+                                    value={newDodText}
+                                    onChange={(e) => setNewDodText(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && addDodItem()}
+                                />
+                                <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Git Integration */}
+                        <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                            <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-4">
+                                <GitBranch className="w-3.5 h-3.5" /> Git
+                            </h3>
+
+                            {/* Branch */}
+                            <div className="mb-4">
+                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
+                                {editingBranch ? (
+                                    <input
+                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded font-mono text-text-primary focus:outline-none focus:border-accent-primary"
+                                        value={branchValue}
+                                        onChange={e => setBranchValue(e.target.value)}
+                                        onBlur={() => saveBranch(branchValue)}
+                                        onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {branchValue ? (
+                                            <span className="text-sm font-mono bg-bg-app px-2 py-1 rounded border border-border-subtle text-text-primary cursor-pointer hover:border-accent-primary/50 transition-colors truncate" onClick={() => setEditingBranch(true)} title="Click to edit">
+                                                {branchValue}
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingBranch(true)}>No branch set</span>
+                                        )}
+                                        {branchValue && (
+                                            <button onClick={() => copyToClipboard(`git checkout -b ${branchValue}`)} className="p-1 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors" title="Copy checkout command">
+                                                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* PR URL */}
+                            <div className="mb-4">
+                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
+                                {editingPrUrl ? (
+                                    <input
+                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
+                                        value={prUrlValue}
+                                        onChange={e => setPrUrlValue(e.target.value)}
+                                        onBlur={() => savePrUrl(prUrlValue)}
+                                        onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
+                                        placeholder="https://github.com/..."
+                                        autoFocus
+                                    />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {prUrlValue ? (
+                                            <>
+                                                <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
+                                                    {prUrlValue.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                                                </a>
+                                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors">
+                                                    <Pencil className="w-3 h-3" />
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingPrUrl(true)}>No PR linked</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Commits list */}
+                            {commits.length > 0 && (
+                                <>
+                                    <div className="text-[10px] font-bold uppercase text-text-secondary mb-1.5">Commits & PRs ({commits.length})</div>
+                                    <div className="space-y-1.5">
+                                        {commits.map((c) => (
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-bg-app border border-border-subtle/30 text-sm">
+                                                {c.kind === 'pr'
+                                                    ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                                    : <GitCommit className="w-3.5 h-3.5 text-text-secondary flex-shrink-0" />
+                                                }
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-text-primary truncate text-xs">
+                                                        {c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}{c.message}
+                                                    </div>
+                                                    <div className="text-[10px] text-text-secondary">
+                                                        {c.author}{c.branch ? ` on ${c.branch}` : ''}
+                                                        {c.kind === 'pr' && c.pr_state && (
+                                                            <span className={`ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium ${
+                                                                c.pr_state === 'merged' ? 'bg-purple-500/20 text-purple-400' :
+                                                                c.pr_state === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                                            }`}>{c.pr_state}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                {c.url && (
+                                                    <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0">
+                                                        <ExternalLink className="w-3 h-3" />
+                                                    </a>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                            <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
                             <div className="space-y-3">
-                                <div className="flex items-center gap-2 text-text-tertiary">
+                                <div className="flex items-center gap-2 text-text-secondary">
                                     <Calendar className="w-3.5 h-3.5" />
                                     <span className="text-xs">Created: {new Date(task.created_at).toLocaleDateString()}</span>
                                 </div>
-                                <div className="flex items-center gap-2 text-text-tertiary">
+                                <div className="flex items-center gap-2 text-text-secondary">
                                     <Clock className="w-3.5 h-3.5" />
                                     <span className="text-xs">Updated: {new Date(task.updated_at).toLocaleDateString()}</span>
                                 </div>
