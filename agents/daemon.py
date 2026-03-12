@@ -82,18 +82,26 @@ class AgentiraDaemon:
         """Start the main loop.  Blocks until shutdown signal."""
         self._running = True
         self._install_signal_handlers()
-        self._receiver.start()
+
+        mode = self.config.notification_mode
+        use_receiver = mode in ("hybrid", "webhook") and self.config.webhook_port
+        use_poll = mode in ("hybrid", "poll")
+
+        if use_receiver:
+            self._receiver.start()
+            self._register_webhook_url()
 
         logger.info(
-            "Daemon started — bot=%s  poll=%ds  webhook_port=%s  dry_run=%s",
+            "Daemon started — bot=%s  mode=%s  poll=%ds  webhook_port=%s  dry_run=%s",
             self.config.bot_name,
+            mode,
             self.config.poll_interval,
             self.config.webhook_port or "disabled",
             self.config.dry_run,
         )
 
         # Initial poll on startup
-        self._run_cycle()
+        self._run_cycle(poll_notifications=use_poll)
 
         while self._running:
             # Interrupt-aware sleep: wake early on webhook push or signal
@@ -102,11 +110,15 @@ class AgentiraDaemon:
                 break
             self._wake_event.clear()
 
+            webhook_events: list[dict] = []
             if woken_by_webhook:
                 logger.debug("Woken by webhook push — draining queue")
-                self._drain_webhook_queue()
+                webhook_events = self._drain_webhook_queue()
 
-            self._run_cycle()
+            if webhook_events:
+                self._process_webhook_events(webhook_events)
+
+            self._run_cycle(poll_notifications=use_poll)
 
         self.shutdown()
 
@@ -127,19 +139,68 @@ class AgentiraDaemon:
         logger.info("Received signal %d — stopping after current cycle.", signum)
         self._running = False
 
+    # ── Webhook registration ─────────────────────────────────────────────
+
+    def _register_webhook_url(self) -> None:
+        """Auto-register this daemon's webhook URL with Agentira."""
+        host = self.config.webhook_host
+        url = f"http://{host}:{self.config.webhook_port}/webhook"
+        try:
+            self.client.update_my_profile(webhook_url=url)
+            logger.info("Registered webhook URL: %s", url)
+        except Exception as exc:
+            logger.warning("Failed to register webhook URL: %s", exc)
+
     # ── Core loop ────────────────────────────────────────────────────────
 
-    def _drain_webhook_queue(self) -> None:
-        """Log webhook push payloads (events wake the loop; execution is via poll)."""
+    def _drain_webhook_queue(self) -> list[dict]:
+        """Drain webhook push payloads and return them for targeted execution."""
+        events: list[dict] = []
         while not self._webhook_queue.empty():
             try:
                 payload = self._webhook_queue.get_nowait()
-                logger.debug(
+                logger.info(
                     "Webhook event dequeued: %s task=%s",
                     payload.get("event"), payload.get("task_id"),
                 )
+                events.append(payload)
             except queue.Empty:
                 break
+        return events
+
+    def _process_webhook_events(self, events: list[dict]) -> None:
+        """Execute tasks referenced by webhook events (targeted, not generic poll).
+
+        For task-level events with a task_id, fetch and execute that specific
+        task — the agent gets event context so it knows WHY it was triggered.
+        Project-level events are logged; actual work comes from the poll cycle.
+        """
+        seen_task_ids: set[str] = set()
+        for event in events:
+            task_id = event.get("task_id")
+            if not task_id or task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(task_id)
+
+            try:
+                task = self.client.get_task(task_id)
+                if not task:
+                    logger.warning("Webhook task %s not found", task_id)
+                    continue
+
+                # Only execute if assigned to this bot
+                if task.get("assignee") != self.config.bot_name:
+                    logger.debug("Webhook task %s not assigned to us, skipping", task_id)
+                    continue
+
+                logger.info(
+                    "Webhook-driven execution: event=%s task=%s — %s",
+                    event.get("event"), task_id, task.get("title"),
+                )
+                self.execute_task(task, event_context=event)
+
+            except Exception:
+                logger.error("Webhook event processing error:\n%s", traceback.format_exc())
 
     def _poll_notifications(self) -> None:
         """Consume unread notifications — durable fallback for missed webhooks.
@@ -158,10 +219,11 @@ class AgentiraDaemon:
         except Exception as exc:
             logger.warning("Notification poll failed: %s", exc)
 
-    def _run_cycle(self) -> None:
+    def _run_cycle(self, poll_notifications: bool = True) -> None:
         """Run one poll-and-execute cycle, with error isolation."""
         try:
-            self._poll_notifications()
+            if poll_notifications:
+                self._poll_notifications()
             self.poll_and_execute()
         except KeyboardInterrupt:
             self._running = False
@@ -209,15 +271,15 @@ class AgentiraDaemon:
 
     # ── Execution ────────────────────────────────────────────────────────
 
-    def execute_task(self, task: dict) -> None:
-        """Execute a single task via ZeroClaw and report the result."""
+    def execute_task(self, task: dict, event_context: dict | None = None) -> None:
+        """Execute a single task via the configured executor and report the result."""
         task_id = task["id"]
         title = task.get("title", "Untitled")
         description = task.get("description", "")
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        # Build the prompt
-        prompt = self._build_prompt(title, description)
+        # Build the prompt — include event context when triggered by webhook
+        prompt = self._build_prompt(title, description, event_context=event_context)
 
         # Comment that we're starting
         self.client.add_comment(
@@ -356,11 +418,42 @@ class AgentiraDaemon:
         return result
 
     @staticmethod
-    def _build_prompt(title: str, description: str) -> str:
-        """Build the agent prompt from task metadata."""
+    def _build_prompt(
+        title: str, description: str, event_context: dict | None = None
+    ) -> str:
+        """Build the agent prompt from task metadata and optional webhook event."""
         parts = [f"# Task: {title}"]
         if description:
             parts.append(f"\n## Description\n{description}")
+
+        # When triggered by a webhook event, tell the agent WHY it was woken
+        if event_context:
+            event = event_context.get("event", "")
+            actor = event_context.get("actor", "")
+            status = event_context.get("status", "")
+            parts.append("\n## Trigger")
+            parts.append(f"Event: {event}")
+            if actor:
+                parts.append(f"Triggered by: {actor}")
+            if status:
+                parts.append(f"Current status: {status}")
+
+            if event == "task.commented":
+                parts.append(
+                    "\nA new comment was added to this task. "
+                    "Read the latest comments and respond or adjust your work."
+                )
+            elif event == "task.assigned":
+                parts.append(
+                    "\nYou have been assigned this task. "
+                    "Read the description and begin working on it."
+                )
+            elif event == "task.moved":
+                parts.append(
+                    f"\nThe task status changed to '{status}'. "
+                    "Check if further action is needed."
+                )
+
         parts.append(
             "\n## Instructions\n"
             "Work on this task. Use the tools available to you (terminal, files, etc.) "

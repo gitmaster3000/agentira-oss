@@ -11,7 +11,7 @@ from backend.db import SessionLocal, init_db
 from backend.models import (
     Project, Task, Activity, TaskPriority, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
-    ProjectMember, Notification
+    ProjectMember, Notification, TaskCommit
 )
 from backend.auth import has_permission
 from backend.notifications import broker
@@ -44,7 +44,26 @@ def _session() -> Session:
     return SessionLocal()
 
 
+def _parse_dod(raw: str | None) -> list | None:
+    if not raw:
+        return None
+    import json as _json
+    try:
+        return _json.loads(raw)
+    except Exception:
+        return []
+
+
+def _dod_progress(dod: list | None) -> dict | None:
+    if not dod:
+        return None
+    total = len(dod)
+    checked = sum(1 for item in dod if item.get("checked"))
+    return {"total": total, "checked": checked}
+
+
 def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
+    dod = _parse_dod(t.dod_items)
     return {
         "id": t.id,
         "project_id": t.project_id,
@@ -54,6 +73,11 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "priority": t.priority.value,
         "assignee": t.assignee,
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
+        "dod_items": dod,
+        "dod_progress": _dod_progress(dod),
+        "branch": t.branch or "",
+        "pr_url": t.pr_url or "",
+        "commits_count": len(t.commits) if t.commits else 0,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "attachments_count": attachments_count,
@@ -496,6 +520,9 @@ def update_task(
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    dod_items: Optional[list[dict]] = None,
+    branch: Optional[str] = None,
+    pr_url: Optional[str] = None,
     actor: str = "system",
 ) -> dict:
     with _session() as db:
@@ -528,6 +555,23 @@ def update_task(
                 diff["tags"] = {"from": old_tags, "to": tags}
                 changes.append(f"tags → {tags}")
             task.tags = ",".join(tags)
+
+        if dod_items is not None:
+            old_dod = _parse_dod(task.dod_items) or []
+            task.dod_items = json.dumps(dod_items)
+            old_checked = sum(1 for i in old_dod if i.get("checked"))
+            new_checked = sum(1 for i in dod_items if i.get("checked"))
+            if old_checked != new_checked or len(old_dod) != len(dod_items):
+                changes.append(f"DOD {new_checked}/{len(dod_items)} checked")
+
+        if branch is not None and branch != (task.branch or ""):
+            diff["branch"] = {"from": task.branch or "", "to": branch}
+            task.branch = branch
+            changes.append(f"branch → {branch}" if branch else "branch cleared")
+        if pr_url is not None and pr_url != (task.pr_url or ""):
+            diff["pr_url"] = {"from": task.pr_url or "", "to": pr_url}
+            task.pr_url = pr_url
+            changes.append(f"PR linked" if pr_url else "PR unlinked")
 
         if changes:
             _log_activity(
@@ -647,7 +691,7 @@ def get_webhook_config(project_id: str) -> dict | None:
         return {"enabled": True, "rules": agent_notifier.DEFAULT_WEBHOOK_RULES}
 
 
-def set_webhook_config(project_id: str, enabled: bool, rules: list[dict]) -> dict:
+def set_webhook_config(project_id: str, enabled: bool, rules: list[dict], token: str = "") -> dict:
     """Validate and save webhook config for a project."""
     import json
     _valid_receivers = {"assignee", "bots", "members"}
@@ -662,6 +706,8 @@ def set_webhook_config(project_id: str, enabled: bool, rules: list[dict]) -> dic
         if not p:
             raise ValueError(f"Project {project_id} not found")
         cfg = {"enabled": enabled, "rules": rules}
+        if token:
+            cfg["token"] = token
         p.webhook_config = json.dumps(cfg)
         db.commit()
         return cfg
@@ -1079,6 +1125,165 @@ def delete_profile(profile_id: str) -> bool:
         db.delete(p)
         db.commit()
         return True
+
+
+# ── Git Integration ──────────────────────────────────────────────────
+
+def _commit_to_dict(c: TaskCommit) -> dict:
+    return {
+        "id": c.id,
+        "task_id": c.task_id,
+        "sha": c.sha,
+        "message": c.message,
+        "author": c.author,
+        "branch": c.branch,
+        "url": c.url,
+        "repo": c.repo,
+        "kind": c.kind,
+        "pr_state": c.pr_state,
+        "pr_number": c.pr_number,
+        "committed_at": c.committed_at.isoformat() if c.committed_at else None,
+        "created_at": c.created_at.isoformat(),
+    }
+
+
+def list_task_commits(task_id: str) -> list[dict]:
+    with _session() as db:
+        commits = db.query(TaskCommit).filter(TaskCommit.task_id == task_id).order_by(TaskCommit.committed_at.desc()).all()
+        return [_commit_to_dict(c) for c in commits]
+
+
+def suggest_branch_name(task_id: str) -> dict | None:
+    """Generate a suggested branch name from task id + title."""
+    import re
+    with _session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return None
+        slug = re.sub(r'[^a-z0-9]+', '-', task.title.lower()).strip('-')[:50]
+        name = f"task/{task_id}-{slug}"
+        return {"branch": name, "command": f"git checkout -b {name}"}
+
+
+def link_commit(task_id: str, *, sha: str, message: str = "", author: str = "",
+                branch: str = "", url: str = "", repo: str = "",
+                committed_at: str | None = None) -> dict:
+    from datetime import datetime as dt, timezone as tz
+    with _session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        # Avoid duplicate sha per task
+        existing = db.query(TaskCommit).filter_by(task_id=task_id, sha=sha).first()
+        if existing:
+            return _commit_to_dict(existing)
+        ts = None
+        if committed_at:
+            ts = dt.fromisoformat(committed_at.replace("Z", "+00:00"))
+        c = TaskCommit(
+            task_id=task_id, sha=sha, message=message, author=author,
+            branch=branch, url=url, repo=repo, kind="commit", committed_at=ts,
+        )
+        db.add(c)
+        # Auto-sync: set task.branch from commit if empty
+        if branch and not task.branch:
+            task.branch = branch
+        _log_activity(db, author or "system", "task.commit.linked",
+                      f"Commit {sha[:7]}: {message[:80]}",
+                      project_id=task.project_id, task_id=task_id)
+        db.commit()
+        db.refresh(c)
+        return _commit_to_dict(c)
+
+
+def link_pr(task_id: str, *, pr_number: int, title: str = "", author: str = "",
+            branch: str = "", url: str = "", repo: str = "",
+            state: str = "open") -> dict:
+    with _session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        existing = db.query(TaskCommit).filter_by(task_id=task_id, pr_number=pr_number, kind="pr").first()
+        if existing:
+            existing.pr_state = state
+            # Auto-sync: update pr_url on state changes too
+            if url and not task.pr_url:
+                task.pr_url = url
+            db.commit()
+            db.refresh(existing)
+            return _commit_to_dict(existing)
+        c = TaskCommit(
+            task_id=task_id, sha=f"pr-{pr_number}", message=title, author=author,
+            branch=branch, url=url, repo=repo, kind="pr",
+            pr_state=state, pr_number=pr_number,
+        )
+        db.add(c)
+        # Auto-sync: set task.pr_url and task.branch from PR
+        if url:
+            task.pr_url = url
+        if branch and not task.branch:
+            task.branch = branch
+        _log_activity(db, author or "system", "task.pr.linked",
+                      f"PR #{pr_number}: {title[:80]}",
+                      project_id=task.project_id, task_id=task_id)
+        db.commit()
+        db.refresh(c)
+        return _commit_to_dict(c)
+
+
+def process_github_webhook(payload: dict) -> list[dict]:
+    """Parse a GitHub push or PR webhook and link commits/PRs to tasks.
+
+    Task IDs are detected in commit messages and PR titles/body using
+    patterns like [TASK-abc123] or task:abc123.
+    """
+    import re
+    task_id_pattern = re.compile(r'(?:\[TASK[- ]?([a-f0-9]{12})\]|task[: ]([a-f0-9]{12}))', re.IGNORECASE)
+    results = []
+
+    def extract_task_ids(text: str) -> list[str]:
+        return [m.group(1) or m.group(2) for m in task_id_pattern.finditer(text or "")]
+
+    # Push event — commits
+    if "commits" in payload:
+        repo = payload.get("repository", {}).get("full_name", "")
+        branch = (payload.get("ref", "").replace("refs/heads/", ""))
+        for commit in payload.get("commits", []):
+            task_ids = extract_task_ids(commit.get("message", ""))
+            for tid in task_ids:
+                try:
+                    r = link_commit(
+                        tid, sha=commit.get("id", ""),
+                        message=commit.get("message", ""),
+                        author=commit.get("author", {}).get("name", ""),
+                        branch=branch, url=commit.get("url", ""),
+                        repo=repo, committed_at=commit.get("timestamp"),
+                    )
+                    results.append(r)
+                except ValueError:
+                    pass
+
+    # PR event
+    if "pull_request" in payload:
+        pr = payload["pull_request"]
+        repo = payload.get("repository", {}).get("full_name", "")
+        title = pr.get("title", "")
+        body = pr.get("body", "") or ""
+        task_ids = extract_task_ids(title) + extract_task_ids(body)
+        state = "merged" if pr.get("merged") else pr.get("state", "open")
+        for tid in set(task_ids):
+            try:
+                r = link_pr(
+                    tid, pr_number=pr.get("number", 0),
+                    title=title, author=pr.get("user", {}).get("login", ""),
+                    branch=pr.get("head", {}).get("ref", ""),
+                    url=pr.get("html_url", ""), repo=repo, state=state,
+                )
+                results.append(r)
+            except ValueError:
+                pass
+
+    return results
 
 
 # ── Bootstrap ────────────────────────────────────────────────────────────

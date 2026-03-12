@@ -42,6 +42,14 @@ class DaemonConfig(BaseSettings):
     webhook_token: str = ""
     """Shared secret for X-Agentira-Token validation.  Empty = no auth (localhost-safe)."""
 
+    webhook_host: str = "127.0.0.1"
+    """Host/IP used when auto-registering the webhook URL with Agentira.
+    Set to this machine's reachable IP for remote deployments."""
+
+    # ── Notification mode ──────────────────────────────────────────────────
+    notification_mode: str = "hybrid"
+    """Notification mode: 'hybrid' (webhook + poll), 'webhook' (push only), 'poll' (pull only)."""
+
     # ── Polling ──────────────────────────────────────────────────────────
     poll_interval: int = 120
     """Seconds between task polls.  Default: 120 (2 minutes)."""

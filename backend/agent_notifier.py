@@ -67,13 +67,16 @@ def _build_project_payload(event: str, project: dict, actor: str) -> dict:
 
 # ── HTTP delivery ────────────────────────────────────────────────────────
 
-def _post(url: str, payload: dict) -> None:
+def _post(url: str, payload: dict, token: str = "") -> None:
     """POST payload to url. Runs in background thread — never raises."""
     try:
         data = json.dumps(payload).encode()
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         req  = urllib.request.Request(
             url, data=data,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -192,10 +195,21 @@ def dispatch(db, event: str, task: dict, actor: str) -> None:
     if not targets:
         return
 
+    # Extract auth token from project webhook_config
+    token = ""
+    from backend.models import Project
+    project = db.get(Project, project_id)
+    if project and project.webhook_config:
+        try:
+            cfg = json.loads(project.webhook_config)
+            token = cfg.get("token", "")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
     payload = _build_payload(event, task, actor)
     for profile in targets:
         thread = threading.Thread(
-            target=_post, args=(profile.webhook_url, payload), daemon=True
+            target=_post, args=(profile.webhook_url, payload, token), daemon=True
         )
         thread.start()
         logger.debug("Dispatched %s webhook to %s", event, profile.name)
@@ -212,10 +226,21 @@ def dispatch_project(db, event: str, project: dict, actor: str) -> None:
     if not targets:
         return
 
+    # Extract auth token from project webhook_config
+    token = ""
+    from backend.models import Project as ProjectModel
+    proj_obj = db.get(ProjectModel, project_id)
+    if proj_obj and proj_obj.webhook_config:
+        try:
+            cfg = json.loads(proj_obj.webhook_config)
+            token = cfg.get("token", "")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
     payload = _build_project_payload(event, project, actor)
     for profile in targets:
         thread = threading.Thread(
-            target=_post, args=(profile.webhook_url, payload), daemon=True
+            target=_post, args=(profile.webhook_url, payload, token), daemon=True
         )
         thread.start()
         logger.debug("Dispatched %s webhook to %s", event, profile.name)

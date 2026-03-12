@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -37,6 +37,9 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     assignee: Optional[str] = None
     tags: Optional[list[str]] = None
+    dod_items: Optional[list[dict]] = None
+    branch: Optional[str] = None
+    pr_url: Optional[str] = None
     actor: str = "system"
 
 class TaskMove(BaseModel):
@@ -74,6 +77,7 @@ class WebhookRuleSchema(BaseModel):
 class WebhookConfigUpdate(BaseModel):
     enabled: bool = True
     rules: list[WebhookRuleSchema] = Field(default_factory=list)
+    token: str = ""
 
 # ── App ──────────────────────────────────────────────────────────────────
 
@@ -86,6 +90,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount product routers
+from backend.forge.router import router as forge_router
+app.include_router(forge_router)
 
 class LoginRequest(BaseModel):
     username: str
@@ -263,6 +271,9 @@ def api_update_task(task_id: str, body: TaskUpdate):
             priority=body.priority,
             assignee=body.assignee,
             tags=body.tags,
+            dod_items=body.dod_items,
+            branch=body.branch,
+            pr_url=body.pr_url,
             actor=body.actor,
         )
     except ValueError as e:
@@ -468,6 +479,7 @@ def api_put_webhook_config(project_id: str, body: WebhookConfigUpdate):
             project_id,
             enabled=body.enabled,
             rules=[{"event": r.event, "receivers": r.receivers} for r in body.rules],
+            token=body.token,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -505,3 +517,71 @@ def api_delete_profile(profile_id: str):
     if not services.delete_profile(profile_id):
         raise HTTPException(404, "Profile not found")
     return {"ok": True}
+
+
+# ── Git Integration ──────────────────────────────────────────────────────
+
+@app.get("/api/tasks/{task_id}/suggest-branch")
+def api_suggest_branch(task_id: str):
+    result = services.suggest_branch_name(task_id)
+    if not result:
+        raise HTTPException(404, "Task not found")
+    return result
+
+
+@app.get("/api/tasks/{task_id}/commits")
+def api_list_task_commits(task_id: str):
+    return services.list_task_commits(task_id)
+
+
+class CommitLink(BaseModel):
+    sha: str
+    message: str = ""
+    author: str = ""
+    branch: str = ""
+    url: str = ""
+    repo: str = ""
+    committed_at: Optional[str] = None
+
+
+@app.post("/api/tasks/{task_id}/commits")
+def api_link_commit(task_id: str, body: CommitLink):
+    try:
+        return services.link_commit(
+            task_id, sha=body.sha, message=body.message,
+            author=body.author, branch=body.branch,
+            url=body.url, repo=body.repo,
+            committed_at=body.committed_at,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+class PRLink(BaseModel):
+    pr_number: int
+    title: str = ""
+    author: str = ""
+    branch: str = ""
+    url: str = ""
+    repo: str = ""
+    state: str = "open"
+
+
+@app.post("/api/tasks/{task_id}/prs")
+def api_link_pr(task_id: str, body: PRLink):
+    try:
+        return services.link_pr(
+            task_id, pr_number=body.pr_number, title=body.title,
+            author=body.author, branch=body.branch,
+            url=body.url, repo=body.repo, state=body.state,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.post("/api/webhooks/github")
+async def api_github_webhook(request: Request):
+    """Receive GitHub push/PR webhooks and auto-link commits to tasks."""
+    body = await request.json()
+    results = services.process_github_webhook(body)
+    return {"linked": len(results), "items": results}

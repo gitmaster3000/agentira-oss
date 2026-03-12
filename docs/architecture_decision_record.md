@@ -153,14 +153,44 @@ those agents.
 Setting `notification_mode: poll` in the YAML config disables the webhook receiver
 entirely. The daemon reverts to notification polling only, with no other changes.
 
-## Webhook Configuration (YAML)
+## Webhook Configuration
 
-Daemon configuration moves from pure environment variables to a **YAML config file**.
-This file also carries webhook subscription rules — which events dispatch to which
-receiver groups. This makes the system configurable without code changes.
+**Subscription rules are backend-owned, stored per project in the DB** as a JSON column
+(`Project.webhook_config`). This is the source of truth — not the daemon's local config.
+The backend controls which events fire to which receiver groups. This was a deliberate
+choice to avoid technical debt: a separate `webhook_rules` table is premature, but the
+JSON schema is designed so migrating to a table later is mechanical.
+
+```json
+{
+  "enabled": true,
+  "rules": [
+    { "event": "task.assigned",      "receivers": "assignee" },
+    { "event": "task.moved",         "receivers": "assignee" },
+    { "event": "task.commented",     "receivers": "assignee" },
+    { "event": "task.created",       "receivers": "bots"     },
+    { "event": "task.updated",       "receivers": "assignee" },
+    { "event": "project.updated",    "receivers": "bots"     },
+    { "event": "project.member.add", "receivers": "assignee" }
+  ]
+}
+```
+
+If `Project.webhook_config` is `null`, the dispatch layer applies `DEFAULT_WEBHOOK_RULES`
+(a constant in `agent_notifier.py`). Existing projects get sensible defaults without a
+migration.
+
+**Receiver groups:** `assignee` (task's current assignee), `bots` (all bot-role project
+members), `members` (all project members). Expanding receiver groups or adding conditions
+is a JSON schema change, not a DB migration.
+
+**Validation:** `WebhookRule` and `ProjectWebhookConfig` Pydantic models validate the
+JSON at the service layer before persistence and before dispatch.
+
+The **daemon YAML** only carries receiver-side config — not subscription rules:
 
 ```yaml
-# agents/config.yaml — example
+# agents/config.yaml
 
 connection:
   api_url: http://127.0.0.1:8111
@@ -168,31 +198,12 @@ connection:
   bot_name: arch-bot
 
 polling:
-  interval: 120       # seconds between poll cycles when no webhook arrives
+  interval: 120       # seconds between poll cycles
   mode: hybrid        # hybrid | webhook | poll
 
 webhook:
-  port: 9111
-  token: ""           # shared secret; empty = no auth (localhost-only deployments)
-
-  # Subscription rules — controls which events the BACKEND dispatches via webhook.
-  # receiver options: bots | members | [explicit-profile-name-list]
-  # Default if omitted: bots (all bot-role members of the project)
-  subscriptions:
-    - event: task.assigned
-      receivers: [self]       # only the assignee
-    - event: task.moved
-      receivers: [self]
-    - event: task.commented
-      receivers: [self]
-    - event: task.created
-      receivers: bots         # all bot members of the project
-    - event: task.updated
-      receivers: [self]
-    - event: project.updated
-      receivers: bots
-    - event: project.member.add
-      receivers: [self]       # only the newly added member
+  port: 9111          # 0 = disabled
+  token: ""           # shared secret; empty = no auth (safe for localhost)
 
 execution:
   max_agent_turns: 20
@@ -202,13 +213,6 @@ execution:
 logging:
   level: INFO
 ```
-
-The subscription rules are read by the backend's `agent_notifier` when deciding which
-profiles to POST to for a given event. They are stored in the daemon's local config;
-the backend reads them from the profile's registered config endpoint (future) or applies
-the project-level defaults stored in the DB. For this sprint: the backend applies
-project-level defaults (bots only); per-event customisation is read from the local YAML
-config by the daemon to filter events it actually acts on.
 
 ## Payload Contract — Structured Only
 
@@ -239,14 +243,16 @@ and `project_id` is the primary identifier.
 
 | File | Change | Notes |
 |---|---|---|
-| `agents/webhook_receiver.py` | NEW | stdlib HTTP server, no deps |
-| `agents/daemon.py` | MODIFY | interrupt-aware sleep, receiver startup, notification poll |
-| `agents/config.py` | REPLACE with `agents/config.yaml` | YAML-based; includes webhook subscription rules |
-| `agents/agentira_client.py` | MODIFY | reuse existing `get_notifications` / `mark_notification_read`; no new method needed |
-| `backend/agent_notifier.py` | MODIFY | `notify_many`, project-level payload builder, subscription-aware dispatch |
-| `backend/services.py` | MODIFY | expanded webhook firing for new event types |
-| `backend/rest_api.py` | no new endpoints | existing `/api/notifications` reused for fallback |
+| `backend/models.py` | MODIFY | add `webhook_config` JSON col to `Project`; add `notification_transport` enum col to `Profile` |
+| `backend/services.py` | MODIFY | `WebhookRule` + `ProjectWebhookConfig` Pydantic models; `get_webhook_targets()`; `resolve_transport()`; `DEFAULT_WEBHOOK_RULES`; expanded event firing |
+| `backend/agent_notifier.py` | MODIFY | remove `message` field; add `notify_many()`; project-level payload builder; config-driven dispatch |
+| `backend/rest_api.py` | MODIFY | add `GET/PUT /api/projects/:id/webhook-config` endpoints |
+| `agents/webhook_receiver.py` | NEW | stdlib HTTP server, zero external deps |
+| `agents/daemon.py` | MODIFY | interrupt-aware sleep; receiver startup; notification poll fallback |
+| `agents/config.py` | REPLACE with `agents/config.yaml` | YAML-based; receiver-side config only (rules stay in backend DB) |
+| `agents/agentira_client.py` | no change needed | existing `get_notifications` / `mark_notification_read` cover the poll fallback |
 | `docs/setup-agent-guide.md` | UPDATE | webhook setup section |
+| `docs/continuous-execution-architecture.md` | NEW | full architecture reference with Mermaid diagrams |
 
 ## Event Coverage After Implementation
 

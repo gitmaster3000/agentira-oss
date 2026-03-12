@@ -1,0 +1,41 @@
+{
+  "id": "openclaw-webhook-receiver",
+  "name": "Agentira Webhook Receiver",
+  "description": "Receives Agentira webhook events and triggers agent runs — zero external dependencies",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable/disable the webhook receiver"
+      },
+      "port": {
+        "type": "number",
+        "default": 9112,
+        "description": "Port for the webhook HTTP server"
+      },
+      "token": {
+        "type": "string",
+        "default": "",
+        "description": "Shared secret for X-Agentira-Token validation (empty = no auth)"
+      },
+      "gatewayUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:18789/v1/chat/completions",
+        "description": "OpenClaw gateway completions endpoint URL"
+      },
+      "gatewayToken": {
+        "type": "string",
+        "default": "",
+        "description": "Bearer token for the gateway endpoint (supports ${VAR} interpolation)"
+      },
+      "agentName": {
+        "type": "string",
+        "default": "",
+        "description": "Agent/model name passed to the gateway (blank = 'main')"
+      }
+    }
+  }
+}

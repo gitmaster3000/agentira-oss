@@ -1,0 +1,66 @@
+Use this for Claude:
+
+We are evolving Agentira into a product family under a new umbrella brand: **Flowty**.
+
+Core idea:
+Flowty is the umbrella platform for autonomous software work. It has closely linked sub-products, starting with:
+
+1. **Flowty Forge**
+   This is the orchestration and execution control plane. It manages workers, runs, costs, models, webhooks, MCP integrations, policies, and observability. It integrates with external systems like Jira, GitHub, and later Monday/others. It is the runtime and agent-ops layer.
+
+2. **Flowty Studio**
+   This is the native work management and collaboration app, evolved from Agentira. It is the human + agent workspace with boards, tasks, comments, audit logs, RBAC, bot identities, approvals, evidence, and agent-native workflows.
+
+3. **Flowty Migrate**
+   This will handle Jira migration/sync/import later, but not the immediate focus.
+
+Important positioning:
+
+* We are **not** trying to replace Jira immediately.
+* Flowty Forge should work with Jira and other systems.
+* Flowty Studio is our native workspace and flagship frontend.
+* Agentira should now be treated as the implementation base for **Flowty Studio**, while also being used internally to build/manage the new Flowty project itself.
+
+Immediate implementation goal:
+Use Agentira itself to manage the buildout of this new product structure. Create a new internal project for Flowty and implement in fast, iterative slices.
+
+First milestones:
+
+* Rename/reframe Agentira internally as the seed for **Flowty Studio**
+* Introduce a new domain model for **Agents, Workers, Runs, Events, Workspaces, Costs**
+* Add a **Runs dashboard** so every webhook-triggered execution becomes traceable
+* Add a **Workers dashboard** to show which worker is doing what, with model/config/cost visibility
+* Treat webhooks as triggers only; Agentira/Studio should own durable run state
+* Prepare architectural separation between Studio (workspace) and Forge (control plane), even if initially implemented in one codebase
+
+Implementation style:
+
+* Do not over-architect upfront
+* Keep one repo/project for now if faster
+* Separate by modules/bounded contexts first
+* Build UI and backend in thin vertical slices
+* Dogfood everything through Agentira/Studio itself
+
+Suggested first project structure inside Agentira:
+
+* Project: **Flowty**
+* Epics:
+
+  * Branding and terminology migration
+  * Runs model
+  * Workers registry
+  * Cost tracking
+  * Forge/Studio boundary definition
+  * Dashboard UI
+  * Jira/GitHub integration hardening
+
+Guiding principle:
+Flowty Studio is the native work layer.
+Flowty Forge is the orchestration layer.
+Agentira is now the implementation starting point for Studio, and we will iteratively extract the broader Flowty architecture from there.
+
+Working tagline:
+**Flowty — from work to working software**
+
+If useful, I can also compress this into an even shorter “build brief” format for Claude.
+
