@@ -81,11 +81,11 @@ export function Navbar({ onNewProject }) {
                         <span className="text-text-primary whitespace-nowrap max-w-[150px] truncate">
                             {activeProject ? activeProject.name : 'Select Project'}
                         </span>
-                        <ChevronDown className="w-3 h-3" />
+                        <ChevronDown className={`w-3 h-3 transition-transform ${isProjectOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {isProjectOpen && (
-                        <div className="absolute top-full left-0 mt-1 w-64 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-1 z-[60]">
+                        <div className="dropdown-menu top-full left-0 mt-1 w-64">
                             <div className="px-3 py-2 text-xs font-semibold text-text-tertiary uppercase">Recent Projects</div>
                             <div className="max-h-64 overflow-y-auto">
                                 {projects.map(p => (
@@ -95,7 +95,7 @@ export function Navbar({ onNewProject }) {
                                             navigate(`/board/${p.id}`);
                                             setIsProjectOpen(false);
                                         }}
-                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-bg-hover flex items-center gap-3 transition-colors ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
+                                        className={`dropdown-item px-3 ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                                     >
                                         <div className="w-6 h-6 rounded border border-border-subtle bg-bg-panel flex items-center justify-center text-[10px] font-bold text-text-secondary">
                                             {p.name[0].toUpperCase()}
@@ -108,7 +108,7 @@ export function Navbar({ onNewProject }) {
                             <div className="border-t border-border-subtle mt-1 pt-1">
                                 <button
                                     onClick={() => { onNewProject(); setIsProjectOpen(false); }}
-                                    className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                                    className="dropdown-item px-3 text-text-secondary hover:text-text-primary gap-2"
                                 >
                                     <Plus className="w-4 h-4" /> Create Project
                                 </button>
@@ -125,22 +125,23 @@ export function Navbar({ onNewProject }) {
                 >
                     <button
                         onClick={() => setIsCreateOpen(!isCreateOpen)}
-                        className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
+                        className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors flex items-center gap-0"
                         title="Create new"
                     >
-                        <Plus className="w-5 h-5" />
-                        <ChevronDown className="w-3 h-3" />
+                        <Plus className="w-5 h-5 mr-1.5" />
+                        <span className="w-px h-4 bg-border-active mx-1 rounded-full" />
+                        <ChevronDown className={`w-3 h-3 ml-1 transition-transform ${isCreateOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {isCreateOpen && (
-                        <div className="absolute top-full right-0 mt-1 w-48 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-1 z-[60]">
+                        <div className="dropdown-menu top-full right-0 mt-1 w-48">
                             {projectId && (
                                 <button
                                     onClick={() => {
                                         window.dispatchEvent(new CustomEvent('open-create-task'));
                                         setIsCreateOpen(false);
                                     }}
-                                    className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                                    className="dropdown-item"
                                 >
                                     <CheckSquare className="w-4 h-4 text-accent-primary" /> Task
                                 </button>
@@ -150,7 +151,7 @@ export function Navbar({ onNewProject }) {
                                     onNewProject();
                                     setIsCreateOpen(false);
                                 }}
-                                className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                                className="dropdown-item"
                             >
                                 <Briefcase className="w-4 h-4 text-accent-primary" /> Project
                             </button>
@@ -164,7 +165,7 @@ export function Navbar({ onNewProject }) {
                     <input
                         type="text"
                         placeholder="Search..."
-                        className="bg-bg-app border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all"
+                        className="bg-bg-app border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all text-text-primary"
                     />
                 </div>
 
@@ -185,20 +186,20 @@ export function Navbar({ onNewProject }) {
                         </button>
 
                         {isUserOpen && (
-                            <div className="absolute top-full right-0 mt-1 w-56 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-2 z-[60]">
+                            <div className="dropdown-menu top-full right-0 mt-1 w-56">
                                 <div className="px-4 py-2 border-b border-border-subtle mb-1">
                                     <div className="text-sm font-semibold text-text-primary">{user?.display_name}</div>
                                     <div className="text-xs text-text-tertiary truncate">{user?.name}</div>
                                 </div>
                                 <button
                                     onClick={() => { navigate('/settings'); setIsUserOpen(false); }}
-                                    className="w-full text-left px-4 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary flex items-center gap-3"
+                                    className="dropdown-item text-text-secondary hover:text-text-primary"
                                 >
                                     <Settings className="w-4 h-4" /> Settings
                                 </button>
                                 <button
                                     onClick={handleLogout}
-                                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-3"
+                                    className="dropdown-item text-red-400 hover:bg-red-500/10"
                                 >
                                     <LogOut className="w-4 h-4" /> Sign out
                                 </button>

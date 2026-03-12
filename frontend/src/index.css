@@ -19,6 +19,9 @@
   --accent-hover: #9e75ff;
   --accent-subtle: rgba(124, 77, 255, 0.1);
 
+  --bg-surface-purple: rgba(124, 77, 255, 0.03);
+  --bg-dropdown-hover: rgba(124, 77, 255, 0.08);
+
   --status-backlog: #5f6368;
   --status-todo: #3498db;
   --status-inprogress: #f1c40f;
@@ -35,24 +38,32 @@
 }
 
 :root[data-theme="light"] {
-  --bg-app: #f0f2f5;
-  --bg-panel: #ffffff;
+  --bg-app: #ffffff;
+  --bg-panel: #f1f3f5;
   --bg-card: #ffffff;
-  --bg-hover: #e8eaed;
+  --bg-hover: #e9ecef;
 
-  --border-subtle: #dadce0;
-  --border-active: #bdc1c6;
+  --border-subtle: #dee2e6;
+  --border-active: #ced4da;
 
-  --text-primary: #202124;
-  --text-secondary: #5f6368;
-  --text-tertiary: #9aa0a6;
+  --text-primary: #212529;
+  --text-secondary: #6c757d;
+  --text-tertiary: #adb5bd;
 
   --accent-primary: #6200ee;
   --accent-hover: #7c4dff;
   --accent-subtle: rgba(98, 0, 238, 0.08);
+
+  --bg-surface-purple: #f8f9fa;
+  --bg-dropdown-hover: rgba(98, 0, 238, 0.06);
 }
 
 @layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
   body {
     @apply bg-bg-app text-primary font-sans antialiased;
   }
@@ -86,6 +97,20 @@
 
   .card {
     @apply bg-bg-card border border-border-subtle rounded-lg p-4;
+  }
+
+  .dropdown-menu {
+    @apply absolute border border-border-subtle rounded-md shadow-2xl py-1 overflow-hidden;
+    background-color: var(--bg-card);
+    z-index: 60;
+  }
+
+  .dropdown-item {
+    @apply w-full text-left px-4 py-2 text-sm text-text-primary transition-colors cursor-pointer flex items-center gap-3;
+  }
+  
+  .dropdown-item:hover {
+    background-color: var(--bg-dropdown-hover);
   }
 }
 
@@ -176,11 +201,38 @@
   background: transparent;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
-  border-radius: 10px;
-}
-
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--border-active);
+}
+
+/* Column scroll: thin scrollbar, visible on hover only */
+.column-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.column-scroll:hover {
+  scrollbar-color: var(--border-active) transparent;
+}
+
+.column-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.column-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.column-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+.column-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--border-active);
+}
+
+.column-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: #505560;
 }

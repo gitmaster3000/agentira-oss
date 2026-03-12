@@ -81,7 +81,7 @@ export function TaskCard({ task, onUpdate, onDelete }) {
                 />
             )}
 
-            <div className="flex justify-between items-start mb-1">
+            <div className="flex justify-between items-start mb-1 h-10">
                 <h4 className="font-medium text-sm text-primary line-clamp-2 pr-6">{task.title}</h4>
             </div>
 
