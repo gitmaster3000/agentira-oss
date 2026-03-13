@@ -31,19 +31,19 @@ export function Sidebar() {
 
     return (
         <aside
-            className={`flex flex-col border-r border-border-subtle bg-bg-panel transition-all duration-300 ease-in-out relative ${isCollapsed ? 'w-16' : 'w-64'}`}
+            className={`flex flex-col border-r bg-bg-panel transition-all duration-300 ease-in-out absolute top-0 left-0 h-full z-20 ${isCollapsed ? 'w-[72px]' : 'w-64 shadow-xl'}`}
         >
-            {/* Toggle Button */}
+            {/* Toggle */}
             <button
                 onClick={toggleSidebar}
-                className="absolute -right-3 top-4 w-6 h-6 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-all shadow-md z-10"
+                className="absolute -right-3 top-5 w-6 h-6 rounded-full bg-bg-card border flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-all shadow-elevation-1 z-10"
             >
                 {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
 
-            <div className="flex-1 py-4 flex flex-col gap-1 overflow-x-hidden">
+            <div className="flex-1 py-3 flex flex-col gap-0.5 overflow-x-hidden">
                 {!isCollapsed && (
-                    <div className="px-4 mb-4 text-xs font-semibold text-text-tertiary uppercase tracking-wider">
+                    <div className="px-4 mb-3 text-label-sm text-text-tertiary uppercase tracking-wider">
                         Planning
                     </div>
                 )}
@@ -54,13 +54,15 @@ export function Sidebar() {
                         <Link
                             key={item.label}
                             to={item.path}
-                            className={`flex items-center gap-3 px-4 py-2.5 transition-all
-                                ${isActive ? 'bg-accent-subtle text-accent-primary border-r-2 border-accent-primary' : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'}
+                            className={`flex items-center gap-3 mx-3 px-3 py-2.5 rounded-xl transition-all
+                                ${isActive
+                                    ? 'bg-accent-subtle text-accent-primary font-medium'
+                                    : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'}
                             `}
                             title={isCollapsed ? item.label : ''}
                         >
                             <item.icon className="w-5 h-5 flex-shrink-0" />
-                            {!isCollapsed && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+                            {!isCollapsed && <span className="text-label-lg whitespace-nowrap">{item.label}</span>}
                         </Link>
                     );
                 })}

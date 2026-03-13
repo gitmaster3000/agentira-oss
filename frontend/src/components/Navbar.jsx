@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
@@ -12,12 +12,22 @@ import {
     LogOut,
     Search,
     Briefcase,
-    CheckSquare
+    CheckSquare,
+    Pencil,
+    Cpu,
 } from 'lucide-react';
+
+const PRODUCTS = {
+    studio: { name: 'Studio', icon: Pencil, color: '#d0bcff', path: '/' },
+    forge:  { name: 'Forge',  icon: Cpu,    color: '#80cbc4', path: '/forge' },
+};
 
 export function Navbar({ onNewProject }) {
     const { user, logout } = useAuth();
     const { projectId } = useParams();
+    const location = useLocation();
+    const activeProduct = PRODUCTS[location.pathname.startsWith('/forge') ? 'forge' : 'studio'];
+    const ActiveIcon = activeProduct.icon;
     const navigate = useNavigate();
     const [projects, setProjects] = useState([]);
     const [isProjectOpen, setIsProjectOpen] = useState(false);
@@ -61,32 +71,35 @@ export function Navbar({ onNewProject }) {
     };
 
     return (
-        <header className="h-14 border-b border-border-subtle bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
-            <div className="flex items-center gap-6">
+        <header className="h-16 border-b bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
+            <div className="flex items-center gap-5">
                 {/* Logo */}
-                <AppSwitcher />
-
-                <Link to="/" className="flex items-center gap-2 font-bold text-lg hover:opacity-80 transition-opacity">
-                    <span className="w-8 h-8 rounded bg-accent-primary flex items-center justify-center text-white">A</span>
-                    <span className="hidden md:inline">Agentira</span>
+                <Link to={activeProduct.path} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+                    <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: activeProduct.color + '1a' }}>
+                        <ActiveIcon className="w-5 h-5" style={{ color: activeProduct.color }} />
+                    </span>
+                    <div className="hidden md:flex flex-col leading-tight">
+                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>Flowty</span>
+                        <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{activeProduct.name}</span>
+                    </div>
                 </Link>
 
                 {/* Project Switcher */}
                 <div className="relative" ref={projectRef}>
                     <button
                         onClick={() => setIsProjectOpen(!isProjectOpen)}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border-subtle text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-sm font-medium"
+                        className="flex items-center gap-2 px-3 py-2 rounded-xl border text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors text-label-lg"
                     >
                         <Briefcase className="w-4 h-4" />
                         <span className="text-text-primary whitespace-nowrap max-w-[150px] truncate">
                             {activeProject ? activeProject.name : 'Select Project'}
                         </span>
-                        <ChevronDown className="w-3 h-3" />
+                        <ChevronDown className={`w-3 h-3 transition-transform ${isProjectOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {isProjectOpen && (
-                        <div className="absolute top-full left-0 mt-1 w-64 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-1 z-[60]">
-                            <div className="px-3 py-2 text-xs font-semibold text-text-tertiary uppercase">Recent Projects</div>
+                        <div className="dropdown-menu top-full left-0 mt-1 w-64">
+                            <div className="px-3 py-2 text-label-sm text-text-tertiary uppercase tracking-wider">Recent Projects</div>
                             <div className="max-h-64 overflow-y-auto">
                                 {projects.map(p => (
                                     <button
@@ -95,20 +108,20 @@ export function Navbar({ onNewProject }) {
                                             navigate(`/board/${p.id}`);
                                             setIsProjectOpen(false);
                                         }}
-                                        className={`w-full text-left px-3 py-2 text-sm hover:bg-bg-hover flex items-center gap-3 transition-colors ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
+                                        className={`dropdown-item px-3 ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                                     >
-                                        <div className="w-6 h-6 rounded border border-border-subtle bg-bg-panel flex items-center justify-center text-[10px] font-bold text-text-secondary">
+                                        <div className="w-7 h-7 rounded-md border bg-bg-panel flex items-center justify-center text-label-sm font-bold text-text-secondary">
                                             {p.name[0].toUpperCase()}
                                         </div>
                                         <span className="truncate flex-1">{p.name}</span>
-                                        {p.id === projectId && <div className="w-1.5 h-1.5 rounded-full bg-text-primary" />}
+                                        {p.id === projectId && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent-primary)' }} />}
                                     </button>
                                 ))}
                             </div>
-                            <div className="border-t border-border-subtle mt-1 pt-1">
+                            <div className="border-t mt-1 pt-1">
                                 <button
                                     onClick={() => { onNewProject(); setIsProjectOpen(false); }}
-                                    className="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                                    className="dropdown-item px-3 text-text-secondary hover:text-text-primary gap-2"
                                 >
                                     <Plus className="w-4 h-4" /> Create Project
                                 </button>
@@ -117,32 +130,29 @@ export function Navbar({ onNewProject }) {
                     )}
                 </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
                 {/* Create Dropdown */}
-                <div
-                    className="relative"
-                    ref={createRef}
-                >
+                <div className="relative" ref={createRef}>
                     <button
                         onClick={() => setIsCreateOpen(!isCreateOpen)}
-                        className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
+                        className="p-2 rounded-xl border hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors flex items-center gap-1"
                         title="Create new"
                     >
                         <Plus className="w-5 h-5" />
-                        <ChevronDown className="w-3 h-3" />
+                        <ChevronDown className={`w-3 h-3 transition-transform ${isCreateOpen ? 'rotate-180' : ''}`} />
                     </button>
 
                     {isCreateOpen && (
-                        <div className="absolute top-full right-0 mt-1 w-48 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-1 z-[60]">
+                        <div className="dropdown-menu top-full right-0 mt-1 w-48">
                             {projectId && (
                                 <button
                                     onClick={() => {
                                         window.dispatchEvent(new CustomEvent('open-create-task'));
                                         setIsCreateOpen(false);
                                     }}
-                                    className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                                    className="dropdown-item"
                                 >
-                                    <CheckSquare className="w-4 h-4 text-accent-primary" /> Task
+                                    <CheckSquare className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} /> Task
                                 </button>
                             )}
                             <button
@@ -150,9 +160,9 @@ export function Navbar({ onNewProject }) {
                                     onNewProject();
                                     setIsCreateOpen(false);
                                 }}
-                                className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-hover flex items-center gap-3"
+                                className="dropdown-item"
                             >
-                                <Briefcase className="w-4 h-4 text-accent-primary" /> Project
+                                <Briefcase className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} /> Project
                             </button>
                         </div>
                     )}
@@ -164,41 +174,43 @@ export function Navbar({ onNewProject }) {
                     <input
                         type="text"
                         placeholder="Search..."
-                        className="bg-bg-app border border-border-subtle rounded-md pl-9 pr-3 py-1.5 text-sm w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all"
+                        className="bg-bg-app border rounded-xl pl-9 pr-3 py-2 text-body-md w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all text-text-primary"
                     />
                 </div>
 
-                <div className="flex items-center gap-1 border-l border-border-subtle pl-3 ml-2">
-                    <button className="p-1.5 rounded-md border border-border-subtle hover:bg-bg-hover text-text-secondary relative">
+                <div className="flex items-center gap-1 border-l pl-3 ml-1">
+                    <button className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary relative transition-colors">
                         <Bell className="w-5 h-5" />
-                        <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-bg-panel" />
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
                     </button>
                     <ThemeToggle />
+                    <AppSwitcher />
 
                     {/* User Menu */}
-                    <div className="relative ml-2" ref={userRef}>
+                    <div className="relative ml-1" ref={userRef}>
                         <button
                             onClick={() => setIsUserOpen(!isUserOpen)}
-                            className="w-8 h-8 rounded-full bg-accent-subtle flex items-center justify-center font-bold text-sm text-accent-primary border border-accent-primary/20 hover:border-accent-primary transition-all"
+                            className="w-9 h-9 rounded-full flex items-center justify-center font-medium text-sm transition-all"
+                            style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}
                         >
                             {user?.display_name?.[0]?.toUpperCase() || 'U'}
                         </button>
 
                         {isUserOpen && (
-                            <div className="absolute top-full right-0 mt-1 w-56 bg-bg-card border border-border-subtle rounded-md shadow-2xl py-2 z-[60]">
-                                <div className="px-4 py-2 border-b border-border-subtle mb-1">
-                                    <div className="text-sm font-semibold text-text-primary">{user?.display_name}</div>
-                                    <div className="text-xs text-text-tertiary truncate">{user?.name}</div>
+                            <div className="dropdown-menu top-full right-0 mt-1 w-56">
+                                <div className="px-4 py-3 border-b mb-1">
+                                    <div className="text-title-sm text-text-primary">{user?.display_name}</div>
+                                    <div className="text-body-sm text-text-tertiary truncate">{user?.name}</div>
                                 </div>
                                 <button
                                     onClick={() => { navigate('/settings'); setIsUserOpen(false); }}
-                                    className="w-full text-left px-4 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary flex items-center gap-3"
+                                    className="dropdown-item text-text-secondary hover:text-text-primary"
                                 >
                                     <Settings className="w-4 h-4" /> Settings
                                 </button>
                                 <button
                                     onClick={handleLogout}
-                                    className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 flex items-center gap-3"
+                                    className="dropdown-item text-red-400 hover:bg-red-500/10"
                                 >
                                     <LogOut className="w-4 h-4" /> Sign out
                                 </button>

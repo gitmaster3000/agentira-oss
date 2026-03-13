@@ -44,7 +44,7 @@ function formatPrDisplay(val) {
 }
 import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
 
-export function TaskDetailPanel({ task, onClose, onUpdate }) {
+export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -64,7 +64,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
     const [copiedField, setCopiedField] = useState(null);
 
     // Edit state
-    const [isEditing, setIsEditing] = useState(false);
+    const [isEditing, _setIsEditing] = useState(false);
+    const setIsEditing = (v) => { _setIsEditing(v); onEditingChange?.(v); };
     const [formData, setFormData] = useState({ ...task });
 
     useEffect(() => {
@@ -241,7 +242,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
         <>
             {/* Panel */}
             <div
-                className="h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col flex-shrink-0 animate-slide-in shadow-2xl overflow-hidden"
+                className="absolute top-0 right-0 h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -254,14 +255,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                     <div className="flex items-center gap-1">
                         <button
                             onClick={() => navigate(`/tasks/${task.id}`)}
-                            className="p-2 rounded-md hover:bg-bg-hover text-text-secondary transition-colors"
+                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
                             title="Open in full page"
                         >
                             <Maximize2 className="w-4 h-4" />
                         </button>
                         <button
                             onClick={onClose}
-                            className="p-2 rounded-md hover:bg-bg-hover text-text-secondary transition-colors"
+                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
                         >
                             <X className="w-5 h-5" />
                         </button>
@@ -275,7 +276,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             <div className="flex-1 mr-4">
                                 {isEditing ? (
                                     <input
-                                        className="bg-bg-app border border-border-subtle text-xl font-bold text-text-primary p-2 rounded w-full focus:outline-none focus:border-accent-primary"
+                                        className="bg-bg-app border border-border-subtle text-xl font-bold text-text-primary p-2 rounded-lg w-full focus:outline-none focus:border-accent-primary"
                                         value={formData.title}
                                         onChange={e => setFormData({ ...formData, title: e.target.value })}
                                         autoFocus
@@ -298,15 +299,16 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             </div>
                             {isEditing ? (
                                 <textarea
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-3 rounded w-full h-48 focus:outline-none focus:border-accent-primary resize-none"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-3 rounded-lg w-full h-48 focus:outline-none focus:border-accent-primary resize-none"
                                     value={formData.description}
                                     onChange={e => setFormData({ ...formData, description: e.target.value })}
                                     placeholder="Add a more detailed description..."
                                 />
                             ) : (
                                 <div
-                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors"
+                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors whitespace-pre-wrap break-words overflow-x-auto"
                                     onClick={() => setIsEditing(true)}
+                                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
                                 >
                                     {task.description || "No description provided."}
                                 </div>
@@ -322,7 +324,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     </label>
                                     {isEditing ? (
                                         <select
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded w-full"
+                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
                                             value={formData.assignee}
                                             onChange={e => setFormData({ ...formData, assignee: e.target.value })}
                                         >
@@ -346,7 +348,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     </label>
                                     {isEditing ? (
                                         <select
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded w-full"
+                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
                                             value={formData.priority}
                                             onChange={e => setFormData({ ...formData, priority: e.target.value })}
                                         >
@@ -370,7 +372,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     </label>
                                     {isEditing ? (
                                         <input
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded w-full"
+                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
                                             value={Array.isArray(formData.tags) ? formData.tags.join(', ') : (formData.tags || '')}
                                             onChange={e => setFormData({ ...formData, tags: e.target.value })}
                                             placeholder="tag1, tag2..."
@@ -378,7 +380,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     ) : (
                                         <div className="flex flex-wrap gap-1">
                                             {(task.tags || []).length > 0 ? task.tags.map(t => (
-                                                <span key={t} className="text-[10px] bg-bg-panel px-2 py-0.5 rounded border border-border-subtle text-text-secondary">{t}</span>
+                                                <span key={t} className="text-[10px] bg-bg-panel px-2 py-0.5 rounded-md border border-border-subtle text-text-secondary">{t}</span>
                                             )) : <span className="text-xs text-text-tertiary italic">None</span>}
                                         </div>
                                     )}
@@ -395,15 +397,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                             </div>
                         </div>
 
-                        {/* Action Buttons for Edit Mode */}
-                        {isEditing && (
-                            <div className="flex justify-end gap-2 mb-8">
-                                <button onClick={() => { setIsEditing(false); setFormData({ ...task }); }} className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors">Cancel</button>
-                                <button onClick={handleSave} className="bg-accent-primary text-white text-sm font-semibold px-6 py-2 rounded shadow-lg hover:bg-accent-hover transition-all" disabled={loading}>
-                                    {loading ? 'Saving...' : 'Save Changes'}
-                                </button>
-                            </div>
-                        )}
 
                         {/* Definition of Done */}
                         <div className="mb-8">
@@ -432,7 +425,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
 
                             <div className="space-y-1">
                                 {dodItems.map((item, i) => (
-                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded-lg hover:bg-bg-hover transition-colors">
                                         <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 text-text-secondary hover:text-accent-primary transition-colors">
                                             {item.checked
                                                 ? <CheckSquare className="w-4 h-4 text-green-500" />
@@ -454,13 +447,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
 
                             <div className="flex items-center gap-2 mt-2">
                                 <input
-                                    className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded focus:outline-none focus:border-accent-primary"
+                                    className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg focus:outline-none focus:border-accent-primary"
                                     placeholder="Add DOD item..."
                                     value={newDodText}
                                     onChange={(e) => setNewDodText(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && addDodItem()}
                                 />
-                                <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
+                                <button onClick={addDodItem} className="p-1.5 rounded-lg hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
                                     <Plus className="w-4 h-4" />
                                 </button>
                             </div>
@@ -477,7 +470,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
                                 {editingBranch ? (
                                     <input
-                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded font-mono text-text-primary focus:outline-none focus:border-accent-primary"
+                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
                                         value={branchValue}
                                         onChange={e => setBranchValue(e.target.value)}
                                         onBlur={() => saveBranch(branchValue)}
@@ -555,7 +548,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                     </div>
                                     <div className="space-y-1.5">
                                         {commits.map((c) => (
-                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-bg-app border border-border-subtle/30 text-sm">
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-bg-app border border-border-subtle/30 text-sm">
                                                 {c.kind === 'pr'
                                                     ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
                                                     : <GitCommit className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
@@ -609,13 +602,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                                 </div>
                                 <form onSubmit={handleComment} className="flex-1">
                                     <input
-                                        className="w-full bg-bg-app border border-border-subtle text-sm p-3 rounded-md focus:outline-none focus:border-accent-primary transition-colors"
+                                        className="w-full bg-bg-app border border-border-subtle text-sm p-3 rounded-lg focus:outline-none focus:border-accent-primary transition-colors"
                                         placeholder="Add a comment..."
                                         value={comment}
                                         onChange={e => setComment(e.target.value)}
                                     />
                                     <div className="mt-2 text-[10px] text-text-tertiary">
-                                        Tip: Press <span className="p-0.5 bg-bg-panel border border-border-subtle rounded px-1">M</span> to focus comment box
+                                        Tip: Press <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">M</span> to focus comment box
                                     </div>
                                 </form>
                             </div>
@@ -648,7 +641,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                     <div>
                         <button
                             onClick={() => setIsConfirmingDelete(true)}
-                            className="flex items-center gap-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded transition-all"
+                            className="flex items-center gap-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all"
                             title="Delete Task"
                         >
                             <Trash2 className="w-4 h-4" /> Delete
@@ -678,7 +671,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate }) {
                         ) : (
                             <button
                                 onClick={() => setIsEditing(true)}
-                                className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover px-3 py-1.5 rounded transition-all"
+                                className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover px-3 py-1.5 rounded-lg transition-all"
                                 title="Edit Task"
                             >
                                 <Pencil className="w-3.5 h-3.5" /> Edit

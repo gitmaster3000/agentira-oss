@@ -209,7 +209,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     return (
         <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
             <div
-                className="w-full max-w-3xl rounded-lg shadow-xl flex flex-col"
+                className="w-full max-w-3xl rounded-lg shadow-elevation-3 flex flex-col"
                 onClick={e => e.stopPropagation()}
                 style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', border: '1px solid var(--border-subtle)', maxHeight: '85vh' }}
             >
@@ -228,13 +228,13 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             </h2>
                         )}
                         <div className="flex gap-2 items-center mt-1 text-xs">
-                            <span className="px-2 py-0.5 rounded" style={{
+                            <span className="px-2 py-0.5 rounded-md" style={{
                                 backgroundColor: task.status === 'done' ? 'rgba(46,204,113,0.15)' : 'var(--bg-panel)',
                                 color: task.status === 'done' ? '#2ecc71' : 'var(--text-secondary)'
                             }}>
                                 {task.status?.replace('_', ' ')}
                             </span>
-                            <span className="px-2 py-0.5 rounded" style={{
+                            <span className="px-2 py-0.5 rounded-md" style={{
                                 backgroundColor: `${priorityColors[task.priority]}20`,
                                 color: priorityColors[task.priority]
                             }}>
@@ -246,7 +246,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                     <div className="flex items-center gap-1">
                         <button
                             onClick={() => setIsEditing(v => !v)}
-                            className="p-2 rounded hover:bg-bg-hover"
+                            className="p-2 rounded-xl hover:bg-bg-hover transition-colors"
                             style={{ color: isEditing ? 'var(--accent-primary)' : 'var(--text-secondary)' }}
                             title="Edit task"
                         >
@@ -254,13 +254,13 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                         </button>
                         <button
                             onClick={handleDelete}
-                            className="p-2 rounded hover:bg-bg-hover"
+                            className="p-2 rounded-xl hover:bg-bg-hover transition-colors"
                             style={{ color: 'var(--text-secondary)' }}
                             title="Delete task"
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
-                        <button onClick={onClose} className="p-2 rounded hover:bg-bg-hover" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
+                        <button onClick={onClose} className="p-2 rounded-xl hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
                     </div>
                 </div>
 
@@ -279,7 +279,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 />
                             ) : (
                                 <div
-                                    className="text-sm whitespace-pre-wrap cursor-pointer min-h-[3rem] rounded p-2"
+                                    className="text-sm whitespace-pre-wrap cursor-pointer min-h-[3rem] rounded-lg p-2"
                                     style={{ color: task.description ? 'var(--text-primary)' : 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}
                                     onClick={() => setIsEditing(true)}
                                 >
@@ -328,7 +328,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 ) : (
                                     <div className="flex gap-1 flex-wrap">
                                         {(task.tags || []).length > 0 ? task.tags.map((t, i) => (
-                                            <span key={i} className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>{t}</span>
+                                            <span key={i} className="text-xs px-2 py-0.5 rounded-md" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>{t}</span>
                                         )) : <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>No tags</span>}
                                     </div>
                                 )}
@@ -370,7 +370,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             )}
                             <div className="space-y-1">
                                 {dodItems.map((item, i) => (
-                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded-lg hover:bg-bg-hover transition-colors">
                                         <button onClick={() => toggleDodItem(i)} className="flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
                                             {item.checked ? <CheckSquare className="w-4 h-4 text-green-500" /> : <Square className="w-4 h-4" />}
                                         </button>
@@ -382,9 +382,9 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 ))}
                             </div>
                             <div className="flex items-center gap-2 mt-2">
-                                <input className="flex-1 text-sm p-1.5 rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                <input className="flex-1 text-sm p-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
                                     placeholder="Add DOD item..." value={newDodText} onChange={(e) => setNewDodText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addDodItem()} />
-                                <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-tertiary)' }}>
+                                <button onClick={addDodItem} className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-tertiary)' }}>
                                     <Plus className="w-4 h-4" />
                                 </button>
                             </div>
@@ -398,7 +398,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             <div className="mb-3">
                                 <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Branch</div>
                                 {editingBranch ? (
-                                    <input className="w-full px-2 py-1.5 text-sm font-mono rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                    <input className="w-full px-2 py-1.5 text-sm font-mono rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
                                         value={branchValue} onChange={e => setBranchValue(e.target.value)} onBlur={() => saveBranch(branchValue)} onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)} autoFocus />
                                 ) : (
                                     <div className="flex items-center gap-1.5">
@@ -421,7 +421,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             <div className="mb-3">
                                 <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Pull Request</div>
                                 {editingPrUrl ? (
-                                    <input className="w-full px-2 py-1.5 text-sm rounded" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                    <input className="w-full px-2 py-1.5 text-sm rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
                                         value={prUrlValue} onChange={e => setPrUrlValue(e.target.value)} onBlur={() => savePrUrl(prUrlValue)} onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)} placeholder="https://github.com/..." autoFocus />
                                 ) : (
                                     <div className="flex items-center gap-1.5">
@@ -442,7 +442,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                     <div className="text-[10px] font-bold uppercase mb-1.5" style={{ color: 'var(--text-secondary)' }}>Commits & PRs ({commits.length})</div>
                                     <div className="space-y-1.5">
                                         {commits.map((c) => (
-                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded text-sm" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)' }}>
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)' }}>
                                                 {c.kind === 'pr' ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" /> : <GitCommit className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />}
                                                 <div className="flex-1 min-w-0">
                                                     <div className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>{c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}{c.message}</div>
@@ -460,19 +460,19 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                         <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                             <div className="flex items-center justify-between mb-3">
                                 <label className="block text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)' }}>Attachments ({attachments.length})</label>
-                                <label className="text-xs font-semibold px-3 py-1 rounded cursor-pointer" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
+                                <label className="text-xs font-semibold px-3 py-1 rounded-lg cursor-pointer" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
                                     {uploading ? 'Uploading…' : '+ Upload'}
                                     <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
                                 </label>
                             </div>
                             {attachments.length === 0 ? (
-                                <div className="text-xs py-3 text-center rounded" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}>
+                                <div className="text-xs py-3 text-center rounded-lg" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}>
                                     No attachments yet
                                 </div>
                             ) : (
                                 <div className="space-y-2">
                                     {attachments.map(att => (
-                                        <div key={att.id} className="flex items-center gap-3 p-2 rounded text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
+                                        <div key={att.id} className="flex items-center gap-3 p-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
                                             <Paperclip className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
                                             <div className="flex-1 min-w-0">
                                                 <a
@@ -490,7 +490,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                             </div>
                                             <button
                                                 onClick={() => handleDeleteAttachment(att.id, att.filename)}
-                                                className="p-1 rounded text-xs"
+                                                className="p-1 rounded-lg text-xs"
                                                 style={{ color: 'var(--text-tertiary)' }}
                                                 title="Delete"
                                             >

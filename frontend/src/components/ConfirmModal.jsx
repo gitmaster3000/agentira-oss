@@ -13,13 +13,13 @@ export function ConfirmModal({ title, message, confirmText = "Confirm", cancelTe
             />
 
             {/* Modal */}
-            <div className="relative bg-bg-card border border-border-subtle rounded-lg shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in">
-                <div className="p-5">
-                    <h2 className="text-lg font-bold text-text-primary mb-2">{title}</h2>
-                    <p className="text-sm text-text-secondary">{message}</p>
+            <div className="relative bg-bg-card border border-border-subtle rounded-lg shadow-elevation-3 w-full max-w-sm overflow-hidden animate-fade-in">
+                <div className="p-6">
+                    <h2 className="text-title-lg font-medium text-text-primary mb-2">{title}</h2>
+                    <p className="text-body-md text-text-secondary">{message}</p>
                 </div>
 
-                <div className="bg-bg-panel/50 p-4 border-t border-border-subtle flex justify-end gap-3">
+                <div className="px-6 py-4 border-t flex justify-end gap-3" style={{ backgroundColor: 'var(--bg-panel)' }}>
                     <button
                         onClick={onCancel}
                         className="btn btn-ghost"
@@ -28,7 +28,7 @@ export function ConfirmModal({ title, message, confirmText = "Confirm", cancelTe
                     </button>
                     <button
                         onClick={onConfirm}
-                        className={`btn ${isDanger ? 'bg-red-600 text-white hover:bg-red-700' : 'btn-primary'}`}
+                        className={`btn ${isDanger ? 'bg-red-600 text-white hover:bg-red-500' : 'btn-primary'}`}
                     >
                         {confirmText}
                     </button>

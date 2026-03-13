@@ -137,7 +137,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-1.5 rounded-md transition-colors hover:bg-bg-hover"
+                        className="p-1.5 rounded-xl transition-colors hover:bg-bg-hover"
                         style={{ color: 'var(--text-tertiary)' }}
                     >
                         <X className="w-5 h-5" />
@@ -166,16 +166,27 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                         <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
                             Category
                         </label>
-                        <select
-                            className="input"
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
-                        >
-                            <option value="">Select category...</option>
+                        <div className="flex flex-wrap gap-2">
                             {PROJECT_CATEGORIES.map(c => (
-                                <option key={c} value={c}>{c}</option>
+                                <button
+                                    key={c}
+                                    type="button"
+                                    onClick={() => setCategory(c === category ? '' : c)}
+                                    className="px-3 py-1.5 rounded-full text-xs font-medium transition-all border"
+                                    style={category === c ? {
+                                        borderColor: 'var(--accent-primary)',
+                                        color: 'var(--accent-primary)',
+                                        backgroundColor: 'var(--accent-subtle)',
+                                    } : {
+                                        borderColor: 'var(--border-subtle)',
+                                        color: 'var(--text-secondary)',
+                                        backgroundColor: 'transparent',
+                                    }}
+                                >
+                                    {c}
+                                </button>
                             ))}
-                        </select>
+                        </div>
                     </div>
 
                     {/* Description */}
@@ -238,7 +249,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                                         <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                                            className="p-0.5 rounded hover:bg-red-500/10 transition-colors"
+                                            className="p-0.5 rounded-lg hover:bg-red-500/10 transition-colors"
                                             style={{ color: 'var(--text-tertiary)' }}
                                         >
                                             <Trash2 className="w-3 h-3" />
