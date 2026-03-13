@@ -306,8 +306,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
                                 />
                             ) : (
                                 <div
-                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors"
+                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors whitespace-pre-wrap break-words overflow-x-auto"
                                     onClick={() => setIsEditing(true)}
+                                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
                                 >
                                     {task.description || "No description provided."}
                                 </div>
