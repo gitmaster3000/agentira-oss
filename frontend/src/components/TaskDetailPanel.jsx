@@ -44,7 +44,7 @@ function formatPrDisplay(val) {
 }
 import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
 
-export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
+export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditing }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -64,8 +64,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onEditingChange }) {
     const [copiedField, setCopiedField] = useState(null);
 
     // Edit state
-    const [isEditing, _setIsEditing] = useState(false);
-    const setIsEditing = (v) => { _setIsEditing(v); onEditingChange?.(v); };
     const [formData, setFormData] = useState({ ...task });
 
     useEffect(() => {

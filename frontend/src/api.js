@@ -154,5 +154,40 @@ export const api = {
         createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
         startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
         completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
+
+        // Messages (chat)
+        listMessages: (agentId, params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '') qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/agents/${agentId}/messages${q ? '?' + q : ''}`);
+        },
+        createMessage: (agentId, data) => request(`/forge/agents/${agentId}/messages`, { method: 'POST', body: JSON.stringify(data) }),
+
+        // Webhook logs
+        listWebhookLogs: (agentId, params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '') qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/agents/${agentId}/webhook-logs${q ? '?' + q : ''}`);
+        },
+
+        // Schedule
+        updateSchedule: (agentId, data) => request(`/forge/agents/${agentId}/schedule`, { method: 'PUT', body: JSON.stringify(data) }),
+
+        // Costs
+        getAgentCosts: (agentId) => request(`/forge/agents/${agentId}/costs`),
+        estimateCost: (data) => request('/forge/cost-estimate', { method: 'POST', body: JSON.stringify(data) }),
+        getPricing: () => request('/forge/pricing'),
+
+        // OpenClaw integration
+        getRuntimeStatus: (agentId) => request(`/forge/agents/${agentId}/runtime/status`),
+        sendRuntimeChat: (agentId, data) => request(`/forge/agents/${agentId}/runtime/chat`, { method: 'POST', body: JSON.stringify(data) }),
+        getOpenClawOverview: () => request('/forge/openclaw/overview'),
+        syncOpenClaw: () => request('/forge/openclaw/sync', { method: 'POST' }),
     },
 };
