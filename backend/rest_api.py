@@ -366,6 +366,13 @@ def api_get_board(project_id: str):
     except ValueError as e:
         raise HTTPException(404, str(e))
 
+@app.get("/api/projects/{project_id}/roadmap")
+def api_get_roadmap(project_id: str):
+    try:
+        return services.get_roadmap(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
 
 # ── Attachments ──────────────────────────────────────────────────────────
 

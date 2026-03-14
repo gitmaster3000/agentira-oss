@@ -694,6 +694,30 @@ def get_board(project_id: str) -> dict:
             "columns": board,
         }
 
+def get_roadmap(project_id: str) -> list[dict]:
+    with _session() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        # For the roadmap, we'll return a list of tasks with a mock structure or filtered tasks
+        # Assuming the roadmap relies on tasks and maybe start/end dates if available, but for now we map task data.
+        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
+        
+        roadmap_data = []
+        for i, t in enumerate(tasks):
+            # We mock the dates based on created_at and index since we don't have explicit dates
+            roadmap_data.append({
+                "id": t.id,
+                "title": t.title,
+                "start": t.created_at.strftime("%Y-%m-%d"),
+                "end": t.updated_at.strftime("%Y-%m-%d") if t.updated_at != t.created_at else (t.created_at.replace(day=min(t.created_at.day + 7, 28))).strftime("%Y-%m-%d"),
+                "progress": 100 if t.status.name == "done" else (50 if t.status.name == "in_progress" else 0),
+                "color": "bg-blue-500" if t.status.name == "done" else "bg-purple-500"
+            })
+            
+        return roadmap_data
+
 
 # ── Status operations ───────────────────────────────────────────────────
 
