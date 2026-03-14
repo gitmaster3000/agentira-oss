@@ -69,6 +69,7 @@ export const api = {
 
     // Board
     getBoard: (projectId) => request(`/board/${projectId}`),
+    getRoadmap: (projectId) => request(`/projects/${projectId}/roadmap`),
 
     // Tasks
     createTask: (data) => request('/tasks', { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
