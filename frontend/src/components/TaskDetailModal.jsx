@@ -279,7 +279,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 />
                             ) : (
                                 <div
-                                    className="text-sm whitespace-pre-wrap cursor-pointer min-h-[3rem] rounded-lg p-2"
+                                    className="text-sm cursor-pointer min-h-[3rem] rounded-lg p-2 whitespace-pre-wrap break-words overflow-x-auto"
                                     style={{ color: task.description ? 'var(--text-primary)' : 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}
                                     onClick={() => setIsEditing(true)}
                                 >

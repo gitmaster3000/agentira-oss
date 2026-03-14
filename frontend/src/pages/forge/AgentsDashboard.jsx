@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Bot, Plus, RefreshCw, Wifi, WifiOff, Loader, Trash2, ChevronDown, Clock, Play, DollarSign } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign } from 'lucide-react';
 import { api } from '../../api';
 
 const STATUS_STYLES = {
@@ -9,10 +10,9 @@ const STATUS_STYLES = {
 };
 
 export function AgentsDashboard() {
+    const navigate = useNavigate();
     const [agents, setAgents] = useState([]);
-    const [profiles, setProfiles] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [showCreate, setShowCreate] = useState(false);
     const [filter, setFilter] = useState('all');
 
     const loadAgents = async () => {
@@ -66,11 +66,12 @@ export function AgentsDashboard() {
                         <option value="offline">Offline</option>
                         <option value="busy">Busy</option>
                     </select>
-                    <button onClick={loadAgents} className="btn btn-ghost" title="Refresh">
-                        <RefreshCw className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setShowCreate(true)} className="btn btn-primary">
-                        <Plus className="w-4 h-4" /> Register Agent
+                    <button
+                        onClick={async () => { await api.forge.syncOpenClaw().catch(console.error); loadAgents(); }}
+                        className="btn btn-ghost text-xs"
+                        title="Sync models & status from OpenClaw"
+                    >
+                        <RefreshCw className="w-4 h-4" /> Sync OpenClaw
                     </button>
                 </div>
             </div>
@@ -81,32 +82,25 @@ export function AgentsDashboard() {
                     Loading agents...
                 </div>
             ) : filtered.length === 0 ? (
-                <EmptyState onRegister={() => setShowCreate(true)} />
+                <EmptyState />
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map((agent) => (
-                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} />
+                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} />
                     ))}
                 </div>
             )}
 
-            {/* Create Modal */}
-            {showCreate && (
-                <CreateAgentModal
-                    onClose={() => setShowCreate(false)}
-                    onCreated={() => { setShowCreate(false); loadAgents(); }}
-                />
-            )}
         </div>
     );
 }
 
-function AgentCard({ agent, onDelete }) {
+function AgentCard({ agent, onDelete, onClick }) {
     const status = STATUS_STYLES[agent.status] || STATUS_STYLES.offline;
     const StatusIcon = status.icon;
 
     return (
-        <div className="card hover:border-border-active transition-colors group">
+        <div className="card hover:border-border-active transition-colors group cursor-pointer" onClick={onClick}>
             <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-bg-hover flex items-center justify-center">
@@ -126,7 +120,7 @@ function AgentCard({ agent, onDelete }) {
                         {status.label}
                     </span>
                     <button
-                        onClick={onDelete}
+                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all"
                         title="Delete agent"
                     >
@@ -137,17 +131,24 @@ function AgentCard({ agent, onDelete }) {
 
             {/* Config row */}
             <div className="flex flex-wrap gap-2 mb-3">
-                {agent.executor_type && (
-                    <span className="px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary">
-                        {agent.executor_type}
-                    </span>
-                )}
                 {agent.model && (
-                    <span className="px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary truncate max-w-[180px]" title={agent.model}>
+                    <span className="px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary truncate max-w-[220px]" title={agent.model}>
                         {agent.model}
                     </span>
                 )}
+                {agent.runtime_agent_name && (
+                    <span className="px-2 py-0.5 rounded bg-accent-primary/15 text-xs text-accent-primary" title="OpenClaw agent ID">
+                        {agent.runtime_agent_name}
+                    </span>
+                )}
             </div>
+
+            {/* Webhook */}
+            {agent.webhook_url && (
+                <div className="text-xs text-text-tertiary truncate mb-2" title={agent.webhook_url}>
+                    {agent.webhook_url}
+                </div>
+            )}
 
             {/* Stats row */}
             <div className="flex items-center gap-4 text-xs text-text-tertiary border-t border-border-subtle pt-3">
@@ -167,125 +168,14 @@ function AgentCard({ agent, onDelete }) {
     );
 }
 
-function EmptyState({ onRegister }) {
+function EmptyState() {
     return (
         <div className="card text-center py-16">
             <Bot className="w-12 h-12 mx-auto mb-4 text-text-tertiary opacity-50" />
-            <h3 className="text-lg font-semibold text-text-primary mb-2">No agents registered</h3>
-            <p className="text-sm text-text-secondary mb-6 max-w-md mx-auto">
-                Agents are runtime executors that pick up and run tasks. Register an agent to start tracking executions.
+            <h3 className="text-lg font-semibold text-text-primary mb-2">No agents found</h3>
+            <p className="text-sm text-text-secondary mb-2 max-w-md mx-auto">
+                Agents are auto-synced from bot profiles. Create a service account in Settings to add an agent.
             </p>
-            <button onClick={onRegister} className="btn btn-primary">
-                <Plus className="w-4 h-4" /> Register First Agent
-            </button>
-        </div>
-    );
-}
-
-function CreateAgentModal({ onClose, onCreated }) {
-    const [profiles, setProfiles] = useState([]);
-    const [form, setForm] = useState({
-        profile_id: '',
-        name: '',
-        executor_type: 'http',
-        model: '',
-        webhook_url: '',
-    });
-    const [submitting, setSubmitting] = useState(false);
-
-    useEffect(() => {
-        api.getProfiles().then(setProfiles).catch(console.error);
-    }, []);
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!form.profile_id || !form.name) return;
-        setSubmitting(true);
-        try {
-            await api.forge.createAgent(form);
-            onCreated();
-        } catch (err) {
-            console.error('Failed to create agent:', err);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center animate-fade-in" onClick={onClose}>
-            <div className="bg-bg-card border border-border-subtle rounded-lg w-full max-w-md p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <h2 className="text-lg font-semibold text-text-primary mb-4">Register Agent</h2>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <label className="block text-sm text-text-secondary mb-1">Name</label>
-                        <input
-                            className="input"
-                            placeholder="e.g. swe-agent-1"
-                            value={form.name}
-                            onChange={(e) => setForm({ ...form, name: e.target.value })}
-                            required
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-sm text-text-secondary mb-1">Profile (Identity)</label>
-                        <select
-                            className="input"
-                            value={form.profile_id}
-                            onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                            required
-                        >
-                            <option value="">Select a profile...</option>
-                            {profiles.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                    {p.display_name || p.name} ({p.role})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <label className="block text-sm text-text-secondary mb-1">Executor</label>
-                            <select
-                                className="input"
-                                value={form.executor_type}
-                                onChange={(e) => setForm({ ...form, executor_type: e.target.value })}
-                            >
-                                <option value="http">HTTP</option>
-                                <option value="zeroclaw">ZeroClaw</option>
-                                <option value="cli">CLI</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-sm text-text-secondary mb-1">Model</label>
-                            <input
-                                className="input"
-                                placeholder="e.g. claude-sonnet-4-20250514"
-                                value={form.model}
-                                onChange={(e) => setForm({ ...form, model: e.target.value })}
-                            />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm text-text-secondary mb-1">Webhook URL</label>
-                        <input
-                            className="input"
-                            placeholder="http://localhost:9100/webhook"
-                            value={form.webhook_url}
-                            onChange={(e) => setForm({ ...form, webhook_url: e.target.value })}
-                        />
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-2">
-                        <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-                        <button type="submit" disabled={submitting} className="btn btn-primary">
-                            {submitting ? 'Registering...' : 'Register Agent'}
-                        </button>
-                    </div>
-                </form>
-            </div>
         </div>
     );
 }
