@@ -153,8 +153,14 @@ export function Board() {
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('');
     const [filterAssignee, setFilterAssignee] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
     const panelEditingRef = useRef(false);
     const [pendingAction, setPendingAction] = useState(null);
+
+    // Sync refs for the discard modal
+    useEffect(() => {
+        panelEditingRef.current = isEditing;
+    }, [isEditing]);
 
     const loadBoard = async () => {
         try {
@@ -362,7 +368,7 @@ export function Board() {
 
                 {/* Main Content Area: Columns */}
                 <div className="flex-1 overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
-                        <div className="h-full" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: '12px', minWidth: '1148px', width: '100%', marginRight: selectedTask ? 470 : 0 }}>
+                        <div className="h-full grid grid-cols-5 gap-3 min-w-[1148px] w-full" style={{ marginRight: selectedTask ? 470 : 0 }}>
                             {COLUMNS.map(col => (
                                 <div
                                     key={col.id}
@@ -387,6 +393,7 @@ export function Board() {
                                                     if (panelEditingRef.current && String(t.id) !== String(selectedTaskId)) {
                                                         setPendingAction(() => () => {
                                                             panelEditingRef.current = false;
+                                                            setIsEditing(false);
                                                             const newParams = new URLSearchParams(searchParams);
                                                             newParams.set('selectedTask', t.id);
                                                             setSearchParams(newParams);
@@ -394,6 +401,7 @@ export function Board() {
                                                         return;
                                                     }
                                                     panelEditingRef.current = false;
+                                                    setIsEditing(false);
                                                     const newParams = new URLSearchParams(searchParams);
                                                     newParams.set('selectedTask', t.id);
                                                     setSearchParams(newParams);
@@ -412,16 +420,20 @@ export function Board() {
             {selectedTask && (
                 <TaskDetailPanel
                     task={selectedTask}
+                    isEditing={isEditing}
+                    setIsEditing={setIsEditing}
                     onClose={() => {
                         if (panelEditingRef.current) {
                             setPendingAction(() => () => {
                                 panelEditingRef.current = false;
+                                setIsEditing(false);
                                 const newParams = new URLSearchParams(searchParams);
                                 newParams.delete('selectedTask');
                                 setSearchParams(newParams);
                             });
                             return;
                         }
+                        setIsEditing(false);
                         const newParams = new URLSearchParams(searchParams);
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
@@ -429,7 +441,6 @@ export function Board() {
                     onUpdate={() => {
                         loadBoard();
                     }}
-                    onEditingChange={(v) => { panelEditingRef.current = v; }}
                 />
             )}
 

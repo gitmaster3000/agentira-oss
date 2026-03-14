@@ -10,6 +10,7 @@ import { TaskPage } from './pages/TaskPage';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
 import { AgentsDashboard } from './pages/forge/AgentsDashboard';
+import { AgentDetail } from './pages/forge/AgentDetail';
 import { RunsDashboard } from './pages/forge/RunsDashboard';
 
 function Welcome() {
@@ -58,6 +59,7 @@ export default function App() {
                     }>
                         <Route index element={<ForgeOverview />} />
                         <Route path="agents" element={<AgentsDashboard />} />
+                        <Route path="agents/:agentId" element={<AgentDetail />} />
                         <Route path="runs" element={<RunsDashboard />} />
                     </Route>
                 </Routes>

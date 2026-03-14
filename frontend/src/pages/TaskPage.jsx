@@ -181,7 +181,7 @@ export function TaskPage() {
 
                         <div className="mb-10">
                             <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
-                            <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm">
+                            <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm whitespace-pre-wrap">
                                 {task.description || "No description provided."}
                             </div>
                         </div>
