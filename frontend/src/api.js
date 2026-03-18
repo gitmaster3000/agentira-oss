@@ -124,6 +124,70 @@ export const api = {
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
     getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
 
+    // Git Integration
+    listTaskCommits: (taskId) => request(`/tasks/${taskId}/commits`),
+    linkCommit: (taskId, data) => request(`/tasks/${taskId}/commits`, { method: 'POST', body: JSON.stringify(data) }),
+    linkPR: (taskId, data) => request(`/tasks/${taskId}/prs`, { method: 'POST', body: JSON.stringify(data) }),
+    suggestBranch: (taskId) => request(`/tasks/${taskId}/suggest-branch`),
+
     // Generic
     request,
+
+    // Forge
+    forge: {
+        getStats: () => request('/forge/stats'),
+        listAgents: (status) => request(`/forge/agents${status ? `?status=${status}` : ''}`),
+        getAgent: (id) => request(`/forge/agents/${id}`),
+        createAgent: (data) => request('/forge/agents', { method: 'POST', body: JSON.stringify(data) }),
+        updateAgent: (id, data) => request(`/forge/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+        deleteAgent: (id) => request(`/forge/agents/${id}`, { method: 'DELETE' }),
+        heartbeat: (id, status = 'online') => request(`/forge/agents/${id}/heartbeat`, { method: 'POST', body: JSON.stringify({ status }) }),
+        listRuns: (params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '') qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/runs${q ? '?' + q : ''}`);
+        },
+        getRun: (id) => request(`/forge/runs/${id}`),
+        createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
+        startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
+        completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
+
+        // Messages (chat)
+        listMessages: (agentId, params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '') qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/agents/${agentId}/messages${q ? '?' + q : ''}`);
+        },
+        createMessage: (agentId, data) => request(`/forge/agents/${agentId}/messages`, { method: 'POST', body: JSON.stringify(data) }),
+
+        // Webhook logs
+        listWebhookLogs: (agentId, params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '') qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/agents/${agentId}/webhook-logs${q ? '?' + q : ''}`);
+        },
+
+        // Schedule
+        updateSchedule: (agentId, data) => request(`/forge/agents/${agentId}/schedule`, { method: 'PUT', body: JSON.stringify(data) }),
+
+        // Costs
+        getAgentCosts: (agentId) => request(`/forge/agents/${agentId}/costs`),
+        estimateCost: (data) => request('/forge/cost-estimate', { method: 'POST', body: JSON.stringify(data) }),
+        getPricing: () => request('/forge/pricing'),
+
+        // OpenClaw integration
+        getRuntimeStatus: (agentId) => request(`/forge/agents/${agentId}/runtime/status`),
+        sendRuntimeChat: (agentId, data) => request(`/forge/agents/${agentId}/runtime/chat`, { method: 'POST', body: JSON.stringify(data) }),
+        getOpenClawOverview: () => request('/forge/openclaw/overview'),
+        syncOpenClaw: () => request('/forge/openclaw/sync', { method: 'POST' }),
+    },
 };

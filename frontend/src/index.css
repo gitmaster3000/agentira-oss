@@ -2,185 +2,252 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Material Design 3 — Dark Theme (default) ─────────────────────── */
 :root {
-  --bg-app: #0f1115;
-  --bg-panel: #16181d;
-  --bg-card: #1c1e24;
-  --bg-hover: #252830;
+  --bg-app: #0e1117;
+  --bg-panel: #161b22;
+  --bg-card: #1c2128;
+  --bg-hover: #272d36;
 
-  --border-subtle: #2d313a;
-  --border-active: #3f4451;
+  --border-subtle: #30363d;
+  --border-active: #484f58;
 
-  --text-primary: #ecedee;
-  --text-secondary: #9aa0a6;
-  --text-tertiary: #5f6368;
+  --text-primary: #f0f3f6;
+  --text-secondary: #b1bac4;
+  --text-tertiary: #768390;
 
-  --accent-primary: #7c4dff;
-  --accent-hover: #9e75ff;
-  --accent-subtle: rgba(124, 77, 255, 0.1);
+  --accent-primary: #c9b8ff;
+  --accent-hover: #ddd1ff;
+  --accent-subtle: rgba(201, 184, 255, 0.1);
+  --accent-on: #2d1a6e;
 
-  --status-backlog: #5f6368;
-  --status-todo: #3498db;
-  --status-inprogress: #f1c40f;
-  --status-review: #9b59b6;
-  --status-done: #2ecc71;
+  --bg-surface-purple: rgba(201, 184, 255, 0.04);
+  --bg-dropdown-hover: rgba(201, 184, 255, 0.08);
 
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --status-backlog: #938f99;
+  --status-todo: #8ab4f8;
+  --status-inprogress: #fdd663;
+  --status-review: #c58af9;
+  --status-done: #81c995;
 
-  /* Layout Variables */
-  --navbar-height: 56px;
-  --sidebar-w-expanded: 240px;
-  --sidebar-w-collapsed: 64px;
+  --font-sans: 'Inter', 'Roboto', system-ui, -apple-system, sans-serif;
+
+  /* Layout */
+  --navbar-height: 64px;
+  --sidebar-w-expanded: 256px;
+  --sidebar-w-collapsed: 72px;
   --panel-width: 600px;
 }
 
+/* ─── Material Design 3 — Light Theme ──────────────────────────────── */
 :root[data-theme="light"] {
-  --bg-app: #f0f2f5;
-  --bg-panel: #ffffff;
+  --bg-app: #ffffff;
+  --bg-panel: #f6f8fa;
   --bg-card: #ffffff;
-  --bg-hover: #e8eaed;
+  --bg-hover: #f0f2f5;
 
-  --border-subtle: #dadce0;
-  --border-active: #bdc1c6;
+  --border-subtle: #d8dee4;
+  --border-active: #c4cad2;
 
-  --text-primary: #202124;
-  --text-secondary: #5f6368;
-  --text-tertiary: #9aa0a6;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-tertiary: #8b949e;
 
-  --accent-primary: #6200ee;
-  --accent-hover: #7c4dff;
-  --accent-subtle: rgba(98, 0, 238, 0.08);
+  --accent-primary: #6e56cf;
+  --accent-hover: #7d66d9;
+  --accent-subtle: rgba(110, 86, 207, 0.06);
+  --accent-on: #ffffff;
+
+  --bg-surface-purple: #f6f8fa;
+  --bg-dropdown-hover: rgba(110, 86, 207, 0.05);
+
+  --status-backlog: #79747e;
+  --status-todo: #1a73e8;
+  --status-inprogress: #f9ab00;
+  --status-review: #9334e6;
+  --status-done: #1e8e3e;
 }
 
+/* ─── Base ─────────────────────────────────────────────────────────── */
 @layer base {
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
   body {
-    @apply bg-bg-app text-primary font-sans antialiased;
+    @apply bg-bg-app font-sans;
+    color: var(--text-primary);
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: optimizeLegibility;
   }
 
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    @apply font-semibold text-primary;
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  * {
+    border-color: var(--border-subtle);
   }
 }
 
+/* ─── MD3 Components ───────────────────────────────────────────────── */
 @layer components {
+
+  /* Filled button */
   .btn {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all duration-200 text-sm border border-transparent;
+    @apply inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-medium text-sm transition-all duration-200;
   }
 
   .btn-primary {
-    @apply bg-accent-primary text-white hover:bg-accent-hover hover:-translate-y-px;
+    background-color: var(--accent-primary);
+    color: var(--accent-on);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15);
+    filter: brightness(1.08);
   }
 
+  /* Ghost / text button */
   .btn-ghost {
-    @apply bg-transparent text-secondary hover:bg-bg-hover hover:text-primary;
+    @apply bg-transparent;
+    color: var(--accent-primary);
+  }
+  .btn-ghost:hover {
+    background-color: var(--accent-subtle);
   }
 
+  /* Text field — MD3 outlined */
   .input {
-    @apply bg-bg-panel border border-border-subtle text-primary px-3 py-2 rounded-md w-full transition-colors focus:outline-none focus:border-accent-primary;
+    @apply w-full px-4 py-3 text-sm transition-colors;
+    border-radius: 12px;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+  }
+  select.input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23768390' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+    cursor: pointer;
   }
 
+  /* MD3 Card — filled */
   .card {
-    @apply bg-bg-card border border-border-subtle rounded-lg p-4;
+    @apply rounded-md p-4;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+  }
+
+  /* Dropdown / Menu — MD3 */
+  .dropdown-menu {
+    @apply absolute py-2 overflow-hidden;
+    border-radius: 12px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 2px 6px 2px rgba(0,0,0,0.15);
+    z-index: 60;
+    min-width: 112px;
+  }
+
+  .dropdown-item {
+    @apply w-full text-left px-4 py-2.5 text-sm transition-colors cursor-pointer flex items-center gap-3;
+    color: var(--text-primary);
+    border-radius: 0;
+  }
+  .dropdown-item:hover {
+    background-color: var(--bg-hover);
   }
 }
 
-/* Scrollbar utilities */
+/* ─── Scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: var(--bg-app);
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
   background: var(--border-active);
-  border-radius: 4px;
+  border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #505560;
+  background: var(--text-tertiary);
 }
 
-/* Animations */
-@keyframes slideInRight {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+/* Column scroll: thin scrollbar, visible on hover only */
+.column-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 }
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
+.column-scroll:hover {
+  scrollbar-color: var(--border-active) transparent;
 }
-
-.animate-slide-in {
-  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.column-scroll::-webkit-scrollbar {
+  width: 4px;
 }
-
-.animate-fade-in {
-  animation: fadeIn 0.2s ease-out forwards;
+.column-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
-
-/* Jira-style utility classes */
-.text-text-primary {
-  color: var(--text-primary);
+.column-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
 }
-
-.text-text-secondary {
-  color: var(--text-secondary);
+.column-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--border-active);
 }
-
-.text-text-tertiary {
-  color: var(--text-tertiary);
-}
-
-.bg-bg-panel {
-  background-color: var(--bg-panel);
-}
-
-.bg-bg-app {
-  background-color: var(--bg-app);
-}
-
-.bg-bg-card {
-  background-color: var(--bg-card);
-}
-
-.bg-bg-hover {
-  background-color: var(--bg-hover);
+.column-scroll:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: var(--border-subtle);
-  border-radius: 10px;
+  border-radius: 9999px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--border-active);
 }
+
+/* ─── Animations ───────────────────────────────────────────────────── */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-slide-in {
+  animation: slideInRight 0.25s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+.animate-fade-in {
+  animation: fadeIn 0.15s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+/* ─── Utility classes ──────────────────────────────────────────────── */
+.text-text-primary { color: var(--text-primary); }
+.text-text-secondary { color: var(--text-secondary); }
+.text-text-tertiary { color: var(--text-tertiary); }
+.bg-bg-panel { background-color: var(--bg-panel); }
+.bg-bg-app { background-color: var(--bg-app); }
+.bg-bg-card { background-color: var(--bg-card); }
+.bg-bg-hover { background-color: var(--bg-hover); }

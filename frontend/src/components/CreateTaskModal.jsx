@@ -35,17 +35,19 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center catch-click" onClick={onClose}>
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onClose}>
             <div
-                className="bg-card p-6 rounded-lg w-full max-w-md border border-border-subtle shadow-xl"
+                className="w-full max-w-md rounded-xl shadow-2xl overflow-hidden"
                 onClick={e => e.stopPropagation()}
-                style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)' }}
+                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
             >
-                <h2 className="text-xl font-bold mb-4">New Task</h2>
+                <div className="px-6 py-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>New Task</h2>
+                </div>
 
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
                     <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Title</label>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Title</label>
                         <input
                             autoFocus
                             className="input"
@@ -56,7 +58,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-semibold text-secondary mb-1">Description</label>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Description</label>
                         <textarea
                             className="input resize-none h-24"
                             value={formData.description}
@@ -66,7 +68,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
 
                     <div className="flex gap-4">
                         <div className="flex-1">
-                            <label className="block text-xs font-semibold text-secondary mb-1">Priority</label>
+                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Priority</label>
                             <select
                                 className="input"
                                 value={formData.priority}
@@ -79,7 +81,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                             </select>
                         </div>
                         <div className="flex-1">
-                            <label className="block text-xs font-semibold text-secondary mb-1">Assignee</label>
+                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Assignee</label>
                             <select
                                 className="input"
                                 value={formData.assignee}
@@ -95,7 +97,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         </div>
                     </div>
 
-                    <div className="flex justify-end gap-2 mt-4">
+                    <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                         <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
                         <button type="submit" disabled={loading} className="btn btn-primary">
                             {loading ? 'Creating...' : 'Create Task'}

@@ -1,6 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api';
-import { Paperclip, Pencil, Trash2, X } from 'lucide-react';
+import {
+    Paperclip, Pencil, Trash2, X,
+    GitBranch, GitCommit, GitPullRequest, ExternalLink, Copy, Check,
+    CheckSquare, Square, Plus
+} from 'lucide-react';
+
+function formatBranchDisplay(val) {
+    if (!val) return '';
+    const treeMatch = val.match(/\/tree\/(.+)$/);
+    if (treeMatch) return treeMatch[1];
+    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
+    return val;
+}
+
+function formatPrDisplay(val) {
+    if (!val) return '';
+    const prMatch = val.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
+    if (prMatch) return `${prMatch[1]}#${prMatch[2]}`;
+    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
+    return val;
+}
 
 export function TaskDetailModal({ task, onClose, onUpdate }) {
     const [loading, setLoading] = useState(false);
@@ -9,6 +29,14 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     const [profiles, setProfiles] = useState([]);
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
+    const [commits, setCommits] = useState([]);
+    const [dodItems, setDodItems] = useState(task.dod_items || []);
+    const [newDodText, setNewDodText] = useState('');
+    const [editingBranch, setEditingBranch] = useState(false);
+    const [branchValue, setBranchValue] = useState(task.branch || '');
+    const [editingPrUrl, setEditingPrUrl] = useState(false);
+    const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
+    const [copiedField, setCopiedField] = useState(null);
 
     // Edit state
     const [isEditing, setIsEditing] = useState(false);
@@ -17,6 +45,10 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     useEffect(() => {
         loadActivity();
         loadAttachments();
+        loadCommits();
+        setDodItems(task.dod_items || []);
+        setBranchValue(task.branch || '');
+        setPrUrlValue(task.pr_url || '');
         api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
         const interval = setInterval(loadActivity, 3000);
         return () => clearInterval(interval);
@@ -38,6 +70,58 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const loadCommits = async () => {
+        try {
+            const data = await api.listTaskCommits(task.id);
+            if (Array.isArray(data)) setCommits(data);
+        } catch (err) {}
+    };
+
+    const copyToClipboard = (text, field) => {
+        navigator.clipboard.writeText(text);
+        setCopiedField(field);
+        setTimeout(() => setCopiedField(null), 800);
+    };
+
+    const saveBranch = async (val) => {
+        setEditingBranch(false);
+        if (val !== (task.branch || '')) {
+            await api.updateTask(task.id, { branch: val });
+            onUpdate();
+        }
+    };
+
+    const savePrUrl = async (val) => {
+        setEditingPrUrl(false);
+        if (val !== (task.pr_url || '')) {
+            await api.updateTask(task.id, { pr_url: val });
+            onUpdate();
+        }
+    };
+
+    const toggleDodItem = async (index) => {
+        const updated = dodItems.map((item, i) => i === index ? { ...item, checked: !item.checked } : item);
+        setDodItems(updated);
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
+    };
+
+    const addDodItem = async () => {
+        if (!newDodText.trim()) return;
+        const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
+        setDodItems(updated);
+        setNewDodText('');
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
+    };
+
+    const removeDodItem = async (index) => {
+        const updated = dodItems.filter((_, i) => i !== index);
+        setDodItems(updated);
+        await api.updateTask(task.id, { dod_items: updated });
+        onUpdate();
     };
 
     const handleUpload = async (e) => {
@@ -125,7 +209,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     return (
         <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
             <div
-                className="w-full max-w-3xl rounded-lg shadow-xl flex flex-col"
+                className="w-full max-w-3xl rounded-lg shadow-elevation-3 flex flex-col"
                 onClick={e => e.stopPropagation()}
                 style={{ backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', border: '1px solid var(--border-subtle)', maxHeight: '85vh' }}
             >
@@ -144,13 +228,13 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             </h2>
                         )}
                         <div className="flex gap-2 items-center mt-1 text-xs">
-                            <span className="px-2 py-0.5 rounded" style={{
+                            <span className="px-2 py-0.5 rounded-md" style={{
                                 backgroundColor: task.status === 'done' ? 'rgba(46,204,113,0.15)' : 'var(--bg-panel)',
                                 color: task.status === 'done' ? '#2ecc71' : 'var(--text-secondary)'
                             }}>
                                 {task.status?.replace('_', ' ')}
                             </span>
-                            <span className="px-2 py-0.5 rounded" style={{
+                            <span className="px-2 py-0.5 rounded-md" style={{
                                 backgroundColor: `${priorityColors[task.priority]}20`,
                                 color: priorityColors[task.priority]
                             }}>
@@ -162,7 +246,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                     <div className="flex items-center gap-1">
                         <button
                             onClick={() => setIsEditing(v => !v)}
-                            className="p-2 rounded hover:bg-bg-hover"
+                            className="p-2 rounded-xl hover:bg-bg-hover transition-colors"
                             style={{ color: isEditing ? 'var(--accent-primary)' : 'var(--text-secondary)' }}
                             title="Edit task"
                         >
@@ -170,13 +254,13 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                         </button>
                         <button
                             onClick={handleDelete}
-                            className="p-2 rounded hover:bg-bg-hover"
+                            className="p-2 rounded-xl hover:bg-bg-hover transition-colors"
                             style={{ color: 'var(--text-secondary)' }}
                             title="Delete task"
                         >
                             <Trash2 className="w-4 h-4" />
                         </button>
-                        <button onClick={onClose} className="p-2 rounded hover:bg-bg-hover" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
+                        <button onClick={onClose} className="p-2 rounded-xl hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-secondary)' }}><X className="w-4 h-4" /></button>
                     </div>
                 </div>
 
@@ -195,7 +279,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 />
                             ) : (
                                 <div
-                                    className="text-sm whitespace-pre-wrap cursor-pointer min-h-[3rem] rounded p-2"
+                                    className="text-sm cursor-pointer min-h-[3rem] rounded-lg p-2 whitespace-pre-wrap break-words overflow-x-auto"
                                     style={{ color: task.description ? 'var(--text-primary)' : 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}
                                     onClick={() => setIsEditing(true)}
                                 >
@@ -244,7 +328,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 ) : (
                                     <div className="flex gap-1 flex-wrap">
                                         {(task.tags || []).length > 0 ? task.tags.map((t, i) => (
-                                            <span key={i} className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>{t}</span>
+                                            <span key={i} className="text-xs px-2 py-0.5 rounded-md" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>{t}</span>
                                         )) : <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>No tags</span>}
                                     </div>
                                 )}
@@ -264,23 +348,131 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             </div>
                         )}
 
+                        {/* Definition of Done */}
+                        <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <div className="flex items-center justify-between mb-3">
+                                <label className="text-xs font-bold uppercase flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                                    <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
+                                </label>
+                                {dodItems.length > 0 && (
+                                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                                        {dodItems.filter(i => i.checked).length}/{dodItems.length}
+                                    </span>
+                                )}
+                            </div>
+                            {dodItems.length > 0 && (
+                                <div className="w-full rounded-full h-1.5 mb-3" style={{ backgroundColor: 'var(--bg-app)' }}>
+                                    <div className="h-1.5 rounded-full transition-all duration-300" style={{
+                                        width: `${(dodItems.filter(i => i.checked).length / dodItems.length) * 100}%`,
+                                        backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
+                                    }} />
+                                </div>
+                            )}
+                            <div className="space-y-1">
+                                {dodItems.map((item, i) => (
+                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded-lg hover:bg-bg-hover transition-colors">
+                                        <button onClick={() => toggleDodItem(i)} className="flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
+                                            {item.checked ? <CheckSquare className="w-4 h-4 text-green-500" /> : <Square className="w-4 h-4" />}
+                                        </button>
+                                        <span className="text-sm flex-1" style={{ color: item.checked ? 'var(--text-tertiary)' : 'var(--text-primary)', textDecoration: item.checked ? 'line-through' : 'none' }}>{item.text}</span>
+                                        <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-all p-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex items-center gap-2 mt-2">
+                                <input className="flex-1 text-sm p-1.5 rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                    placeholder="Add DOD item..." value={newDodText} onChange={(e) => setNewDodText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addDodItem()} />
+                                <button onClick={addDodItem} className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors" style={{ color: 'var(--text-tertiary)' }}>
+                                    <Plus className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Git Integration */}
+                        <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                            <label className="text-xs font-bold uppercase flex items-center gap-1.5 mb-3" style={{ color: 'var(--text-primary)' }}>
+                                <GitBranch className="w-3.5 h-3.5" /> Git
+                            </label>
+                            <div className="mb-3">
+                                <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Branch</div>
+                                {editingBranch ? (
+                                    <input className="w-full px-2 py-1.5 text-sm font-mono rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        value={branchValue} onChange={e => setBranchValue(e.target.value)} onBlur={() => saveBranch(branchValue)} onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)} autoFocus />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {branchValue ? (
+                                            <>
+                                                {branchValue.startsWith('http') ? (
+                                                    <a href={branchValue} target="_blank" rel="noopener noreferrer" className="text-sm font-mono truncate" style={{ color: 'var(--accent-primary)' }}>{formatBranchDisplay(branchValue)}</a>
+                                                ) : (
+                                                    <span className="text-sm font-mono truncate" style={{ color: 'var(--text-primary)' }}>{branchValue}</span>
+                                                )}
+                                                <button onClick={() => setEditingBranch(true)} className="p-0.5 transition-colors flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} title="Edit"><Pencil className="w-3 h-3" /></button>
+                                                <button onClick={() => copyToClipboard(branchValue, 'branch')} className="p-0.5 transition-colors flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} title="Copy">{copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}</button>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs italic cursor-pointer" style={{ color: 'var(--text-tertiary)' }} onClick={() => setEditingBranch(true)}>No branch set</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="mb-3">
+                                <div className="text-[10px] font-bold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Pull Request</div>
+                                {editingPrUrl ? (
+                                    <input className="w-full px-2 py-1.5 text-sm rounded-lg" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}
+                                        value={prUrlValue} onChange={e => setPrUrlValue(e.target.value)} onBlur={() => savePrUrl(prUrlValue)} onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)} placeholder="https://github.com/..." autoFocus />
+                                ) : (
+                                    <div className="flex items-center gap-1.5">
+                                        {prUrlValue ? (
+                                            <>
+                                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm truncate" style={{ color: 'var(--accent-primary)' }}>{formatPrDisplay(prUrlValue)}</a>
+                                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 transition-colors flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} title="Edit"><Pencil className="w-3 h-3" /></button>
+                                                <button onClick={() => copyToClipboard(prUrlValue, 'pr')} className="p-0.5 transition-colors flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} title="Copy">{copiedField === 'pr' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}</button>
+                                            </>
+                                        ) : (
+                                            <span className="text-xs italic cursor-pointer" style={{ color: 'var(--text-tertiary)' }} onClick={() => setEditingPrUrl(true)}>No PR linked</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                            {commits.length > 0 && (
+                                <>
+                                    <div className="text-[10px] font-bold uppercase mb-1.5" style={{ color: 'var(--text-secondary)' }}>Commits & PRs ({commits.length})</div>
+                                    <div className="space-y-1.5">
+                                        {commits.map((c) => (
+                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-app)', border: '1px solid var(--border-subtle)' }}>
+                                                {c.kind === 'pr' ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" /> : <GitCommit className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>{c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}{c.message}</div>
+                                                    <div className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{c.author}{c.branch ? ` on ${c.branch}` : ''}</div>
+                                                </div>
+                                                {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}><ExternalLink className="w-3 h-3" /></a>}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
                         {/* Attachments */}
                         <div className="mt-5 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                             <div className="flex items-center justify-between mb-3">
                                 <label className="block text-xs font-semibold uppercase" style={{ color: 'var(--text-secondary)' }}>Attachments ({attachments.length})</label>
-                                <label className="text-xs font-semibold px-3 py-1 rounded cursor-pointer" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
+                                <label className="text-xs font-semibold px-3 py-1 rounded-lg cursor-pointer" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
                                     {uploading ? 'Uploading…' : '+ Upload'}
                                     <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
                                 </label>
                             </div>
                             {attachments.length === 0 ? (
-                                <div className="text-xs py-3 text-center rounded" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}>
+                                <div className="text-xs py-3 text-center rounded-lg" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-panel)' }}>
                                     No attachments yet
                                 </div>
                             ) : (
                                 <div className="space-y-2">
                                     {attachments.map(att => (
-                                        <div key={att.id} className="flex items-center gap-3 p-2 rounded text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
+                                        <div key={att.id} className="flex items-center gap-3 p-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
                                             <Paperclip className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
                                             <div className="flex-1 min-w-0">
                                                 <a
@@ -298,7 +490,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                             </div>
                                             <button
                                                 onClick={() => handleDeleteAttachment(att.id, att.filename)}
-                                                className="p-1 rounded text-xs"
+                                                className="p-1 rounded-lg text-xs"
                                                 style={{ color: 'var(--text-tertiary)' }}
                                                 title="Delete"
                                             >
