@@ -48,6 +48,7 @@ jobs:
 
       - name: Start API server
         run: |
+          python -c "from backend.db import init_db; init_db()"
           python -m uvicorn backend.rest_api:app --host 127.0.0.1 --port 8000 &
           sleep 3
           curl -sf http://127.0.0.1:8000/api/projects || (echo "Server failed to start" && exit 1)
