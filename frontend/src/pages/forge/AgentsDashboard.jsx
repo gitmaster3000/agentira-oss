@@ -86,7 +86,7 @@ export function AgentsDashboard() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map((agent) => (
-                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} />
+                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} onRefresh={loadAgents} />
                     ))}
                 </div>
             )}
@@ -95,7 +95,7 @@ export function AgentsDashboard() {
     );
 }
 
-function AgentCard({ agent, onDelete, onClick }) {
+function AgentCard({ agent, onDelete, onClick, onRefresh }) {
     const status = STATUS_STYLES[agent.status] || STATUS_STYLES.offline;
     const StatusIcon = status.icon;
 
@@ -119,6 +119,23 @@ function AgentCard({ agent, onDelete, onClick }) {
                         <StatusIcon className="w-3 h-3" />
                         {status.label}
                     </span>
+                    {agent.status === 'busy' && (
+                        <button
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                    await api.forge.resetAgentStatus(agent.id);
+                                    if (onRefresh) onRefresh();
+                                } catch (err) {
+                                    console.error('Reset failed:', err);
+                                }
+                            }}
+                            className="p-1 rounded hover:bg-yellow-500/20 text-yellow-400 transition-all"
+                            title="Reset — unstick busy status"
+                        >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                     <button
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all"

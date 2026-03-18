@@ -85,6 +85,22 @@ export function AgentDetail() {
                     <div className="flex items-center gap-4 text-sm text-text-secondary">
                         <span className="flex items-center gap-1"><Play className="w-3.5 h-3.5" /> {agent.total_runs} runs</span>
                         <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" /> ${agent.total_cost_usd.toFixed(4)}</span>
+                        {agent.status === 'busy' && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await api.forge.resetAgentStatus(agentId);
+                                        loadAgent();
+                                    } catch (err) {
+                                        console.error('Reset failed:', err);
+                                    }
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                                title="Reset status — unstick agent and fail orphaned runs"
+                            >
+                                <RefreshCw className="w-3 h-3" /> Reset
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -125,30 +141,144 @@ export function AgentDetail() {
 
 function OverviewTab({ agent }) {
     const [costs, setCosts] = useState(null);
+    const [runtimeCosts, setRuntimeCosts] = useState(null);
     const [runtimeStatus, setRuntimeStatus] = useState(null);
+    const [pricing, setPricing] = useState(null);
+    const [costFocus, setCostFocus] = useState(false);
+    const costRef = useRef(null);
 
     useEffect(() => {
         api.forge.getAgentCosts(agent.id).then(setCosts).catch(console.error);
         api.forge.getRuntimeStatus(agent.id).then(setRuntimeStatus).catch(console.error);
+        api.forge.getRuntimeCosts(agent.id).then(setRuntimeCosts).catch(console.error);
+        api.forge.getPricing().then(setPricing).catch(console.error);
     }, [agent.id]);
+
+    const _price = (model) => {
+        if (!model || !pricing) return null;
+        return pricing[model] || pricing[`google/${model}`] || pricing[model.replace('google/', '')];
+    };
 
     return (
         <div className="p-6 space-y-6">
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <StatCard icon={Play} label="Total Runs" value={agent.total_runs} color="#7c4dff" />
-                <StatCard icon={DollarSign} label="Total Cost" value={`$${agent.total_cost_usd.toFixed(4)}`} color="#f1c40f" />
-                <StatCard icon={Clock} label="Last Heartbeat" value={agent.last_heartbeat ? timeAgo(agent.last_heartbeat) : 'Never'} color="#00bcd4" />
-                <StatCard
-                    icon={Calendar}
-                    label="Schedule"
-                    value={agent.schedule_enabled ? `${agent.schedule_start} - ${agent.schedule_end}` : 'Disabled'}
-                    sub={agent.schedule_enabled ? `${agent.schedule_tz} · ${agent.schedule_days}` : null}
-                    color="#2ecc71"
-                />
-            </div>
+            {!costFocus && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <StatCard icon={Play} label="Total Runs" value={agent.total_runs} color="#7c4dff" />
+                    <StatCard
+                        icon={DollarSign}
+                        label="Total Cost"
+                        value={`$${(runtimeCosts?.runtime?.estimated_cost_usd || agent.total_cost_usd).toFixed(4)}`}
+                        color="#f1c40f"
+                        onClick={() => { setCostFocus(true); setTimeout(() => costRef.current?.scrollIntoView({ behavior: 'smooth' }), 50); }}
+                        expandable
+                    />
+                    <StatCard icon={Clock} label="Last Heartbeat" value={agent.last_heartbeat ? timeAgo(agent.last_heartbeat) : 'Never'} color="#00bcd4" />
+                    <StatCard
+                        icon={Calendar}
+                        label="Schedule"
+                        value={agent.schedule_enabled ? `${agent.schedule_start} - ${agent.schedule_end}` : 'Disabled'}
+                        sub={agent.schedule_enabled ? `${agent.schedule_tz} · ${agent.schedule_days}` : null}
+                        color="#2ecc71"
+                    />
+                </div>
+            )}
 
-            {/* OpenClaw Live Status */}
+            {/* Cost Focus Header */}
+            {costFocus && (
+                <div className="flex items-center justify-between" ref={costRef}>
+                    <h2 className="text-lg font-bold text-text-primary flex items-center gap-2">
+                        <DollarSign className="w-5 h-5 text-yellow-400" />
+                        Cost &amp; Usage Detail
+                    </h2>
+                    <button onClick={() => setCostFocus(false)} className="text-sm text-accent-primary hover:underline">Back to Overview</button>
+                </div>
+            )}
+
+            {/* Cost Detail Table — shown in focus mode */}
+            {costFocus && (
+                <div className="card space-y-4">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-xs text-text-tertiary uppercase tracking-wider border-b border-border-subtle">
+                                    <th className="text-left pb-2 pr-4">Source / Model</th>
+                                    <th className="text-right pb-2 px-3">Input Tokens</th>
+                                    <th className="text-right pb-2 px-3">Output Tokens</th>
+                                    <th className="text-right pb-2 px-3">Cache Read</th>
+                                    <th className="text-right pb-2 px-3">Input $/1M</th>
+                                    <th className="text-right pb-2 px-3">Output $/1M</th>
+                                    <th className="text-right pb-2 px-3">Input Cost</th>
+                                    <th className="text-right pb-2 px-3">Output Cost</th>
+                                    <th className="text-right pb-2 pl-3">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {/* Runtime rows */}
+                                {runtimeCosts?.runtime && runtimeCosts.runtime.total_tokens > 0 && (() => {
+                                    const rt = runtimeCosts.runtime;
+                                    const p = _price(rt.model);
+                                    const inC = rt.total_input_tokens / 1_000_000 * (p?.input || 0);
+                                    const outC = rt.total_output_tokens / 1_000_000 * (p?.output || 0);
+                                    return (
+                                        <tr className="border-b border-border-subtle/50 bg-bg-hover/30">
+                                            <td className="py-3 pr-4">
+                                                <div className="text-text-primary font-medium">{rt.model}</div>
+                                                <div className="text-xs text-text-tertiary">Runtime (OpenClaw) · {rt.session_count} sessions</div>
+                                            </td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{rt.total_input_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{rt.total_output_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary font-mono">{(rt.total_cache_read || 0).toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.input}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.output}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${inC.toFixed(4)}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${outC.toFixed(4)}</td>
+                                            <td className="text-right py-3 pl-3 text-emerald-400 font-semibold">${(inC + outC).toFixed(4)}</td>
+                                        </tr>
+                                    );
+                                })()}
+                                {/* Forge tracked runs */}
+                                {costs && Object.entries(costs.by_model).map(([model, data]) => {
+                                    const p = _price(model);
+                                    const inC = data.input_tokens / 1_000_000 * (p?.input || 0);
+                                    const outC = data.output_tokens / 1_000_000 * (p?.output || 0);
+                                    const total = data.cost_usd || (inC + outC);
+                                    return (
+                                        <tr key={model} className="border-b border-border-subtle/50">
+                                            <td className="py-3 pr-4">
+                                                <div className="text-text-primary font-medium">{model}</div>
+                                                <div className="text-xs text-text-tertiary">Forge Runs · {data.runs} runs</div>
+                                            </td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{data.input_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{data.output_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">—</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.input}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.output}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${inC.toFixed(4)}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${outC.toFixed(4)}</td>
+                                            <td className="text-right py-3 pl-3 text-emerald-400 font-semibold">${total.toFixed(4)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    {/* Totals */}
+                    {runtimeCosts?.runtime && (
+                        <div className="flex justify-between items-center pt-3 border-t border-border-subtle text-sm">
+                            <span className="text-text-tertiary">
+                                Total: {(runtimeCosts.runtime.total_input_tokens + runtimeCosts.runtime.total_output_tokens).toLocaleString()} tokens
+                            </span>
+                            <span className="text-text-primary font-bold text-lg">
+                                ${(runtimeCosts.runtime.estimated_cost_usd || 0).toFixed(4)}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* OpenClaw Live Status — hidden in cost focus */}
+            {!costFocus && (
             <div className="card">
                 <h3 className="text-sm font-semibold text-text-primary mb-3">OpenClaw Status</h3>
                 {runtimeStatus?.error ? (
@@ -175,10 +305,12 @@ function OverviewTab({ agent }) {
                                         <span className="text-text-primary font-mono">{s.key}</span>
                                         <div className="flex items-center gap-3 text-text-secondary">
                                             <span>{s.model}</span>
-                                            <span>{(s.input_tokens + s.output_tokens).toLocaleString()} tok</span>
-                                            <span className={s.percent_used > 80 ? 'text-red-400 font-medium' : ''}>
-                                                {s.percent_used}% ctx
-                                            </span>
+                                            <span>{((s.input_tokens || 0) + (s.output_tokens || 0)).toLocaleString()} tok</span>
+                                            {s.percent_used != null && (
+                                                <span className={s.percent_used > 80 ? 'text-red-400 font-medium' : ''}>
+                                                    {s.percent_used}% ctx
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
                                 ))}
@@ -193,11 +325,55 @@ function OverviewTab({ agent }) {
                     </>
                 )}
             </div>
+            )}
 
-            {/* Cost Breakdown */}
-            {costs && Object.keys(costs.by_model).length > 0 && (
+            {/* Cost Breakdown — Runtime & Forge — hidden in cost focus */}
+            {!costFocus && runtimeCosts?.runtime && runtimeCosts.runtime.total_tokens > 0 && (
                 <div className="card">
-                    <h3 className="text-sm font-semibold text-text-primary mb-3">Cost Breakdown by Model</h3>
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Usage &amp; Cost (Runtime)</h3>
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Input Tokens</div>
+                                <div className="text-lg font-semibold text-text-primary">{runtimeCosts.runtime.total_input_tokens.toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Output Tokens</div>
+                                <div className="text-lg font-semibold text-text-primary">{runtimeCosts.runtime.total_output_tokens.toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Cache Read</div>
+                                <div className="text-lg font-semibold text-text-primary">{(runtimeCosts.runtime.total_cache_read || 0).toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Estimated Cost</div>
+                                <div className="text-lg font-semibold text-emerald-400">${runtimeCosts.runtime.estimated_cost_usd.toFixed(4)}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-text-tertiary px-1">
+                            <span>Model: <span className="text-text-secondary">{runtimeCosts.runtime.model}</span></span>
+                            <span>Sessions: <span className="text-text-secondary">{runtimeCosts.runtime.session_count}</span></span>
+                            {(() => {
+                                const m = runtimeCosts.runtime.model;
+                                if (!m || !pricing) return null;
+                                const p = pricing[m] || pricing[`google/${m}`] || pricing[m.replace('google/', '')];
+                                if (!p) return <span className="text-yellow-400">pricing not found for {m}</span>;
+                                const inCost = (runtimeCosts.runtime.total_input_tokens / 1_000_000 * p.input);
+                                const outCost = (runtimeCosts.runtime.total_output_tokens / 1_000_000 * p.output);
+                                return <>
+                                    <span>Input: <span className="text-text-secondary">${p.input}/1M tok</span></span>
+                                    <span>Output: <span className="text-text-secondary">${p.output}/1M tok</span></span>
+                                    <span>Calculated: <span className="text-emerald-400">${(inCost + outCost).toFixed(4)}</span></span>
+                                </>;
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {!costFocus && costs && Object.keys(costs.by_model).length > 0 && (
+                <div className="card">
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Cost Breakdown by Model (Forge Runs)</h3>
                     <div className="space-y-2">
                         {Object.entries(costs.by_model).map(([model, data]) => (
                             <div key={model} className="flex items-center justify-between px-3 py-2 rounded-md bg-bg-hover text-sm">
@@ -205,9 +381,10 @@ function OverviewTab({ agent }) {
                                     <span className="text-text-primary font-medium">{model}</span>
                                     <span className="text-text-tertiary ml-2">{data.runs} runs</span>
                                 </div>
-                                <div className="flex items-center gap-4 text-text-secondary">
-                                    <span>{(data.input_tokens + data.output_tokens).toLocaleString()} tokens</span>
-                                    <span className="font-medium">${data.cost_usd.toFixed(4)}</span>
+                                <div className="flex items-center gap-4 text-text-secondary text-xs">
+                                    <span>In: {data.input_tokens.toLocaleString()}</span>
+                                    <span>Out: {data.output_tokens.toLocaleString()}</span>
+                                    <span className="font-medium text-sm">${data.cost_usd.toFixed(4)}</span>
                                 </div>
                             </div>
                         ))}
@@ -516,10 +693,30 @@ function ConfigTab({ agent, onSaved }) {
     const [msg, setMsg] = useState('');
     const [showGwToken, setShowGwToken] = useState(false);
     const [showHooksToken, setShowHooksToken] = useState(false);
+    const [availableModels, setAvailableModels] = useState([]);
+
+    useEffect(() => {
+        api.forge.getOpenClawModels().then((data) => {
+            // Merge openclaw + pricing models, dedupe
+            const all = [...(data.openclaw_models || []), ...(data.pricing_models || [])];
+            const seen = new Set();
+            const deduped = all.filter((m) => {
+                if (seen.has(m.id)) return false;
+                seen.add(m.id);
+                return true;
+            });
+            setAvailableModels(deduped);
+        }).catch(() => {});
+    }, []);
 
     const saveAgent = async () => {
         setSaving(true);
         try {
+            // Update OpenClaw config if model changed and agent has a runtime name
+            const runtimeName = form.runtime_agent_name || agent.runtime_agent_name;
+            if (form.model !== agent.model && runtimeName) {
+                await api.forge.setOpenClawAgentModel(runtimeName, form.model).catch(() => {});
+            }
             await api.forge.updateAgent(agent.id, form);
             await api.forge.updateSchedule(agent.id, schedule);
             setMsg('Saved');
@@ -554,7 +751,22 @@ function ConfigTab({ agent, onSaved }) {
                     </div>
                     <div>
                         <label className="block text-xs text-text-tertiary mb-1">Model</label>
-                        <input className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
+                        <select className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
+                            <option value="">— select model —</option>
+                            {availableModels.length > 0 ? (
+                                availableModels.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                        {m.alias ? `${m.alias} (${m.id})` : m.id}
+                                    </option>
+                                ))
+                            ) : (
+                                <option value={form.model}>{form.model || 'loading...'}</option>
+                            )}
+                            {/* Keep current value if not in list */}
+                            {form.model && !availableModels.some(m => m.id === form.model) && (
+                                <option value={form.model}>{form.model} (current)</option>
+                            )}
+                        </select>
                     </div>
                     <div>
                         <label className="block text-xs text-text-tertiary mb-1">Executor</label>
@@ -858,17 +1070,21 @@ function LiveTab({ agentId, agent }) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-function StatCard({ icon: Icon, label, value, sub, color }) {
+function StatCard({ icon: Icon, label, value, sub, color, onClick, expandable }) {
     return (
-        <div className="card flex items-start gap-4">
+        <div
+            className={`card flex items-start gap-4 ${onClick ? 'cursor-pointer hover:border-border-active transition-colors' : ''}`}
+            onClick={onClick}
+        >
             <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
                 <Icon className="w-5 h-5" style={{ color }} />
             </div>
-            <div>
+            <div className="flex-1">
                 <div className="text-2xl font-bold text-text-primary">{value}</div>
                 <div className="text-sm text-text-secondary">{label}</div>
                 {sub && <div className="text-xs text-text-tertiary mt-1">{sub}</div>}
             </div>
+            {expandable && <ChevronDown className="w-4 h-4 text-text-tertiary mt-1" />}
         </div>
     );
 }
