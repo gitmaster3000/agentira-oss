@@ -148,6 +148,8 @@ export function Board() {
     const selectedTaskId = searchParams.get('selectedTask');
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
+    const [isPanelEditing, setIsPanelEditing] = useState(false);
+    const [pendingAction, setPendingAction] = useState(null);
     const addBtnRef = useRef(null);
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -441,6 +443,7 @@ export function Board() {
                     onUpdate={() => {
                         loadBoard();
                     }}
+                    onEditingChange={setIsPanelEditing}
                 />
             )}
 
