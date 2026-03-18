@@ -114,10 +114,15 @@ export function RoadmapView({ projectId }) {
                         {/* Data Rows */}
                         <div className="relative z-0">
                             {roadmapData.map((item, index) => {
-                                // Simple positioning logic based on mock dates for visual representation
-                                // In a real app, calculate left % and width % from exact date values relative to view bounds
-                                const startPos = index * 15 + 5; // pseudo-percentage
-                                const widthPos = 20 + (index % 3) * 10; // pseudo-percentage
+                                const viewStart = new Date('2026-03-01').getTime();
+                                const viewEnd = new Date('2026-06-30').getTime();
+                                const duration = viewEnd - viewStart;
+                                const tStart = new Date(item.start || '2026-03-01').getTime();
+                                const tEnd = new Date(item.end || '2026-03-15').getTime();
+                                const clampStart = Math.max(tStart, viewStart);
+                                const clampEnd = Math.min(tEnd, viewEnd);
+                                const startPos = ((clampStart - viewStart) / duration) * 100;
+                                const widthPos = Math.max(((clampEnd - clampStart) / duration) * 100, 2);
 
                                 return (
                                     <div key={item.id} className="flex border-b border-border-subtle hover:bg-bg-hover/50 transition-colors group">
@@ -154,3 +159,4 @@ export function RoadmapView({ projectId }) {
         </div>
     );
 }
+
