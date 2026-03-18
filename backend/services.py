@@ -399,6 +399,16 @@ def create_task(
                 raise PermissionError(f"User {actor} is not a member of project {project_id}")
 
         status_id = _get_status_id(db, status)
+        from datetime import datetime
+        start_dt = None
+        if start_date:
+            try: start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except ValueError: pass
+        due_dt = None
+        if due_date:
+            try: due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            except ValueError: pass
+
         task = Task(
             project_id=project_id,
             title=title,
@@ -407,6 +417,8 @@ def create_task(
             priority=TaskPriority(priority),
             assignee=assignee,
             tags=",".join(tags) if tags else "",
+            start_date=start_dt,
+            due_date=due_dt,
         )
         db.add(task)
         db.flush()

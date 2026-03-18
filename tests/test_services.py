@@ -70,3 +70,48 @@ def test_remove_project_member_clears_task_assignments():
     p_updated = services.get_project(p["id"])
     assert "alice" not in p_updated["members"]
     assert "bob" in p_updated["members"]
+
+
+def test_create_task_with_dates(test_db):
+    from backend import services, models
+    project = services.create_project("Dates Project", "Desc", actor="system")
+    
+    task = services.create_task(
+        project["id"],
+        "Task with dates",
+        start_date="2026-04-01T00:00:00Z",
+        due_date="2026-04-15T00:00:00Z",
+        actor="system"
+    )
+    
+    assert "start_date" in task
+    assert "due_date" in task
+    assert task["start_date"].startswith("2026-04-01")
+    assert task["due_date"].startswith("2026-04-15")
+
+def test_update_task_dates(test_db):
+    from backend import services
+    project = services.create_project("Update Dates", "Desc", actor="system")
+    task = services.create_task(project["id"], "Initial task", actor="system")
+    
+    updated = services.update_task(
+        task["id"],
+        start_date="2026-05-01T00:00:00Z",
+        due_date="2026-05-10T00:00:00Z",
+        actor="system"
+    )
+    assert updated["start_date"].startswith("2026-05-01")
+    assert updated["due_date"].startswith("2026-05-10")
+
+def test_get_roadmap(test_db):
+    from backend import services
+    project = services.create_project("Roadmap Proj", "Desc", actor="system")
+    services.create_task(
+        project["id"], "R1", start_date="2026-06-01T00:00:00Z", due_date="2026-06-15T00:00:00Z", actor="system"
+    )
+    
+    roadmap = services.get_roadmap(project["id"])
+    assert len(roadmap) == 1
+    assert roadmap[0]["title"] == "R1"
+    assert roadmap[0]["start"].startswith("2026-06-01")
+    assert roadmap[0]["end"].startswith("2026-06-15")
