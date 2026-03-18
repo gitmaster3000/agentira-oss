@@ -121,6 +121,17 @@ async def get_me(ctx: Context) -> str:
     actor = actor_ctx.get()
     return f"Hello! You are connected as Client ID: {actor}."
 
+
+@mcp.tool()
+async def update_profile(display_name: str = None, avatar_url: str = None, webhook_url: str = None, ctx: Context = None) -> dict:
+    """Update your own profile. Set webhook_url so Agentira can push task events to your runtime (ZeroClaw, OpenClaw, custom daemon, etc.)."""
+    actor = actor_ctx.get()
+    with services._session() as db:
+        p = services._get_profile_by_name(db, actor)
+        if not p:
+            raise ValueError(f"Profile not found: {actor}")
+        return services.update_profile(p.id, display_name=display_name, avatar_url=avatar_url, webhook_url=webhook_url)
+
 @mcp.tool()
 async def login(name: str, password: str) -> str:
     """Login with username and password to get your API Key."""

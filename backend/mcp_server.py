@@ -78,6 +78,7 @@ class ASGILoggingMiddleware:
         }
 
         logger.info(f"REQ: {method} {path}")
+        logger.info(f"Headers: {headers}")
 
         is_protected = path == "/mcp" or path.startswith("/mcp/")
 
@@ -258,11 +259,14 @@ async def update_task(
     priority: str = None,
     assignee: str = None,
     tags: list[str] = None,
+    branch: str = None,
+    pr_url: str = None,
+    dod_items: list[dict] = None,
     ctx: Context = None,
 ) -> dict:
-    """Update task metadata."""
+    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked})."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, actor=actor)
+    return services.update_task(task_id, title, description, priority, assignee, tags, dod_items=dod_items, branch=branch, pr_url=pr_url, actor=actor)
 
 @mcp.tool()
 async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:

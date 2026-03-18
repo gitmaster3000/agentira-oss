@@ -1,0 +1,29 @@
+{
+  "name": "openclaw-webhook-receiver",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenClaw plugin that receives Agentira webhook events and triggers agent runs",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "agentira",
+    "webhook"
+  ],
+  "license": "MIT",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "webhook-server.ts",
+    "config.ts",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}
