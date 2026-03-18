@@ -1,0 +1,37 @@
+meta {
+  name: Create Task with Dates
+  type: http
+  seq: 19
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{new_project_id}}",
+    "title": "Task with Start/Due Dates",
+    "description": "This is a task with explicit start and due dates.",
+    "status": "backlog",
+    "priority": "high",
+    "assignee": "Architect",
+    "tags": ["roadmap", "dates"],
+    "start_date": "2026-04-01T00:00:00Z",
+    "due_date": "2026-04-15T00:00:00Z",
+    "actor": "Architect"
+  }
+}
+
+vars:post-response {
+  new_task_with_dates_id: res.id
+}
+
+assert {
+  res.status: eq 200
+  res.body.title: eq "Task with Start/Due Dates"
+  res.body.start_date: eq "2026-04-01T00:00:00+00:00"
+  res.body.due_date: eq "2026-04-15T00:00:00+00:00"
+}
