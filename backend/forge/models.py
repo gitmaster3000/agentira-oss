@@ -28,6 +28,13 @@ class AgentStatus(str, enum.Enum):
     BUSY    = "busy"
 
 
+class MessageRole(str, enum.Enum):
+    USER      = "user"
+    ASSISTANT = "assistant"
+    SYSTEM    = "system"
+    TOOL      = "tool"
+
+
 class RunStatus(str, enum.Enum):
     PENDING   = "pending"
     RUNNING   = "running"
@@ -53,10 +60,23 @@ class Agent(Base):
     total_runs: Mapped[int]     = mapped_column(Integer, default=0)
     total_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    personality: Mapped[str | None] = mapped_column(Text, nullable=True)
+    runtime_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    runtime_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_gateway_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_hooks_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    runtime_agent_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    schedule_start: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    schedule_end: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    schedule_tz: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    schedule_days: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    schedule_enabled: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     profile = relationship("Profile")
     runs: Mapped[list["Run"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
+    messages: Mapped[list["AgentMessage"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
 
 
 # ── Run ──────────────────────────────────────────────────────────────────
@@ -88,3 +108,45 @@ class Run(Base):
     agent: Mapped["Agent"] = relationship(back_populates="runs")
     task = relationship("Task")
     project = relationship("Project")
+
+
+# ── AgentMessage ────────────────────────────────────────────────────────
+
+class AgentMessage(Base):
+    """A single message in an agent's chat history."""
+    __tablename__ = "forge_messages"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    agent_id: Mapped[str]       = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    run_id: Mapped[str | None]  = mapped_column(String(12), nullable=True)
+    role: Mapped[MessageRole]   = mapped_column(SAEnum(MessageRole), nullable=False)
+    content: Mapped[str]        = mapped_column(Text, default="")
+    tool_name: Mapped[str | None]   = mapped_column(String(120), nullable=True)
+    tool_input: Mapped[str | None]  = mapped_column(Text, nullable=True)
+    tool_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_tokens: Mapped[int]   = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int]  = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float]     = mapped_column(Float, default=0.0)
+    model_used: Mapped[str]     = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    agent: Mapped["Agent"] = relationship(back_populates="messages")
+
+
+# ── WebhookLog ──────────────────────────────────────────────────────────
+
+class WebhookLog(Base):
+    """Log entry for inbound/outbound webhook calls."""
+    __tablename__ = "forge_webhook_logs"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    agent_id: Mapped[str]       = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    direction: Mapped[str]      = mapped_column(String(10), default="outbound")
+    url: Mapped[str]            = mapped_column(String(500), default="")
+    event: Mapped[str]          = mapped_column(String(60), default="")
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    success: Mapped[bool]       = mapped_column(default=False)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
