@@ -423,9 +423,30 @@ def get_stats() -> dict:
         failed_runs = db.query(func.count(Run.id)).filter(Run.status == RunStatus.FAILED).scalar() or 0
         running_now = db.query(func.count(Run.id)).filter(Run.status == RunStatus.RUNNING).scalar() or 0
 
-        total_cost = db.query(func.sum(Run.cost_usd)).scalar() or 0.0
+        forge_cost = db.query(func.sum(Run.cost_usd)).scalar() or 0.0
         total_input_tokens = db.query(func.sum(Run.input_tokens)).scalar() or 0
         total_output_tokens = db.query(func.sum(Run.output_tokens)).scalar() or 0
+
+        # Pull live runtime costs for all agents with a runtime_url
+        from backend.forge import runtime_client
+        runtime_total = 0.0
+        runtime_input = 0
+        runtime_output = 0
+        agents = db.query(Agent).filter(Agent.runtime_url.isnot(None), Agent.runtime_url != "").all()
+        for a in agents:
+            agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
+            costs = runtime_client.get_costs(
+                a.runtime_url, a.runtime_gateway_token or "",
+                agent_name, a.runtime_type or "openclaw",
+            )
+            if costs:
+                runtime_total += costs.get("estimated_cost_usd", 0) or 0
+                runtime_input += costs.get("total_input_tokens", 0) or 0
+                runtime_output += costs.get("total_output_tokens", 0) or 0
+
+        total_cost = forge_cost + runtime_total
+        total_input_tokens += runtime_input
+        total_output_tokens += runtime_output
 
         return {
             "agents": {"total": total_agents, "online": online_agents, "busy": busy_agents},
