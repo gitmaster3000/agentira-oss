@@ -53,6 +53,8 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "priority": t.priority.value,
         "assignee": t.assignee,
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
+        "start_date": t.start_date.isoformat() if t.start_date else None,
+        "due_date": t.due_date.isoformat() if t.due_date else None,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "attachments_count": attachments_count,
@@ -374,6 +376,8 @@ def create_task(
     priority: str = "medium",
     assignee: str = "",
     tags: list[str] | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
     actor: str = "system",
 ) -> dict:
     """Create a task. Enforces membership check (unless admin/wildcard)."""
@@ -492,6 +496,8 @@ def update_task(
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    start_date: Optional[str] = None,
+    due_date: Optional[str] = None,
     actor: str = "system",
 ) -> dict:
     with _session() as db:
@@ -518,6 +524,26 @@ def update_task(
             diff["assignee"] = {"from": task.assignee, "to": assignee}
             task.assignee = assignee
             changes.append(f"assignee → {assignee}")
+        if start_date is not None:
+            from datetime import datetime
+            dt = None
+            try: dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except ValueError: pass
+            if dt != task.start_date:
+                diff["start_date"] = {"from": str(task.start_date), "to": str(dt)}
+                task.start_date = dt
+                changes.append(f"start_date -> {start_date}")
+
+        if due_date is not None:
+            from datetime import datetime
+            dt = None
+            try: dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            except ValueError: pass
+            if dt != task.due_date:
+                diff["due_date"] = {"from": str(task.due_date), "to": str(dt)}
+                task.due_date = dt
+                changes.append(f"due_date -> {due_date}")
+
         if tags is not None:
             old_tags = task.tags.split(",") if task.tags else []
             if old_tags != tags:
@@ -700,18 +726,18 @@ def get_roadmap(project_id: str) -> list[dict]:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        # For the roadmap, we'll return a list of tasks with a mock structure or filtered tasks
-        # Assuming the roadmap relies on tasks and maybe start/end dates if available, but for now we map task data.
         tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
         
         roadmap_data = []
-        for i, t in enumerate(tasks):
-            # We mock the dates based on created_at and index since we don't have explicit dates
+        for t in tasks:
+            start_date = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
+            due_date = t.due_date.isoformat() if t.due_date else (t.updated_at.isoformat() if t.updated_at != t.created_at else t.created_at.isoformat())
+            
             roadmap_data.append({
                 "id": t.id,
                 "title": t.title,
-                "start": t.created_at.strftime("%Y-%m-%d"),
-                "end": t.updated_at.strftime("%Y-%m-%d") if t.updated_at != t.created_at else (t.created_at.replace(day=min(t.created_at.day + 7, 28))).strftime("%Y-%m-%d"),
+                "start": start_date,
+                "end": due_date,
                 "progress": 100 if t.status.name == "done" else (50 if t.status.name == "in_progress" else 0),
                 "color": "bg-blue-500" if t.status.name == "done" else "bg-purple-500"
             })

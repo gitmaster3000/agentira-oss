@@ -208,6 +208,8 @@ async def create_task(
     priority: str = "medium",
     assignee: str = "",
     tags: list[str] = None,
+    start_date: str = None,
+    due_date: str = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new task in a project."""
@@ -215,7 +217,7 @@ async def create_task(
     try:
         logger.info(f"Tool create_task called for project='{project_id}', title='{title}', actor='{actor}'")
         res = services.create_task(
-            project_id, title, description, status, priority, assignee, tags, actor=actor
+            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, actor=actor
         )
         logger.debug(f"Tool create_task success: {res}")
         return res
@@ -258,6 +260,8 @@ async def update_task(
     priority: str = None,
     assignee: str = None,
     tags: list[str] = None,
+    start_date: str = None,
+    due_date: str = None,
     ctx: Context = None,
 ) -> dict:
     """Update task metadata."""
