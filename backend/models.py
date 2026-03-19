@@ -26,6 +26,12 @@ class TaskPriority(str, enum.Enum):
     CRITICAL = "critical"
 
 
+class NotificationTransport(str, enum.Enum):
+    WEBHOOK = "webhook"
+    SSE     = "sse"    # Phase 2 — column exists, dispatch logic ships later
+    POLL    = "poll"
+
+
 # ── Auth ─────────────────────────────────────────────────────────────────
 
 class Role(Base):
@@ -91,6 +97,10 @@ class Profile(Base):
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
+    webhook_url: Mapped[str] = mapped_column(String(500), default="")
+    notification_transport: Mapped[str | None] = mapped_column(
+        SAEnum(NotificationTransport), nullable=True, default=None
+    )
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -133,6 +143,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
+    webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     tasks: Mapped[list["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -151,6 +162,9 @@ class Task(Base):
     priority: Mapped[TaskPriority] = mapped_column(SAEnum(TaskPriority), default=TaskPriority.MEDIUM)
     assignee: Mapped[str] = mapped_column(String(120), default="")
     tags: Mapped[str] = mapped_column(String(500), default="")
+    dod_items: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: [{"text": "...", "checked": false}]
+    branch: Mapped[str] = mapped_column(String(255), default="")
+    pr_url: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -161,6 +175,8 @@ class Task(Base):
     activities: Mapped[list["Activity"]] = relationship(back_populates="task", cascade="all, delete-orphan",
                                                          order_by="Activity.created_at.desc()")
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    commits: Mapped[list["TaskCommit"]] = relationship(back_populates="task", cascade="all, delete-orphan",
+                                                        order_by="TaskCommit.committed_at.desc()")
 
 
 class Activity(Base):
@@ -193,3 +209,26 @@ class Attachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     task: Mapped["Task"] = relationship(back_populates="attachments")
+
+
+# ── Git Integration ─────────────────────────────────────────────────────
+
+class TaskCommit(Base):
+    """A git commit or PR linked to a task."""
+    __tablename__ = "task_commits"
+
+    id: Mapped[str]          = mapped_column(String(12), primary_key=True, default=_new_id)
+    task_id: Mapped[str]     = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    sha: Mapped[str]         = mapped_column(String(40), nullable=False)
+    message: Mapped[str]     = mapped_column(Text, default="")
+    author: Mapped[str]      = mapped_column(String(120), default="")
+    branch: Mapped[str]      = mapped_column(String(255), default="")
+    url: Mapped[str]         = mapped_column(String(500), default="")
+    repo: Mapped[str]        = mapped_column(String(255), default="")
+    kind: Mapped[str]        = mapped_column(String(20), default="commit")  # commit | pr
+    pr_state: Mapped[str]    = mapped_column(String(20), default="")       # open | closed | merged (for PRs)
+    pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    task: Mapped["Task"] = relationship(back_populates="commits")
