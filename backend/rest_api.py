@@ -29,6 +29,8 @@ class TaskCreate(BaseModel):
     priority: str = "medium"
     assignee: str = ""
     tags: list[str] = Field(default_factory=list)
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
     actor: str = "system"
 
 class TaskUpdate(BaseModel):
@@ -37,6 +39,8 @@ class TaskUpdate(BaseModel):
     priority: Optional[str] = None
     assignee: Optional[str] = None
     tags: Optional[list[str]] = None
+    start_date: Optional[str] = None
+    due_date: Optional[str] = None
     dod_items: Optional[list[dict]] = None
     branch: Optional[str] = None
     pr_url: Optional[str] = None
@@ -239,6 +243,8 @@ def api_create_task(body: TaskCreate):
             priority=body.priority,
             assignee=body.assignee,
             tags=body.tags,
+            start_date=body.start_date,
+            due_date=body.due_date,
             actor=body.actor,
         )
     except ValueError as e:
@@ -271,6 +277,8 @@ def api_update_task(task_id: str, body: TaskUpdate):
             priority=body.priority,
             assignee=body.assignee,
             tags=body.tags,
+            start_date=body.start_date,
+            due_date=body.due_date,
             dod_items=body.dod_items,
             branch=body.branch,
             pr_url=body.pr_url,
@@ -383,6 +391,13 @@ def api_revoke_permission(body: RolePermissionUpdate):
 def api_get_board(project_id: str):
     try:
         return services.get_board(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@app.get("/api/projects/{project_id}/roadmap")
+def api_get_roadmap(project_id: str):
+    try:
+        return services.get_roadmap(project_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 

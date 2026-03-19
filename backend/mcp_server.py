@@ -209,6 +209,8 @@ async def create_task(
     priority: str = "medium",
     assignee: str = "",
     tags: list[str] = None,
+    start_date: str = None,
+    due_date: str = None,
     ctx: Context = None,
 ) -> dict:
     """Create a new task in a project."""
@@ -216,7 +218,7 @@ async def create_task(
     try:
         logger.info(f"Tool create_task called for project='{project_id}', title='{title}', actor='{actor}'")
         res = services.create_task(
-            project_id, title, description, status, priority, assignee, tags, actor=actor
+            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, actor=actor
         )
         logger.debug(f"Tool create_task success: {res}")
         return res
@@ -259,14 +261,16 @@ async def update_task(
     priority: str = None,
     assignee: str = None,
     tags: list[str] = None,
+    start_date: str = None,
+    due_date: str = None,
     branch: str = None,
     pr_url: str = None,
     dod_items: list[dict] = None,
     ctx: Context = None,
 ) -> dict:
-    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked})."""
+    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, dod_items=dod_items, branch=branch, pr_url=pr_url, actor=actor)
+    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, actor=actor)
 
 @mcp.tool()
 async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:

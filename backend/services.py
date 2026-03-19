@@ -73,6 +73,8 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "priority": t.priority.value,
         "assignee": t.assignee,
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
+        "start_date": t.start_date.isoformat() if t.start_date else None,
+        "due_date": t.due_date.isoformat() if t.due_date else None,
         "dod_items": dod,
         "dod_progress": _dod_progress(dod),
         "branch": t.branch or "",
@@ -401,6 +403,8 @@ def create_task(
     priority: str = "medium",
     assignee: str = "",
     tags: list[str] | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
     actor: str = "system",
 ) -> dict:
     """Create a task. Enforces membership check (unless admin/wildcard)."""
@@ -422,6 +426,16 @@ def create_task(
                 raise PermissionError(f"User {actor} is not a member of project {project_id}")
 
         status_id = _get_status_id(db, status)
+        from datetime import datetime
+        start_dt = None
+        if start_date:
+            try: start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except ValueError: pass
+        due_dt = None
+        if due_date:
+            try: due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            except ValueError: pass
+
         task = Task(
             project_id=project_id,
             title=title,
@@ -430,6 +444,8 @@ def create_task(
             priority=TaskPriority(priority),
             assignee=assignee,
             tags=",".join(tags) if tags else "",
+            start_date=start_dt,
+            due_date=due_dt,
         )
         db.add(task)
         db.flush()
@@ -520,6 +536,8 @@ def update_task(
     priority: Optional[str] = None,
     assignee: Optional[str] = None,
     tags: Optional[list[str]] = None,
+    start_date: Optional[str] = None,
+    due_date: Optional[str] = None,
     dod_items: Optional[list[dict]] = None,
     branch: Optional[str] = None,
     pr_url: Optional[str] = None,
@@ -549,6 +567,26 @@ def update_task(
             diff["assignee"] = {"from": task.assignee, "to": assignee}
             task.assignee = assignee
             changes.append(f"assignee → {assignee}")
+        if start_date is not None:
+            from datetime import datetime
+            dt = None
+            try: dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except ValueError: pass
+            if dt != task.start_date:
+                diff["start_date"] = {"from": str(task.start_date), "to": str(dt)}
+                task.start_date = dt
+                changes.append(f"start_date -> {start_date}")
+
+        if due_date is not None:
+            from datetime import datetime
+            dt = None
+            try: dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            except ValueError: pass
+            if dt != task.due_date:
+                diff["due_date"] = {"from": str(task.due_date), "to": str(dt)}
+                task.due_date = dt
+                changes.append(f"due_date -> {due_date}")
+
         if tags is not None:
             old_tags = task.tags.split(",") if task.tags else []
             if old_tags != tags:
@@ -781,6 +819,30 @@ def get_board(project_id: str) -> dict:
             "project": _project_to_dict(project),
             "columns": board,
         }
+
+def get_roadmap(project_id: str) -> list[dict]:
+    with _session() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
+        
+        roadmap_data = []
+        for t in tasks:
+            start_date = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
+            due_date = t.due_date.isoformat() if t.due_date else (t.updated_at.isoformat() if t.updated_at != t.created_at else t.created_at.isoformat())
+            
+            roadmap_data.append({
+                "id": t.id,
+                "title": t.title,
+                "start": start_date,
+                "end": due_date,
+                "progress": 100 if t.status.name == "done" else (50 if t.status.name == "in_progress" else 0),
+                "color": "bg-blue-500" if t.status.name == "done" else "bg-purple-500"
+            })
+            
+        return roadmap_data
 
 
 # ── Status operations ───────────────────────────────────────────────────

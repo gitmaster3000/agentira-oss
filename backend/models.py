@@ -166,6 +166,8 @@ class Task(Base):
     branch: Mapped[str] = mapped_column(String(255), default="")
     pr_url: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="tasks")
