@@ -143,6 +143,8 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
+    key_prefix: Mapped[str] = mapped_column(String(10), nullable=False, default="PROJ")
+    next_task_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -172,6 +174,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    key: Mapped[str] = mapped_column(String(20), nullable=True, unique=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
