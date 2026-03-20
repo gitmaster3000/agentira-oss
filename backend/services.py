@@ -11,7 +11,7 @@ from backend.db import SessionLocal, init_db
 from backend.models import (
     Project, Task, Activity, TaskPriority, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
-    ProjectMember, Notification, TaskCommit
+    ProjectMember, Notification, TaskCommit, Epic
 )
 from backend.auth import has_permission
 from backend.notifications import broker
@@ -67,6 +67,9 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
     return {
         "id": t.id,
         "project_id": t.project_id,
+        "epic_id": t.epic_id,
+        "epic_name": t.epic.title if t.epic else None,
+        "epic_color": t.epic.color if t.epic else None,
         "title": t.title,
         "description": t.description,
         "status": t.status.name,
@@ -393,6 +396,94 @@ def remove_project_member(project_id: str, profile_name: str) -> bool:
         return True
 
 
+# ── Epic operations ─────────────────────────────────────────────────────
+
+def _epic_to_dict(e: Epic) -> dict:
+    return {
+        "id": e.id,
+        "project_id": e.project_id,
+        "title": e.title,
+        "description": e.description,
+        "status": e.status,
+        "assignee": e.assignee,
+        "color": e.color,
+        "task_count": len(e.tasks),
+        "created_at": e.created_at.isoformat(),
+    }
+
+def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", actor: str = "system") -> dict:
+    with _session() as db:
+        project = db.get(Project, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+        epic = Epic(
+            project_id=project_id,
+            title=title,
+            description=description,
+            color=color,
+        )
+        db.add(epic)
+        db.flush()
+        _log_activity(db, actor, "epic.create", f"Created epic: {title}", project_id=project_id)
+        db.commit()
+        db.refresh(epic)
+        return _epic_to_dict(epic)
+
+def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[dict]:
+    with _session() as db:
+        q = db.query(Epic)
+
+        if not has_permission(db, actor, "project.view_all"):
+            profile = _get_profile_by_name(db, actor)
+            if not profile:
+                return []
+            my_project_ids = [
+                pm.project_id for pm in 
+                db.query(ProjectMember.project_id).filter(ProjectMember.profile_id == profile.id).all()
+            ]
+            q = q.filter(Epic.project_id.in_(my_project_ids))
+
+        if project_id:
+            q = q.filter(Epic.project_id == project_id)
+
+        epics = q.order_by(Epic.created_at.desc()).all()
+        return [_epic_to_dict(e) for e in epics]
+
+def update_epic(epic_id: str, title: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None, actor: str = "system") -> dict:
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        if not epic:
+            raise ValueError(f"Epic {epic_id} not found")
+        changes = []
+        if title is not None and title != epic.title:
+            epic.title = title
+            changes.append(f"title -> {title}")
+        if description is not None and description != epic.description:
+            epic.description = description
+            changes.append("description updated")
+        if color is not None and color != epic.color:
+            epic.color = color
+            changes.append("color updated")
+        
+        if changes:
+            _log_activity(db, actor, "epic.update", "; ".join(changes), project_id=epic.project_id)
+            db.commit()
+            db.refresh(epic)
+        return _epic_to_dict(epic)
+
+def delete_epic(epic_id: str) -> bool:
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        if not epic:
+            return False
+        # Unlink tasks before deleting
+        for t in epic.tasks:
+            t.epic_id = None
+        db.delete(epic)
+        db.commit()
+        return True
+
+
 # ── Task operations ─────────────────────────────────────────────────────
 
 def create_task(
@@ -405,6 +496,7 @@ def create_task(
     tags: list[str] | None = None,
     start_date: str | None = None,
     due_date: str | None = None,
+    epic_id: str | None = None,
     actor: str = "system",
 ) -> dict:
     """Create a task. Enforces membership check (unless admin/wildcard)."""
@@ -446,6 +538,7 @@ def create_task(
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
+            epic_id=epic_id if epic_id and epic_id.strip() else None,
         )
         db.add(task)
         db.flush()
@@ -541,6 +634,7 @@ def update_task(
     dod_items: Optional[list[dict]] = None,
     branch: Optional[str] = None,
     pr_url: Optional[str] = None,
+    epic_id: Optional[str] = None,
     actor: str = "system",
 ) -> dict:
     with _session() as db:
@@ -610,6 +704,13 @@ def update_task(
             diff["pr_url"] = {"from": task.pr_url or "", "to": pr_url}
             task.pr_url = pr_url
             changes.append(f"PR linked" if pr_url else "PR unlinked")
+
+        if epic_id is not None:
+            new_epic_id = epic_id if epic_id.strip() else None
+            if task.epic_id != new_epic_id:
+                diff["epic_id"] = {"from": task.epic_id, "to": new_epic_id}
+                task.epic_id = new_epic_id
+                changes.append(f"epic_id → {new_epic_id}")
 
         if changes:
             _log_activity(
@@ -820,29 +921,87 @@ def get_board(project_id: str) -> dict:
             "columns": board,
         }
 
-def get_roadmap(project_id: str) -> list[dict]:
+def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
+    """Return roadmap data: tasks grouped by epic or tag, with milestones and date range."""
     with _session() as db:
         project = db.get(Project, project_id)
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
         tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
-        
-        roadmap_data = []
+
+        STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
+
+        # Group by epic or tag
+        groups: dict[str, list] = {}
+        milestones = []
+        all_dates = []
+
         for t in tasks:
-            start_date = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
-            due_date = t.due_date.isoformat() if t.due_date else (t.updated_at.isoformat() if t.updated_at != t.created_at else t.created_at.isoformat())
-            
-            roadmap_data.append({
+            if group_by == "tag":
+                tags = [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else []
+                group_key = tags[0] if tags else "Ungrouped"
+            else:
+                group_key = t.epic.title if t.epic else "Ungrouped"
+
+            start = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
+            end = t.due_date.isoformat() if t.due_date else None
+            status_name = t.status.name
+            progress = STATUS_PROGRESS.get(status_name, 0)
+
+            task_data = {
                 "id": t.id,
                 "title": t.title,
-                "start": start_date,
-                "end": due_date,
-                "progress": 100 if t.status.name == "done" else (50 if t.status.name == "in_progress" else 0),
-                "color": "bg-blue-500" if t.status.name == "done" else "bg-purple-500"
+                "status": status_name,
+                "priority": t.priority.value,
+                "assignee": t.assignee or None,
+                "start": start,
+                "end": end,
+                "progress": progress,
+            }
+
+            groups.setdefault(group_key, []).append(task_data)
+            all_dates.append(start)
+            if end:
+                all_dates.append(end)
+
+            # Completed tasks = milestones
+            if status_name == "done":
+                milestones.append({
+                    "id": t.id,
+                    "title": t.title,
+                    "date": t.updated_at.isoformat(),
+                    "epic": group_key,
+                })
+
+        # Build summaries
+        group_list = []
+        for name, tasks_in_group in groups.items():
+            total = len(tasks_in_group)
+            done = sum(1 for t in tasks_in_group if t["progress"] == 100)
+            in_flight = sum(1 for t in tasks_in_group if 0 < t["progress"] < 100)
+            group_list.append({
+                "name": name,
+                "tasks": tasks_in_group,
+                "total": total,
+                "done": done,
+                "in_progress": in_flight,
+                "progress": round(sum(t["progress"] for t in tasks_in_group) / total) if total else 0,
             })
-            
-        return roadmap_data
+
+        # Sort: groups with in-progress work first, then by progress desc
+        group_list.sort(key=lambda e: (-e["in_progress"], -e["progress"], e["name"]))
+
+        return {
+            "project": {"id": project.id, "name": project.name},
+            "epics": group_list,
+            "milestones": sorted(milestones, key=lambda m: m["date"], reverse=True)[:10],
+            "summary": {
+                "total_tasks": sum(e["total"] for e in group_list),
+                "total_done": sum(e["done"] for e in group_list),
+                "total_epics": len(group_list),
+            },
+        }
 
 
 # ── Status operations ───────────────────────────────────────────────────

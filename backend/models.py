@@ -146,9 +146,26 @@ class Project(Base):
     webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     tasks: Mapped[list["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     activities: Mapped[list["Activity"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Activity.created_at.desc()")
+
+
+class Epic(Base):
+    __tablename__ = "epics"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="backlog")  # backlog | in_progress | done
+    assignee: Mapped[str] = mapped_column(String(120), default="")
+    color: Mapped[str] = mapped_column(String(7), default="#7c4dff")  # hex color
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    project: Mapped["Project"] = relationship(back_populates="epics")
+    tasks: Mapped[list["Task"]] = relationship(back_populates="epic", foreign_keys="Task.epic_id")
 
 
 class Task(Base):
@@ -156,6 +173,7 @@ class Task(Base):
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False)
@@ -171,6 +189,7 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="tasks")
+    epic: Mapped["Epic | None"] = relationship(back_populates="tasks", foreign_keys=[epic_id])
     status: Mapped["Status"] = relationship()
     activities: Mapped[list["Activity"]] = relationship(back_populates="task", cascade="all, delete-orphan",
                                                          order_by="Activity.created_at.desc()")

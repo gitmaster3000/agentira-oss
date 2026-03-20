@@ -29,7 +29,7 @@ def get_db():
 
 def init_db():
     """Create all tables."""
-    from backend.models import Project, Task, Activity  # noqa: F401
+    from backend.models import Project, Task, Activity, Epic  # noqa: F401
     from backend.forge.models import Agent, Run  # noqa: F401
     Base.metadata.create_all(bind=engine)
     run_migrations()
@@ -71,4 +71,13 @@ def run_migrations():
             conn.commit()
         if "pr_url" not in existing:
             conn.execute(text("ALTER TABLE tasks ADD COLUMN pr_url VARCHAR(500) DEFAULT ''"))
+            conn.commit()
+        if "start_date" not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN start_date DATETIME"))
+            conn.commit()
+        if "due_date" not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN due_date DATETIME"))
+            conn.commit()
+        if "epic_id" not in existing:
+            conn.execute(text("ALTER TABLE tasks ADD COLUMN epic_id VARCHAR(12) REFERENCES epics(id)"))
             conn.commit()

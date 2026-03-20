@@ -4,62 +4,21 @@
       "label": "Agentira REST API",
       "port": 8111,
       "kind": "agentira",
-      "health_url": "http://127.0.0.1:8111/api/statuses"
+      "health_url": "http://127.0.0.1:8111/api/statuses",
+      "command": "python run.py"
     },
     {
       "label": "Agentira MCP",
       "port": 8000,
-      "kind": "agentira"
+      "kind": "agentira",
+      "command": "python backend/mcp_server.py"
     },
     {
       "label": "Agentira UI",
       "port": 3111,
-      "kind": "agentira"
-    },
-    {
-      "label": "ZC architect",
-      "port": 3015,
-      "kind": "zeroclaw",
-      "health_url": "http://127.0.0.1:3015/health",
-      "dashboard_via": 3011
-    },
-    {
-      "label": "ZC claude-arch",
-      "port": 3016,
-      "kind": "zeroclaw",
-      "health_url": "http://127.0.0.1:3016/health",
-      "dashboard_via": 3013
-    },
-    {
-      "label": "ZC frontend",
-      "port": 3025,
-      "kind": "zeroclaw",
-      "health_url": "http://127.0.0.1:3025/health",
-      "dashboard_via": 3022
-    },
-    {
-      "label": "Proxy architect",
-      "port": 3011,
-      "kind": "proxy"
-    },
-    {
-      "label": "Proxy claude-arch",
-      "port": 3013,
-      "kind": "proxy"
-    },
-    {
-      "label": "Proxy frontend",
-      "port": 3022,
-      "kind": "proxy"
+      "kind": "agentira",
+      "command": "cd frontend && npm run dev"
     }
   ],
-  "agent_webhooks": {
-    "Architect": "http://127.0.0.1:18789/hooks/agentira/architect",
-    "mastercoder": "http://127.0.0.1:18789/hooks/agentira/mastercoder",
-    "junior-coder": "http://127.0.0.1:18789/hooks/agentira/junior-coder",
-    "frontend": "http://127.0.0.1:18789/hooks/agentira/frontend",
-    "docus": "http://127.0.0.1:18789/hooks/agentira/docus",
-    "customer-engagement": "http://127.0.0.1:18789/hooks/agentira/customer-engagement",
-    "product-owner": "http://127.0.0.1:18789/hooks/agentira/product-owner"
-  }
+  "agent_webhooks": {}
 }
