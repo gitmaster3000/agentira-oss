@@ -4,16 +4,19 @@ import { api } from '../api';
 export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const [loading, setLoading] = useState(false);
     const [profiles, setProfiles] = useState([]);
+    const [epics, setEpics] = useState([]);
     const [formData, setFormData] = useState({
         title: '',
         description: '',
         priority: 'medium',
         assignee: '',
+        epic_id: '',
         tags: ''
     });
 
     useEffect(() => {
         api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
+        api.getEpics(projectId).then(setEpics).catch(console.error);
     }, [projectId]);
 
     const handleSubmit = async (e) => {
@@ -23,6 +26,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
             await api.createTask({
                 project_id: projectId,
                 ...formData,
+                epic_id: formData.epic_id || undefined,
                 tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean)
             });
             onCreated();
@@ -78,6 +82,19 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 <option value="medium">Medium</option>
                                 <option value="high">High</option>
                                 <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Epic</label>
+                            <select
+                                className="input"
+                                value={formData.epic_id}
+                                onChange={e => setFormData({ ...formData, epic_id: e.target.value })}
+                            >
+                                <option value="">Unassigned</option>
+                                {epics.map(ep => (
+                                    <option key={ep.id} value={ep.id}>{ep.title}</option>
+                                ))}
                             </select>
                         </div>
                         <div className="flex-1">

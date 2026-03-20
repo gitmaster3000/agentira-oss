@@ -12,6 +12,7 @@ import { ForgeOverview } from './pages/forge/ForgeOverview';
 import { AgentsDashboard } from './pages/forge/AgentsDashboard';
 import { AgentDetail } from './pages/forge/AgentDetail';
 import { RunsDashboard } from './pages/forge/RunsDashboard';
+import { RunDetail } from './pages/forge/RunDetail';
 
 function Welcome() {
     return (
@@ -46,6 +47,7 @@ export default function App() {
                         </RequireAuth>
                     }>
                         <Route index element={<Welcome />} />
+                        <Route path="board" element={<Navigate to="/" replace />} />
                         <Route path="board/:projectId" element={<Board />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
@@ -61,6 +63,7 @@ export default function App() {
                         <Route path="agents" element={<AgentsDashboard />} />
                         <Route path="agents/:agentId" element={<AgentDetail />} />
                         <Route path="runs" element={<RunsDashboard />} />
+                        <Route path="runs/:runId" element={<RunDetail />} />
                     </Route>
                 </Routes>
             </BrowserRouter>

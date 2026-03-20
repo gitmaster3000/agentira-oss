@@ -1,162 +1,253 @@
-import React, { useState, useEffect } from 'react';
-import { CalendarDays, Flag, Clock, Layers } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target } from 'lucide-react';
 import { api } from '../../api';
 
-export function RoadmapView({ projectId }) {
-    const [roadmapData, setRoadmapData] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+const STATUS_COLORS = {
+    done: '#2ecc71',
+    review: '#ff9800',
+    in_progress: '#7c4dff',
+    todo: '#00bcd4',
+    backlog: '#5f6368',
+};
 
-    // Mock data for Gantt chart if API is empty or missing fields
-    const mockGanttData = [
-        { id: '1', title: 'Phase 1: Foundation', start: '2026-03-01', end: '2026-03-15', progress: 100, color: 'bg-blue-500' },
-        { id: '2', title: 'Design System', start: '2026-03-10', end: '2026-03-25', progress: 60, color: 'bg-purple-500' },
-        { id: '3', title: 'Frontend Implementation', start: '2026-03-20', end: '2026-04-10', progress: 20, color: 'bg-green-500' },
-        { id: '4', title: 'Backend APIs', start: '2026-03-15', end: '2026-04-05', progress: 40, color: 'bg-orange-500' },
-        { id: '5', title: 'Beta Testing', start: '2026-04-10', end: '2026-04-30', progress: 0, color: 'bg-red-500' }
-    ];
+const PRIORITY_DOTS = {
+    critical: '#e74c3c',
+    high: '#ff9800',
+    medium: '#f1c40f',
+    low: '#5f6368',
+};
 
-    useEffect(() => {
-        if (!projectId) {
-            setError("Project ID is missing.");
-            setLoading(false);
-            return;
-        }
-
-        const fetchRoadmap = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                // Attempt to fetch, fallback to mock if API fails or returns empty
-                const data = await api.getRoadmap(projectId).catch(() => []);
-                setRoadmapData(data && data.length > 0 ? data : mockGanttData);
-            } catch (err) {
-                console.error("Failed to fetch roadmap:", err);
-                setRoadmapData(mockGanttData); // Fallback to mock on hard error
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchRoadmap();
-    }, [projectId]);
-
-    if (loading) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-12">
-                <Clock className="w-8 h-8 mb-4 animate-spin text-primary" />
-                <p>Loading roadmap timeline...</p>
+function EpicProgress({ epic }) {
+    const pct = epic.progress;
+    return (
+        <div className="flex items-center gap-3 min-w-0">
+            <div className="flex-1 h-1.5 rounded-full bg-bg-tertiary overflow-hidden max-w-[120px]">
+                <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${pct}%`, backgroundColor: pct === 100 ? STATUS_COLORS.done : STATUS_COLORS.in_progress }}
+                />
             </div>
-        );
-    }
+            <span className="text-xs text-text-tertiary whitespace-nowrap">{epic.done}/{epic.total}</span>
+        </div>
+    );
+}
 
-    if (error) {
-        return <div className="p-6 text-center text-red-500 bg-red-500/10 rounded-lg m-6">Error: {error}</div>;
-    }
-
-    if (roadmapData.length === 0) {
-        return (
-            <div className="p-12 bg-bg-panel border border-border-subtle rounded-xl shadow-sm h-full flex flex-col items-center justify-center text-text-muted">
-                <CalendarDays className="mb-4 text-border-strong" size={48} />
-                <p className="text-lg font-medium">No roadmap items found.</p>
-                <p className="text-sm mt-2">Create epics and milestones to populate the timeline.</p>
-            </div>
-        );
-    }
-
-    // Generate timeline months
-    const months = ['March', 'April', 'May', 'June'];
+function TaskRow({ task }) {
+    const statusColor = STATUS_COLORS[task.status] || STATUS_COLORS.backlog;
+    const priorityColor = PRIORITY_DOTS[task.priority] || PRIORITY_DOTS.medium;
+    const Icon = task.progress === 100 ? CheckCircle : task.progress > 0 ? Clock : Circle;
 
     return (
-        <div className="p-6 bg-bg-panel border border-border-subtle rounded-xl shadow-sm h-full flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-semibold text-text-primary flex items-center gap-2">
-                    <Layers className="text-primary w-5 h-5" />
-                    Project Roadmap
-                </h3>
-                <div className="flex gap-2">
-                    <button className="btn btn-ghost btn-sm">Today</button>
-                    <div className="flex bg-bg-card rounded-md border border-border-subtle overflow-hidden">
-                        <button className="px-3 py-1 text-sm bg-bg-hover text-text-primary">Months</button>
-                        <button className="px-3 py-1 text-sm text-text-muted hover:text-text-primary">Quarters</button>
-                    </div>
+        <div className="flex items-center gap-3 px-4 py-2 hover:bg-bg-hover rounded-md transition-colors group">
+            <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: statusColor }} />
+            <div
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: priorityColor }}
+                title={task.priority}
+            />
+            <span className="text-sm text-text-primary flex-1 min-w-0 truncate">{task.title}</span>
+            {task.assignee && (
+                <span className="text-xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-tertiary hidden group-hover:inline">
+                    {task.assignee}
+                </span>
+            )}
+            <span
+                className="text-xs px-1.5 py-0.5 rounded font-medium text-white"
+                style={{ backgroundColor: statusColor }}
+            >
+                {task.status.replace('_', ' ')}
+            </span>
+            {task.end && (
+                <span className="text-xs text-text-tertiary whitespace-nowrap">
+                    {formatDate(task.end)}
+                </span>
+            )}
+        </div>
+    );
+}
+
+function EpicSection({ epic }) {
+    const [open, setOpen] = useState(epic.in_progress > 0 || epic.progress < 100);
+    const Arrow = open ? ChevronDown : ChevronRight;
+
+    return (
+        <div className="card p-0 overflow-hidden">
+            <button
+                onClick={() => setOpen(!open)}
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-hover transition-colors text-left"
+            >
+                <Arrow className="w-4 h-4 text-text-tertiary flex-shrink-0" />
+                <Target className="w-4 h-4 text-accent-primary flex-shrink-0" />
+                <span className="text-sm font-semibold text-text-primary flex-1">{epic.name}</span>
+                <EpicProgress epic={epic} />
+            </button>
+            {open && (
+                <div className="border-t border-border-subtle pb-1">
+                    {epic.tasks.map((task) => (
+                        <TaskRow key={task.id} task={task} />
+                    ))}
                 </div>
-            </div>
+            )}
+        </div>
+    );
+}
 
-            <div className="flex-1 overflow-x-auto overflow-y-auto border border-border-subtle rounded-lg bg-bg-card">
-                <div className="min-w-[800px]">
-                    {/* Header: Time scale */}
-                    <div className="flex border-b border-border-subtle bg-bg-panel sticky top-0 z-10">
-                        <div className="w-64 p-3 border-r border-border-subtle font-medium text-text-secondary text-sm flex items-center">
-                            Epic / Milestone
-                        </div>
-                        <div className="flex-1 flex">
-                            {months.map((month, idx) => (
-                                <div key={idx} className="flex-1 border-r border-border-subtle p-2 text-center text-sm font-medium text-text-secondary">
-                                    {month} 2026
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Gantt Rows */}
-                    <div className="relative">
-                        {/* Background Grid Lines */}
-                        <div className="absolute inset-0 flex pointer-events-none">
-                            <div className="w-64 border-r border-border-subtle bg-bg-card"></div>
-                            <div className="flex-1 flex">
-                                {months.map((_, idx) => (
-                                    <div key={idx} className="flex-1 border-r border-border-subtle opacity-30"></div>
-                                ))}
-                            </div>
-                        </div>
-
-                        {/* Data Rows */}
-                        <div className="relative z-0">
-                            {roadmapData.map((item, index) => {
-                                const viewStart = new Date('2026-03-01').getTime();
-                                const viewEnd = new Date('2026-06-30').getTime();
-                                const duration = viewEnd - viewStart;
-                                const tStart = new Date(item.start || '2026-03-01').getTime();
-                                const tEnd = new Date(item.end || '2026-03-15').getTime();
-                                const clampStart = Math.max(tStart, viewStart);
-                                const clampEnd = Math.min(tEnd, viewEnd);
-                                const startPos = ((clampStart - viewStart) / duration) * 100;
-                                const widthPos = Math.max(((clampEnd - clampStart) / duration) * 100, 2);
-
-                                return (
-                                    <div key={item.id} className="flex border-b border-border-subtle hover:bg-bg-hover/50 transition-colors group">
-                                        <div className="w-64 p-3 border-r border-border-subtle flex items-center gap-2 z-10 bg-bg-card group-hover:bg-transparent">
-                                            <Flag className={`w-4 h-4 ${item.color ? item.color.replace('bg-', 'text-') : 'text-primary'}`} />
-                                            <span className="text-sm font-medium text-text-primary truncate" title={item.title}>{item.title}</span>
-                                        </div>
-                                        <div className="flex-1 relative p-2 flex items-center">
-                                            {/* Gantt Bar */}
-                                            <div 
-                                                className={`absolute h-8 rounded-md shadow-sm ${item.color || 'bg-primary'} flex items-center overflow-hidden cursor-pointer hover:opacity-90 transition-opacity`}
-                                                style={{ left: `${startPos}%`, width: `${widthPos}%` }}
-                                                title={`${item.title} (${item.progress || 0}% complete)`}
-                                            >
-                                                {/* Progress fill inside bar */}
-                                                {item.progress !== undefined && (
-                                                    <div 
-                                                        className="absolute top-0 left-0 bottom-0 bg-black/20" 
-                                                        style={{ width: `${item.progress}%` }}
-                                                    ></div>
-                                                )}
-                                                <span className="relative z-10 px-2 text-xs font-medium text-white truncate drop-shadow-sm">
-                                                    {item.progress !== undefined ? `${item.progress}%` : ''}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+function MilestoneTimeline({ milestones }) {
+    if (!milestones.length) return null;
+    return (
+        <div className="card">
+            <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+                <Flag className="w-4 h-4 text-green-400" />
+                Recent Milestones
+            </h3>
+            <div className="relative border-l-2 border-green-500/30 ml-2 pl-4 space-y-3">
+                {milestones.map((m) => (
+                    <div key={m.id} className="relative">
+                        <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-green-500" />
+                        <div className="text-sm text-text-primary">{m.title}</div>
+                        <div className="text-xs text-text-tertiary">
+                            {formatDate(m.date)} · {m.epic}
                         </div>
                     </div>
-                </div>
+                ))}
             </div>
         </div>
     );
 }
 
+function SummaryBar({ summary, groupBy }) {
+    const pct = summary.total_tasks > 0 ? Math.round((summary.total_done / summary.total_tasks) * 100) : 0;
+    return (
+        <div className="flex items-center gap-6 text-sm">
+            <div>
+                <span className="text-2xl font-bold text-text-primary">{pct}%</span>
+                <span className="text-text-tertiary ml-1">complete</span>
+            </div>
+            <div className="flex-1 h-2 rounded-full bg-bg-tertiary overflow-hidden max-w-xs">
+                <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="flex gap-4 text-xs text-text-tertiary">
+                <span>{summary.total_tasks} tasks</span>
+                <span>{summary.total_epics} {groupBy === 'tag' ? 'tags' : 'epics'}</span>
+                <span>{summary.total_done} done</span>
+            </div>
+        </div>
+    );
+}
+
+function formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export function RoadmapView({ projectId }) {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [groupBy, setGroupBy] = useState('epic');
+
+    const loadRoadmap = useCallback(() => {
+        if (!projectId) return;
+        setLoading(true);
+        api.getRoadmap(projectId, groupBy)
+            .then(d => {
+                setData(d);
+                // Seed initial activity ID
+                api.getProjectActivity(projectId, 1).then(acts => {
+                    if (acts[0]) lastActivityIdRef.current = acts[0].id;
+                });
+            })
+            .catch((err) => {
+                console.error('Failed to fetch roadmap:', err);
+                setError('Failed to load roadmap.');
+            })
+            .finally(() => setLoading(false));
+    }, [projectId, groupBy]);
+
+    useEffect(() => {
+        loadRoadmap();
+    }, [loadRoadmap]);
+
+    const lastActivityIdRef = React.useRef(null);
+    const checkForUpdates = useCallback(async () => {
+        if (document.visibilityState !== 'visible' || !projectId) return;
+        try {
+            const activities = await api.getProjectActivity(projectId, 1);
+            const latest = activities[0];
+            if (latest && latest.id !== lastActivityIdRef.current) {
+                lastActivityIdRef.current = latest.id;
+                api.getRoadmap(projectId, groupBy).then(setData);
+            }
+        } catch (err) {
+            console.error('[Roadmap] checkForUpdates error:', err);
+        }
+    }, [projectId, groupBy]);
+
+    const checkRef = React.useRef(checkForUpdates);
+    useEffect(() => { checkRef.current = checkForUpdates; }, [checkForUpdates]);
+
+    useEffect(() => {
+        if (!projectId) return;
+        const interval = setInterval(() => checkRef.current(), 30000); // Stable 30s
+        return () => clearInterval(interval);
+    }, [projectId]);
+
+    if (loading && !data) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading roadmap...</div>;
+    }
+
+    if (error) {
+        return <div className="flex-1 flex items-center justify-center text-red-400 p-6">{error}</div>;
+    }
+
+    if (!data || !data.summary || !data.epics || data.summary.total_tasks === 0) {
+        return (
+            <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary p-6">
+                <CalendarDays className="w-12 h-12 mb-3 opacity-50" />
+                <p className="text-lg font-medium text-text-primary">No roadmap data yet</p>
+                <p className="text-sm mt-1">Add tasks with tags to create epics. Set start/due dates for timeline planning.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex-1 p-6 overflow-y-auto space-y-5 h-full max-h-[calc(100vh-64px)]">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                    <CalendarDays className="w-5 h-5 text-text-tertiary" />
+                    Roadmap — {data?.project?.name}
+                </h2>
+                <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle">
+                    <button
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'tag' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
+                        onClick={() => setGroupBy('tag')}
+                    >
+                        By Tag
+                    </button>
+                    <button
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'epic' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
+                        onClick={() => setGroupBy('epic')}
+                    >
+                        By Epic
+                    </button>
+                </div>
+            </div>
+
+            {/* Summary */}
+            <SummaryBar summary={data.summary} groupBy={groupBy} />
+
+            {/* Layout: Epics + Milestones */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                <div className="lg:col-span-2 space-y-3">
+                    {data.epics.map((epic) => (
+                        <EpicSection key={epic.name} epic={epic} />
+                    ))}
+                </div>
+                <div>
+                    <MilestoneTimeline milestones={data.milestones} />
+                </div>
+            </div>
+        </div>
+    );
+}

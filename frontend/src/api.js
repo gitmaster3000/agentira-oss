@@ -66,12 +66,28 @@ export const api = {
         body: JSON.stringify({ profile_name: profileName, actor: actor || getActor() })
     }),
     removeProjectMember: (projectId, profileName) => request(`/projects/${projectId}/members/${profileName}`, { method: 'DELETE' }),
+    getProjectActivity: (projectId, limit = 50) => request(`/projects/${projectId}/activity?limit=${limit}`),
 
     // Board
-    getBoard: (projectId) => request(`/board/${projectId}`),
-    getRoadmap: (projectId) => request(`/projects/${projectId}/roadmap`),
+    getBoard: (projectId) => request(`/projects/${projectId}/board`),
+    getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
+
+    // Epics
+    getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
+    createEpic: (projectId, data) => request(`/projects/${projectId}/epics`, { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    deleteEpic: (id) => request(`/epics/${id}`, { method: 'DELETE' }),
 
     // Tasks
+    listTasks: (projectId, status, assignee, priority) => {
+        const params = new URLSearchParams();
+        if (projectId) params.set('project_id', projectId);
+        if (status) params.set('status', status);
+        if (assignee) params.set('assignee', assignee);
+        if (priority) params.set('priority', priority);
+        params.set('actor', getActor());
+        return request(`/tasks?${params.toString()}`);
+    },
     createTask: (data) => request('/tasks', { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
     getTask: (id) => request(`/tasks/${id}`),
     updateTask: (id, data) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ actor: getActor(), ...data }) }),
@@ -125,6 +141,9 @@ export const api = {
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
     getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
 
+    // Roadmap
+    getRoadmap: (projectId, groupBy = "epic") => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
+
     // Git Integration
     listTaskCommits: (taskId) => request(`/tasks/${taskId}/commits`),
     linkCommit: (taskId, data) => request(`/tasks/${taskId}/commits`, { method: 'POST', body: JSON.stringify(data) }),
@@ -155,6 +174,26 @@ export const api = {
         createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
         startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
         completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
+        updateRunStatus: (id, data) => request(`/forge/runs/${id}/status`, { method: 'POST', body: JSON.stringify(data) }),
+        listRunEvents: (runId) => request(`/forge/runs/${runId}/events`),
+        getTriggerEvent: (runId) => request(`/forge/runs/${runId}/trigger-event`),
+
+        // Events
+        listEvents: (params = {}) => {
+            const qs = new URLSearchParams();
+            for (const [k, v] of Object.entries(params)) {
+                if (v !== undefined && v !== '' && v !== null) qs.set(k, v);
+            }
+            const q = qs.toString();
+            return request(`/forge/events${q ? '?' + q : ''}`);
+        },
+        getEvent: (id) => request(`/forge/events/${id}`),
+        createEvent: (data) => request('/forge/events', { method: 'POST', body: JSON.stringify(data) }),
+        markEventProcessed: (id) => request(`/forge/events/${id}/process`, { method: 'POST' }),
+        listDeliveries: (eventId) => request(`/forge/events/${eventId}/deliveries`),
+        createDelivery: (data) => request('/forge/deliveries', { method: 'POST', body: JSON.stringify(data) }),
+        updateDeliveryStatus: (id, data) => request(`/forge/deliveries/${id}/status`, { method: 'POST', body: JSON.stringify(data) }),
+        attachEventToRun: (data) => request('/forge/run-events', { method: 'POST', body: JSON.stringify(data) }),
 
         // Messages (chat)
         listMessages: (agentId, params = {}) => {

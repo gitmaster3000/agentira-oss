@@ -1,18 +1,23 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Play, RefreshCw, Clock, Bot, Zap, ChevronLeft, ChevronRight, Filter, DollarSign } from 'lucide-react';
 import { api } from '../../api';
 
 const STATUS_STYLES = {
-    pending:   { bg: '#5f6368', label: 'Pending' },
-    running:   { bg: '#f1c40f', label: 'Running' },
-    completed: { bg: '#2ecc71', label: 'Completed' },
-    failed:    { bg: '#e74c3c', label: 'Failed' },
-    cancelled: { bg: '#9aa0a6', label: 'Cancelled' },
+    queued:        { bg: '#5f6368', label: 'Queued' },
+    pending:       { bg: '#5f6368', label: 'Pending' },
+    running:       { bg: '#f1c40f', label: 'Running' },
+    waiting_human: { bg: '#ff9800', label: 'Waiting' },
+    blocked:       { bg: '#e91e63', label: 'Blocked' },
+    completed:     { bg: '#2ecc71', label: 'Completed' },
+    failed:        { bg: '#e74c3c', label: 'Failed' },
+    cancelled:     { bg: '#9aa0a6', label: 'Cancelled' },
 };
 
 const PAGE_SIZE = 25;
 
 export function RunsDashboard() {
+    const navigate = useNavigate();
     const [runs, setRuns] = useState([]);
     const [agents, setAgents] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -69,8 +74,10 @@ export function RunsDashboard() {
                     className="input py-1.5 px-3 text-sm w-auto"
                 >
                     <option value="">All statuses</option>
-                    <option value="pending">Pending</option>
+                    <option value="queued">Queued</option>
                     <option value="running">Running</option>
+                    <option value="waiting_human">Waiting (Human)</option>
+                    <option value="blocked">Blocked</option>
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>
                     <option value="cancelled">Cancelled</option>
@@ -121,7 +128,7 @@ export function RunsDashboard() {
                             </thead>
                             <tbody>
                                 {runs.map((run) => (
-                                    <RunRow key={run.id} run={run} />
+                                    <RunRow key={run.id} run={run} navigate={navigate} />
                                 ))}
                             </tbody>
                         </table>
@@ -155,12 +162,12 @@ export function RunsDashboard() {
     );
 }
 
-function RunRow({ run }) {
+function RunRow({ run, navigate }) {
     const s = STATUS_STYLES[run.status] || STATUS_STYLES.pending;
     const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0);
 
     return (
-        <tr className="border-b border-border-subtle hover:bg-bg-hover transition-colors">
+        <tr className="border-b border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer" onClick={() => navigate(`/forge/runs/${run.id}`)}>
             <td className="px-4 py-3">
                 <span
                     className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
