@@ -554,7 +554,25 @@ function ConfigTab({ agent, onSaved }) {
                     </div>
                     <div>
                         <label className="block text-xs text-text-tertiary mb-1">Model</label>
-                        <input className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
+                        <select className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
+                            <option value="">Select model...</option>
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                            <option value="claude-haiku-4-20250506">Claude Haiku 4</option>
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="o3-mini">o3-mini</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                            {form.model && ![
+                                '', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250506',
+                                'claude-3-5-sonnet-20241022', 'gpt-4o', 'gpt-4o-mini', 'o3-mini',
+                                'gemini-2.5-pro', 'gemini-2.5-flash'
+                            ].includes(form.model) && (
+                                <option value={form.model}>{form.model}</option>
+                            )}
+                        </select>
                     </div>
                     <div>
                         <label className="block text-xs text-text-tertiary mb-1">Executor</label>

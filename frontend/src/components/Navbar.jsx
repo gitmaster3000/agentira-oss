@@ -15,6 +15,7 @@ import {
     CheckSquare,
     Pencil,
     Cpu,
+    Zap,
 } from 'lucide-react';
 
 const PRODUCTS = {
@@ -145,15 +146,26 @@ export function Navbar({ onNewProject }) {
                     {isCreateOpen && (
                         <div className="dropdown-menu top-full right-0 mt-1 w-48">
                             {projectId && (
-                                <button
-                                    onClick={() => {
-                                        window.dispatchEvent(new CustomEvent('open-create-task'));
-                                        setIsCreateOpen(false);
-                                    }}
-                                    className="dropdown-item"
-                                >
-                                    <CheckSquare className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} /> Task
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => {
+                                            window.dispatchEvent(new CustomEvent('open-create-task'));
+                                            setIsCreateOpen(false);
+                                        }}
+                                        className="dropdown-item"
+                                    >
+                                        <CheckSquare className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} /> Task
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            window.dispatchEvent(new CustomEvent('open-create-epic'));
+                                            setIsCreateOpen(false);
+                                        }}
+                                        className="dropdown-item"
+                                    >
+                                        <Zap className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} /> Epic
+                                    </button>
+                                </>
                             )}
                             <button
                                 onClick={() => {

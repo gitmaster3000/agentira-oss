@@ -27,6 +27,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     const [activities, setActivities] = useState([]);
     const [comment, setComment] = useState('');
     const [profiles, setProfiles] = useState([]);
+    const [epics, setEpics] = useState([]);
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
     const [commits, setCommits] = useState([]);
@@ -50,6 +51,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
         api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
+        api.getEpics(task.project_id).then(setEpics).catch(console.error);
         const interval = setInterval(loadActivity, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
@@ -165,6 +167,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                 description: formData.description,
                 priority: formData.priority,
                 assignee: formData.assignee,
+                epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
                 tags: typeof formData.tags === 'string' ? formData.tags.split(',') : formData.tags
             });
             setIsEditing(false);
@@ -314,6 +317,30 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                     </select>
                                 ) : (
                                     <div className="text-sm">{task.assignee || "Unassigned"}</div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Epic</label>
+                                {isEditing ? (
+                                    <select className="input" value={formData.epic_id || ""} onChange={e => setFormData({ ...formData, epic_id: e.target.value })}>
+                                        <option value="">Unassigned</option>
+                                        {epics.map(ep => (
+                                            <option key={ep.id} value={ep.id}>{ep.title}</option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        {task.epic_name ? (
+                                            <span 
+                                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
+                                                style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                            >
+                                                {task.epic_name}
+                                            </span>
+                                        ) : (
+                                            <span className="text-sm font-medium italic text-text-tertiary">None</span>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                             <div>

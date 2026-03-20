@@ -6,7 +6,10 @@ import { TaskCard } from '../components/TaskCard';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { UserPlus, X, Plus, Search, ChevronDown } from 'lucide-react';
+import { UserPlus, X, Plus, Search, ChevronDown, Zap } from 'lucide-react';
+import { RoadmapView } from '../components/RoadmapView/RoadmapView';
+import { Backlog } from './Backlog';
+import { CreateEpicModal } from '../components/CreateEpicModal';
 
 const COLUMNS = [
     { id: 'backlog', label: 'Backlog' },
@@ -61,7 +64,7 @@ function AddMemberDropdown({ anchorRef, profiles, onAdd, onClose }) {
                     {profiles.map(p => (
                         <div
                             key={p.id}
-                            onClick={() => { console.log('[Dropdown] clicked:', p.name); onAdd(p.name); }}
+                            onClick={() => { onAdd(p.name); }}
                             role="button"
                             tabIndex={0}
                             className="dropdown-item px-3 py-2.5"
@@ -143,16 +146,19 @@ export function Board() {
     const [board, setBoard] = useState(null);
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);
+    const [epics, setEpics] = useState([]);
     const [showCreate, setShowCreate] = useState(false);
+    const [showCreateEpic, setShowCreateEpic] = useState(false);
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedTaskId = searchParams.get('selectedTask');
+    const view = searchParams.get('view') || 'board';
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
     const addBtnRef = useRef(null);
-
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('');
     const [filterAssignee, setFilterAssignee] = useState('');
+    const [filterEpic, setFilterEpic] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const panelEditingRef = useRef(false);
     const [pendingAction, setPendingAction] = useState(null);
@@ -162,49 +168,87 @@ export function Board() {
         panelEditingRef.current = isEditing;
     }, [isEditing]);
 
-    const loadBoard = async () => {
+    const loadBoard = useCallback(async () => {
         try {
             const data = await api.getBoard(projectId);
             setBoard(data);
         } catch (err) { console.error('[Board] loadBoard error:', err); }
         finally { setLoading(false); }
-    };
+    }, [projectId]);
 
-    const loadMembers = async () => {
+    const loadMembers = useCallback(async () => {
         try {
             const data = await api.getProjectMembers(projectId);
-            console.log('[Board] members loaded:', data?.length);
             setMembers(data);
         } catch (err) { console.error('[Board] loadMembers error:', err); }
-    };
+    }, [projectId]);
 
-    const loadProfiles = async () => {
+    const loadProfiles = useCallback(async () => {
         try {
             const data = await api.getProfiles();
-            console.log('[Board] profiles loaded:', data?.length, data?.map(p => p.name));
             setProfiles(data);
         } catch (err) { console.error('[Board] loadProfiles error:', err); }
-    };
+    }, []);
+
+    const loadEpics = useCallback(async () => {
+        try {
+            const data = await api.getEpics(projectId);
+            setEpics(data);
+        } catch (err) { console.error('[Board] loadEpics error:', err); }
+    }, [projectId]);
+
+    const lastActivityIdRef = useRef(null);
+
+    const checkForUpdates = useCallback(async () => {
+        if (document.visibilityState !== 'visible' || !projectId) return;
+        try {
+            const activities = await api.getProjectActivity(projectId, 1);
+            const latest = activities[0];
+            if (latest && latest.id !== lastActivityIdRef.current) {
+                lastActivityIdRef.current = latest.id;
+                loadBoard();
+                loadMembers();
+                loadEpics();
+            }
+        } catch (err) {
+            console.error('[Board] checkForUpdates error:', err);
+        }
+    }, [projectId, loadBoard, loadMembers, loadEpics]);
 
     useEffect(() => {
-        loadBoard();
-        loadMembers();
-        loadProfiles();
-        const interval = setInterval(() => { loadBoard(); loadMembers(); }, 5000);
+        const init = async () => {
+            await Promise.all([loadBoard(), loadMembers(), loadProfiles(), loadEpics()]);
+            try {
+                const activities = await api.getProjectActivity(projectId, 1);
+                if (activities[0]) lastActivityIdRef.current = activities[0].id;
+            } catch (e) {}
+        };
+        init();
+    }, [projectId]); // Initial load only when project changes
+
+    const checkRef = useRef(checkForUpdates);
+    useEffect(() => { checkRef.current = checkForUpdates; }, [checkForUpdates]);
+
+    useEffect(() => {
+        if (!projectId) return;
+        const interval = setInterval(() => checkRef.current(), 30000); // Stable 30s
         return () => clearInterval(interval);
-    }, [projectId]);
+    }, [projectId]); // Only restart if project changes
 
     useEffect(() => {
         const handleOpenCreateTask = () => setShowCreate(true);
+        const handleOpenCreateEpic = () => setShowCreateEpic(true);
         window.addEventListener('open-create-task', handleOpenCreateTask);
-        return () => window.removeEventListener('open-create-task', handleOpenCreateTask);
+        window.addEventListener('open-create-epic', handleOpenCreateEpic);
+        return () => {
+            window.removeEventListener('open-create-task', handleOpenCreateTask);
+            window.removeEventListener('open-create-epic', handleOpenCreateEpic);
+        };
     }, []);
 
     const handleAddMember = useCallback(async (name) => {
-        console.log('[Board] handleAddMember:', name);
         try {
             const result = await api.addProjectMember(projectId, name);
-            console.log('[Board] addProjectMember result:', result);
             await loadMembers();
             setShowAddMember(false);
         } catch (err) {
@@ -237,9 +281,29 @@ export function Board() {
     const availableProfiles = profiles.filter(p => !memberNames.has(p.name));
 
     // Derive selectedTask from the ID in the URL
-    const selectedTask = board && selectedTaskId
-        ? Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId))
-        : null;
+    // We try to find it in the board columns first, then in the epics if needed (if ever selected?)
+    // Actually, it's better to just hold the selectedTask object once found to avoid re-searching
+    const [selectedTask, setSelectedTask] = useState(null);
+
+    useEffect(() => {
+        if (!selectedTaskId) {
+            setSelectedTask(null);
+            return;
+        }
+        
+        // Try to find in board
+        if (board) {
+            const found = Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId));
+            if (found) {
+                setSelectedTask(found);
+                return;
+            }
+        }
+
+        // If not found in board, we might need to fetch it specifically or it might be in Backlog's local state
+        // For simplicity, let's just fetch it if missing
+        api.getTask(selectedTaskId).then(setSelectedTask).catch(err => console.error('Failed to fetch selected task:', err));
+    }, [selectedTaskId, board]);
 
     const getFilteredColumns = () => {
         if (!board) return {};
@@ -249,6 +313,7 @@ export function Board() {
                 if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
                 if (filterPriority && task.priority !== filterPriority) return false;
                 if (filterAssignee && task.assignee !== filterAssignee) return false;
+                if (filterEpic && String(task.epic_id) !== String(filterEpic)) return false;
                 return true;
             });
         }
@@ -297,7 +362,7 @@ export function Board() {
                                 {/* Add member button */}
                                 <button
                                     ref={addBtnRef}
-                                    onClick={() => { console.log('[Board] Add button clicked, available:', availableProfiles.length); setShowAddMember(v => !v); }}
+                                    onClick={() => { setShowAddMember(v => !v); }}
                                     className="w-8 h-8 rounded-full border-2 border-dashed flex items-center justify-center transition-colors hover:bg-white/10"
                                     style={{ borderColor: 'var(--border-subtle)', color: 'var(--text-tertiary)' }}
                                     title="Add member"
@@ -349,12 +414,22 @@ export function Board() {
                                         ...members.map(m => ({ value: m.name, label: m.display_name || m.name }))
                                     ]}
                                 />
+                                <FilterDropdown
+                                    label="Epic"
+                                    value={filterEpic}
+                                    onChange={setFilterEpic}
+                                    options={[
+                                        { value: '', label: 'All Epics' },
+                                        ...epics.map(ep => ({ value: ep.id, label: ep.title }))
+                                    ]}
+                                />
                                 {(searchQuery || filterPriority || filterAssignee) && (
                                     <button
                                         onClick={() => {
                                             setSearchQuery('');
                                             setFilterPriority('');
                                             setFilterAssignee('');
+                                            setFilterEpic('');
                                         }}
                                         className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1"
                                     >
@@ -366,53 +441,65 @@ export function Board() {
                     </div>
                 </header>
 
-                {/* Main Content Area: Columns */}
-                <div className="flex-1 overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
-                        <div className="h-full grid grid-cols-5 gap-3 min-w-[1148px] w-full" style={{ marginRight: selectedTask ? 470 : 0 }}>
-                            {COLUMNS.map(col => (
-                                <div
-                                    key={col.id}
-                                    className="flex flex-col rounded-md h-full overflow-hidden"
-                                    style={{ backgroundColor: 'var(--bg-surface-purple)' }}
-                                    onDragOver={e => e.preventDefault()}
-                                    onDrop={e => handleDrop(e, col.id)}
-                                >
-                                    <div className="px-4 py-3 font-medium text-title-sm flex justify-between items-center border-b">
-                                        {col.label}
-                                        <span className="text-label-sm px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
-                                            {filteredColumns[col.id]?.length || 0}
-                                        </span>
-                                    </div>
+                {/* Main Content Area: Conditional Views */}
+                <div className="flex-1 overflow-hidden relative">
+                    {view === 'board' && (
+                        <div className="h-full overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
+                            <div className="h-full grid grid-cols-5 gap-3 min-w-[1148px] w-full">
+                                {COLUMNS.map(col => (
+                                    <div
+                                        key={col.id}
+                                        className="flex flex-col rounded-md h-full overflow-hidden"
+                                        style={{ backgroundColor: 'var(--bg-surface-purple)' }}
+                                        onDragOver={e => e.preventDefault()}
+                                        onDrop={e => handleDrop(e, col.id)}
+                                    >
+                                        <div className="px-4 py-3 font-medium text-title-sm flex justify-between items-center border-b">
+                                            {col.label}
+                                            <span className="text-label-sm px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
+                                                {filteredColumns[col.id]?.length || 0}
+                                            </span>
+                                        </div>
 
-                                    <div className="flex-1 pl-4 pr-2.5 py-2 column-scroll">
-                                        {filteredColumns[col.id]?.map(task => (
-                                            <TaskCard
-                                                key={task.id}
-                                                task={task}
-                                                onUpdate={(t) => {
-                                                    if (panelEditingRef.current && String(t.id) !== String(selectedTaskId)) {
-                                                        setPendingAction(() => () => {
-                                                            panelEditingRef.current = false;
-                                                            setIsEditing(false);
-                                                            const newParams = new URLSearchParams(searchParams);
-                                                            newParams.set('selectedTask', t.id);
-                                                            setSearchParams(newParams);
-                                                        });
-                                                        return;
-                                                    }
-                                                    panelEditingRef.current = false;
-                                                    setIsEditing(false);
-                                                    const newParams = new URLSearchParams(searchParams);
-                                                    newParams.set('selectedTask', t.id);
-                                                    setSearchParams(newParams);
-                                                }}
-                                                onDelete={loadBoard}
-                                            />
-                                        ))}
+                                        <div className="flex-1 pl-4 pr-2.5 py-2 column-scroll">
+                                            {filteredColumns[col.id]?.map(task => (
+                                                <TaskCard
+                                                    key={task.id}
+                                                    task={task}
+                                                    onUpdate={(t) => {
+                                                        if (panelEditingRef.current && String(t.id) !== String(selectedTaskId)) {
+                                                            setPendingAction(() => () => {
+                                                                panelEditingRef.current = false;
+                                                                setIsEditing(false);
+                                                                const newParams = new URLSearchParams(searchParams);
+                                                                newParams.set('selectedTask', t.id);
+                                                                setSearchParams(newParams);
+                                                            });
+                                                            return;
+                                                        }
+                                                        panelEditingRef.current = false;
+                                                        setIsEditing(false);
+                                                        const newParams = new URLSearchParams(searchParams);
+                                                        newParams.set('selectedTask', t.id);
+                                                        setSearchParams(newParams);
+                                                    }}
+                                                    onDelete={loadBoard}
+                                                />
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
                         </div>
+                    )}
+
+                    {view === 'backlog' && (
+                        <Backlog projectId={projectId} />
+                    )}
+
+                    {view === 'roadmap' && (
+                        <RoadmapView projectId={projectId} />
+                    )}
                 </div>
             </div>
 
@@ -449,6 +536,14 @@ export function Board() {
                     projectId={projectId}
                     onClose={() => setShowCreate(false)}
                     onCreated={loadBoard}
+                />
+            )}
+
+            {showCreateEpic && (
+                <CreateEpicModal
+                    projectId={projectId}
+                    onClose={() => setShowCreateEpic(false)}
+                    onCreated={loadEpics}
                 />
             )}
 

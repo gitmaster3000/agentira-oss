@@ -4,8 +4,7 @@ import {
     LayoutGrid,
     ListTodo,
     TrendingUp,
-    ChevronLeft,
-    ChevronRight,
+    PanelLeft,
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -31,22 +30,23 @@ export function Sidebar() {
 
     return (
         <aside
-            className={`flex flex-col border-r bg-bg-panel transition-all duration-300 ease-in-out absolute top-0 left-0 h-full z-20 ${isCollapsed ? 'w-[72px]' : 'w-64 shadow-xl'}`}
+            className={`flex flex-col border-r bg-bg-panel transition-all duration-300 ease-in-out h-full relative group ${isCollapsed ? 'w-16' : 'w-64'}`}
         >
-            {/* Toggle */}
-            <button
-                onClick={toggleSidebar}
-                className="absolute -right-3 top-5 w-6 h-6 rounded-full bg-bg-card border flex items-center justify-center hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-all shadow-elevation-1 z-10"
-            >
-                {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-
             <div className="flex-1 py-3 flex flex-col gap-0.5 overflow-x-hidden">
-                {!isCollapsed && (
-                    <div className="px-4 mb-3 text-label-sm text-text-tertiary uppercase tracking-wider">
-                        Planning
-                    </div>
-                )}
+                <div className={`flex items-center px-4 mb-4 ${isCollapsed ? 'justify-center mb-6' : 'justify-between'}`}>
+                    {!isCollapsed && (
+                        <span className="text-title-sm font-bold text-text-primary uppercase tracking-wider">
+                            Planning
+                        </span>
+                    )}
+                    <button
+                        onClick={toggleSidebar}
+                        className="p-1.5 rounded-lg text-text-secondary hover:bg-bg-hover hover:text-accent-primary transition-all"
+                        title={isCollapsed ? "Expand" : "Collapse"}
+                    >
+                        <PanelLeft className="w-5 h-5 flex-shrink-0" />
+                    </button>
+                </div>
 
                 {navItems.map((item) => {
                     const isActive = currentView === item.view;
@@ -54,7 +54,7 @@ export function Sidebar() {
                         <Link
                             key={item.label}
                             to={item.path}
-                            className={`flex items-center gap-3 mx-3 px-3 py-2.5 rounded-xl transition-all
+                            className={`flex items-center gap-3 mx-2 px-3 py-2.5 rounded-xl transition-all
                                 ${isActive
                                     ? 'bg-accent-subtle text-accent-primary font-medium'
                                     : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'}

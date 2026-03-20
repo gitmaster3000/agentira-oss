@@ -52,6 +52,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [comment, setComment] = useState('');
     const [profiles, setProfiles] = useState([]);
+    const [epics, setEpics] = useState([]);
     const [attachments, setAttachments] = useState([]);
     const [uploading, setUploading] = useState(false);
     const [commits, setCommits] = useState([]);
@@ -75,6 +76,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         setPrUrlValue(task.pr_url || '');
         if (task.project_id) {
             api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
+            api.getEpics(task.project_id).then(setEpics).catch(console.error);
         }
         const interval = setInterval(loadActivity, 3000);
         return () => clearInterval(interval);
@@ -197,6 +199,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 tags: typeof formData.tags === 'string' ? formData.tags.split(',').map(t => t.trim()) : formData.tags,
                 branch: branchValue || undefined,
                 pr_url: prUrlValue || undefined,
+                epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
             });
             setIsEditing(false);
             onUpdate();
@@ -240,7 +243,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         <>
             {/* Panel */}
             <div
-                className="absolute top-0 right-0 h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg"
+                className="h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg flex-shrink-0"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -364,6 +367,36 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             </div>
                             <div className="space-y-4">
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
+                                        <Tag className="w-3 h-3" /> Epic
+                                    </label>
+                                    {isEditing ? (
+                                        <select
+                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
+                                            value={formData.epic_id || ""}
+                                            onChange={e => setFormData({ ...formData, epic_id: e.target.value })}
+                                        >
+                                            <option value="">Unassigned</option>
+                                            {epics.map(e => (
+                                                <option key={e.id} value={e.id}>{e.title}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <div className="flex items-center gap-2">
+                                            {task.epic_name ? (
+                                                <span 
+                                                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
+                                                    style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                                >
+                                                    {task.epic_name}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-text-tertiary italic">None</span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                                 <div>
                                     <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
                                         <Tag className="w-3 h-3" /> Tags

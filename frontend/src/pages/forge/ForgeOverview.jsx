@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Bot, Play, DollarSign, Zap, CheckCircle, XCircle, Clock, Activity } from 'lucide-react';
 import { api } from '../../api';
 
@@ -22,6 +22,7 @@ function StatCard({ icon: Icon, label, value, sub, color }) {
 }
 
 export function ForgeOverview() {
+    const navigate = useNavigate();
     const [stats, setStats] = useState(null);
     const [recentRuns, setRecentRuns] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -118,7 +119,7 @@ export function ForgeOverview() {
                 ) : (
                     <div className="space-y-2">
                         {recentRuns.map((run) => (
-                            <div key={run.id} className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-bg-hover transition-colors">
+                            <div key={run.id} className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-bg-hover transition-colors cursor-pointer" onClick={() => navigate(`/forge/runs/${run.id}`)}>
                                 <RunStatusBadge status={run.status} />
                                 <div className="flex-1 min-w-0">
                                     <span className="text-sm text-text-primary font-medium">
@@ -150,13 +151,16 @@ export function ForgeOverview() {
 
 function RunStatusBadge({ status }) {
     const styles = {
-        pending:   { bg: '#5f6368', label: 'Pending' },
-        running:   { bg: '#f1c40f', label: 'Running' },
-        completed: { bg: '#2ecc71', label: 'Done' },
-        failed:    { bg: '#e74c3c', label: 'Failed' },
-        cancelled: { bg: '#9aa0a6', label: 'Cancelled' },
+        queued:        { bg: '#5f6368', label: 'Queued' },
+        pending:       { bg: '#5f6368', label: 'Pending' },
+        running:       { bg: '#f1c40f', label: 'Running' },
+        waiting_human: { bg: '#ff9800', label: 'Waiting' },
+        blocked:       { bg: '#e91e63', label: 'Blocked' },
+        completed:     { bg: '#2ecc71', label: 'Done' },
+        failed:        { bg: '#e74c3c', label: 'Failed' },
+        cancelled:     { bg: '#9aa0a6', label: 'Cancelled' },
     };
-    const s = styles[status] || styles.pending;
+    const s = styles[status] || styles.queued;
     return (
         <span
             className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white"
