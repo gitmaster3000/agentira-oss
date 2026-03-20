@@ -188,15 +188,34 @@ async def delete_project(project_id: str) -> bool:
     return services.delete_project(project_id)
 
 @mcp.tool()
-async def add_project_member(project_id: str, profile_name: str, ctx: Context = None) -> dict:
-    """Add a user to a project."""
-    actor = actor_ctx.get()
-    return services.add_project_member(project_id, profile_name, actor=actor)
-
-@mcp.tool()
 async def remove_project_member(project_id: str, profile_name: str) -> bool:
     """Remove a user from a project."""
     return services.remove_project_member(project_id, profile_name)
+
+# ── Epic Tools ─────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def list_epics(project_id: str = None, ctx: Context = None) -> list[dict]:
+    """List all epics for a project or all projects."""
+    actor = actor_ctx.get()
+    return services.list_epics(project_id=project_id, actor=actor)
+
+@mcp.tool()
+async def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", ctx: Context = None) -> dict:
+    """Create a new epic."""
+    actor = actor_ctx.get()
+    return services.create_epic(project_id, title, description=description, color=color, actor=actor)
+
+@mcp.tool()
+async def update_epic(epic_id: str, title: str = None, description: str = None, color: str = None, ctx: Context = None) -> dict:
+    """Update epic metadata."""
+    actor = actor_ctx.get()
+    return services.update_epic(epic_id, title=title, description=description, color=color, actor=actor)
+
+@mcp.tool()
+async def delete_epic(epic_id: str) -> bool:
+    """Delete an epic."""
+    return services.delete_epic(epic_id)
 
 # ── Task Tools ─────────────────────────────────────────────────────────────────
 
