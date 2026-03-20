@@ -1,0 +1,16 @@
+meta {
+  name: 30-Delete Task by Key
+  type: http
+  seq: 30
+}
+
+delete {
+  url: {{base_url}}/api/tasks/{{task_key}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.ok: eq true
+}

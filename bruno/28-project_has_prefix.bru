@@ -1,0 +1,17 @@
+meta {
+  name: 28-Project Has Key Prefix
+  type: http
+  seq: 28
+}
+
+get {
+  url: {{base_url}}/api/projects/{{new_project_id}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.key_prefix: isDefined
+  res.body.key_prefix: matches [A-Z]{2,10}
+}

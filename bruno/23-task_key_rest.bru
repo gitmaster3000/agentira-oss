@@ -1,0 +1,34 @@
+meta {
+  name: 23-Task Key REST
+  type: http
+  seq: 23
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{new_project_id}}",
+    "title": "Task Key Test",
+    "description": "Verify Jira-style key is generated",
+    "status": "backlog",
+    "priority": "medium",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.key: isDefined
+  res.body.key: matches [A-Z]+-\d+
+  res.body.id: isDefined
+}
+
+vars:post-response {
+  task_key: res.body.key
+  task_key_id: res.body.id
+}

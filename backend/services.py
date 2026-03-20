@@ -62,10 +62,19 @@ def _dod_progress(dod: list | None) -> dict | None:
     return {"total": total, "checked": checked}
 
 
+def _resolve_task(db: Session, task_ref: str) -> Task | None:
+    """Resolve a task by ID or Jira-style key (e.g. 'AGNT-1')."""
+    task = db.get(Task, task_ref)
+    if task:
+        return task
+    return db.query(Task).filter(Task.key == task_ref.upper()).first()
+
+
 def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
     dod = _parse_dod(t.dod_items)
     return {
         "id": t.id,
+        "key": t.key or t.id,
         "project_id": t.project_id,
         "epic_id": t.epic_id,
         "epic_name": t.epic.title if t.epic else None,
@@ -111,6 +120,7 @@ def _attachment_count(db: Session, task_id: str) -> int:
 def _project_to_dict(p: Project) -> dict:
     return {
         "id": p.id,
+        "key_prefix": p.key_prefix or "PROJ",
         "name": p.name,
         "description": p.description,
         "created_at": p.created_at.isoformat(),
@@ -258,9 +268,30 @@ def mark_notification_read(notification_id: str, actor_profile_id: str | None = 
 
 # ── Project operations ──────────────────────────────────────────────────
 
+def _derive_prefix(name: str) -> str:
+    """Derive a short uppercase prefix from a project name."""
+    import re
+    words = re.findall(r'[A-Za-z]+', name)
+    if not words:
+        return "PROJ"
+    if len(words) == 1:
+        w = words[0].upper()
+        consonants = re.sub(r'[AEIOU]', '', w)
+        return (consonants[:4] if len(consonants) >= 3 else w[:4]).ljust(2, 'X')
+    return ''.join(w[0].upper() for w in words[:5])
+
+
 def create_project(name: str, description: str = "", actor: str = "system") -> dict:
     with _session() as db:
-        project = Project(name=name, description=description)
+        prefix = _derive_prefix(name)
+        # Deduplicate prefix
+        existing = {r[0] for r in db.query(Project.key_prefix).all() if r[0]}
+        base = prefix
+        i = 2
+        while prefix in existing:
+            prefix = f"{base}{i}"
+            i += 1
+        project = Project(name=name, description=description, key_prefix=prefix)
         db.add(project)
         db.flush()
 
@@ -528,8 +559,15 @@ def create_task(
             try: due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
             except ValueError: pass
 
+        # Generate Jira-style key
+        prefix = project.key_prefix or "PROJ"
+        num = project.next_task_number or 1
+        task_key = f"{prefix}-{num}"
+        project.next_task_number = num + 1
+
         task = Task(
             project_id=project_id,
+            key=task_key,
             title=title,
             description=description,
             status_id=status_id,
@@ -616,7 +654,7 @@ def list_tasks(
 
 def get_task(task_id: str) -> dict | None:
     with _session() as db:
-        t = db.get(Task, task_id)
+        t = _resolve_task(db, task_id)
         if not t:
             return None
         return _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
@@ -638,9 +676,10 @@ def update_task(
     actor: str = "system",
 ) -> dict:
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
 
         import json
         changes = []
@@ -735,9 +774,10 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
     from backend.auth import check_transition
 
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
 
         old = task.status.name
         if old == new_status:
@@ -769,7 +809,7 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
 
 def delete_task(task_id: str) -> bool:
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             return False
         db.delete(task)
@@ -781,9 +821,10 @@ def delete_task(task_id: str) -> bool:
 
 def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
         
         act = _log_activity(
             db, actor, "commented", comment,
@@ -951,6 +992,7 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
 
             task_data = {
                 "id": t.id,
+                "key": t.key or t.id,
                 "title": t.title,
                 "status": status_name,
                 "priority": t.priority.value,
@@ -1174,9 +1216,10 @@ def revoke_profile_permission(profile_id: str, codename: str) -> bool:
 
 def add_attachment(task_id: str, filename: str, file_bytes: bytes, content_type: str = "application/octet-stream", uploaded_by: str = "system") -> dict:
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
 
         task_dir = os.path.join(ATTACHMENTS_DIR, task_id)
         os.makedirs(task_dir, exist_ok=True)
@@ -1375,14 +1418,15 @@ def list_task_commits(task_id: str) -> list[dict]:
 
 
 def suggest_branch_name(task_id: str) -> dict | None:
-    """Generate a suggested branch name from task id + title."""
+    """Generate a suggested branch name from task key + title."""
     import re
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             return None
+        key = (task.key or task.id).lower()
         slug = re.sub(r'[^a-z0-9]+', '-', task.title.lower()).strip('-')[:50]
-        name = f"task/{task_id}-{slug}"
+        name = f"task/{key}-{slug}"
         return {"branch": name, "command": f"git checkout -b {name}"}
 
 
@@ -1391,9 +1435,10 @@ def link_commit(task_id: str, *, sha: str, message: str = "", author: str = "",
                 committed_at: str | None = None) -> dict:
     from datetime import datetime as dt, timezone as tz
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
         # Avoid duplicate sha per task
         existing = db.query(TaskCommit).filter_by(task_id=task_id, sha=sha).first()
         if existing:
@@ -1421,9 +1466,10 @@ def link_pr(task_id: str, *, pr_number: int, title: str = "", author: str = "",
             branch: str = "", url: str = "", repo: str = "",
             state: str = "open") -> dict:
     with _session() as db:
-        task = db.get(Task, task_id)
+        task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        task_id = task.id
         existing = db.query(TaskCommit).filter_by(task_id=task_id, pr_number=pr_number, kind="pr").first()
         if existing:
             existing.pr_state = state
@@ -1460,10 +1506,13 @@ def process_github_webhook(payload: dict) -> list[dict]:
     """
     import re
     task_id_pattern = re.compile(r'(?:\[TASK[- ]?([a-f0-9]{12})\]|task[: ]([a-f0-9]{12}))', re.IGNORECASE)
+    task_key_pattern = re.compile(r'\[([A-Z]{2,10}-\d+)\]', re.IGNORECASE)
     results = []
 
     def extract_task_ids(text: str) -> list[str]:
-        return [m.group(1) or m.group(2) for m in task_id_pattern.finditer(text or "")]
+        ids = [m.group(1) or m.group(2) for m in task_id_pattern.finditer(text or "")]
+        keys = [m.group(1).upper() for m in task_key_pattern.finditer(text or "")]
+        return ids + keys
 
     # Push event — commits
     if "commits" in payload:
