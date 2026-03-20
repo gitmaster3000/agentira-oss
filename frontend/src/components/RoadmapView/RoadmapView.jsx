@@ -211,7 +211,7 @@ export function RoadmapView({ projectId }) {
     }
 
     return (
-        <div className="flex-1 p-6 overflow-y-auto space-y-5">
+        <div className="flex-1 p-6 overflow-y-auto space-y-5 h-full max-h-[calc(100vh-64px)]">
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">

@@ -154,6 +154,8 @@ export function Board() {
     const view = searchParams.get('view') || 'board';
     const [loading, setLoading] = useState(true);
     const [showAddMember, setShowAddMember] = useState(false);
+    const [isPanelEditing, setIsPanelEditing] = useState(false);
+    const [pendingAction, setPendingAction] = useState(null);
     const addBtnRef = useRef(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('');
@@ -161,7 +163,6 @@ export function Board() {
     const [filterEpic, setFilterEpic] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const panelEditingRef = useRef(false);
-    const [pendingAction, setPendingAction] = useState(null);
 
     // Sync refs for the discard modal
     useEffect(() => {
@@ -528,6 +529,7 @@ export function Board() {
                     onUpdate={() => {
                         loadBoard();
                     }}
+                    onEditingChange={setIsPanelEditing}
                 />
             )}
 

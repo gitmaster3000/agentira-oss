@@ -70,6 +70,7 @@ export const api = {
 
     // Board
     getBoard: (projectId) => request(`/projects/${projectId}/board`),
+    getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
@@ -221,6 +222,7 @@ export const api = {
         // Costs
         getAgentCosts: (agentId) => request(`/forge/agents/${agentId}/costs`),
         estimateCost: (data) => request('/forge/cost-estimate', { method: 'POST', body: JSON.stringify(data) }),
+        getRuntimeCosts: (agentId) => request(`/forge/agents/${agentId}/runtime/costs`),
         getPricing: () => request('/forge/pricing'),
 
         // OpenClaw integration
@@ -228,5 +230,8 @@ export const api = {
         sendRuntimeChat: (agentId, data) => request(`/forge/agents/${agentId}/runtime/chat`, { method: 'POST', body: JSON.stringify(data) }),
         getOpenClawOverview: () => request('/forge/openclaw/overview'),
         syncOpenClaw: () => request('/forge/openclaw/sync', { method: 'POST' }),
+        getOpenClawModels: () => request('/forge/openclaw/models'),
+        setOpenClawAgentModel: (agentName, model) => request('/forge/openclaw/agent-model', { method: 'POST', body: JSON.stringify({ agent_name: agentName, model }) }),
+        resetAgentStatus: (agentId) => request(`/forge/agents/${agentId}/reset-status`, { method: 'POST' }),
     },
 };

@@ -67,6 +67,19 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     // Edit state
     const [formData, setFormData] = useState({ ...task });
 
+    // Notify parent of edit state changes
+    const toggleEditing = (val) => {
+        setIsEditing(val);
+        if (onEditingChange) onEditingChange(val);
+    };
+
+    useEffect(() => {
+        // Reset edit state when switching to a different task
+        setIsEditing(false);
+        setFormData({ ...task });
+        if (onEditingChange) onEditingChange(false);
+    }, [task.id]);
+
     useEffect(() => {
         loadActivity();
         loadAttachments();
@@ -201,7 +214,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 pr_url: prUrlValue || undefined,
                 epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
             });
-            setIsEditing(false);
+            toggleEditing(false);
             onUpdate();
         } catch (err) {
             alert(err.message);
@@ -285,7 +298,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 ) : (
                                     <h1
                                         className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors cursor-pointer hover:bg-bg-hover"
-                                        onClick={() => setIsEditing(true)}
+                                        onClick={() => toggleEditing(true)}
                                     >
                                         {task.title}
                                     </h1>
@@ -685,7 +698,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 <button
                                     onClick={() => {
                                         setFormData(task);
-                                        setIsEditing(false);
+                                        toggleEditing(false);
                                     }}
                                     className="btn btn-ghost text-xs py-1.5"
                                 >
