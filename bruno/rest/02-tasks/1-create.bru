@@ -1,0 +1,29 @@
+meta {
+  name: Create Task
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{_rest_pid}}",
+    "title": "REST Test Task",
+    "status": "backlog",
+    "priority": "high",
+    "tags": ["backend", "test"],
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.title: eq "REST Test Task"
+  res.body.id: isDefined
+  res.body.key: isDefined
+}

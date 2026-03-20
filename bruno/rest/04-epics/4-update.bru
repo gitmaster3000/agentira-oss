@@ -1,0 +1,27 @@
+meta {
+  name: Update Epic
+  type: "http"
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/api/epics/{{epic_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "title": "Updated Epic Title",
+    "description": "Updated description",
+    "color": "#2196f3",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.title: eq "Updated Epic Title"
+  res.body.color: eq "#2196f3"
+  res.body.id: eq {{epic_id}}
+}

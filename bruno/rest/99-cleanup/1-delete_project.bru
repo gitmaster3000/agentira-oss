@@ -1,0 +1,16 @@
+meta {
+  name: Cleanup - Delete REST Project
+  type: http
+  seq: 1
+}
+
+delete {
+  url: {{base_url}}/api/projects/{{_rest_pid}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.ok: eq true
+}

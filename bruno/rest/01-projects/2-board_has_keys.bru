@@ -1,0 +1,28 @@
+meta {
+  name: Board Has Task Keys
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_rest_pid}}/board
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.columns: isDefined
+}
+
+tests {
+  test("Board tasks include key field", function() {
+    expect(res.status).to.equal(200);
+    const columns = res.body.columns;
+    const allTasks = Object.values(columns).flat();
+    if (allTasks.length > 0) {
+      expect(allTasks[0]).to.have.property('key');
+      expect(allTasks[0].key).to.match(/^[A-Z][A-Z0-9]*-\d+$/);
+    }
+  });
+}

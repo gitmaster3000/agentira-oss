@@ -1,0 +1,36 @@
+meta {
+  name: Create Epic
+  type: "http"
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_rest_pid}}/epics
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "title": "Bruno Test Epic",
+    "description": "Created via Bruno test",
+    "color": "#ff5722",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.title: eq "Bruno Test Epic"
+  res.body.description: eq "Created via Bruno test"
+  res.body.color: eq "#ff5722"
+  res.body.status: eq "backlog"
+  res.body.task_count: eq 0
+  res.body.project_id: eq {{_rest_pid}}
+  res.body.id: isDefined
+  res.body.created_at: isDefined
+}
+
+vars:post-response {
+  epic_id: res.body.id
+}

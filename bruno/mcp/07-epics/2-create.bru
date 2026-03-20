@@ -1,0 +1,54 @@
+meta {
+  name: Create Epic MCP
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("_mcp_epics_pid");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 222,
+    method: "tools/call",
+    params: {
+      name: "create_epic",
+      arguments: {
+        project_id: pid,
+        title: "MCP Created Epic",
+        description: "Epic from MCP tool",
+        color: "#4caf50"
+      }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+script:post-response {
+  try {
+    const r = res.body.result;
+    const data = r.structuredContent ? r.structuredContent.result : JSON.parse(r.content[0].text);
+    if (data && data.id) {
+      bru.setVar("_mcp_epic_id", data.id);
+    }
+  } catch (e) {}
+}
+
+tests {
+  test("MCP create_epic successful", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("MCP Created Epic");
+    expect(text).to.contain("#4caf50");
+  });
+}

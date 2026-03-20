@@ -1,0 +1,38 @@
+meta {
+  name: List Epics MCP
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("_mcp_epics_pid");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 223,
+    method: "tools/call",
+    params: {
+      name: "list_epics",
+      arguments: { project_id: pid }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("MCP list_epics returns created epic", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("MCP Created Epic");
+  });
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Delete Epic
+  type: "http"
+  seq: 8
+}
+
+delete {
+  url: {{base_url}}/api/epics/{{epic_id}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.ok: eq true
+}

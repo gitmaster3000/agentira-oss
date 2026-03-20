@@ -1,0 +1,52 @@
+meta {
+  name: "18-Download Attachment"
+  type: "http"
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 18,
+    "method": "tools/call",
+    "params": {
+      "name": "download_attachment",
+      "arguments": {
+        "attachment_id": "{{attachmentId}}"
+      }
+    }
+  }
+}
+
+tests {
+  test("Download attachment successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
+  });
+
+  test("Response contains base64 content", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('content_base64');
+  });
+
+  test("Filename matches uploaded original", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('bruno_proof.txt');
+  });
+
+  test("download_url is present", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('/api/attachments/');
+  });
+}

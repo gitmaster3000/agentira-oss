@@ -1,0 +1,38 @@
+meta {
+  name: Delete Epic
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const eid = bru.getVar("_mcp_epic_id");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 225,
+    method: "tools/call",
+    params: {
+      name: "delete_epic",
+      arguments: { epic_id: eid }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Delete epic successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
+    expect(res.body.result.isError).to.not.equal(true);
+  });
+}

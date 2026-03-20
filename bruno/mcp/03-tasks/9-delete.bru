@@ -1,0 +1,38 @@
+meta {
+  name: Delete Task
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const tid = bru.getVar("taskId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 65,
+    method: "tools/call",
+    params: {
+      name: "delete_task",
+      arguments: { task_id: tid }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Delete task successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
+    expect(res.body.result.isError).to.not.equal(true);
+  });
+}

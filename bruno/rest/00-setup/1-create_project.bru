@@ -1,0 +1,29 @@
+meta {
+  name: Setup - Create REST Project
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/projects
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "REST Integration Test",
+    "description": "Shared project for all REST tests",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+  res.body.key_prefix: isDefined
+}
+
+vars:post-response {
+  _rest_pid: res.body.id
+}

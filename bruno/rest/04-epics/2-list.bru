@@ -1,0 +1,32 @@
+meta {
+  name: "21-List Epics"
+  type: "http"
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/api/epics/?project_id={{_rest_pid}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("List epics returns array", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('array');
+  });
+
+  test("Each epic has required fields", function() {
+    if (res.body.length > 0) {
+      const epic = res.body[0];
+      expect(epic).to.have.property('id');
+      expect(epic).to.have.property('project_id');
+      expect(epic).to.have.property('title');
+      expect(epic).to.have.property('description');
+      expect(epic).to.have.property('status');
+      expect(epic).to.have.property('color');
+      expect(epic).to.have.property('task_count');
+      expect(epic).to.have.property('created_at');
+    }
+  });
+}

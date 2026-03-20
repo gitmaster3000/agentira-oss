@@ -1,0 +1,38 @@
+meta {
+  name: Move Task
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const tid = bru.getVar("taskId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 61,
+    method: "tools/call",
+    params: {
+      name: "move_task",
+      arguments: { task_id: tid, status: "todo" }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Move task successful", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("todo");
+  });
+}
