@@ -107,7 +107,7 @@ export function Backlog({ projectId }) {
         };
     }, []);
 
-    const selectedTask = selectedTaskId ? tasks.find(t => String(t.id) === String(selectedTaskId)) : null;
+    const selectedTask = selectedTaskId ? tasks.find(t => String(t.id) === String(selectedTaskId) || String(t.key) === String(selectedTaskId)) : null;
 
     const toggleSection = (id) => setCollapsedSections(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -238,15 +238,16 @@ export function Backlog({ projectId }) {
                                                     key={task.id}
                                                     onClick={() => {
                                                         const newParams = new URLSearchParams(searchParams);
-                                                        newParams.set('selectedTask', task.id);
+                                                        newParams.set('selectedTask', task.key || task.id);
                                                         setSearchParams(newParams);
                                                     }}
-                                                    className={`flex items-center px-4 py-2 hover:bg-bg-hover cursor-pointer transition-colors ${selectedTaskId === String(task.id) ? 'bg-bg-hover' : ''}`}
+                                                    className={`flex items-center px-4 py-2 hover:bg-bg-hover cursor-pointer transition-colors ${selectedTaskId === String(task.key) || selectedTaskId === String(task.id) ? 'bg-bg-hover' : ''}`}
                                                     style={{ borderBottom: idx !== section.tasks.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
                                                 >
-                                                    <div className="w-3 h-3 rounded-sm mr-3 flex-shrink-0" style={{ backgroundColor: `var(--status-${task.status}, var(--text-tertiary))` }} />
+                                                    <div className="w-2.5 h-2.5 rounded-full mr-3 flex-shrink-0" style={{ backgroundColor: { done: '#2ecc71', review: '#ff9800', in_progress: '#7c4dff', todo: '#00bcd4', backlog: '#5f6368' }[task.status] || '#5f6368' }} title={task.status?.replace('_', ' ')} />
                                                     
                                                     <div className="flex items-center gap-2 flex-1 min-w-0 mr-3">
+                                                        <span className="text-[12px] font-mono font-semibold flex-shrink-0" style={{ color: '#7c8db5' }}>{task.key || task.id}</span>
                                                         <span className="text-sm truncate font-medium" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
                                                         
                                                         {/* Epic/Tag pills inside row */}

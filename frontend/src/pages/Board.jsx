@@ -11,6 +11,14 @@ import { RoadmapView } from '../components/RoadmapView/RoadmapView';
 import { Backlog } from './Backlog';
 import { CreateEpicModal } from '../components/CreateEpicModal';
 
+const STATUS_COLORS = {
+    backlog: '#5f6368',
+    todo: '#00bcd4',
+    in_progress: '#7c4dff',
+    review: '#ff9800',
+    done: '#2ecc71',
+};
+
 const COLUMNS = [
     { id: 'backlog', label: 'Backlog' },
     { id: 'todo', label: 'To Do' },
@@ -294,7 +302,7 @@ export function Board() {
         
         // Try to find in board
         if (board) {
-            const found = Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId));
+            const found = Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId) || String(t.key) === String(selectedTaskId));
             if (found) {
                 setSelectedTask(found);
                 return;
@@ -456,7 +464,10 @@ export function Board() {
                                         onDrop={e => handleDrop(e, col.id)}
                                     >
                                         <div className="px-4 py-3 font-medium text-title-sm flex justify-between items-center border-b">
-                                            {col.label}
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[col.id] }} />
+                                                {col.label}
+                                            </div>
                                             <span className="text-label-sm px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
                                                 {filteredColumns[col.id]?.length || 0}
                                             </span>
@@ -473,7 +484,7 @@ export function Board() {
                                                                 panelEditingRef.current = false;
                                                                 setIsEditing(false);
                                                                 const newParams = new URLSearchParams(searchParams);
-                                                                newParams.set('selectedTask', t.id);
+                                                                newParams.set('selectedTask', t.key || t.id);
                                                                 setSearchParams(newParams);
                                                             });
                                                             return;
@@ -481,7 +492,7 @@ export function Board() {
                                                         panelEditingRef.current = false;
                                                         setIsEditing(false);
                                                         const newParams = new URLSearchParams(searchParams);
-                                                        newParams.set('selectedTask', t.id);
+                                                        newParams.set('selectedTask', t.key || t.id);
                                                         setSearchParams(newParams);
                                                     }}
                                                     onDelete={loadBoard}

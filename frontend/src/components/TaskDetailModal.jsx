@@ -243,7 +243,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                             }}>
                                 {task.priority}
                             </span>
-                            <span style={{ color: 'var(--text-tertiary)' }}>#{task.id}</span>
+                            <span className="font-mono" style={{ color: 'var(--text-tertiary)' }}>{task.key || task.id}</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-1">

@@ -70,14 +70,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     // Notify parent of edit state changes
     const toggleEditing = (val) => {
         setIsEditing(val);
-        if (onEditingChange) onEditingChange(val);
+        /* onEditingChange removed — not a prop */
     };
 
     useEffect(() => {
         // Reset edit state when switching to a different task
         setIsEditing(false);
         setFormData({ ...task });
-        if (onEditingChange) onEditingChange(false);
     }, [task.id]);
 
     useEffect(() => {
@@ -264,11 +263,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     <div className="flex items-center gap-4 text-text-tertiary">
                         <span className="text-xs font-bold tracking-widest uppercase">Task Detail</span>
                         <div className="w-1 h-1 rounded-full bg-border-subtle" />
-                        <span className="text-xs font-medium">#{task.id}</span>
+                        <span className="text-xs font-mono font-medium">{task.key || task.id}</span>
                     </div>
                     <div className="flex items-center gap-1">
                         <button
-                            onClick={() => navigate(`/tasks/${task.id}`)}
+                            onClick={() => navigate(`/tasks/${task.key || task.id}`)}
                             className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
                             title="Open in full page"
                         >

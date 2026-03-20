@@ -40,10 +40,7 @@ export function TaskCard({ task, onUpdate, onDelete }) {
         }
     };
 
-    const statusColor = task.priority === 'critical' ? 'var(--status-review)'
-        : task.priority === 'high' ? 'var(--status-inprogress)'
-        : task.priority === 'medium' ? 'var(--status-todo)'
-        : 'var(--status-backlog)';
+    const statusColor = 'var(--border-subtle)';
 
     return (
         <div
@@ -76,12 +73,13 @@ export function TaskCard({ task, onUpdate, onDelete }) {
                 />
             )}
 
+            <span className="text-[13px] font-mono font-semibold mb-1 block" style={{ color: '#7c8db5' }}>{task.key || task.id}</span>
             <div className="flex justify-between items-start mb-1 h-10">
                 <h4 className="font-medium text-body-md text-text-primary line-clamp-2 pr-6">{task.title}</h4>
             </div>
 
             <div className="flex justify-between items-center mt-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
                     {task.epic_name && (
                         <span 
                             className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
