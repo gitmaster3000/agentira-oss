@@ -1,0 +1,31 @@
+meta {
+  name: "22.2-Assign Task to Epic"
+  type: "http"
+  seq: 22
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{new_project_id}}",
+    "title": "Epic Child Task",
+    "epic_id": "{{epic_id}}",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.epic_id: eq {{epic_id}}
+  res.body.epic_name: eq "Updated Epic Title"
+  res.body.key: isDefined
+}
+
+vars:post-response {
+  epic_child_task_id: res.body.id
+}

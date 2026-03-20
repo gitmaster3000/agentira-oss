@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{baseUrl}}/api/projects/7b4232d3e521/epics
+  url: {{base_url}}/api/projects/{{new_project_id}}/epics
   body: json
   auth: none
 }
@@ -14,14 +14,23 @@ body:json {
   {
     "title": "Bruno Test Epic",
     "description": "Created via Bruno test",
-    "color": "#ff0000",
-    "actor": "bruno"
+    "color": "#ff5722",
+    "actor": "admin"
   }
 }
 
-tests {
-  test("Create epic successful", function() {
-    expect(res.status).to.equal(200);
-    expect(res.body.title).to.equal("Bruno Test Epic");
-  });
+assert {
+  res.status: eq 200
+  res.body.title: eq "Bruno Test Epic"
+  res.body.description: eq "Created via Bruno test"
+  res.body.color: eq "#ff5722"
+  res.body.status: eq "backlog"
+  res.body.task_count: eq 0
+  res.body.project_id: eq {{new_project_id}}
+  res.body.id: isDefined
+  res.body.created_at: isDefined
+}
+
+vars:post-response {
+  epic_id: res.body.id
 }
