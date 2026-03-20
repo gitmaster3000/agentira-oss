@@ -45,6 +45,7 @@ function TaskRow({ task }) {
                 style={{ backgroundColor: priorityColor }}
                 title={task.priority}
             />
+            <span className="text-[10px] font-mono text-text-tertiary flex-shrink-0">{task.key || task.id}</span>
             <span className="text-sm text-text-primary flex-1 min-w-0 truncate">{task.title}</span>
             {task.assignee && (
                 <span className="text-xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-tertiary hidden group-hover:inline">
