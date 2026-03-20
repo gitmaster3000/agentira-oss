@@ -1,0 +1,38 @@
+meta {
+  name: Get Project
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("projectId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 51,
+    method: "tools/call",
+    params: {
+      name: "get_project",
+      arguments: { project_id: pid }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Get project returns correct project", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("Integration Test Project");
+  });
+}

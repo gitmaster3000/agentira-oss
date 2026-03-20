@@ -1,0 +1,24 @@
+meta {
+  name: Move Task by Key
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/tasks/{{_key_task_key}}/move
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "todo",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.key: eq {{_key_task_key}}
+  res.body.status: eq todo
+}

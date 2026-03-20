@@ -1,0 +1,20 @@
+meta {
+  name: Epic Task Count
+  type: "http"
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/api/epics/?project_id={{_rest_pid}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("Epic has correct task count after assignment", function() {
+    expect(res.status).to.equal(200);
+    const epic = res.body.find(e => e.id === bru.getVar("epic_id"));
+    expect(epic).to.not.be.undefined;
+    expect(epic.task_count).to.be.at.least(1);
+  });
+}

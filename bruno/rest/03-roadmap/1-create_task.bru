@@ -1,0 +1,25 @@
+meta {
+  name: Create Task for Roadmap
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "project_id": "{{_rest_pid}}",
+    "title": "Roadmap Task",
+    "status": "backlog",
+    "priority": "medium",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+}

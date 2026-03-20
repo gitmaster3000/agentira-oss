@@ -1,0 +1,37 @@
+meta {
+  name: List Statuses
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 70,
+    "method": "tools/call",
+    "params": {
+      "name": "list_statuses",
+      "arguments": {}
+    }
+  }
+}
+
+tests {
+  test("List statuses returns workflow statuses", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("backlog");
+    expect(text).to.contain("done");
+  });
+}

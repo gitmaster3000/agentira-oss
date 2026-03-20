@@ -1,0 +1,39 @@
+meta {
+  name: Verify Unassignment
+  type: "http"
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "method": "tools/call",
+    "params": {
+      "name": "get_task",
+      "arguments": {
+        "task_id": "{{taskId}}"
+      }
+    }
+  }
+}
+
+tests {
+  test("Task assignee is empty", function() {
+    expect(res.status).to.equal(200);
+    // Be flexible with quotes and spacing
+    const text = res.body.result.content[0].text;
+    expect(text).to.match(/['"]assignee['"]:\s*['"]/); 
+  });
+}

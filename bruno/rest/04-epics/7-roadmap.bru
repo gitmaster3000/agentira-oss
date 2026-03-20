@@ -1,0 +1,39 @@
+meta {
+  name: Roadmap with Epic
+  type: "http"
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_rest_pid}}/roadmap?group_by=epic
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary: isDefined
+  res.body.epics: isDefined
+  res.body.milestones: isDefined
+  res.body.project.id: eq {{_rest_pid}}
+}
+
+tests {
+  test("Roadmap groups include epic name", function() {
+    const groups = res.body.epics.map(g => g.name);
+    expect(groups).to.include("Updated Epic Title");
+  });
+
+  test("Roadmap tasks have key field", function() {
+    const allTasks = res.body.epics.flatMap(g => g.tasks);
+    if (allTasks.length > 0) {
+      expect(allTasks[0]).to.have.property('key');
+    }
+  });
+
+  test("Roadmap summary has counts", function() {
+    expect(res.body.summary).to.have.property('total_tasks');
+    expect(res.body.summary).to.have.property('total_done');
+    expect(res.body.summary).to.have.property('total_epics');
+  });
+}

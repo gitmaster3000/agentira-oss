@@ -1,0 +1,39 @@
+meta {
+  name: Update Epic
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const eid = bru.getVar("_mcp_epic_id");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 224,
+    method: "tools/call",
+    params: {
+      name: "update_epic",
+      arguments: { epic_id: eid, title: "MCP Updated Epic", color: "#ff9800" }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Update epic successful", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("MCP Updated Epic");
+    expect(text).to.contain("#ff9800");
+  });
+}

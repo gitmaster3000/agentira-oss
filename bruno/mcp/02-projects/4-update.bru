@@ -1,0 +1,38 @@
+meta {
+  name: Update Project
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("projectId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 52,
+    method: "tools/call",
+    params: {
+      name: "update_project",
+      arguments: { project_id: pid, description: "Updated via Bruno" }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Update project successful", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("Updated via Bruno");
+  });
+}

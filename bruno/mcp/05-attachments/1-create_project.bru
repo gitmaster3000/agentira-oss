@@ -1,0 +1,39 @@
+meta {
+  name: "10-Create Attachment Project"
+  type: "http"
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 10,
+    "method": "tools/call",
+    "params": {
+      "name": "create_project",
+      "arguments": {
+        "name": "Attachment Test Project"
+      }
+    }
+  }
+}
+
+tests {
+  test("Attachment project created", function() {
+    expect(res.status).to.equal(200);
+    const text = res.body.result.content[0].text;
+    const proj = JSON.parse(text);
+    bru.setVar("attachProjectId", proj.id);
+  });
+}

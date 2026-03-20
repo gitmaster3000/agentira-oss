@@ -1,0 +1,59 @@
+meta {
+  name: "16-Upload Attachment"
+  type: "http"
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 16,
+    "method": "tools/call",
+    "params": {
+      "name": "upload_attachment",
+      "arguments": {
+        "task_id": "{{attachTaskId}}",
+        "filename": "bruno_proof.txt",
+        "content_base64": "aGVsbG8gZnJvbSBicnVubyB0ZXN0",
+        "content_type": "text/plain"
+      }
+    }
+  }
+}
+
+tests {
+  test("Upload attachment successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result).to.be.an('object');
+  });
+
+  test("Response contains attachment metadata", function() {
+    const content = res.body.result.content;
+    expect(content).to.be.an('array');
+    const allText = content.map(c => c.text).join('\n');
+    expect(allText).to.contain('bruno_proof.txt');
+  });
+
+  test("Attachment has correct filename", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    expect(allText).to.contain('bruno_proof.txt');
+  });
+
+  test("Capture attachment ID for download test", function() {
+    const allText = res.body.result.content.map(c => c.text).join('\n');
+    const parsed = JSON.parse(allText);
+    bru.setVar("attachmentId", parsed.id);
+    expect(parsed.id).to.be.a('string');
+  });
+}

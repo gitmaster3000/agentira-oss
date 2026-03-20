@@ -1,0 +1,48 @@
+meta {
+  name: Setup - Create Project for MCP Epics
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 100,
+    "method": "tools/call",
+    "params": {
+      "name": "create_project",
+      "arguments": {
+        "name": "MCP Epics Test",
+        "description": "Setup project for MCP epic tests"
+      }
+    }
+  }
+}
+
+script:post-response {
+  if (res.body.result && res.body.result.content && res.body.result.content[0].text) {
+    try {
+      const data = JSON.parse(res.body.result.content[0].text.replace(/'/g, '"'));
+      if (data && data.id) {
+        bru.setVar("_mcp_epics_pid", data.id);
+      }
+    } catch (e) {}
+  }
+}
+
+tests {
+  test("Setup project created", function() {
+    expect(res.status).to.equal(200);
+  });
+}

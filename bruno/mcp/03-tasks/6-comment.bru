@@ -1,0 +1,38 @@
+meta {
+  name: Add Comment
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const tid = bru.getVar("taskId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 62,
+    method: "tools/call",
+    params: {
+      name: "add_comment",
+      arguments: { task_id: tid, comment: "Bruno test comment" }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Add comment successful", function() {
+    expect(res.status).to.equal(200);
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.contain("Bruno test comment");
+  });
+}
