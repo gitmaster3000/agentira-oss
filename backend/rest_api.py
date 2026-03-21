@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
+from backend.jwt_auth import create_token, get_current_user
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -47,7 +48,6 @@ class ProfileUpdate(BaseModel):
 class ProjectCreate(BaseModel):
     name: str
     description: str = ""
-    actor: str = "system"
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -64,7 +64,6 @@ class TaskCreate(BaseModel):
     start_date: Optional[str] = None
     due_date: Optional[str] = None
     epic_id: Optional[str] = None
-    actor: str = "system"
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
@@ -78,15 +77,12 @@ class TaskUpdate(BaseModel):
     branch: Optional[str] = None
     pr_url: Optional[str] = None
     epic_id: Optional[str] = None
-    actor: str = "system"
 
 class TaskMove(BaseModel):
     status: str
-    actor: str = "system"
 
 class CommentCreate(BaseModel):
     comment: str
-    actor: str = "system"
 
 class CommitLink(BaseModel):
     sha: str
@@ -111,13 +107,11 @@ class EpicCreate(BaseModel):
     description: str = ""
     status: str = "backlog"
     color: str = "#7c4dff"
-    actor: str = "system"
 
 class EpicUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
-    actor: str = "system"
 
 class WebhookRuleSchema(BaseModel):
     event: str
@@ -129,7 +123,15 @@ class WebhookConfigUpdate(BaseModel):
     token: str = ""
 
 
-# ── Auth Router ──────────────────────────────────────────────────────────
+def _make_token(user: dict) -> str:
+    """Create a JWT from a user dict returned by services."""
+    role = user.get("role", "member")
+    if isinstance(role, dict):
+        role = role.get("name", "member")
+    return create_token(user["name"], user["id"], role)
+
+
+# ── Auth Router (PUBLIC — no JWT required) ───────────────────────────────
 
 auth = APIRouter(prefix="/api", tags=["auth"])
 
@@ -138,12 +140,13 @@ def api_login(body: LoginRequest):
     user = services.authenticate_user(body.username, body.password)
     if not user:
         raise HTTPException(401, "Invalid credentials")
-    return {"user": user}
+    return {"user": user, "token": _make_token(user)}
 
 @auth.post("/signup")
 def api_signup(body: ProfileSignup):
     try:
-        return services.signup(body.name, body.display_name, body.password)
+        user = services.signup(body.name, body.display_name, body.password)
+        return {"user": user, "token": _make_token(user)}
     except Exception as e:
         raise HTTPException(400, str(e))
 
@@ -168,7 +171,7 @@ def api_auth_google(body: GoogleAuthRequest):
         display_name=info.get("name", ""),
         avatar_url=info.get("picture", ""),
     )
-    return {"user": user}
+    return {"user": user, "token": _make_token(user)}
 
 
 @auth.post("/auth/github")
@@ -217,7 +220,7 @@ async def api_auth_github(body: GitHubAuthRequest):
         display_name=gh_user.get("name") or gh_user.get("login", ""),
         avatar_url=gh_user.get("avatar_url", ""),
     )
-    return {"user": user}
+    return {"user": user, "token": _make_token(user)}
 
 
 @auth.get("/auth/config")
@@ -230,13 +233,18 @@ def api_auth_config():
         "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
     }
 
+@auth.get("/statuses")
+def api_list_statuses():
+    return services.list_statuses()
 
-# ── Profiles Router (includes service accounts) ─────────────────────────
 
-profiles = APIRouter(prefix="/api/profiles", tags=["profiles"])
+# ── Profiles Router ──────────────────────────────────────────────────────
+
+profiles = APIRouter(prefix="/api/profiles", tags=["profiles"],
+                     dependencies=[Depends(get_current_user)])
 
 @profiles.get("/me")
-def api_get_me(actor: str):
+def api_get_me(actor: str = Depends(get_current_user)):
     with services._session() as db:
         p = services._get_profile_by_name(db, actor)
         if not p:
@@ -277,7 +285,8 @@ def api_delete_profile(profile_id: str):
     return {"ok": True}
 
 # Service accounts = profiles with role=bot
-svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"])
+svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"],
+                         dependencies=[Depends(get_current_user)])
 
 @svc_accounts.get("")
 def api_list_service_accounts():
@@ -304,17 +313,18 @@ def api_delete_service_account(profile_id: str):
     return {"ok": True}
 
 
-# ── Projects Router (includes members, board, roadmap, activity, webhooks) ──
+# ── Projects Router ──────────────────────────────────────────────────────
 
-projects = APIRouter(prefix="/api/projects", tags=["projects"])
+projects = APIRouter(prefix="/api/projects", tags=["projects"],
+                     dependencies=[Depends(get_current_user)])
 
 @projects.get("")
-def api_list_projects(actor: str = "system"):
+def api_list_projects(actor: str = Depends(get_current_user)):
     return services.list_projects(actor=actor)
 
 @projects.post("")
-def api_create_project(body: ProjectCreate):
-    return services.create_project(body.name, body.description, actor=body.actor)
+def api_create_project(body: ProjectCreate, actor: str = Depends(get_current_user)):
+    return services.create_project(body.name, body.description, actor=actor)
 
 @projects.get("/{project_id}")
 def api_get_project(project_id: str):
@@ -341,9 +351,9 @@ def api_list_project_members(project_id: str):
     return services.list_project_members(project_id)
 
 @projects.post("/{project_id}/members")
-def api_add_project_member(project_id: str, body: dict):
+def api_add_project_member(project_id: str, body: dict, actor: str = Depends(get_current_user)):
     try:
-        return services.add_project_member(project_id, body["profile_name"], actor=body.get("actor", "system"))
+        return services.add_project_member(project_id, body["profile_name"], actor=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -365,9 +375,9 @@ def api_list_epics(project_id: str):
     return services.list_epics(project_id)
 
 @projects.post("/{project_id}/epics")
-def api_create_epic(project_id: str, body: EpicCreate):
+def api_create_epic(project_id: str, body: EpicCreate, actor: str = Depends(get_current_user)):
     try:
-        return services.create_epic(project_id, title=body.title, description=body.description, color=body.color, actor=body.actor)
+        return services.create_epic(project_id, title=body.title, description=body.description, color=body.color, actor=actor)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -401,26 +411,27 @@ def api_put_webhook_config(project_id: str, body: WebhookConfigUpdate):
         raise HTTPException(404, str(e))
 
 
-# ── Tasks Router (includes comments, activity, attachments, git) ────────
+# ── Tasks Router ─────────────────────────────────────────────────────────
 
-tasks = APIRouter(prefix="/api/tasks", tags=["tasks"])
+tasks = APIRouter(prefix="/api/tasks", tags=["tasks"],
+                  dependencies=[Depends(get_current_user)])
 
 @tasks.get("")
 def api_list_tasks(
     project_id: Optional[str] = None, status: Optional[str] = None,
     assignee: Optional[str] = None, priority: Optional[str] = None,
-    actor: str = "system",
+    actor: str = Depends(get_current_user),
 ):
     return services.list_tasks(project_id=project_id, status=status, assignee=assignee, priority=priority, actor=actor)
 
 @tasks.post("")
-def api_create_task(body: TaskCreate):
+def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
     try:
         return services.create_task(
             project_id=body.project_id, title=body.title, description=body.description,
             status=body.status, priority=body.priority, assignee=body.assignee,
-            tags=body.tags, start_date=body.start_date, due_date=body.due_date, 
-            epic_id=body.epic_id, actor=body.actor,
+            tags=body.tags, start_date=body.start_date, due_date=body.due_date,
+            epic_id=body.epic_id, actor=actor,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -433,14 +444,14 @@ def api_get_task(task_id: str):
     return result
 
 @tasks.patch("/{task_id}")
-def api_update_task(task_id: str, body: TaskUpdate):
+def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_current_user)):
     try:
         return services.update_task(
             task_id=task_id, title=body.title, description=body.description,
             priority=body.priority, assignee=body.assignee, tags=body.tags,
             start_date=body.start_date, due_date=body.due_date,
-            dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url, 
-            epic_id=body.epic_id, actor=body.actor,
+            dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url,
+            epic_id=body.epic_id, actor=actor,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -452,18 +463,18 @@ def api_delete_task(task_id: str):
     return {"ok": True}
 
 @tasks.post("/{task_id}/move")
-def api_move_task(task_id: str, body: TaskMove):
+def api_move_task(task_id: str, body: TaskMove, actor: str = Depends(get_current_user)):
     try:
-        return services.move_task(task_id, body.status, body.actor)
+        return services.move_task(task_id, body.status, actor)
     except PermissionError as e:
         raise HTTPException(403, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 @tasks.post("/{task_id}/comment")
-def api_add_comment(task_id: str, body: CommentCreate):
+def api_add_comment(task_id: str, body: CommentCreate, actor: str = Depends(get_current_user)):
     try:
-        return services.add_comment(task_id, body.comment, body.actor)
+        return services.add_comment(task_id, body.comment, actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -483,11 +494,11 @@ def api_list_attachments(task_id: str):
     return services.list_attachments(task_id)
 
 @tasks.post("/{task_id}/attachments")
-async def api_upload_attachment(task_id: str, file: UploadFile = File(...), uploaded_by: str = Form("system")):
+async def api_upload_attachment(task_id: str, file: UploadFile = File(...), actor: str = Depends(get_current_user)):
     try:
         file_bytes = await file.read()
         return services.add_attachment(task_id=task_id, filename=file.filename, file_bytes=file_bytes,
-                                       content_type=file.content_type or "application/octet-stream", uploaded_by=uploaded_by)
+                                       content_type=file.content_type or "application/octet-stream", uploaded_by=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -521,7 +532,8 @@ def api_suggest_branch(task_id: str):
 
 # ── Attachments (standalone for download/delete by attachment ID) ────────
 
-attachments = APIRouter(prefix="/api/attachments", tags=["tasks"])
+attachments = APIRouter(prefix="/api/attachments", tags=["tasks"],
+                        dependencies=[Depends(get_current_user)])
 
 @attachments.get("/{attachment_id}/download")
 def api_download_attachment(attachment_id: str):
@@ -543,15 +555,13 @@ def api_delete_attachment(attachment_id: str):
 
 # ── Epics Router ─────────────────────────────────────────────────────────
 
-epics_router = APIRouter(prefix="/api/epics", tags=["epics"])
-
-# Moved below to app directly for reliability
-
+epics_router = APIRouter(prefix="/api/epics", tags=["epics"],
+                         dependencies=[Depends(get_current_user)])
 
 @epics_router.patch("/{epic_id}")
-def api_update_epic(epic_id: str, body: EpicUpdate):
+def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_current_user)):
     try:
-        return services.update_epic(epic_id, title=body.title, description=body.description, color=body.color, actor=body.actor)
+        return services.update_epic(epic_id, title=body.title, description=body.description, color=body.color, actor=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -562,13 +572,10 @@ def api_delete_epic(epic_id: str):
     return {"ok": True}
 
 
-# ── Workflow Router (statuses, roles, permissions) ───────────────────────
+# ── Workflow Router (roles, permissions) ─────────────────────────────────
 
-workflow = APIRouter(prefix="/api", tags=["workflow"])
-
-@workflow.get("/statuses")
-def api_list_statuses():
-    return services.list_statuses()
+workflow = APIRouter(prefix="/api", tags=["workflow"],
+                     dependencies=[Depends(get_current_user)])
 
 @workflow.get("/roles")
 def api_list_roles():
@@ -611,10 +618,11 @@ def api_revoke_permission(body: dict):
 
 # ── Notifications Router ─────────────────────────────────────────────────
 
-notifications = APIRouter(prefix="/api/notifications", tags=["notifications"])
+notifications = APIRouter(prefix="/api/notifications", tags=["notifications"],
+                          dependencies=[Depends(get_current_user)])
 
 @notifications.get("")
-def api_list_notifications(actor: str, unread_only: bool = True):
+def api_list_notifications(actor: str = Depends(get_current_user), unread_only: bool = True):
     with services._session() as db:
         prof = services._get_profile_by_name(db, actor)
         if not prof:
@@ -622,7 +630,7 @@ def api_list_notifications(actor: str, unread_only: bool = True):
         return services.list_notifications(prof.id, unread_only=unread_only)
 
 @notifications.patch("/{notification_id}/read")
-def api_mark_notification_read(notification_id: str, actor: str):
+def api_mark_notification_read(notification_id: str, actor: str = Depends(get_current_user)):
     with services._session() as db:
         prof = services._get_profile_by_name(db, actor)
         actor_profile_id = prof.id if prof else None
@@ -631,7 +639,7 @@ def api_mark_notification_read(notification_id: str, actor: str):
     return {"ok": True}
 
 
-# ── Webhooks Router ─────────────────────────────────────────────────────
+# ── Webhooks Router (PUBLIC — external webhooks) ─────────────────────────
 
 webhooks = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -658,21 +666,21 @@ for r in [auth, profiles, svc_accounts, projects, tasks, attachments, workflow, 
 
 # Forge product router (self-contained)
 from backend.forge.router import router as forge_router
-app.include_router(forge_router)
+app.include_router(forge_router, dependencies=[Depends(get_current_user)])
 
 
 # Legacy compat: /api/board/{project_id} → /api/projects/{project_id}/board
-@app.get("/api/board/{project_id}", tags=["projects"], include_in_schema=False)
+@app.get("/api/board/{project_id}", tags=["projects"], include_in_schema=False,
+         dependencies=[Depends(get_current_user)])
 def api_board_legacy(project_id: str):
     try:
         return services.get_board(project_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
-@app.get("/api/epics/", tags=["epics"])
-@app.get("/api/epics", tags=["epics"])
-def api_list_all_epics(project_id: Optional[str] = None, actor: str = "system"):
-    print(f"[DEBUG] api_list_all_epics project_id={project_id}")
+@app.get("/api/epics/", tags=["epics"], dependencies=[Depends(get_current_user)])
+@app.get("/api/epics", tags=["epics"], dependencies=[Depends(get_current_user)])
+def api_list_all_epics(project_id: Optional[str] = None, actor: str = Depends(get_current_user)):
     return services.list_epics(project_id=project_id, actor=actor)
 
 @app.on_event("startup")
