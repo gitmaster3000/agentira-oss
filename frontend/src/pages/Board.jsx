@@ -473,103 +473,46 @@ export function Board() {
                                             </span>
                                         </div>
 
-                                        <div className="flex-1 pl-4 pr-2.5 py-2 column-scroll">
-                                            {filteredColumns[col.id]?.map(task => (
-                                                <TaskCard
-                                                    key={task.id}
-                                                    task={task}
-                                                    onUpdate={(t) => {
-                                                        if (panelEditingRef.current && String(t.id) !== String(selectedTaskId)) {
-                                                            setPendingAction(() => () => {
-                                                                panelEditingRef.current = false;
-                                                                setIsEditing(false);
-                                                                const newParams = new URLSearchParams(searchParams);
-                                                                newParams.set('selectedTask', t.key || t.id);
-                                                                setSearchParams(newParams);
-                                                            });
-                                                            return;
-                                                        }
-                                                        panelEditingRef.current = false;
-                                                        setIsEditing(false);
-                                                        const newParams = new URLSearchParams(searchParams);
-                                                        newParams.set('selectedTask', t.key || t.id);
-                                                        setSearchParams(newParams);
-                                                    }}
-                                                    onDelete={loadBoard}
-                                                />
-                                            ))}
-                                        </div>
+                                    <div className="flex-1 pl-4 pr-2.5 py-2 column-scroll">
+                                        {filteredColumns[col.id]?.map(task => (
+                                            <TaskCard
+                                                key={task.id}
+                                                task={task}
+                                                onClick={() => {
+                                                    const newParams = new URLSearchParams(searchParams);
+                                                    newParams.set('selectedTask', task.key || task.id);
+                                                    setSearchParams(newParams);
+                                                }}
+                                                onDelete={loadBoard}
+                                            />
+                                        ))}
                                     </div>
-                                ))}
-                            </div>
+                                </div>
+                            ))}
                         </div>
-                    )}
+                    </div>
+                )}
 
-                    {view === 'backlog' && (
-                        <Backlog projectId={projectId} />
-                    )}
-
-                    {view === 'roadmap' && (
-                        <RoadmapView projectId={projectId} />
-                    )}
-                </div>
+                {view === 'backlog' && <Backlog projectId={projectId} />}
+                {view === 'roadmap' && <RoadmapView projectId={projectId} />}
             </div>
 
-            {/* Task Detail Panel - pushes the entire board content (Header + Columns) */}
             {selectedTask && (
                 <TaskDetailPanel
                     task={selectedTask}
                     isEditing={isEditing}
                     setIsEditing={setIsEditing}
                     onClose={() => {
-                        if (panelEditingRef.current) {
-                            setPendingAction(() => () => {
-                                panelEditingRef.current = false;
-                                setIsEditing(false);
-                                const newParams = new URLSearchParams(searchParams);
-                                newParams.delete('selectedTask');
-                                setSearchParams(newParams);
-                            });
-                            return;
-                        }
-                        setIsEditing(false);
                         const newParams = new URLSearchParams(searchParams);
                         newParams.delete('selectedTask');
                         setSearchParams(newParams);
                     }}
-                    onUpdate={() => {
-                        loadBoard();
-                    }}
-                    onEditingChange={setIsPanelEditing}
+                    onUpdate={loadBoard}
                 />
             )}
 
-            {showCreate && (
-                <CreateTaskModal
-                    projectId={projectId}
-                    onClose={() => setShowCreate(false)}
-                    onCreated={loadBoard}
-                />
-            )}
-
-            {showCreateEpic && (
-                <CreateEpicModal
-                    projectId={projectId}
-                    onClose={() => setShowCreateEpic(false)}
-                    onCreated={loadEpics}
-                />
-            )}
-
-            {pendingAction && (
-                <ConfirmModal
-                    title="Unsaved Changes"
-                    message="You have unsaved changes. Are you sure you want to discard them?"
-                    confirmText="Discard"
-                    cancelText="Keep Editing"
-                    onConfirm={() => { pendingAction(); setPendingAction(null); }}
-                    onCancel={() => setPendingAction(null)}
-                />
-            )}
+            {showCreate && <CreateTaskModal projectId={projectId} onClose={() => setShowCreate(false)} onCreated={loadBoard} />}
+            {showCreateEpic && <CreateEpicModal projectId={projectId} onClose={() => setShowCreateEpic(false)} onCreated={loadEpics} />}
         </div>
     );
 }
