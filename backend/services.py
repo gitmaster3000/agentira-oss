@@ -11,7 +11,7 @@ from backend.db import SessionLocal, init_db
 from backend.models import (
     Project, Task, Activity, TaskPriority, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
-    ProjectMember, Notification, TaskCommit, Epic
+    ProjectMember, Notification, TaskCommit, Epic, OAuthAccount
 )
 from backend.auth import has_permission
 from backend.notifications import broker
@@ -155,6 +155,7 @@ def _profile_to_dict(p: Profile) -> dict:
         "name": p.name,
         "display_name": p.display_name or p.name,
         "role": p.role.name,
+        "email": p.email,
         "avatar_url": p.avatar_url,
         "webhook_url": p.webhook_url,
         "extra_permissions": extra,
@@ -1330,6 +1331,62 @@ def create_service_account(name: str, display_name: str = "", role: str = "bot")
 def signup(name: str, display_name: str = "", password: str = "") -> dict:
     """Public signup procedure. Defaults to 'member' role. Returns profile + api_key."""
     return create_profile(name, display_name, role="member", password=password)
+
+
+def authenticate_oauth(provider: str, provider_user_id: str, email: str | None = None,
+                       display_name: str = "", avatar_url: str = "") -> dict:
+    """Log in or auto-register a user via OAuth provider.
+
+    Looks up OAuthAccount by (provider, provider_user_id).
+    If found → return existing profile.
+    If not → create a new profile and link the OAuth account.
+    """
+    with _session() as db:
+        # Check for existing OAuth link
+        link = (db.query(OAuthAccount)
+                .filter(OAuthAccount.provider == provider,
+                        OAuthAccount.provider_user_id == provider_user_id)
+                .first())
+        if link:
+            profile = db.query(Profile).get(link.profile_id)
+            return _profile_to_dict(profile)
+
+        # Check if a profile with this email already exists (link it)
+        profile = None
+        if email:
+            profile = db.query(Profile).filter(Profile.email == email).first()
+
+        if not profile:
+            # Create new profile
+            role_id = _get_role_id(db, "member")
+            # Generate a unique username from email or display name
+            base_name = (email.split("@")[0] if email else display_name.lower().replace(" ", "_"))[:60]
+            name = base_name
+            suffix = 1
+            while db.query(Profile).filter(Profile.name == name).first():
+                name = f"{base_name}_{suffix}"
+                suffix += 1
+
+            profile = Profile(
+                name=name,
+                display_name=display_name or name,
+                email=email,
+                role_id=role_id,
+                avatar_url=avatar_url,
+                api_key=secrets.token_hex(32),
+            )
+            db.add(profile)
+            db.flush()
+
+        # Create OAuth link
+        db.add(OAuthAccount(
+            profile_id=profile.id,
+            provider=provider,
+            provider_user_id=provider_user_id,
+        ))
+        db.commit()
+        db.refresh(profile)
+        return _profile_to_dict(profile)
 
 
 def list_profiles(role: Optional[str] = None) -> list[dict]:

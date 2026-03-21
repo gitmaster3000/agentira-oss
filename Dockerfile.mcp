@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY pyproject.toml .
+COPY backend/ backend/
+RUN pip install --no-cache-dir -e .
+
+# Create data directory for SQLite
+RUN mkdir -p data
+
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8000
+
+EXPOSE 8000
+
+CMD ["python", "-m", "backend.mcp_server"]

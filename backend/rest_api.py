@@ -8,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+import os
+import httpx
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
+
 from backend import services
 
 # ── Schemas ──────────────────────────────────────────────────────────────
@@ -20,6 +25,12 @@ class ProfileSignup(BaseModel):
     name: str
     display_name: str = ""
     password: str
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+class GitHubAuthRequest(BaseModel):
+    code: str
 
 class ProfileCreate(BaseModel):
     name: str
@@ -135,6 +146,89 @@ def api_signup(body: ProfileSignup):
         return services.signup(body.name, body.display_name, body.password)
     except Exception as e:
         raise HTTPException(400, str(e))
+
+
+@auth.post("/auth/google")
+def api_auth_google(body: GoogleAuthRequest):
+    """Verify a Google ID token and log in / auto-register the user."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "")
+    if not client_id:
+        raise HTTPException(500, "Google OAuth is not configured")
+    try:
+        info = google_id_token.verify_oauth2_token(
+            body.id_token, google_requests.Request(), client_id
+        )
+    except Exception:
+        raise HTTPException(401, "Invalid Google token")
+
+    user = services.authenticate_oauth(
+        provider="google",
+        provider_user_id=info["sub"],
+        email=info.get("email"),
+        display_name=info.get("name", ""),
+        avatar_url=info.get("picture", ""),
+    )
+    return {"user": user}
+
+
+@auth.post("/auth/github")
+async def api_auth_github(body: GitHubAuthRequest):
+    """Exchange a GitHub OAuth code for user info and log in / auto-register."""
+    client_id = os.getenv("GITHUB_CLIENT_ID", "")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise HTTPException(500, "GitHub OAuth is not configured")
+
+    # Exchange code for access token
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            json={"client_id": client_id, "client_secret": client_secret, "code": body.code},
+            headers={"Accept": "application/json"},
+        )
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise HTTPException(401, "GitHub OAuth failed")
+
+        # Get user info
+        user_resp = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        gh_user = user_resp.json()
+
+        # Get primary email if not public
+        email = gh_user.get("email")
+        if not email:
+            emails_resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            for e in emails_resp.json():
+                if e.get("primary"):
+                    email = e["email"]
+                    break
+
+    user = services.authenticate_oauth(
+        provider="github",
+        provider_user_id=str(gh_user["id"]),
+        email=email,
+        display_name=gh_user.get("name") or gh_user.get("login", ""),
+        avatar_url=gh_user.get("avatar_url", ""),
+    )
+    return {"user": user}
+
+
+@auth.get("/auth/config")
+def api_auth_config():
+    """Return which OAuth providers are enabled and their public client IDs."""
+    return {
+        "google": bool(os.getenv("GOOGLE_CLIENT_ID")),
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+        "github": bool(os.getenv("GITHUB_CLIENT_ID")),
+        "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+    }
 
 
 # ── Profiles Router (includes service accounts) ─────────────────────────
@@ -565,6 +659,7 @@ for r in [auth, profiles, svc_accounts, projects, tasks, attachments, workflow, 
 # Forge product router (self-contained)
 from backend.forge.router import router as forge_router
 app.include_router(forge_router)
+
 
 # Legacy compat: /api/board/{project_id} → /api/projects/{project_id}/board
 @app.get("/api/board/{project_id}", tags=["projects"], include_in_schema=False)

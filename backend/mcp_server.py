@@ -429,6 +429,7 @@ async def lifespan(app_instance) -> AsyncIterator[None]:
 
 
 # ── Starlette Application ──────────────────────────────────────────────────────
+
 app = Starlette(
     debug=True,
     lifespan=lifespan,
@@ -439,12 +440,14 @@ app = Starlette(
 )
 
 if __name__ == "__main__":
-    logger.info("Starting AgentIRA MCP Server on 127.0.0.1:8000")
+    host = os.getenv("MCP_HOST", "127.0.0.1")
+    port = int(os.getenv("MCP_PORT", "8000"))
+    logger.info(f"Starting AgentIRA MCP Server on {host}:{port}")
     uvicorn.run(
         "backend.mcp_server:app",
-        host="127.0.0.1",
-        port=8000,
+        host=host,
+        port=port,
         log_level="debug",
-        reload=True,
-        reload_dirs=[os.path.join(BASE_DIR, "backend")],
+        reload=os.getenv("RAILWAY_ENVIRONMENT") is None,  # no reload in production
+        reload_dirs=[os.path.join(BASE_DIR, "backend")] if os.getenv("RAILWAY_ENVIRONMENT") is None else None,
     )

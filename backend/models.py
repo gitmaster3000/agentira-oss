@@ -95,6 +95,7 @@ class Profile(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(120), default="")
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, default=None)
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
     webhook_url: Mapped[str] = mapped_column(String(500), default="")
@@ -108,6 +109,21 @@ class Profile(Base):
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     project_memberships: Mapped[list["ProjectMember"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     notifications: Mapped[list["Notification"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+
+class OAuthAccount(Base):
+    """Links an external OAuth provider (google, github, etc.) to a Profile."""
+    __tablename__ = "oauth_accounts"
+    __table_args__ = (UniqueConstraint("provider", "provider_user_id"),)
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)        # "google", "github"
+    provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)  # sub / github user id
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    profile: Mapped["Profile"] = relationship(back_populates="oauth_accounts")
 
 
 class ProjectMember(Base):

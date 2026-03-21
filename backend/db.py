@@ -29,7 +29,7 @@ def get_db():
 
 def init_db():
     """Create all tables."""
-    from backend.models import Project, Task, Activity, Epic  # noqa: F401
+    from backend.models import Project, Task, Activity, Epic, OAuthAccount  # noqa: F401
     from backend.forge.models import Agent, Run  # noqa: F401
     Base.metadata.create_all(bind=engine)
     run_migrations()
@@ -52,6 +52,24 @@ def run_migrations():
             conn.commit()
         if "notification_transport" not in existing:
             conn.execute(text("ALTER TABLE profiles ADD COLUMN notification_transport VARCHAR(20)"))
+            conn.commit()
+        if "email" not in existing:
+            conn.execute(text("ALTER TABLE profiles ADD COLUMN email VARCHAR(255)"))
+            conn.commit()
+
+        # OAuth accounts table
+        tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "oauth_accounts" not in tables:
+            conn.execute(text("""
+                CREATE TABLE oauth_accounts (
+                    id VARCHAR(12) PRIMARY KEY,
+                    profile_id VARCHAR(12) NOT NULL REFERENCES profiles(id),
+                    provider VARCHAR(30) NOT NULL,
+                    provider_user_id VARCHAR(255) NOT NULL,
+                    created_at DATETIME,
+                    UNIQUE(provider, provider_user_id)
+                )
+            """))
             conn.commit()
 
         result = conn.execute(text("PRAGMA table_info(projects)"))

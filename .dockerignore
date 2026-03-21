@@ -1,0 +1,14 @@
+node_modules
+frontend/node_modules
+frontend/dist
+*.db
+*.log
+__pycache__
+*.egg-info
+.git
+throwaway
+bruno
+docs
+tests
+*.md
+!README.md
