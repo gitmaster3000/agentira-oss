@@ -9,8 +9,10 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 DATABASE_URL = os.getenv("AGENTIRA_DB_URL", f"sqlite:///{DATA_DIR / 'agentira.db'}")
+_is_sqlite = DATABASE_URL.startswith("sqlite")
 
-engine = create_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+_connect_args = {"check_same_thread": False} if _is_sqlite else {}
+engine = create_engine(DATABASE_URL, echo=False, connect_args=_connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -36,7 +38,10 @@ def init_db():
 
 
 def run_migrations():
-    """Apply incremental schema changes to existing databases."""
+    """Apply incremental schema changes to existing SQLite databases.
+    Postgres gets the full schema from create_all() so migrations are skipped."""
+    if not _is_sqlite:
+        return
     from sqlalchemy import text
     with engine.connect() as conn:
         result = conn.execute(text("PRAGMA table_info(activities)"))
