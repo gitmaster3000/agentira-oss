@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 
 export function GitHubCallback() {
     const [error, setError] = useState('');
@@ -17,7 +18,7 @@ export function GitHubCallback() {
         }
         api.githubAuth(code)
             .then((data) => loginWithOAuth(data))
-            .then(() => navigate('/', { replace: true }))
+            .then(() => navigate(ROUTES.STUDIO, { replace: true }))
             .catch(() => setError('GitHub authentication failed'));
     }, []);
 

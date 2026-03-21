@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 
 export function Signup() {
     const [formData, setFormData] = useState({ name: '', display_name: '', password: '' });
@@ -37,7 +38,7 @@ export function Signup() {
         try {
             const data = await api.googleAuth(response.credential);
             await loginWithOAuth(data);
-            navigate('/', { replace: true });
+            navigate(ROUTES.STUDIO, { replace: true });
         } catch (err) {
             setError('Google sign-up failed');
         }
@@ -49,7 +50,7 @@ export function Signup() {
         setLoading(true);
         try {
             await api.signup(formData);
-            navigate('/login', { state: { message: 'Account created! Please sign in.' } });
+            navigate(ROUTES.LOGIN, { state: { message: 'Account created! Please sign in.' } });
         } catch (err) {
             setError(err.message || 'Signup failed');
         } finally {
@@ -137,7 +138,7 @@ export function Signup() {
                 </form>
 
                 <div className="text-center text-sm text-gray-400">
-                    Already have an account? <Link to="/login" className="text-blue-400 hover:underline">Sign In</Link>
+                    Already have an account? <Link to={ROUTES.LOGIN} className="text-blue-400 hover:underline">Sign In</Link>
                 </div>
             </div>
         </div>

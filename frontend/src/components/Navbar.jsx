@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { ROUTES } from '../routes';
 import { ThemeToggle } from './ThemeToggle';
 import { AppSwitcher } from './AppSwitcher';
 import {
@@ -68,7 +69,7 @@ export function Navbar({ onNewProject }) {
 
     const handleLogout = () => {
         logout();
-        navigate('/login');
+        navigate(ROUTES.LOGIN);
     };
 
     return (
@@ -106,7 +107,7 @@ export function Navbar({ onNewProject }) {
                                     <button
                                         key={p.id}
                                         onClick={() => {
-                                            navigate(`/board/${p.id}`);
+                                            navigate(ROUTES.STUDIO_BOARD(p.id));
                                             setIsProjectOpen(false);
                                         }}
                                         className={`dropdown-item px-3 ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
@@ -215,7 +216,7 @@ export function Navbar({ onNewProject }) {
                                     <div className="text-body-sm text-text-tertiary truncate">{user?.name}</div>
                                 </div>
                                 <button
-                                    onClick={() => { navigate('/settings'); setIsUserOpen(false); }}
+                                    onClick={() => { navigate(ROUTES.STUDIO_SETTINGS); setIsUserOpen(false); }}
                                     className="dropdown-item text-text-secondary hover:text-text-primary"
                                 >
                                     <Settings className="w-4 h-4" /> Settings

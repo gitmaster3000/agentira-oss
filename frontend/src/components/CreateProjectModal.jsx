@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 import { useNavigate } from 'react-router-dom';
 import { Briefcase, X, Upload, FileText, Trash2, AlertCircle } from 'lucide-react';
 
@@ -78,7 +79,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
             }
 
             onSuccess();
-            navigate(`/board/${p.id}`);
+            navigate(ROUTES.STUDIO_BOARD(p.id));
             onClose();
         } catch (err) {
             alert(err.message);

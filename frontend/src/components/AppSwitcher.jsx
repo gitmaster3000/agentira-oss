@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Cpu, Pencil } from 'lucide-react';
+import { ROUTES } from '../routes';
 
 const PRODUCTS = [
     {
@@ -8,7 +9,7 @@ const PRODUCTS = [
         name: 'Studio',
         description: 'Workspace & tasks',
         icon: Pencil,
-        path: '/',
+        path: ROUTES.STUDIO,
         color: '#d0bcff',
     },
     // Forge — disabled for now, will re-enable later

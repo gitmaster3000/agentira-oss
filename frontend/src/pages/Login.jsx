@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 
 export function Login() {
     const [username, setUsername] = useState('');
@@ -14,7 +15,7 @@ export function Login() {
     const successMessage = location.state?.message;
     const googleBtnRef = useRef(null);
 
-    const from = location.state?.from?.pathname || '/';
+    const from = location.state?.from?.pathname || ROUTES.STUDIO;
 
     useEffect(() => {
         api.getAuthConfig().then(setAuthConfig).catch(() => {});
@@ -130,7 +131,7 @@ export function Login() {
                 </form>
 
                 <div className="text-center text-sm text-gray-400">
-                    Don't have an account? <Link to="/signup" className="text-blue-400 hover:underline">Sign Up</Link>
+                    Don't have an account? <Link to={ROUTES.SIGNUP} className="text-blue-400 hover:underline">Sign Up</Link>
                 </div>
             </div>
         </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 import { Layout } from '../components/Layout';
 import { formatDistanceToNow } from 'date-fns'; // Assuming date-fns is installed for relative time
 
@@ -63,7 +64,7 @@ export function ActivityFeedPage() {
                                     <p className="text-sm text-text-primary">
                                         <span className="font-semibold">{entry.actor}</span> {entry.action}
                                         {entry.task_id && entry.task_title && (
-                                            <> on task <Link to={`/board/${projectId}/task/${entry.task_id}`} className="text-accent-primary hover:underline">{entry.task_title}</Link></>
+                                            <> on task <Link to={`${ROUTES.STUDIO_BOARD(projectId)}/task/${entry.task_id}`} className="text-accent-primary hover:underline">{entry.task_title}</Link></>
                                         )}
                                     </p>
                                     {entry.detail && <p className="text-xs text-text-secondary mt-1">{entry.detail}</p>}

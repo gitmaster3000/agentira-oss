@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { ROUTES } from '../routes';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight } from 'lucide-react';
 
@@ -40,7 +41,7 @@ export function Settings() {
 
     useEffect(() => {
         if (!user) {
-            navigate('/login');
+            navigate(ROUTES.LOGIN);
             return;
         }
         loadGeneralData();
