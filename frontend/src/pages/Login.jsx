@@ -67,7 +67,7 @@ export function Login() {
     };
 
     return (
-        <div className="min-h-screen bg-bg-app flex flex-col items-center justify-center px-4">
+        <div className="h-full bg-bg-app flex flex-col items-center justify-center px-4 overflow-y-auto">
             <div className="w-full max-w-sm space-y-6">
                 {/* Logo */}
                 <Link to={ROUTES.WELCOME} className="flex items-center gap-2.5 justify-center mb-2">

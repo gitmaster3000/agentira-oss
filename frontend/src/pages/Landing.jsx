@@ -70,7 +70,7 @@ export function Landing() {
     ];
 
     return (
-        <div className="min-h-screen bg-bg-app flex flex-col overflow-auto">
+        <div className="h-full bg-bg-app flex flex-col overflow-y-auto">
             {/* ── Navbar ─────────────────────────────────────────── */}
             <header className="h-16 border-b bg-bg-panel flex items-center px-6 justify-between sticky top-0 z-50">
                 <div className="flex items-center gap-2.5">
