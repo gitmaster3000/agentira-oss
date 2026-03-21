@@ -9,10 +9,10 @@ export function AuthProvider({ children }) {
 
     useEffect(() => {
         const stored = localStorage.getItem('agentira_user');
-        if (stored) {
+        const token = localStorage.getItem('agentira_token');
+        if (stored && token) {
             try {
                 const parsed = JSON.parse(stored);
-                // Ensure role is a string
                 if (parsed && typeof parsed.role === 'object' && parsed.role.name) {
                     parsed.role = parsed.role.name;
                 }
@@ -20,7 +20,12 @@ export function AuthProvider({ children }) {
             } catch (e) {
                 console.error('Failed to parse stored user:', e);
                 localStorage.removeItem('agentira_user');
+                localStorage.removeItem('agentira_token');
             }
+        } else {
+            // No token = not authenticated, clear stale user data
+            localStorage.removeItem('agentira_user');
+            localStorage.removeItem('agentira_token');
         }
         setLoading(false);
     }, []);
@@ -28,12 +33,12 @@ export function AuthProvider({ children }) {
     const login = async (username, password) => {
         const data = await api.login(username, password);
         let userToStore = data.user;
-        // Normalize role if it's an object
         if (userToStore && typeof userToStore.role === 'object' && userToStore.role.name) {
             userToStore = { ...userToStore, role: userToStore.role.name };
         }
         setUser(userToStore);
         localStorage.setItem('agentira_user', JSON.stringify(userToStore));
+        // Token is stored by api.login() already
         return userToStore;
     };
 
@@ -44,12 +49,14 @@ export function AuthProvider({ children }) {
         }
         setUser(userToStore);
         localStorage.setItem('agentira_user', JSON.stringify(userToStore));
+        // Token is stored by api.googleAuth()/api.githubAuth() already
         return userToStore;
     };
 
     const logout = () => {
         setUser(null);
         localStorage.removeItem('agentira_user');
+        localStorage.removeItem('agentira_token');
     };
 
     const value = { user, login, loginWithOAuth, logout, loading };

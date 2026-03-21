@@ -56,7 +56,7 @@ export function Settings() {
     async function loadGeneralData() {
         setLoading(true);
         try {
-            const meData = await api.getMe(user.name);
+            const meData = await api.getMe();
             setMe(meData);
         } catch (err) {
             console.error('Failed to load profile:', err);

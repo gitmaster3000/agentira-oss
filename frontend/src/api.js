@@ -1,26 +1,31 @@
 const API_BASE = '/api';
 
-function getActor() {
-    const stored = localStorage.getItem('agentira_user');
-    if (stored) {
-        try {
-            const user = JSON.parse(stored);
-            return user.name || 'system';
-        } catch (e) {
-            return 'system';
-        }
-    }
-    return 'system';
+function getToken() {
+    return localStorage.getItem('agentira_token') || '';
 }
 
 export async function request(endpoint, options = {}) {
+    const token = getToken();
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
+    };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${API_BASE}${endpoint}`, {
         ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
+        headers,
     });
+
+    if (res.status === 401) {
+        // Token expired or invalid — force re-login
+        localStorage.removeItem('agentira_token');
+        localStorage.removeItem('agentira_user');
+        window.location.href = '/login';
+        throw new Error('Session expired');
+    }
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -45,37 +50,45 @@ export const api = {
             body: JSON.stringify({ username, password })
         });
         if (!res.ok) throw new Error('Invalid credentials');
-        return res.json();
+        const data = await res.json();
+        if (data.token) localStorage.setItem('agentira_token', data.token);
+        return data;
     },
 
     async signup(data) {
-        return request('/signup', { method: 'POST', body: JSON.stringify(data) });
+        const result = await request('/signup', { method: 'POST', body: JSON.stringify(data) });
+        if (result.token) localStorage.setItem('agentira_token', result.token);
+        return result;
     },
 
     async googleAuth(idToken) {
-        return request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken }) });
+        const result = await request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken }) });
+        if (result.token) localStorage.setItem('agentira_token', result.token);
+        return result;
     },
 
     async githubAuth(code) {
-        return request('/auth/github', { method: 'POST', body: JSON.stringify({ code }) });
+        const result = await request('/auth/github', { method: 'POST', body: JSON.stringify({ code }) });
+        if (result.token) localStorage.setItem('agentira_token', result.token);
+        return result;
     },
 
     async getAuthConfig() {
         return request('/auth/config');
     },
 
-    // Projects
+    // Projects — no more actor params, JWT handles identity
     getProjects: () => request('/projects'),
-    createProject: (data) => request('/projects', { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    createProject: (data) => request('/projects', { method: 'POST', body: JSON.stringify(data) }),
     getProject: (id) => request(`/projects/${id}`),
-    updateProject: (id, data) => request(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    updateProject: (id, data) => request(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteProject: (id) => request(`/projects/${id}`, { method: 'DELETE' }),
 
     // Members
     getProjectMembers: (projectId) => request(`/projects/${projectId}/members`),
-    addProjectMember: (projectId, profileName, actor = null) => request(`/projects/${projectId}/members`, {
+    addProjectMember: (projectId, profileName) => request(`/projects/${projectId}/members`, {
         method: 'POST',
-        body: JSON.stringify({ profile_name: profileName, actor: actor || getActor() })
+        body: JSON.stringify({ profile_name: profileName })
     }),
     removeProjectMember: (projectId, profileName) => request(`/projects/${projectId}/members/${profileName}`, { method: 'DELETE' }),
     getProjectActivity: (projectId, limit = 50) => request(`/projects/${projectId}/activity?limit=${limit}`),
@@ -86,8 +99,8 @@ export const api = {
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
-    createEpic: (projectId, data) => request(`/projects/${projectId}/epics`, { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
-    updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    createEpic: (projectId, data) => request(`/projects/${projectId}/epics`, { method: 'POST', body: JSON.stringify(data) }),
+    updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteEpic: (id) => request(`/epics/${id}`, { method: 'DELETE' }),
 
     // Tasks
@@ -97,15 +110,14 @@ export const api = {
         if (status) params.set('status', status);
         if (assignee) params.set('assignee', assignee);
         if (priority) params.set('priority', priority);
-        params.set('actor', getActor());
         return request(`/tasks?${params.toString()}`);
     },
-    createTask: (data) => request('/tasks', { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    createTask: (data) => request('/tasks', { method: 'POST', body: JSON.stringify(data) }),
     getTask: (id) => request(`/tasks/${id}`),
-    updateTask: (id, data) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    updateTask: (id, data) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
-    moveTask: (taskId, status, actor = null) => request(`/tasks/${taskId}/move`, { method: 'POST', body: JSON.stringify({ status, actor: actor || getActor() }) }),
-    addComment: (taskId, data) => request(`/tasks/${taskId}/comment`, { method: 'POST', body: JSON.stringify({ actor: getActor(), ...data }) }),
+    moveTask: (taskId, status) => request(`/tasks/${taskId}/move`, { method: 'POST', body: JSON.stringify({ status }) }),
+    addComment: (taskId, data) => request(`/tasks/${taskId}/comment`, { method: 'POST', body: JSON.stringify(data) }),
     getActivity: (taskId) => request(`/tasks/${taskId}/activity`),
     getChanges: (taskId, since) => request(`/tasks/${taskId}/changes?since=${encodeURIComponent(since)}`),
 
@@ -130,7 +142,7 @@ export const api = {
     }),
 
     // Profiles
-    getMe: (name) => request(`/profiles/me?actor=${encodeURIComponent(name)}`),
+    getMe: () => request('/profiles/me'),
     getProfiles: (role) => request(`/profiles${role ? `?role=${role}` : ''}`),
     createProfile: (data) => request('/profiles', { method: 'POST', body: JSON.stringify(data) }),
     updateProfile: (id, data) => request(`/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -141,10 +153,13 @@ export const api = {
     uploadAttachment: (taskId, file) => {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('uploaded_by', getActor());
+        const token = getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         return fetch(`${API_BASE}/tasks/${taskId}/attachments`, {
             method: 'POST',
             body: formData,
+            headers,
         }).then(res => {
             if (!res.ok) throw new Error(`Upload failed (${res.status})`);
             return res.json();
@@ -154,13 +169,17 @@ export const api = {
     getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
 
     // Roadmap
-    getRoadmap: (projectId, groupBy = "epic") => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
+    // getRoadmap already defined above
 
     // Git Integration
     listTaskCommits: (taskId) => request(`/tasks/${taskId}/commits`),
     linkCommit: (taskId, data) => request(`/tasks/${taskId}/commits`, { method: 'POST', body: JSON.stringify(data) }),
     linkPR: (taskId, data) => request(`/tasks/${taskId}/prs`, { method: 'POST', body: JSON.stringify(data) }),
     suggestBranch: (taskId) => request(`/tasks/${taskId}/suggest-branch`),
+
+    // Notifications
+    getNotifications: (unreadOnly = true) => request(`/notifications?unread_only=${unreadOnly}`),
+    markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'PATCH' }),
 
     // Generic
     request,
