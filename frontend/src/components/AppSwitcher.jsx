@@ -11,14 +11,15 @@ const PRODUCTS = [
         path: '/',
         color: '#d0bcff',
     },
-    {
-        id: 'forge',
-        name: 'Forge',
-        description: 'Agent orchestration',
-        icon: Cpu,
-        path: '/forge',
-        color: '#80cbc4',
-    },
+    // Forge — disabled for now, will re-enable later
+    // {
+    //     id: 'forge',
+    //     name: 'Forge',
+    //     description: 'Agent orchestration',
+    //     icon: Cpu,
+    //     path: '/forge',
+    //     color: '#80cbc4',
+    // },
 ];
 
 export function AppSwitcher() {

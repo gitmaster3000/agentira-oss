@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 function getActor() {
     const stored = localStorage.getItem('agentira_user');
@@ -50,6 +50,18 @@ export const api = {
 
     async signup(data) {
         return request('/signup', { method: 'POST', body: JSON.stringify(data) });
+    },
+
+    async googleAuth(idToken) {
+        return request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken }) });
+    },
+
+    async githubAuth(code) {
+        return request('/auth/github', { method: 'POST', body: JSON.stringify({ code }) });
+    },
+
+    async getAuthConfig() {
+        return request('/auth/config');
     },
 
     // Projects
