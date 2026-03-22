@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useLocation } from 'react-router-dom';
 import {
     LayoutGrid,
     ListTodo,
     TrendingUp,
     PanelLeft,
 } from 'lucide-react';
+import { ROUTES } from '../routes';
 
 export function Sidebar() {
     const { projectId = 'default' } = useParams();
-    const [searchParams] = useSearchParams();
-    const currentView = searchParams.get('view') || 'board';
+    const location = useLocation();
+    
+    // Check if we are inside a project route to highlight nav items properly
+    const isProjectRoute = location.pathname.includes('/studio/project/');
 
     const [isCollapsed, setIsCollapsed] = useState(() => {
         return localStorage.getItem('sidebar-collapsed') === 'true';
@@ -23,9 +26,9 @@ export function Sidebar() {
     };
 
     const navItems = [
-        { icon: LayoutGrid, label: 'Board', path: `/board/${projectId}`, view: 'board' },
-        { icon: ListTodo, label: 'Backlog', path: `/board/${projectId}?view=backlog`, view: 'backlog' },
-        { icon: TrendingUp, label: 'Roadmap', path: `/board/${projectId}?view=roadmap`, view: 'roadmap' },
+        { icon: LayoutGrid, label: 'Board', path: ROUTES.STUDIO_PROJECT_BOARD(projectId), view: 'board' },
+        { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId), view: 'backlog' },
+        { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId), view: 'roadmap' },
     ];
 
     return (
@@ -48,8 +51,8 @@ export function Sidebar() {
                     </button>
                 </div>
 
-                {navItems.map((item) => {
-                    const isActive = currentView === item.view;
+                {isProjectRoute && navItems.map((item) => {
+                    const isActive = location.pathname === item.path;
                     return (
                         <Link
                             key={item.label}
