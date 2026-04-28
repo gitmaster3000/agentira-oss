@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8111:8111"
+    volumes:
+      - agentira-data:/app/data
+    environment:
+      - PORT=8111
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "8000:8000"
+    volumes:
+      - agentira-data:/app/data
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: ../agentira-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3111:80"
+    volumes:
+      - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - backend
+
+volumes:
+  agentira-data:
