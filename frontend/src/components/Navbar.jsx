@@ -81,7 +81,7 @@ export function Navbar({ onNewProject }) {
                         <ActiveIcon className="w-5 h-5" style={{ color: activeProduct.color }} />
                     </span>
                     <div className="hidden md:flex flex-col leading-tight">
-                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>Flowty</span>
+                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>AgentIRA</span>
                         <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{activeProduct.name}</span>
                     </div>
                 </Link>

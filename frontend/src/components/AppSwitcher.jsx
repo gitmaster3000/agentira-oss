@@ -62,7 +62,7 @@ export function AppSwitcher() {
             {open && (
                 <div className="dropdown-menu top-full right-0 mt-2 w-72 py-3 animate-fade-in">
                     <div className="px-4 py-2 text-label-sm text-text-tertiary uppercase tracking-wider">
-                        Flowty Apps
+                        AgentIRA Apps
                     </div>
                     {PRODUCTS.map((p) => (
                         <button

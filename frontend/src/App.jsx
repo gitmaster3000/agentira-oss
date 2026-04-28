@@ -15,7 +15,7 @@ function Welcome() {
     return (
         <div className="flex-1 flex flex-col items-center justify-center text-secondary">
             <div className="text-center">
-                <h2 className="text-2xl font-bold text-primary mb-2">Welcome to Flowty Studio</h2>
+                <h2 className="text-2xl font-bold text-primary mb-2">Welcome to AgentIRA</h2>
                 <p>Select a project from the sidebar to get started.</p>
             </div>
         </div>
