@@ -100,6 +100,8 @@ def _message_to_dict(m: AgentMessage) -> dict:
         "id": m.id,
         "agent_id": m.agent_id,
         "run_id": m.run_id,
+        "trace_id": m.trace_id,
+        "kind": m.kind,
         "role": m.role.value,
         "content": m.content,
         "tool_name": m.tool_name,
@@ -1010,11 +1012,23 @@ def sync_openclaw_agents() -> list[dict]:
         return [_agent_to_dict(a) for a in forge_agents]
 
 
-def dispatch_chat(agent_id: str, content: str) -> dict:
-    """Dispatch a chat message to the daemon. Chat is NOT a run — no Run row created."""
+def dispatch_trigger(agent_id: str, prompt: str, *,
+                     run_id: str | None = None, kind: str = "chat") -> dict:
+    """Single rail for invoking an agent.
+
+    Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
+    then fires one WS frame to the agent's bound daemon. Used for chat,
+    scheduled run steps, and (later) comments / webhooks / mentions.
+
+    `kind` is a label for audit/logging only — the daemon does not branch on it.
+    `run_id` attaches the trigger to a Run when the work is part of a workflow
+    (cron, task assignment); for free-floating chat it stays None.
+    """
     import asyncio
     import uuid
     from backend.forge.ws_dispatch import hub
+
+    trace_id = uuid.uuid4().hex[:12]
 
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -1024,13 +1038,15 @@ def dispatch_chat(agent_id: str, content: str) -> dict:
         if not runtime:
             return {"error": "Runtime not found"}
 
-        # Save user message (no run_id)
-        user_msg = AgentMessage(
+        # Persist the user message tagged with trace_id (and run_id when present)
+        db.add(AgentMessage(
             agent_id=a.id,
+            run_id=run_id,
+            trace_id=trace_id,
+            kind=kind,
             role=MessageRole.USER,
-            content=content,
-        )
-        db.add(user_msg)
+            content=prompt,
+        ))
         db.commit()
 
         runtime_id = a.runtime_id
@@ -1041,15 +1057,13 @@ def dispatch_chat(agent_id: str, content: str) -> dict:
         system_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
 
-    # chat_id is ephemeral — used to route responses back, not stored as a Run
-    chat_id = uuid.uuid4().hex[:12]
-
-    asyncio.ensure_future(hub.dispatch_task(
+    asyncio.ensure_future(hub.dispatch_trigger(
+        trace_id=trace_id,
         runtime_id=runtime_id,
         agent_id=agent_id,
-        run_id="",        # no run
-        chat_id=chat_id,  # chat-specific id
-        prompt=content,
+        run_id=run_id or "",
+        kind=kind,
+        prompt=prompt,
         provider=provider,
         model=model,
         system_prompt=system_prompt,
@@ -1057,45 +1071,17 @@ def dispatch_chat(agent_id: str, content: str) -> dict:
         gateway_url=gateway_url,
         gateway_token=gateway_token,
     ))
-    return {"ok": True, "chat_id": chat_id}
+    return {"ok": True, "trace_id": trace_id}
 
 
-def append_run_events(run_id: str, daemon_id: str, events: list) -> dict:
-    """Store streamed events from the daemon as AgentMessage records."""
-    with _session() as db:
-        run = db.query(Run).filter(Run.id == run_id).first()
-        if not run:
-            return {"ok": False, "error": "Run not found"}
-        for evt in events:
-            evt_type = evt.get("type", "")
-            if evt_type == "text":
-                role = MessageRole.ASSISTANT
-                content = evt.get("text", "")
-            elif evt_type == "tool_use":
-                role = MessageRole.TOOL
-                content = evt.get("tool", "")
-            elif evt_type == "tool_result":
-                role = MessageRole.TOOL
-                content = evt.get("output", "")
-            else:
-                continue
-            msg = AgentMessage(
-                agent_id=run.agent_id,
-                run_id=run_id,
-                role=role,
-                content=content,
-                tool_name=evt.get("tool"),
-                tool_input=json.dumps(evt.get("input")) if evt.get("input") is not None else None,
-                tool_output=evt.get("output"),
-                model_used=evt.get("model", ""),
-            )
-            db.add(msg)
-        db.commit()
-        return {"ok": True, "count": len(events)}
+def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
+                          events: list) -> dict:
+    """Store streamed events from the daemon as AgentMessage records.
 
-
-def append_agent_chat_events(agent_id: str, daemon_id: str, chat_id: str, events: list) -> dict:
-    """Store chat response events from daemon as AgentMessage records (no run_id)."""
+    One sink for every trigger kind (chat, run_step, …). Messages are tagged
+    with `trace_id` so the UI can group a turn, and with `run_id` when present
+    so run-detail views still query by run.
+    """
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
@@ -1106,28 +1092,63 @@ def append_agent_chat_events(agent_id: str, daemon_id: str, chat_id: str, events
                 content = evt.get("text", "")
                 if not content:
                     continue
-                msg = AgentMessage(
-                    agent_id=agent_id,
-                    role=MessageRole.ASSISTANT,
-                    content=content,
-                    model_used=evt.get("model", ""),
-                )
-                db.add(msg)
+                role = MessageRole.ASSISTANT
+                tool_name = None
             elif evt_type == "tool_use":
-                msg = AgentMessage(
-                    agent_id=agent_id,
-                    role=MessageRole.TOOL,
-                    content=evt.get("tool", ""),
-                    tool_name=evt.get("tool"),
-                    tool_input=json.dumps(evt.get("input")) if evt.get("input") is not None else None,
-                )
-                db.add(msg)
+                role = MessageRole.TOOL
+                content = evt.get("tool", "")
+                tool_name = evt.get("tool")
+            elif evt_type == "tool_result":
+                role = MessageRole.TOOL
+                content = evt.get("output", "")
+                tool_name = evt.get("tool")
+            else:
+                continue
+            db.add(AgentMessage(
+                agent_id=agent_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                role=role,
+                content=content,
+                tool_name=tool_name,
+                tool_input=json.dumps(evt.get("input")) if evt.get("input") is not None else None,
+                tool_output=evt.get("output") if evt_type == "tool_result" else None,
+                model_used=evt.get("model", ""),
+            ))
         db.commit()
         return {"ok": True, "count": len(events)}
 
 
+def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
+                     success: bool, input_tokens: int = 0, output_tokens: int = 0,
+                     error: str | None = None) -> dict:
+    """Finalize a trigger. Updates the Run if `run_id` is set; chat triggers
+    have no persistent state to update beyond the messages already stored."""
+    logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
+                  f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+    if run_id:
+        complete_run(
+            run_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            error=error if not success else None,
+        )
+    return {"ok": True, "trace_id": trace_id, "logged": logger_msg}
+
+
+def get_trigger_events(trace_id: str) -> list[dict]:
+    """Return all messages tagged with this trace_id, ordered by creation time."""
+    with _session() as db:
+        msgs = (db.query(AgentMessage)
+                .filter(AgentMessage.trace_id == trace_id)
+                .order_by(AgentMessage.created_at.asc())
+                .all())
+        return [_message_to_dict(m) for m in msgs]
+
+
 def get_run_events(run_id: str) -> list[dict]:
-    """Return all messages for a run, ordered by creation time."""
+    """Return messages tagged with this run_id (covers any number of triggers
+    that fired against the run), ordered by creation time."""
     with _session() as db:
         msgs = (db.query(AgentMessage)
                 .filter(AgentMessage.run_id == run_id)
@@ -1144,8 +1165,7 @@ def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = No
         if not a:
             return {"error": "Agent not found"}
         if a.runtime_id:
-            dispatch_chat(agent_id, content)
-            return {"ok": True, "dispatched": True}
+            return dispatch_trigger(agent_id, content, run_id=run_id, kind="chat")
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"

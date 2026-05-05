@@ -66,23 +66,21 @@ class RunComplete(BaseModel):
     error: Optional[str] = None
 
 
-class DaemonRunEvents(BaseModel):
+class DaemonTriggerEvents(BaseModel):
     daemon_id: str
+    trace_id: str
+    run_id: Optional[str] = None
     events: list
 
 
-class DaemonRunComplete(BaseModel):
+class DaemonTriggerComplete(BaseModel):
     daemon_id: str
+    trace_id: str
+    run_id: Optional[str] = None
     success: bool
     input_tokens: int = 0
     output_tokens: int = 0
     error: str = ""
-
-
-class DaemonAgentMessages(BaseModel):
-    daemon_id: str
-    chat_id: str
-    events: list
 
 
 class MessageCreate(BaseModel):
@@ -157,24 +155,24 @@ def runtime_heartbeat(body: RuntimeHeartbeatRequest):
     return services.heartbeat_runtimes(daemon_id=body.daemon_id, providers=body.providers)
 
 
-@daemon_router.post("/runs/{run_id}/events")
-def daemon_append_run_events(run_id: str, body: DaemonRunEvents):
-    return services.append_run_events(run_id, body.daemon_id, body.events)
+@daemon_router.post("/agents/{agent_id}/trigger-events")
+def daemon_append_trigger_events(agent_id: str, body: DaemonTriggerEvents):
+    return services.append_trigger_events(
+        agent_id, trace_id=body.trace_id, run_id=body.run_id, events=body.events,
+    )
 
 
-@daemon_router.post("/runs/{run_id}/complete-daemon")
-def daemon_complete_run(run_id: str, body: DaemonRunComplete):
-    return services.complete_run(
-        run_id,
+@daemon_router.post("/agents/{agent_id}/trigger-complete")
+def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
+    return services.complete_trigger(
+        agent_id,
+        trace_id=body.trace_id,
+        run_id=body.run_id,
+        success=body.success,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         error=body.error if not body.success else None,
     )
-
-
-@daemon_router.post("/agents/{agent_id}/chat-events")
-def daemon_append_chat_events(agent_id: str, body: DaemonAgentMessages):
-    return services.append_agent_chat_events(agent_id, body.daemon_id, body.chat_id, body.events)
 
 
 @router.get("/runtimes")
@@ -269,8 +267,15 @@ def get_run(run_id: str):
     return result
 
 
+@router.get("/triggers/{trace_id}/events")
+def get_trigger_events(trace_id: str):
+    """Messages tagged with this trace_id, ordered by creation time."""
+    return services.get_trigger_events(trace_id)
+
+
 @router.get("/runs/{run_id}/events")
 def get_run_events(run_id: str):
+    """Messages tagged with this run_id (across all of its triggers)."""
     return services.get_run_events(run_id)
 
 

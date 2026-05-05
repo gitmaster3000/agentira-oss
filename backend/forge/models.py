@@ -155,6 +155,11 @@ class AgentMessage(Base):
     id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
     agent_id: Mapped[str]       = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
     run_id: Mapped[str | None]  = mapped_column(String(12), nullable=True)
+    # trace_id: ephemeral trigger id linking user prompt → assistant reply(s).
+    # Persisted as a Trigger row in a future increment; today it's just a
+    # correlation handle for grepping logs and grouping messages per turn.
+    trace_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    kind: Mapped[str | None]    = mapped_column(String(20), nullable=True)  # chat | run_step | …
     role: Mapped[MessageRole]   = mapped_column(SAEnum(MessageRole), nullable=False)
     content: Mapped[str]        = mapped_column(Text, default="")
     tool_name: Mapped[str | None]   = mapped_column(String(120), nullable=True)

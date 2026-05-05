@@ -153,22 +153,26 @@ class AgentiraDaemon:
         threading.Thread(target=_run, daemon=True).start()
 
     async def _execute(self, frame: dict) -> None:
-        """Execute a single task frame dispatched from the WS hub."""
+        """Execute a single trigger frame dispatched from the WS hub.
+
+        One path for chat, run_step, and any future trigger kinds. The daemon
+        does not branch on `kind` — that's a server-side audit field. We only
+        route on runtime capability (http_gateway vs stream-json subprocess).
+        """
         from agentira_cli.daemon.executor import run_cli_stream, run_gateway
 
-        run_id = frame.get("run_id", "")
-        chat_id = frame.get("chat_id", "")
+        trace_id = frame.get("trace_id", "")
+        run_id = frame.get("run_id", "") or ""
         agent_id = frame.get("agent_id", "")
         prompt = frame.get("prompt", "")
         provider = frame.get("provider", "")
-        is_chat = not run_id and bool(chat_id)
+        kind = frame.get("kind", "chat")
 
         runtime_cls = get_runtime_cls(provider)
         if runtime_cls is None:
-            logger.warning("Unknown provider '%s' in frame run=%s chat=%s", provider, run_id, chat_id)
+            logger.warning("Unknown provider '%s' trace=%s", provider, trace_id)
             return
 
-        # Determine capability and routing info from the registered runtime record
         runtime_info = next(
             (r for r in self._registered if r.get("provider") == provider), {}
         )
@@ -180,14 +184,20 @@ class AgentiraDaemon:
         system_prompt = frame.get("system_prompt", "")
         agent_name = frame.get("agent_name", "")
 
+        logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",
+                    trace_id, kind, agent_id, run_id or "-", provider)
+
         async def on_event(evts: list) -> None:
             try:
-                if is_chat:
-                    self.client.post_agent_chat_events(agent_id, self._daemon_id, chat_id, list(evts))
-                else:
-                    self.client.post_run_events(run_id, self._daemon_id, list(evts))
+                self.client.post_trigger_events(
+                    agent_id,
+                    daemon_id=self._daemon_id,
+                    trace_id=trace_id,
+                    run_id=run_id,
+                    events=list(evts),
+                )
             except Exception as exc:
-                logger.warning("post_events failed: %s", exc)
+                logger.warning("post_trigger_events failed trace=%s: %s", trace_id, exc)
 
         success = False
         error = ""
@@ -210,18 +220,19 @@ class AgentiraDaemon:
             output_tokens = result.output_tokens
         except Exception as exc:
             error = str(exc)
-            logger.exception("Task execution failed run=%s chat=%s", run_id, chat_id)
+            logger.exception("trigger execution failed trace=%s", trace_id)
 
-        # Only close out a run — chat is ephemeral
-        if not is_chat:
-            try:
-                self.client.complete_run(
-                    run_id, self._daemon_id,
-                    success=success, input_tokens=input_tokens,
-                    output_tokens=output_tokens, error=error,
-                )
-            except Exception as exc:
-                logger.warning("complete_run failed: %s", exc)
+        try:
+            self.client.post_trigger_complete(
+                agent_id,
+                daemon_id=self._daemon_id,
+                trace_id=trace_id,
+                run_id=run_id,
+                success=success, input_tokens=input_tokens,
+                output_tokens=output_tokens, error=error,
+            )
+        except Exception as exc:
+            logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
 
     def _heartbeat(self) -> None:
         if not self._registered:

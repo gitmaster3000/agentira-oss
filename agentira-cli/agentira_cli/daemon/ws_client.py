@@ -91,8 +91,14 @@ class DaemonWsClient:
                 except Exception:
                     continue
 
-                if msg.get("type") == "task_available":
-                    logger.info("WS task_available: run=%s — waking poll loop", msg.get("run_id", ""))
+                if msg.get("type") == "trigger":
+                    logger.info(
+                        "WS trigger received: trace=%s kind=%s agent=%s run=%s",
+                        msg.get("trace_id", ""),
+                        msg.get("kind", ""),
+                        msg.get("agent_id", ""),
+                        msg.get("run_id", "") or "-",
+                    )
                     if self._task_queue is not None:
                         self._task_queue.put(msg)
                     self._wake.set()

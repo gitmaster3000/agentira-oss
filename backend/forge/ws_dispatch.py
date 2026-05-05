@@ -69,25 +69,34 @@ class WsHub:
             self._conns.pop(daemon_id, None)
         logger.info("Daemon disconnected: %s", daemon_id[:8])
 
-    async def dispatch_task(self, runtime_id: str, agent_id: str, run_id: str,
-                            prompt: str, **extra) -> None:
-        """Send task_available to the daemon that owns runtime_id."""
-        import uuid
-        event_id = str(uuid.uuid4())
+    async def dispatch_trigger(self, *, trace_id: str, runtime_id: str, agent_id: str,
+                               kind: str, prompt: str, run_id: str = "",
+                               **runtime_args) -> None:
+        """Send a trigger frame to the daemon that owns runtime_id.
+
+        One frame shape for all invocations — chat, scheduled run step, future
+        comments/webhooks. The daemon doesn't branch on `kind`; that field is
+        purely for logging/auditing on this side.
+        """
         payload = {
-            "type": "task_available",
+            "type": "trigger",
+            "trace_id": trace_id,
             "runtime_id": runtime_id,
             "agent_id": agent_id,
             "run_id": run_id,
+            "kind": kind,
             "prompt": prompt,
-            **extra,
+            **runtime_args,
         }
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
 
         for conn in targets:
-            await conn.send(event_id, payload)
-            logger.debug("Dispatched task_available run=%s → daemon=%s", run_id, conn.daemon_id[:8])
+            await conn.send(trace_id, payload)
+            logger.info(
+                "Dispatched trigger trace=%s kind=%s agent=%s run=%s → daemon=%s",
+                trace_id, kind, agent_id, run_id or "-", conn.daemon_id[:8],
+            )
 
     def connected_daemon_ids(self) -> list[str]:
         return list(self._conns.keys())

@@ -48,27 +48,28 @@ class AgentiraClient:
     def list_runtimes(self) -> list[dict]:
         return self._get("/api/forge/runtimes")
 
-    def post_run_events(self, run_id: str, daemon_id: str, events: list) -> dict:
-        return self._post(f"/api/forge/runs/{run_id}/events", {
+    def post_trigger_events(self, agent_id: str, *, daemon_id: str,
+                            trace_id: str, run_id: str = "",
+                            events: list) -> dict:
+        return self._post(f"/api/forge/agents/{agent_id}/trigger-events", {
             "daemon_id": daemon_id,
+            "trace_id": trace_id,
+            "run_id": run_id or None,
             "events": events,
         })
 
-    def complete_run(self, run_id: str, daemon_id: str, *, success: bool,
-                     input_tokens: int = 0, output_tokens: int = 0, error: str = "") -> dict:
-        return self._post(f"/api/forge/runs/{run_id}/complete-daemon", {
+    def post_trigger_complete(self, agent_id: str, *, daemon_id: str,
+                              trace_id: str, run_id: str = "",
+                              success: bool, input_tokens: int = 0,
+                              output_tokens: int = 0, error: str = "") -> dict:
+        return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
+            "trace_id": trace_id,
+            "run_id": run_id or None,
             "success": success,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "error": error,
-        })
-
-    def post_agent_chat_events(self, agent_id: str, daemon_id: str, chat_id: str, events: list) -> dict:
-        return self._post(f"/api/forge/agents/{agent_id}/chat-events", {
-            "daemon_id": daemon_id,
-            "chat_id": chat_id,
-            "events": events,
         })
 
     def get_agent(self, agent_id: str) -> dict:

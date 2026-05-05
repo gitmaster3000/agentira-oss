@@ -157,6 +157,20 @@ def run_migrations():
             conn.execute(text("ALTER TABLE forge_runtimes ADD COLUMN gateway_token VARCHAR(500)"))
             conn.commit()
 
+        # forge_messages: trace_id + kind columns (Step 1 — one rail).
+        # trace_id correlates user prompt → assistant reply across the daemon
+        # boundary; kind tags whether it came from chat, a run step, etc.
+        if "forge_messages" in tables:
+            result = conn.execute(text("PRAGMA table_info(forge_messages)"))
+            existing = {row[1] for row in result}
+            if "trace_id" not in existing:
+                conn.execute(text("ALTER TABLE forge_messages ADD COLUMN trace_id VARCHAR(12)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_forge_messages_trace_id ON forge_messages(trace_id)"))
+                conn.commit()
+            if "kind" not in existing:
+                conn.execute(text("ALTER TABLE forge_messages ADD COLUMN kind VARCHAR(20)"))
+                conn.commit()
+
         # forge_agents.profile_id NOT NULL → NULLABLE rebuild
         # (agents are runtime executors; profile FK is legacy and now optional)
         if "forge_agents" in tables:

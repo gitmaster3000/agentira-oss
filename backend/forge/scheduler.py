@@ -70,10 +70,14 @@ class ForgeScheduler:
 
 
 def _fire_run(agent_id: str) -> None:
-    """Create a forge Run for a scheduled agent and dispatch via WS."""
+    """Create a forge Run for a scheduled agent and dispatch via the trigger rail.
+
+    The agent prompt for scheduled runs is a placeholder today; templates +
+    gate-driven work selection (planned) will populate the real prompt.
+    """
     with SessionLocal() as db:
         agent = db.get(Agent, agent_id)
-        if not agent:
+        if not agent or not agent.runtime_id:
             return
         run = Run(
             agent_id=agent_id,
@@ -84,27 +88,16 @@ def _fire_run(agent_id: str) -> None:
         db.commit()
         db.refresh(run)
         run_id = run.id
-        runtime_id = agent.runtime_id
 
     logger.info("Scheduled run created: run=%s agent=%s", run_id, agent_id)
 
-    if runtime_id:
-        try:
-            from backend.forge.ws_dispatch import hub
-            import asyncio
-            import uuid
-            coro = hub.dispatch_task(
-                runtime_id=runtime_id,
-                task_id=run_id,  # use run_id as task identifier for scheduled runs
-                agent_id=agent_id,
-            )
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.run_coroutine_threadsafe(coro, loop)
-            except RuntimeError:
-                asyncio.run(coro)
-        except Exception as exc:
-            logger.warning("WS dispatch for scheduled run failed: %s", exc)
+    # TODO: source a real prompt (from agent system_prompt + template task selector)
+    placeholder = "Scheduled run — no prompt source wired yet."
+    try:
+        from backend.forge import services
+        services.dispatch_trigger(agent_id, placeholder, run_id=run_id, kind="run_step")
+    except Exception as exc:
+        logger.warning("dispatch_trigger for scheduled run failed: %s", exc)
 
 
 # Singleton
