@@ -140,6 +140,16 @@ async def get_me(ctx: Context) -> str:
     return f"Hello! You are connected as Client ID: {actor}."
 
 @mcp.tool()
+async def update_profile(display_name: str = None, avatar_url: str = None, webhook_url: str = None, ctx: Context = None) -> dict:
+    """Update your own profile. Set webhook_url so Agentira can push task events to your runtime."""
+    actor = actor_ctx.get()
+    with services._session() as db:
+        p = services._get_profile_by_name(db, actor)
+        if not p:
+            raise ValueError(f"Profile not found: {actor}")
+        return services.update_profile(p.id, display_name=display_name, avatar_url=avatar_url, webhook_url=webhook_url)
+
+@mcp.tool()
 async def login(name: str, password: str) -> str:
     """Login with username and password to get your API Key."""
     user = services.authenticate_user(name, password)
@@ -186,6 +196,12 @@ async def update_project(project_id: str, name: str = None, description: str = N
 async def delete_project(project_id: str) -> bool:
     """Delete a project."""
     return services.delete_project(project_id)
+
+@mcp.tool()
+async def add_project_member(project_id: str, profile_name: str, ctx: Context = None) -> dict:
+    """Add a user to a project."""
+    actor = actor_ctx.get()
+    return services.add_project_member(project_id, profile_name, actor=actor)
 
 @mcp.tool()
 async def remove_project_member(project_id: str, profile_name: str) -> bool:

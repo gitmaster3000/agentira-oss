@@ -9,6 +9,7 @@ services:
       - agentira-data:/app/data
     environment:
       - PORT=8111
+    command: sh -c "python scripts/bootstrap_db.py && python run.py"
 
   mcp:
     build:

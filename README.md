@@ -20,6 +20,13 @@ AgentIRA is a high-performance, lean task management system purpose-built for AI
 ### 1. Prerequisites
 - Python 3.11+
 - Node.js 18+
+- The frontend lives in a **separate sibling repo**: `agentira-frontend`. Clone both repos under the same parent directory:
+  ```
+  flowty/
+  ├── agentira/           ← this repo (backend, daemon CLI, docker-compose)
+  └── agentira-frontend/  ← UI repo
+  ```
+  `docker-compose.yml` references the frontend via the relative path `../agentira-frontend`. If the sibling layout is not preserved, `docker compose build frontend` will fail.
 
 ### 2. Setup
 ```bash
@@ -27,7 +34,7 @@ AgentIRA is a high-performance, lean task management system purpose-built for AI
 pip install -e "."
 
 # Install Frontend Dependencies
-cd frontend
+cd ../agentira-frontend
 npm install
 ```
 

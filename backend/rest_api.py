@@ -446,13 +446,20 @@ def api_get_task(task_id: str):
 @tasks.patch("/{task_id}")
 def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_current_user)):
     try:
-        return services.update_task(
+        result = services.update_task(
             task_id=task_id, title=body.title, description=body.description,
             priority=body.priority, assignee=body.assignee, tags=body.tags,
             start_date=body.start_date, due_date=body.due_date,
             dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url,
             epic_id=body.epic_id, actor=actor,
         )
+        if body.assignee:
+            try:
+                from backend.forge.triggers import fire_task_assigned
+                fire_task_assigned(task_id=task_id, assignee_name=body.assignee)
+            except Exception:
+                pass  # never break task update due to WS dispatch
+        return result
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -665,8 +672,9 @@ for r in [auth, profiles, svc_accounts, projects, tasks, attachments, workflow, 
     app.include_router(r)
 
 # Forge product router (self-contained)
-from backend.forge.router import router as forge_router
+from backend.forge.router import router as forge_router, daemon_router as forge_daemon_router
 app.include_router(forge_router, dependencies=[Depends(get_current_user)])
+app.include_router(forge_daemon_router)  # daemon-facing, no user JWT
 
 
 # Legacy compat: /api/board/{project_id} → /api/projects/{project_id}/board
@@ -687,3 +695,18 @@ def api_list_all_epics(project_id: Optional[str] = None, actor: str = Depends(ge
 def startup():
     from backend.db import init_db
     init_db()
+    try:
+        from backend.forge.scheduler import scheduler
+        scheduler.start()
+    except Exception as exc:
+        import logging
+        logging.getLogger("agentira").warning("Scheduler failed to start: %s", exc)
+
+
+@app.on_event("shutdown")
+def shutdown():
+    try:
+        from backend.forge.scheduler import scheduler
+        scheduler.stop()
+    except Exception:
+        pass
