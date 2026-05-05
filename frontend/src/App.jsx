@@ -9,6 +9,13 @@ import { Signup } from './pages/Signup';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { Settings } from './pages/Settings';
 import { TaskPage } from './pages/TaskPage';
+import { ForgeLayout } from './pages/forge/ForgeLayout';
+import { ForgeOverview } from './pages/forge/ForgeOverview';
+import { AgentsDashboard } from './pages/forge/AgentsDashboard';
+import { RuntimesDashboard } from './pages/forge/RuntimesDashboard';
+import { AgentDetail } from './pages/forge/AgentDetail';
+import { RunsDashboard } from './pages/forge/RunsDashboard';
+import { RunDetail } from './pages/forge/RunDetail';
 import { ROUTES } from './routes';
 
 function Welcome() {
@@ -75,8 +82,15 @@ export default function App() {
                     <Route path="/board/:projectId" element={<LegacyBoardRedirect />} />
                     <Route path="/settings" element={<Navigate to={ROUTES.STUDIO_SETTINGS} replace />} />
 
-                    {/* Forge routes — disabled for now */}
-                    <Route path="/forge/*" element={<Navigate to={ROUTES.STUDIO} replace />} />
+                    {/* Forge routes */}
+                    <Route path="/forge" element={<RequireAuth><ForgeLayout /></RequireAuth>}>
+                        <Route index element={<ForgeOverview />} />
+                        <Route path="agents" element={<AgentsDashboard />} />
+                        <Route path="agents/:agentId" element={<AgentDetail />} />
+                        <Route path="runtimes" element={<RuntimesDashboard />} />
+                        <Route path="runs" element={<RunsDashboard />} />
+                        <Route path="runs/:runId" element={<RunDetail />} />
+                    </Route>
 
                     {/* Catch-all */}
                     <Route path="*" element={<Navigate to="/" replace />} />

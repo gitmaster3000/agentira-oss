@@ -12,15 +12,14 @@ const PRODUCTS = [
         path: ROUTES.STUDIO,
         color: '#d0bcff',
     },
-    // Forge — disabled for now, will re-enable later
-    // {
-    //     id: 'forge',
-    //     name: 'Forge',
-    //     description: 'Agent orchestration',
-    //     icon: Cpu,
-    //     path: '/forge',
-    //     color: '#80cbc4',
-    // },
+    {
+        id: 'forge',
+        name: 'Forge',
+        description: 'Agent orchestration',
+        icon: Cpu,
+        path: '/forge',
+        color: '#80cbc4',
+    },
 ];
 
 export function AppSwitcher() {
