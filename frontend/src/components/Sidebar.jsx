@@ -6,11 +6,13 @@ import {
     TrendingUp,
     PanelLeft,
 } from 'lucide-react';
+import { ROUTES } from '../routes';
 
 export function Sidebar() {
-    const { projectId = 'default' } = useParams();
+    const { projectId } = useParams();
     const [searchParams] = useSearchParams();
     const currentView = searchParams.get('view') || 'board';
+    const boardPath = projectId ? ROUTES.STUDIO_BOARD(projectId) : null;
 
     const [isCollapsed, setIsCollapsed] = useState(() => {
         return localStorage.getItem('sidebar-collapsed') === 'true';
@@ -22,11 +24,11 @@ export function Sidebar() {
         localStorage.setItem('sidebar-collapsed', JSON.stringify(newState));
     };
 
-    const navItems = [
-        { icon: LayoutGrid, label: 'Board', path: `/board/${projectId}`, view: 'board' },
-        { icon: ListTodo, label: 'Backlog', path: `/board/${projectId}?view=backlog`, view: 'backlog' },
-        { icon: TrendingUp, label: 'Roadmap', path: `/board/${projectId}?view=roadmap`, view: 'roadmap' },
-    ];
+    const navItems = boardPath ? [
+        { icon: LayoutGrid, label: 'Board', path: boardPath, view: 'board' },
+        { icon: ListTodo, label: 'Backlog', path: `${boardPath}?view=backlog`, view: 'backlog' },
+        { icon: TrendingUp, label: 'Roadmap', path: `${boardPath}?view=roadmap`, view: 'roadmap' },
+    ] : [];
 
     return (
         <aside
