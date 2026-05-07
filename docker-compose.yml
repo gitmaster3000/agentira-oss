@@ -1,10 +1,17 @@
+# Base compose — service definitions only.
+# Cannot be run alone; requires an environment override:
+#
+#   Dev: `docker compose up`               (auto-loads docker-compose.override.yml)
+#   QA:  `docker compose -f docker-compose.yml -f docker-compose.qa.yml up`
+#   Prod:`docker compose -f docker-compose.yml -f docker-compose.prod.yml up`
+#
+# See README "Running locally" for full details.
+
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8111:8111"
     volumes:
       - agentira-data:/app/data
     environment:
@@ -15,8 +22,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mcp
-    ports:
-      - "8000:8000"
     volumes:
       - agentira-data:/app/data
     environment:
@@ -29,10 +34,6 @@ services:
     build:
       context: ../agentira-frontend
       dockerfile: Dockerfile
-    ports:
-      - "3111:80"
-    volumes:
-      - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
     depends_on:
       - backend
 

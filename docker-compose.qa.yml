@@ -1,0 +1,60 @@
+# QA / staging override.
+# Run: `docker compose -f docker-compose.yml -f docker-compose.qa.yml --env-file .env.qa up -d`
+#
+# Differences from dev:
+# - Postgres instead of SQLite
+# - JWT_SECRET REQUIRED (no insecure default)
+# - No volume-mounted source (image is the truth — same shape as prod)
+# - Ports still exposed so E2E test runners can hit the backend directly
+
+services:
+  backend:
+    ports:
+      - "8111:8111"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for QA — see .env.qa.example}
+      - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
+    depends_on:
+      backend-deps:
+        condition: service_completed_successfully
+
+  mcp:
+    ports:
+      - "8000:8000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for QA}
+      - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
+    depends_on:
+      - postgres
+
+  frontend:
+    ports:
+      - "3111:80"
+    volumes:
+      - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=agentira
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for QA}
+      - POSTGRES_DB=agentira
+    volumes:
+      - agentira-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "agentira"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # One-shot helper that blocks the backend until postgres is healthy.
+  # Without this, the backend can race postgres on first cold start.
+  backend-deps:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["echo", "postgres ready"]
+
+volumes:
+  agentira-pg:

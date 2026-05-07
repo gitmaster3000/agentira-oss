@@ -1,0 +1,89 @@
+# Production override.
+# Run: `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d`
+#
+# Differences from QA:
+# - Backend + MCP NOT exposed to host (frontend is the only public surface)
+# - `restart: unless-stopped` so containers survive host reboots
+# - Healthchecks on every service
+# - Hot reload disabled (RAILWAY_ENVIRONMENT triggers run.py's prod path)
+# - Resource limits to prevent runaway agent processes from saturating the host
+#
+# All secrets MUST come from .env.prod (or the deployment platform's secret store).
+# This file refuses to start if any required var is missing.
+
+services:
+  backend:
+    restart: unless-stopped
+    expose:
+      - "8111"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for production}
+      - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
+      - RAILWAY_ENVIRONMENT=production  # disables uvicorn --reload
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8111/api/auth/config').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mcp:
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for production}
+      - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
+      - RAILWAY_ENVIRONMENT=production
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=agentira
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required for production}
+      - POSTGRES_DB=agentira
+    volumes:
+      - agentira-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "agentira"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+volumes:
+  agentira-pg:

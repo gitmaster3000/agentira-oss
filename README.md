@@ -49,6 +49,38 @@ cd frontend
 npm run dev
 ```
 
+## 🐳 Running via Docker Compose
+
+Three explicit environments — pick one. All target the same images, just with different config.
+
+| Env | Command | DB | JWT survives rebuild | Source hot-reloads |
+|---|---|---|---|---|
+| **dev** | `docker compose up -d` | SQLite (in `agentira-data` volume) | Yes (hard-coded dev secret) | Yes (volume-mounted source) |
+| **qa** | `docker compose -f docker-compose.yml -f docker-compose.qa.yml --env-file .env.qa up -d` | Postgres | Yes (from `.env.qa`) | No |
+| **prod** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d` | Postgres | Yes (from `.env.prod`) | No |
+
+### First-time setup (qa or prod)
+
+```bash
+cp .env.qa.example .env.qa     # or .env.prod.example .env.prod
+# Edit and fill in JWT_SECRET (openssl rand -hex 32) and POSTGRES_PASSWORD.
+```
+
+Both files are gitignored. Compose refuses to start qa or prod if `JWT_SECRET` or `POSTGRES_PASSWORD` is missing — better than a silent insecure default.
+
+### What each environment differs on
+
+- **dev**: `docker-compose.override.yml` is loaded automatically. Source mounted as a volume → uvicorn `--reload` picks up edits without rebuilds. JWT secret is hard-coded so logins survive `docker compose up --build`. Ports `8111` / `8000` / `3111` exposed.
+- **qa**: Postgres replaces SQLite; otherwise mirrors prod. Ports still exposed for E2E test runners.
+- **prod**: Backend + MCP NOT exposed to the host (frontend is the only public surface). `restart: unless-stopped`, healthchecks, resource limits. Hot reload disabled (`RAILWAY_ENVIRONMENT=production`).
+
+### Stop / wipe
+
+```bash
+docker compose down              # stop containers
+docker compose down -v           # also delete volumes (DB wiped)
+```
+
 ## 🤖 MCP Configuration
 To connect an agent (e.g., Claude Desktop, Cursor, or Antigravity), use the following configuration.
 
