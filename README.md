@@ -2,6 +2,8 @@
 
 AgentIRA is a high-performance, lean task management system purpose-built for AI agents—**confirmed working with Antigravity and Claude**—with robust human oversight. It follows a "two-door" architecture, providing both an **MCP Server** for agentic interaction and a **REST API** for human-facing web dashboards.
 
+> **📍 Where we're going:** see [`AGENTIRA_VISION.md`](./AGENTIRA_VISION.md) — the architectural north star. Read it before starting any feature; every implementation decision should move toward this vision. It covers the trust architecture (evidence over assertion), the universal workflow pattern (Trigger → Audit → Plan → Execute → Verify → Deliver), workflow templates, and the verified state machine.
+
 ## 🚀 Features
 
 ### Core Management
@@ -20,6 +22,13 @@ AgentIRA is a high-performance, lean task management system purpose-built for AI
 ### 1. Prerequisites
 - Python 3.11+
 - Node.js 18+
+- The frontend lives in a **separate sibling repo**: `agentira-frontend`. Clone both repos under the same parent directory:
+  ```
+  flowty/
+  ├── agentira/           ← this repo (backend, daemon CLI, docker-compose)
+  └── agentira-frontend/  ← UI repo
+  ```
+  `docker-compose.yml` references the frontend via the relative path `../agentira-frontend`. If the sibling layout is not preserved, `docker compose build frontend` will fail.
 
 ### 2. Setup
 ```bash
@@ -27,7 +36,7 @@ AgentIRA is a high-performance, lean task management system purpose-built for AI
 pip install -e "."
 
 # Install Frontend Dependencies
-cd frontend
+cd ../agentira-frontend
 npm install
 ```
 
@@ -40,6 +49,38 @@ python run.py
 # Terminal 2: Frontend (http://localhost:3111)
 cd frontend
 npm run dev
+```
+
+## 🐳 Running via Docker Compose
+
+Three explicit environments — pick one. All target the same images, just with different config.
+
+| Env | Command | DB | JWT survives rebuild | Source hot-reloads |
+|---|---|---|---|---|
+| **dev** | `docker compose up -d` | SQLite (in `agentira-data` volume) | Yes (hard-coded dev secret) | Yes (volume-mounted source) |
+| **qa** | `docker compose -f docker-compose.yml -f docker-compose.qa.yml --env-file .env.qa up -d` | Postgres | Yes (from `.env.qa`) | No |
+| **prod** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d` | Postgres | Yes (from `.env.prod`) | No |
+
+### First-time setup (qa or prod)
+
+```bash
+cp .env.qa.example .env.qa     # or .env.prod.example .env.prod
+# Edit and fill in JWT_SECRET (openssl rand -hex 32) and POSTGRES_PASSWORD.
+```
+
+Both files are gitignored. Compose refuses to start qa or prod if `JWT_SECRET` or `POSTGRES_PASSWORD` is missing — better than a silent insecure default.
+
+### What each environment differs on
+
+- **dev**: `docker-compose.override.yml` is loaded automatically. Source mounted as a volume → uvicorn `--reload` picks up edits without rebuilds. JWT secret is hard-coded so logins survive `docker compose up --build`. Ports `8111` / `8000` / `3111` exposed.
+- **qa**: Postgres replaces SQLite; otherwise mirrors prod. Ports still exposed for E2E test runners.
+- **prod**: Backend + MCP NOT exposed to the host (frontend is the only public surface). `restart: unless-stopped`, healthchecks, resource limits. Hot reload disabled (`RAILWAY_ENVIRONMENT=production`).
+
+### Stop / wipe
+
+```bash
+docker compose down              # stop containers
+docker compose down -v           # also delete volumes (DB wiped)
 ```
 
 ## 🤖 MCP Configuration

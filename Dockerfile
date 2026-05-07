@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -e .
 
 # Copy entry point
 COPY run.py .
+COPY scripts/ scripts/
 
 # Create data directory for SQLite
 RUN mkdir -p data

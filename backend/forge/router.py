@@ -3,23 +3,30 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket
+
 from pydantic import BaseModel, Field
 
 from backend.forge import services
 
 router = APIRouter(prefix="/api/forge", tags=["forge"])
 
+# Daemon-facing endpoints — no user JWT required. Daemons identify via
+# persistent daemon_id; this is mounted separately without the global auth
+# dependency so the host CLI can register/heartbeat without a user token.
+daemon_router = APIRouter(prefix="/api/forge", tags=["forge-daemon"])
+
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
 class AgentCreate(BaseModel):
-    profile_id: str
     name: str
+    profile_id: Optional[str] = None
     executor_type: str = "http"
     model: str = ""
     webhook_url: str = ""
     config_json: Optional[str] = None
+    runtime_id: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
@@ -36,6 +43,8 @@ class AgentUpdate(BaseModel):
     runtime_gateway_token: Optional[str] = None
     runtime_hooks_token: Optional[str] = None
     runtime_agent_name: Optional[str] = None
+    runtime_id: Optional[str] = None
+    schedule_cron: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -55,6 +64,23 @@ class RunComplete(BaseModel):
     output_tokens: int = 0
     cost_usd: float = 0.0
     error: Optional[str] = None
+
+
+class DaemonTriggerEvents(BaseModel):
+    daemon_id: str
+    trace_id: str
+    run_id: Optional[str] = None
+    events: list
+
+
+class DaemonTriggerComplete(BaseModel):
+    daemon_id: str
+    trace_id: str
+    run_id: Optional[str] = None
+    success: bool
+    input_tokens: int = 0
+    output_tokens: int = 0
+    error: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -90,6 +116,78 @@ class RuntimeChatRequest(BaseModel):
 
 
 
+# ── Runtime registration schemas ─────────────────────────────────────────
+
+class RuntimeEntry(BaseModel):
+    provider: str
+    binary_path: str
+    version: Optional[str] = None
+    capabilities: list[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
+    gateway_url: Optional[str] = None
+    gateway_token: Optional[str] = None
+
+
+class RuntimeRegisterRequest(BaseModel):
+    daemon_id: str
+    device_name: Optional[str] = None
+    runtimes: list[RuntimeEntry]
+
+
+class RuntimeHeartbeatRequest(BaseModel):
+    daemon_id: str
+    providers: list[str]  # which providers are still alive
+
+
+# ── Runtime endpoints ─────────────────────────────────────────────────────
+
+@daemon_router.post("/runtimes/register", status_code=200)
+def register_runtimes(body: RuntimeRegisterRequest):
+    return services.register_runtimes(
+        daemon_id=body.daemon_id,
+        device_name=body.device_name,
+        runtimes=[r.model_dump() for r in body.runtimes],
+    )
+
+
+@daemon_router.post("/runtimes/heartbeat")
+def runtime_heartbeat(body: RuntimeHeartbeatRequest):
+    return services.heartbeat_runtimes(daemon_id=body.daemon_id, providers=body.providers)
+
+
+@daemon_router.post("/agents/{agent_id}/trigger-events")
+def daemon_append_trigger_events(agent_id: str, body: DaemonTriggerEvents):
+    return services.append_trigger_events(
+        agent_id, trace_id=body.trace_id, run_id=body.run_id, events=body.events,
+    )
+
+
+@daemon_router.post("/agents/{agent_id}/trigger-complete")
+def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
+    return services.complete_trigger(
+        agent_id,
+        trace_id=body.trace_id,
+        run_id=body.run_id,
+        success=body.success,
+        input_tokens=body.input_tokens,
+        output_tokens=body.output_tokens,
+        error=body.error if not body.success else None,
+    )
+
+
+@router.get("/runtimes")
+def list_runtimes(provider: Optional[str] = None, status: Optional[str] = None):
+    return services.list_runtimes(provider=provider, status=status)
+
+
+@router.get("/runtimes/{runtime_id}")
+def get_runtime(runtime_id: str):
+    result = services.get_runtime(runtime_id)
+    if not result:
+        raise HTTPException(404, "Runtime not found")
+    return result
+
+
 # ── Agent endpoints ──────────────────────────────────────────────────────
 
 @router.get("/agents")
@@ -106,6 +204,7 @@ def create_agent(body: AgentCreate):
         model=body.model,
         webhook_url=body.webhook_url,
         config_json=body.config_json,
+        runtime_id=body.runtime_id,
     )
 
 
@@ -166,6 +265,18 @@ def get_run(run_id: str):
     if not result:
         raise HTTPException(404, "Run not found")
     return result
+
+
+@router.get("/triggers/{trace_id}/events")
+def get_trigger_events(trace_id: str):
+    """Messages tagged with this trace_id, ordered by creation time."""
+    return services.get_trigger_events(trace_id)
+
+
+@router.get("/runs/{run_id}/events")
+def get_run_events(run_id: str):
+    """Messages tagged with this run_id (across all of its triggers)."""
+    return services.get_run_events(run_id)
 
 
 @router.post("/runs/{run_id}/start")
@@ -261,7 +372,7 @@ def runtime_status(agent_id: str):
 
 
 @router.post("/agents/{agent_id}/runtime/chat")
-def runtime_chat(agent_id: str, body: RuntimeChatRequest):
+async def runtime_chat(agent_id: str, body: RuntimeChatRequest):
     return services.send_runtime_message(agent_id, content=body.content, run_id=body.run_id)
 
 
@@ -317,3 +428,38 @@ def reset_agent_status(agent_id: str):
     if not result:
         raise HTTPException(404, "Agent not found")
     return result
+
+
+# ── Scheduler ───────────────────────────────────────────────────────────
+
+@router.post("/scheduler/refresh")
+def refresh_scheduler():
+    """Re-read agent cron schedules and rebuild APScheduler jobs."""
+    try:
+        from backend.forge.scheduler import scheduler
+        return scheduler.refresh()
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+# ── Daemon WebSocket ─────────────────────────────────────────────────────
+
+@daemon_router.websocket("/daemon/ws")
+async def daemon_ws(ws: WebSocket):
+    """Persistent WebSocket for daemon ↔ server push.
+
+    Daemon sends: {"daemon_id": "...", "runtime_ids": ["rid1", ...]}
+    Server sends: {"type": "task_available", "task_id": "...", "runtime_id": "..."}
+    """
+    from backend.forge.ws_dispatch import handle_daemon_ws
+    await handle_daemon_ws(ws)
+
+
+# ── WS hub status (debugging) ────────────────────────────────────────────
+
+@router.get("/daemon/connections")
+def daemon_connections():
+    """List currently connected daemon IDs (debug endpoint)."""
+    from backend.forge.ws_dispatch import hub
+    return {"connected": hub.connected_daemon_ids()}
+

@@ -12,6 +12,7 @@ from backend.models import Profile, Role
 from backend.forge.models import (
     Agent, Run, AgentMessage, WebhookLog,
     AgentStatus, RunStatus, MessageRole,
+    ForgeRuntime, RuntimeStatus,
 )
 
 
@@ -24,6 +25,12 @@ def _utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _iso(dt: datetime | None) -> str | None:
+    """ISO timestamp with explicit UTC suffix; safe for browser Date()."""
+    aware = _utc(dt)
+    return aware.isoformat() if aware else None
 
 
 # ── Serializers ──────────────────────────────────────────────────────────
@@ -49,6 +56,14 @@ def _sync_bots(db) -> None:
 def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
     # Pull live webhook_url from profile (source of truth)
     profile_webhook = a.profile.webhook_url if a.profile else ""
+    # Liveness comes only from the WS hub — daemon connected = agent live.
+    runtime_live = bool(a.runtime_id and a.runtime and _is_runtime_online(a.runtime))
+    live_heartbeat = datetime.now(timezone.utc) if runtime_live else None
+    # Derived status for new-model agents; legacy agents fall back to DB value.
+    if a.runtime_id:
+        derived_status = "online" if runtime_live else "offline"
+    else:
+        derived_status = a.status.value
     return {
         "id": a.id,
         "profile_id": a.profile_id,
@@ -57,9 +72,9 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "name": a.name,
         "executor_type": a.executor_type,
         "model": a.model,
-        "status": a.status.value,
+        "status": derived_status,
         "webhook_url": profile_webhook or a.webhook_url,
-        "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+        "last_heartbeat": _iso(live_heartbeat),
         "total_runs": a.total_runs,
         "total_cost_usd": runtime_cost if runtime_cost is not None else a.total_cost_usd,
         "system_prompt": a.system_prompt or "",
@@ -74,7 +89,9 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_gateway_token": a.runtime_gateway_token or "",
         "runtime_hooks_token": a.runtime_hooks_token or "",
         "runtime_agent_name": a.runtime_agent_name or "",
-        "created_at": a.created_at.isoformat(),
+        "runtime_id": a.runtime_id,
+        "schedule_cron": a.schedule_cron or "",
+        "created_at": _iso(a.created_at),
     }
 
 
@@ -83,6 +100,8 @@ def _message_to_dict(m: AgentMessage) -> dict:
         "id": m.id,
         "agent_id": m.agent_id,
         "run_id": m.run_id,
+        "trace_id": m.trace_id,
+        "kind": m.kind,
         "role": m.role.value,
         "content": m.content,
         "tool_name": m.tool_name,
@@ -92,7 +111,7 @@ def _message_to_dict(m: AgentMessage) -> dict:
         "output_tokens": m.output_tokens,
         "cost_usd": m.cost_usd,
         "model_used": m.model_used,
-        "created_at": m.created_at.isoformat(),
+        "created_at": _iso(m.created_at),
     }
 
 
@@ -108,7 +127,7 @@ def _webhook_log_to_dict(w: WebhookLog) -> dict:
         "response_body": w.response_body,
         "success": w.success,
         "duration_ms": w.duration_ms,
-        "created_at": w.created_at.isoformat(),
+        "created_at": _iso(w.created_at),
     }
 
 
@@ -124,15 +143,115 @@ def _run_to_dict(r: Run) -> dict:
         "trigger_event": r.trigger_event,
         "status": r.status.value,
         "model_used": r.model_used,
-        "started_at": r.started_at.isoformat() if r.started_at else None,
-        "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+        "started_at": _iso(r.started_at),
+        "finished_at": _iso(r.finished_at),
         "duration_ms": r.duration_ms,
         "input_tokens": r.input_tokens,
         "output_tokens": r.output_tokens,
         "cost_usd": r.cost_usd,
         "error": r.error,
-        "created_at": r.created_at.isoformat(),
+        "created_at": _iso(r.created_at),
     }
+
+
+# ── Runtime serializer ──────────────────────────────────────────────────
+
+def _runtime_to_dict(r: ForgeRuntime) -> dict:
+    live = _is_runtime_online(r)
+    return {
+        "id": r.id,
+        "daemon_id": r.daemon_id,
+        "device_name": r.device_name,
+        "provider": r.provider,
+        "binary_path": r.binary_path,
+        "version": r.version,
+        "status": "online" if live else "offline",
+        "capabilities": json.loads(r.capabilities) if r.capabilities else [],
+        "models": json.loads(r.models) if r.models else [],
+        "gateway_url": r.gateway_url or "",
+        "gateway_token": r.gateway_token or "",
+        "last_heartbeat": _iso(datetime.now(timezone.utc)) if live else None,
+        "created_at": _iso(r.created_at),
+    }
+
+
+# ── Runtime CRUD ─────────────────────────────────────────────────────────
+
+def register_runtimes(daemon_id: str, device_name: str | None, runtimes: list[dict]) -> dict:
+    now = datetime.now(timezone.utc)
+    with _session() as db:
+        results = []
+        for entry in runtimes:
+            existing = (
+                db.query(ForgeRuntime)
+                .filter_by(daemon_id=daemon_id, provider=entry["provider"])
+                .first()
+            )
+            if existing:
+                existing.binary_path = entry["binary_path"]
+                existing.version = entry.get("version")
+                existing.capabilities = json.dumps(entry.get("capabilities", []))
+                existing.models = json.dumps(entry.get("models", []))
+                existing.gateway_url = entry.get("gateway_url") or None
+                existing.gateway_token = entry.get("gateway_token") or None
+                existing.status = RuntimeStatus.ONLINE
+                existing.last_heartbeat = now
+                if device_name:
+                    existing.device_name = device_name
+                results.append(_runtime_to_dict(existing))
+            else:
+                rt = ForgeRuntime(
+                    daemon_id=daemon_id,
+                    device_name=device_name,
+                    provider=entry["provider"],
+                    binary_path=entry["binary_path"],
+                    version=entry.get("version"),
+                    capabilities=json.dumps(entry.get("capabilities", [])),
+                    models=json.dumps(entry.get("models", [])),
+                    gateway_url=entry.get("gateway_url") or None,
+                    gateway_token=entry.get("gateway_token") or None,
+                    status=RuntimeStatus.ONLINE,
+                    last_heartbeat=now,
+                )
+                db.add(rt)
+                db.flush()
+                results.append(_runtime_to_dict(rt))
+        db.commit()
+        return {"registered": results}
+
+
+def heartbeat_runtimes(daemon_id: str, providers: list[str]) -> dict:
+    now = datetime.now(timezone.utc)
+    with _session() as db:
+        updated = (
+            db.query(ForgeRuntime)
+            .filter(
+                ForgeRuntime.daemon_id == daemon_id,
+                ForgeRuntime.provider.in_(providers),
+            )
+            .all()
+        )
+        for rt in updated:
+            rt.status = RuntimeStatus.ONLINE
+            rt.last_heartbeat = now
+        db.commit()
+        return {"updated": len(updated)}
+
+
+def list_runtimes(provider: str | None = None, status: str | None = None) -> list[dict]:
+    with _session() as db:
+        q = db.query(ForgeRuntime)
+        if provider:
+            q = q.filter(ForgeRuntime.provider == provider)
+        if status:
+            q = q.filter(ForgeRuntime.status == status)
+        return [_runtime_to_dict(r) for r in q.order_by(ForgeRuntime.created_at.desc()).all()]
+
+
+def get_runtime(runtime_id: str) -> dict | None:
+    with _session() as db:
+        rt = db.get(ForgeRuntime, runtime_id)
+        return _runtime_to_dict(rt) if rt else None
 
 
 # ── Live status probe ────────────────────────────────────────────────────
@@ -148,11 +267,19 @@ def _has_active_runs(db, agent_id: str) -> bool:
             .first()) is not None
 
 
+def _is_runtime_online(rt: "ForgeRuntime | None") -> bool:
+    """Runtime is online iff its daemon's WS is currently connected."""
+    if rt is None:
+        return False
+    from backend.forge.ws_dispatch import hub
+    return hub.is_connected(rt.daemon_id)
+
+
 def _resolve_agent_status(a: Agent, runtime_online: bool, db) -> AgentStatus:
     """Determine correct status for an agent given runtime health.
 
-    Unsticks BUSY agents with no active runs. Falls back to heartbeat
-    staleness for agents without a runtime_url.
+    Priority: bound forge_runtime → legacy runtime_url → heartbeat staleness.
+    Unsticks BUSY agents with no active runs.
     """
     now = datetime.now(timezone.utc)
 
@@ -164,11 +291,15 @@ def _resolve_agent_status(a: Agent, runtime_online: bool, db) -> AgentStatus:
     if a.status == AgentStatus.BUSY:
         return AgentStatus.BUSY
 
-    # Runtime-based status
+    # New model: agent bound to a forge_runtime — mirror daemon health
+    if a.runtime_id:
+        return AgentStatus.ONLINE if _is_runtime_online(a.runtime) else AgentStatus.OFFLINE
+
+    # Legacy: HTTP gateway agent
     if a.runtime_url:
         return AgentStatus.ONLINE if runtime_online else AgentStatus.OFFLINE
 
-    # No runtime_url — use heartbeat staleness
+    # Fallback: heartbeat staleness
     if a.last_heartbeat:
         age_s = (now - _utc(a.last_heartbeat)).total_seconds()
         return AgentStatus.ONLINE if age_s < _HEARTBEAT_TIMEOUT_S else AgentStatus.OFFLINE
@@ -247,8 +378,9 @@ def get_agent(agent_id: str) -> dict | None:
         return _agent_to_dict(a, runtime_cost=live_costs.get(a.id))
 
 
-def create_agent(*, profile_id: str, name: str, executor_type: str = "http",
-                 model: str = "", webhook_url: str = "", config_json: str | None = None) -> dict:
+def create_agent(*, profile_id: str | None = None, name: str, executor_type: str = "http",
+                 model: str = "", webhook_url: str = "", config_json: str | None = None,
+                 runtime_id: str | None = None) -> dict:
     with _session() as db:
         a = Agent(
             profile_id=profile_id,
@@ -257,6 +389,7 @@ def create_agent(*, profile_id: str, name: str, executor_type: str = "http",
             model=model,
             webhook_url=webhook_url,
             config_json=config_json,
+            runtime_id=runtime_id,
         )
         db.add(a)
         db.commit()
@@ -405,9 +538,44 @@ def complete_run(run_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
             r.agent.status = AgentStatus.ONLINE
             r.agent.total_runs += 1
             r.agent.total_cost_usd += cost_usd
+
+        # Notify human admins on failure. Successful runs are silent —
+        # bumping a notification per success would be noise. Per-user
+        # opt-in for success notifications is a future enhancement.
+        if r.status == RunStatus.FAILED:
+            agent_name = r.agent.name if r.agent else "agent"
+            short_err = (error or "unknown error")[:140]
+            _notify_admins(
+                db,
+                type_="forge.run.failed",
+                title=f"{agent_name} run failed: {short_err}",
+                link=f"/forge/runs/{run_id}",
+            )
         db.commit()
         db.refresh(r)
         return _run_to_dict(r)
+
+
+def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
+    """Insert a Notification row for every profile with role=admin.
+
+    Used by the forge layer to alert humans about agent run events.
+    Caller is responsible for committing the session.
+    """
+    from backend.models import Notification, Role
+    admins = (
+        db.query(Profile)
+        .join(Role, Profile.role_id == Role.id)
+        .filter(Role.name == "admin")
+        .all()
+    )
+    for prof in admins:
+        db.add(Notification(
+            profile_id=prof.id,
+            type=type_,
+            title=title[:255],
+            link=link[:255],
+        ))
 
 
 # ── Stats ────────────────────────────────────────────────────────────────
@@ -879,6 +1047,151 @@ def sync_openclaw_agents() -> list[dict]:
         return [_agent_to_dict(a) for a in forge_agents]
 
 
+def dispatch_trigger(agent_id: str, prompt: str, *,
+                     run_id: str | None = None, kind: str = "chat") -> dict:
+    """Single rail for invoking an agent.
+
+    Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
+    then fires one WS frame to the agent's bound daemon. Used for chat,
+    scheduled run steps, and (later) comments / webhooks / mentions.
+
+    `kind` is a label for audit/logging only — the daemon does not branch on it.
+    `run_id` attaches the trigger to a Run when the work is part of a workflow
+    (cron, task assignment); for free-floating chat it stays None.
+    """
+    import asyncio
+    import uuid
+    from backend.forge.ws_dispatch import hub
+
+    trace_id = uuid.uuid4().hex[:12]
+
+    with _session() as db:
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a or not a.runtime_id:
+            return {"error": "Agent has no bound runtime"}
+        runtime = db.get(ForgeRuntime, a.runtime_id)
+        if not runtime:
+            return {"error": "Runtime not found"}
+
+        # Persist the user message tagged with trace_id (and run_id when present)
+        db.add(AgentMessage(
+            agent_id=a.id,
+            run_id=run_id,
+            trace_id=trace_id,
+            kind=kind,
+            role=MessageRole.USER,
+            content=prompt,
+        ))
+        db.commit()
+
+        runtime_id = a.runtime_id
+        provider = runtime.provider
+        gateway_url = runtime.gateway_url or ""
+        gateway_token = runtime.gateway_token or ""
+        model = a.model or ""
+        system_prompt = a.system_prompt or ""
+        agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
+
+    asyncio.ensure_future(hub.dispatch_trigger(
+        trace_id=trace_id,
+        runtime_id=runtime_id,
+        agent_id=agent_id,
+        run_id=run_id or "",
+        kind=kind,
+        prompt=prompt,
+        provider=provider,
+        model=model,
+        system_prompt=system_prompt,
+        agent_name=agent_name,
+        gateway_url=gateway_url,
+        gateway_token=gateway_token,
+    ))
+    return {"ok": True, "trace_id": trace_id}
+
+
+def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
+                          events: list) -> dict:
+    """Store streamed events from the daemon as AgentMessage records.
+
+    One sink for every trigger kind (chat, run_step, …). Messages are tagged
+    with `trace_id` so the UI can group a turn, and with `run_id` when present
+    so run-detail views still query by run.
+    """
+    with _session() as db:
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a:
+            return {"ok": False, "error": "Agent not found"}
+        for evt in events:
+            evt_type = evt.get("type", "")
+            if evt_type == "text":
+                content = evt.get("text", "")
+                if not content:
+                    continue
+                role = MessageRole.ASSISTANT
+                tool_name = None
+            elif evt_type == "tool_use":
+                role = MessageRole.TOOL
+                content = evt.get("tool", "")
+                tool_name = evt.get("tool")
+            elif evt_type == "tool_result":
+                role = MessageRole.TOOL
+                content = evt.get("output", "")
+                tool_name = evt.get("tool")
+            else:
+                continue
+            db.add(AgentMessage(
+                agent_id=agent_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                role=role,
+                content=content,
+                tool_name=tool_name,
+                tool_input=json.dumps(evt.get("input")) if evt.get("input") is not None else None,
+                tool_output=evt.get("output") if evt_type == "tool_result" else None,
+                model_used=evt.get("model", ""),
+            ))
+        db.commit()
+        return {"ok": True, "count": len(events)}
+
+
+def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
+                     success: bool, input_tokens: int = 0, output_tokens: int = 0,
+                     error: str | None = None) -> dict:
+    """Finalize a trigger. Updates the Run if `run_id` is set; chat triggers
+    have no persistent state to update beyond the messages already stored."""
+    logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
+                  f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+    if run_id:
+        complete_run(
+            run_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            error=error if not success else None,
+        )
+    return {"ok": True, "trace_id": trace_id, "logged": logger_msg}
+
+
+def get_trigger_events(trace_id: str) -> list[dict]:
+    """Return all messages tagged with this trace_id, ordered by creation time."""
+    with _session() as db:
+        msgs = (db.query(AgentMessage)
+                .filter(AgentMessage.trace_id == trace_id)
+                .order_by(AgentMessage.created_at.asc())
+                .all())
+        return [_message_to_dict(m) for m in msgs]
+
+
+def get_run_events(run_id: str) -> list[dict]:
+    """Return messages tagged with this run_id (covers any number of triggers
+    that fired against the run), ordered by creation time."""
+    with _session() as db:
+        msgs = (db.query(AgentMessage)
+                .filter(AgentMessage.run_id == run_id)
+                .order_by(AgentMessage.created_at.asc())
+                .all())
+        return [_message_to_dict(m) for m in msgs]
+
+
 def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = None) -> dict:
     """Send a message to the agent via runtime adapter, log both sides."""
     from backend.forge import runtime_client
@@ -886,6 +1199,8 @@ def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = No
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"error": "Agent not found"}
+        if a.runtime_id:
+            return dispatch_trigger(agent_id, content, run_id=run_id, kind="chat")
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"

@@ -57,3 +57,10 @@ agentira.egg-info/
 validate_key.py
 debug_routes.py
 my personal website/
+
+# Per-environment secrets — only the .example files are committed.
+.env
+.env.dev
+.env.qa
+.env.prod
+.env.local

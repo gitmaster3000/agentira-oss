@@ -1,11 +1,11 @@
-"""Forge domain models — Agents and Runs."""
+"""Forge domain models — Agents, Runtimes, and Runs."""
 
 import enum
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    String, Text, Integer, Float, DateTime,
-    ForeignKey, Enum as SAEnum,
+    String, Text, Integer, Float, DateTime, Boolean,
+    ForeignKey, Enum as SAEnum, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +43,37 @@ class RunStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+# ── Runtime ──────────────────────────────────────────────────────────────
+
+class RuntimeStatus(str, enum.Enum):
+    ONLINE  = "online"
+    OFFLINE = "offline"
+    BUSY    = "busy"
+    UNKNOWN = "unknown"
+
+
+class ForgeRuntime(Base):
+    """A CLI binary (or HTTP gateway) registered by a running daemon."""
+    __tablename__ = "forge_runtimes"
+    __table_args__ = (UniqueConstraint("daemon_id", "provider"),)
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    daemon_id: Mapped[str]      = mapped_column(String(64), nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider: Mapped[str]       = mapped_column(String(40), nullable=False)
+    binary_path: Mapped[str]    = mapped_column(String(500), nullable=False)
+    version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    status: Mapped[RuntimeStatus] = mapped_column(SAEnum(RuntimeStatus), default=RuntimeStatus.UNKNOWN)
+    capabilities: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    models: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list — supported model ids
+    gateway_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gateway_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    agents: Mapped[list["Agent"]] = relationship(back_populates="runtime")
+
+
 # ── Agent ────────────────────────────────────────────────────────────────
 
 class Agent(Base):
@@ -50,7 +81,7 @@ class Agent(Base):
     __tablename__ = "forge_agents"
 
     id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
-    profile_id: Mapped[str]     = mapped_column(ForeignKey("profiles.id"), nullable=False)
+    profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), nullable=True)
     name: Mapped[str]           = mapped_column(String(120), nullable=False)
     executor_type: Mapped[str]  = mapped_column(String(30), default="http")
     model: Mapped[str]          = mapped_column(String(120), default="")
@@ -72,9 +103,12 @@ class Agent(Base):
     schedule_tz: Mapped[str | None] = mapped_column(String(40), nullable=True)
     schedule_days: Mapped[str | None] = mapped_column(String(60), nullable=True)
     schedule_enabled: Mapped[bool] = mapped_column(default=False)
+    schedule_cron: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    runtime_id: Mapped[str | None] = mapped_column(ForeignKey("forge_runtimes.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     profile = relationship("Profile")
+    runtime: Mapped["ForgeRuntime | None"] = relationship(back_populates="agents")
     runs: Mapped[list["Run"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
     messages: Mapped[list["AgentMessage"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
 
@@ -102,6 +136,8 @@ class Run(Base):
     output_tokens: Mapped[int]  = mapped_column(Integer, default=0)
     cost_usd: Mapped[float]     = mapped_column(Float, default=0.0)
     error: Mapped[str | None]   = mapped_column(Text, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    workdir: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -119,6 +155,11 @@ class AgentMessage(Base):
     id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
     agent_id: Mapped[str]       = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
     run_id: Mapped[str | None]  = mapped_column(String(12), nullable=True)
+    # trace_id: ephemeral trigger id linking user prompt → assistant reply(s).
+    # Persisted as a Trigger row in a future increment; today it's just a
+    # correlation handle for grepping logs and grouping messages per turn.
+    trace_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    kind: Mapped[str | None]    = mapped_column(String(20), nullable=True)  # chat | run_step | …
     role: Mapped[MessageRole]   = mapped_column(SAEnum(MessageRole), nullable=False)
     content: Mapped[str]        = mapped_column(Text, default="")
     tool_name: Mapped[str | None]   = mapped_column(String(120), nullable=True)

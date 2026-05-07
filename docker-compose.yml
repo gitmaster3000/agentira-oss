@@ -1,0 +1,41 @@
+# Base compose — service definitions only.
+# Cannot be run alone; requires an environment override:
+#
+#   Dev: `docker compose up`               (auto-loads docker-compose.override.yml)
+#   QA:  `docker compose -f docker-compose.yml -f docker-compose.qa.yml up`
+#   Prod:`docker compose -f docker-compose.yml -f docker-compose.prod.yml up`
+#
+# See README "Running locally" for full details.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - agentira-data:/app/data
+    environment:
+      - PORT=8111
+    command: sh -c "python scripts/bootstrap_db.py && python run.py"
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    volumes:
+      - agentira-data:/app/data
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8000
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: ../agentira-frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+
+volumes:
+  agentira-data:

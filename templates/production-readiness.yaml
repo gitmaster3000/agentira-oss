@@ -1,0 +1,124 @@
+# Production Readiness — Agentira's first workflow template.
+# Turns a vibe-coded GitHub repo into a production-ready, deployed app.
+# See AGENTIRA_VISION.md §8 for the user flow this produces.
+
+name: "Production Readiness"
+version: "1.0.0"
+description: |
+  Audit a GitHub repo for production readiness, generate a remediation plan
+  with machine-checkable acceptance criteria, fix every issue through
+  verified PRs, and deploy the result.
+
+trigger:
+  type: github_repo_url
+  label: "GitHub Repository URL"
+
+columns:
+  - Audit
+  - Planning
+  - Ready
+  - In Progress
+  - Review
+  - Deploy
+  - Done
+
+agents:
+  - name: Auditor
+    role: auditor
+    model: claude-sonnet-4-5
+    system_prompt_file: prompts/production-readiness/auditor.md
+    allowed_tools:
+      - get_task
+      - add_comment
+      - upload_attachment
+      - move_task
+
+  - name: Planner
+    role: planner
+    model: claude-sonnet-4-5
+    system_prompt_file: prompts/production-readiness/planner.md
+    allowed_tools:
+      - create_task
+      - update_task
+      - add_comment
+      - get_task
+      - list_tasks
+
+  - name: Implementer
+    role: implementer
+    model: claude-opus-4-5
+    system_prompt_file: prompts/production-readiness/implementer.md
+    allowed_tools:
+      - get_task
+      - move_task
+      - update_task
+      - add_comment
+
+  - name: Reviewer
+    role: reviewer
+    # MUST differ from Implementer's model — see vision §7.2.
+    model: claude-sonnet-4-5
+    system_prompt_file: prompts/production-readiness/reviewer.md
+    allowed_tools:
+      - get_task
+      - add_comment
+
+  - name: CI/CD Setup
+    role: implementer
+    model: claude-sonnet-4-5
+    system_prompt_file: prompts/production-readiness/cicd.md
+    allowed_tools:
+      - get_task
+      - move_task
+      - update_task
+      - add_comment
+
+  - name: Deploy
+    role: deployer
+    model: claude-sonnet-4-5
+    system_prompt_file: prompts/production-readiness/deployer.md
+    allowed_tools:
+      - get_task
+      - move_task
+      - update_task
+      - add_comment
+
+ac_check_types:
+  - name: test_passes
+    description: Named test passes in CI
+    runner: "pytest {test_name} --tb=short"
+    pass_condition: "exit_code == 0"
+
+  - name: no_secrets_in_source
+    description: No hardcoded secrets detected
+    runner: "trufflehog filesystem . --json --no-update --fail"
+    pass_condition: "exit_code == 0"
+
+  - name: endpoint_returns
+    description: HTTP endpoint returns expected status
+    runner: "curl -s -o /dev/null -w '%{http_code}' {url}"
+    pass_condition: "output == '{expected_status}'"
+
+  - name: file_exists
+    description: Required file exists in repo
+    runner: "test -f {path}"
+    pass_condition: "exit_code == 0"
+
+  - name: lint_passes
+    description: Linter exits clean
+    runner: "{lint_cmd}"
+    pass_condition: "exit_code == 0"
+    timeout_sec: 120
+
+  - name: build_succeeds
+    description: Project builds without errors
+    runner: "{build_cmd}"
+    pass_condition: "exit_code == 0"
+    timeout_sec: 300
+
+conductor:
+  auto_assign: true
+  pick_strategy: highest_priority_unblocked
+  respect_dependencies: true
+  notify_on_block: true
+  digest_schedule: daily

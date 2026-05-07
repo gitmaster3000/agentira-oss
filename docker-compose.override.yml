@@ -1,0 +1,29 @@
+# Dev override — auto-loaded by `docker compose up`. NOT for QA/prod.
+# Hot-reloads backend on file changes (via volume mount + uvicorn --reload).
+# JWT_SECRET is intentionally hard-coded so tokens survive container restarts.
+
+services:
+  backend:
+    ports:
+      - "8111:8111"
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+    environment:
+      # Stable across rebuilds so browser logins don't die — dev only.
+      - JWT_SECRET=dev-only-not-for-prod-32-byte-secret-12345678901234
+      # SQLite is fine for dev. Persisted in the agentira-data volume.
+      - AGENTIRA_DB_URL=sqlite:////app/data/agentira.db
+
+  mcp:
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+
+  frontend:
+    ports:
+      - "3111:80"
+    volumes:
+      - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
