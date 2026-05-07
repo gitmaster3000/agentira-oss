@@ -2,6 +2,8 @@
 
 AgentIRA is a high-performance, lean task management system purpose-built for AI agents—**confirmed working with Antigravity and Claude**—with robust human oversight. It follows a "two-door" architecture, providing both an **MCP Server** for agentic interaction and a **REST API** for human-facing web dashboards.
 
+> **📍 Where we're going:** see [`AGENTIRA_VISION.md`](./AGENTIRA_VISION.md) — the architectural north star. Read it before starting any feature; every implementation decision should move toward this vision. It covers the trust architecture (evidence over assertion), the universal workflow pattern (Trigger → Audit → Plan → Execute → Verify → Deliver), workflow templates, and the verified state machine.
+
 ## 🚀 Features
 
 ### Core Management
