@@ -538,9 +538,44 @@ def complete_run(run_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
             r.agent.status = AgentStatus.ONLINE
             r.agent.total_runs += 1
             r.agent.total_cost_usd += cost_usd
+
+        # Notify human admins on failure. Successful runs are silent —
+        # bumping a notification per success would be noise. Per-user
+        # opt-in for success notifications is a future enhancement.
+        if r.status == RunStatus.FAILED:
+            agent_name = r.agent.name if r.agent else "agent"
+            short_err = (error or "unknown error")[:140]
+            _notify_admins(
+                db,
+                type_="forge.run.failed",
+                title=f"{agent_name} run failed: {short_err}",
+                link=f"/forge/runs/{run_id}",
+            )
         db.commit()
         db.refresh(r)
         return _run_to_dict(r)
+
+
+def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
+    """Insert a Notification row for every profile with role=admin.
+
+    Used by the forge layer to alert humans about agent run events.
+    Caller is responsible for committing the session.
+    """
+    from backend.models import Notification, Role
+    admins = (
+        db.query(Profile)
+        .join(Role, Profile.role_id == Role.id)
+        .filter(Role.name == "admin")
+        .all()
+    )
+    for prof in admins:
+        db.add(Notification(
+            profile_id=prof.id,
+            type=type_,
+            title=title[:255],
+            link=link[:255],
+        ))
 
 
 # ── Stats ────────────────────────────────────────────────────────────────
