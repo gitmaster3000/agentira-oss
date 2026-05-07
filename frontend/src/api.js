@@ -99,9 +99,11 @@ export const api = {
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
+    getEpic: (id) => request(`/epics/${id}`),
     createEpic: (projectId, data) => request(`/projects/${projectId}/epics`, { method: 'POST', body: JSON.stringify(data) }),
     updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteEpic: (id) => request(`/epics/${id}`, { method: 'DELETE' }),
+    getEpicTasks: (id) => request(`/epics/${id}/tasks`),
 
     // Tasks
     listTasks: (projectId, status, assignee, priority) => {
@@ -208,6 +210,14 @@ export const api = {
         updateRunStatus: (id, data) => request(`/forge/runs/${id}/status`, { method: 'POST', body: JSON.stringify(data) }),
         listRunEvents: (runId) => request(`/forge/runs/${runId}/events`),
         getTriggerEvent: (runId) => request(`/forge/runs/${runId}/trigger-event`),
+
+        // Task ↔ Forge bridge
+        scheduleTaskRun: (taskId, agentId) =>
+            request(`/forge/tasks/${taskId}/run`, {
+                method: 'POST',
+                body: JSON.stringify({ agent_id: agentId }),
+            }),
+        listTaskRuns: (taskId) => request(`/forge/tasks/${taskId}/runs`),
 
         // Events
         listEvents: (params = {}) => {

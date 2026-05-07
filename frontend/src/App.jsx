@@ -9,6 +9,7 @@ import { Signup } from './pages/Signup';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { Settings } from './pages/Settings';
 import { TaskPage } from './pages/TaskPage';
+import { EpicPage } from './pages/EpicPage';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
 import { AgentsDashboard } from './pages/forge/AgentsDashboard';
@@ -73,6 +74,7 @@ export default function App() {
                         <Route path="board/:projectId" element={<Board />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
+                        <Route path="epics/:epicId" element={<EpicPage />} />
                     </Route>
 
                     {/* Root redirect */}

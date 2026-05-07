@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink } from 'lucide-react';
 import { api } from '../../api';
+import { ROUTES } from '../../routes';
 
 const STATUS_COLORS = {
     done: '#2ecc71',
@@ -68,20 +70,47 @@ function TaskRow({ task }) {
 }
 
 function EpicSection({ epic }) {
+    const navigate = useNavigate();
     const [open, setOpen] = useState(epic.in_progress > 0 || epic.progress < 100);
     const Arrow = open ? ChevronDown : ChevronRight;
+    const epicId = epic.id || epic.epic_id;
 
     return (
         <div className="card p-0 overflow-hidden">
-            <button
-                onClick={() => setOpen(!open)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-hover transition-colors text-left"
-            >
-                <Arrow className="w-4 h-4 text-text-tertiary flex-shrink-0" />
-                <Target className="w-4 h-4 text-accent-primary flex-shrink-0" />
-                <span className="text-sm font-semibold text-text-primary flex-1">{epic.name}</span>
+            {/* Header row: chevron toggles expand inline; clicking the
+                epic title navigates to the dedicated epic page. Two
+                independent click targets, no nested-button. */}
+            <div className="flex items-center gap-3 px-4 py-3 hover:bg-bg-hover transition-colors">
+                <button
+                    onClick={() => setOpen(!open)}
+                    className="text-text-tertiary hover:text-text-primary"
+                    title={open ? 'Collapse' : 'Expand'}
+                >
+                    <Arrow className="w-4 h-4 flex-shrink-0" />
+                </button>
+                <Target
+                    className="w-4 h-4 flex-shrink-0"
+                    style={{ color: epic.color || 'var(--accent-primary)' }}
+                />
+                <button
+                    onClick={() => epicId && navigate(ROUTES.STUDIO_EPIC(epicId))}
+                    disabled={!epicId}
+                    className="text-sm font-semibold text-text-primary flex-1 text-left hover:underline disabled:no-underline disabled:cursor-default"
+                    title={epicId ? 'Open epic' : ''}
+                >
+                    {epic.name}
+                </button>
+                {epicId && (
+                    <button
+                        onClick={() => navigate(ROUTES.STUDIO_EPIC(epicId))}
+                        className="text-text-tertiary hover:text-text-primary"
+                        title="Open epic page"
+                    >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                )}
                 <EpicProgress epic={epic} />
-            </button>
+            </div>
             {open && (
                 <div className="border-t border-border-subtle pb-1">
                     {epic.tasks.map((task) => (
@@ -139,6 +168,127 @@ function SummaryBar({ summary, groupBy }) {
 function formatDate(iso) {
     if (!iso) return '';
     return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/**
+ * Horizontal time-axis showing each epic as a bar from min(task.start) to
+ * max(task.end). Tasks without dates are silently skipped — if nothing in
+ * the project has dates, we render a friendly "no scheduled work" state
+ * instead of an empty grid.
+ */
+function TimelineStrip({ epics }) {
+    // Collect all date-bearing tasks
+    const items = [];
+    for (const epic of epics || []) {
+        const dates = (epic.tasks || [])
+            .map(t => ({ start: t.start || t.start_date, end: t.end || t.due_date || t.start || t.start_date }))
+            .filter(d => d.start || d.end);
+        if (dates.length === 0) continue;
+        const earliest = dates.map(d => new Date(d.start || d.end)).reduce((a, b) => a < b ? a : b);
+        const latest   = dates.map(d => new Date(d.end || d.start)).reduce((a, b) => a > b ? a : b);
+        items.push({
+            name: epic.name,
+            color: epic.color || '#7c4dff',
+            progress: epic.progress || 0,
+            taskCount: dates.length,
+            start: earliest,
+            end: latest,
+        });
+    }
+
+    if (items.length === 0) {
+        return (
+            <div className="card p-4 text-sm text-text-tertiary">
+                <div className="flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4" />
+                    <span>No scheduled work yet — set <strong>start / due dates</strong> on tasks to see the timeline.</span>
+                </div>
+            </div>
+        );
+    }
+
+    // Pad axis: 1 week before earliest, 1 week after latest
+    const axisStart = new Date(Math.min(...items.map(i => i.start.getTime())) - 7 * 86400000);
+    const axisEnd   = new Date(Math.max(...items.map(i => i.end.getTime()))   + 7 * 86400000);
+    const span = axisEnd - axisStart;
+
+    // Month tick positions across the axis
+    const ticks = [];
+    let cursor = new Date(axisStart.getFullYear(), axisStart.getMonth(), 1);
+    while (cursor <= axisEnd) {
+        ticks.push(new Date(cursor));
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+
+    const pct = (d) => `${((d.getTime() - axisStart.getTime()) / span) * 100}%`;
+    const widthPct = (a, b) => `${Math.max(2, ((b.getTime() - a.getTime()) / span) * 100)}%`;
+    const today = new Date();
+    const showToday = today >= axisStart && today <= axisEnd;
+
+    return (
+        <div className="card p-0 overflow-hidden">
+            <div className="px-4 py-3 border-b border-border-subtle/40 flex items-center gap-2">
+                <CalendarDays className="w-4 h-4 text-text-tertiary" />
+                <span className="text-xs font-medium text-text-primary uppercase tracking-wider">Timeline</span>
+                <span className="text-xs text-text-tertiary ml-auto">
+                    {axisStart.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                    {' → '}
+                    {axisEnd.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                </span>
+            </div>
+
+            <div className="relative px-4 py-4">
+                {/* Month grid + labels */}
+                <div className="relative h-5 mb-3">
+                    {ticks.map((t, i) => (
+                        <div
+                            key={i}
+                            className="absolute top-0 bottom-0 border-l border-border-subtle/50"
+                            style={{ left: pct(t) }}
+                        >
+                            <span className="absolute -top-0.5 left-1 text-[10px] uppercase tracking-wider text-text-tertiary whitespace-nowrap">
+                                {t.toLocaleDateString(undefined, { month: 'short', year: t.getMonth() === 0 ? 'numeric' : undefined })}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Today marker — full-height vertical line behind the bars */}
+                {showToday && (
+                    <div
+                        className="absolute top-9 bottom-2 border-l-2 border-red-500/70 z-10 pointer-events-none"
+                        style={{ left: `calc(1rem + ${pct(today)})` }}
+                        title={`Today: ${today.toLocaleDateString()}`}
+                    >
+                        <span className="absolute -top-3 -translate-x-1/2 text-[9px] font-semibold text-red-500 bg-bg-panel px-1 rounded">today</span>
+                    </div>
+                )}
+
+                {/* One bar per epic */}
+                <div className="space-y-2">
+                    {items.map((item) => (
+                        <div key={item.name} className="relative h-7 flex items-center group">
+                            {/* Background row */}
+                            <div className="absolute inset-y-0 left-0 right-0 border-t border-border-subtle/20" />
+                            {/* The bar */}
+                            <div
+                                className="absolute h-5 rounded-md flex items-center justify-between px-2 text-[10px] font-medium text-white whitespace-nowrap overflow-hidden"
+                                style={{
+                                    left: pct(item.start),
+                                    width: widthPct(item.start, item.end),
+                                    backgroundColor: item.color,
+                                }}
+                                title={`${item.name} · ${item.start.toLocaleDateString()} → ${item.end.toLocaleDateString()} · ${item.progress}%`}
+                            >
+                                <span className="truncate">{item.name}</span>
+                                <span className="opacity-75 ml-2 flex-shrink-0">{item.progress}%</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
 }
 
 export function RoadmapView({ projectId }) {
@@ -234,6 +384,11 @@ export function RoadmapView({ projectId }) {
                     </button>
                 </div>
             </div>
+
+            {/* Timeline strip — actual horizontal time axis with epic bars
+                spanning min(task.start) → max(task.end) per epic. Shows
+                "no scheduled work yet" if nothing has dates. */}
+            <TimelineStrip epics={data.epics} />
 
             {/* Summary */}
             <SummaryBar summary={data.summary} groupBy={groupBy} />

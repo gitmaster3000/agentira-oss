@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { ROUTES } from '../routes';
 import {
     Trash2,
     X,
@@ -20,7 +21,9 @@ import {
     GitBranch,
     ExternalLink,
     Copy,
-    Check
+    Check,
+    Cpu,
+    Play,
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -58,6 +61,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [commits, setCommits] = useState([]);
     const [dodItems, setDodItems] = useState(task.dod_items || []);
     const [newDodText, setNewDodText] = useState('');
+    const [forgeAgents, setForgeAgents] = useState([]);
+    const [taskRuns, setTaskRuns] = useState([]);
+    const [pickingAgent, setPickingAgent] = useState(false);
+    const [scheduling, setScheduling] = useState(false);
     const [editingBranch, setEditingBranch] = useState(false);
     const [branchValue, setBranchValue] = useState(task.branch || '');
     const [editingPrUrl, setEditingPrUrl] = useState(false);
@@ -83,6 +90,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         loadActivity();
         loadAttachments();
         loadCommits();
+        loadTaskRuns();
         setDodItems(task.dod_items || []);
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
@@ -90,9 +98,48 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
             api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
             api.getEpics(task.project_id).then(setEpics).catch(console.error);
         }
-        const interval = setInterval(loadActivity, 3000);
+        const interval = setInterval(() => {
+            loadActivity();
+            loadTaskRuns();
+        }, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
+
+    const loadTaskRuns = async () => {
+        try {
+            const data = await api.forge.listTaskRuns(task.id);
+            if (Array.isArray(data)) setTaskRuns(data);
+        } catch {
+            // Forge may not be deployed; silently ignore
+        }
+    };
+
+    const openAgentPicker = async () => {
+        setPickingAgent(true);
+        try {
+            const data = await api.forge.listAgents();
+            // Only agents bound to a runtime can run anything.
+            setForgeAgents(Array.isArray(data) ? data.filter(a => a.runtime_id) : []);
+        } catch (err) {
+            console.error('Failed to load agents:', err);
+            setForgeAgents([]);
+        }
+    };
+
+    const handleScheduleRun = async (agentId) => {
+        setScheduling(true);
+        try {
+            const result = await api.forge.scheduleTaskRun(task.id, agentId);
+            setPickingAgent(false);
+            await loadTaskRuns();
+            if (result.run_id) navigate(`/forge/runs/${result.run_id}`);
+        } catch (err) {
+            console.error('Schedule run failed:', err);
+            alert('Failed to schedule run: ' + (err.message || err));
+        } finally {
+            setScheduling(false);
+        }
+    };
 
     const loadActivity = async () => {
         try {
@@ -267,7 +314,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </div>
                     <div className="flex items-center gap-1">
                         <button
-                            onClick={() => navigate(`/tasks/${task.key || task.id}`)}
+                            onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
                             className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
                             title="Open in full page"
                         >
@@ -631,6 +678,78 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             <AttachmentsSection taskId={task.id} />
                         </div>
 
+                        {/* Forge Runs — schedule an agent to work on this task,
+                            and see the runs that have been kicked off. */}
+                        <div className="mb-8">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2 text-text-primary">
+                                    <Cpu className="w-4 h-4" />
+                                    <h3 className="font-bold">Agent runs</h3>
+                                    {taskRuns.length > 0 && (
+                                        <span className="text-xs text-text-tertiary">{taskRuns.length}</span>
+                                    )}
+                                </div>
+                                <button
+                                    onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
+                                    className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
+                                >
+                                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
+                                </button>
+                            </div>
+
+                            {pickingAgent && (
+                                <div className="mb-4 p-3 rounded-lg border border-border-subtle bg-bg-app/50">
+                                    {forgeAgents.length === 0 ? (
+                                        <p className="text-xs text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {forgeAgents.map(a => {
+                                                const online = a.status === 'online';
+                                                return (
+                                                    <button
+                                                        key={a.id}
+                                                        disabled={scheduling || !online}
+                                                        onClick={() => handleScheduleRun(a.id)}
+                                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                                                    >
+                                                        <div className="w-7 h-7 rounded-md bg-bg-panel border border-border-subtle flex items-center justify-center text-xs font-bold text-text-secondary">
+                                                            {a.name?.[0]?.toUpperCase() || 'A'}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-sm text-text-primary truncate">{a.name}</div>
+                                                            <div className="text-xs text-text-tertiary truncate">{a.model || a.runtime_type || 'no model'}</div>
+                                                        </div>
+                                                        <span className={`text-xs ${online ? 'text-green-400' : 'text-text-tertiary'}`}>
+                                                            {online ? 'online' : 'offline'}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {taskRuns.length > 0 && (
+                                <div className="space-y-1">
+                                    {taskRuns.slice(0, 5).map(r => (
+                                        <button
+                                            key={r.id}
+                                            onClick={() => navigate(`/forge/runs/${r.id}`)}
+                                            className="w-full text-left px-3 py-2 rounded-md hover:bg-bg-hover flex items-center gap-3 transition-colors border border-transparent hover:border-border-subtle/40"
+                                        >
+                                            <RunStatusDot status={r.status} />
+                                            <span className="text-sm text-text-primary">{r.agent_name || r.agent_id}</span>
+                                            <span className="text-xs text-text-tertiary">{r.status}</span>
+                                            <span className="text-xs text-text-tertiary ml-auto">
+                                                {r.created_at && new Date(r.created_at).toLocaleString()}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {/* Comments / Activity Section */}
                         <div className="space-y-6">
                             <div className="flex items-center gap-2 text-text-primary mb-4">
@@ -734,5 +853,32 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 />
             )}
         </>
+    );
+}
+
+const RUN_STATUS_COLORS = {
+    pending:   '#5f6368',
+    running:   '#f1c40f',
+    completed: '#2ecc71',
+    failed:    '#e74c3c',
+    cancelled: '#9aa0a6',
+};
+
+function RunStatusDot({ status }) {
+    const color = RUN_STATUS_COLORS[status] || '#5f6368';
+    const pulse = status === 'running' || status === 'pending';
+    return (
+        <span className="relative inline-flex w-2.5 h-2.5 flex-shrink-0">
+            {pulse && (
+                <span
+                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                    style={{ backgroundColor: color }}
+                />
+            )}
+            <span
+                className="relative inline-flex rounded-full h-2.5 w-2.5"
+                style={{ backgroundColor: color }}
+            />
+        </span>
     );
 }

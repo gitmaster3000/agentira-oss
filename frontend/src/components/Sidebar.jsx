@@ -26,8 +26,8 @@ export function Sidebar() {
 
     const navItems = boardPath ? [
         { icon: LayoutGrid, label: 'Board', path: boardPath, view: 'board' },
-        { icon: ListTodo, label: 'Backlog', path: `${boardPath}?view=backlog`, view: 'backlog' },
-        { icon: TrendingUp, label: 'Roadmap', path: `${boardPath}?view=roadmap`, view: 'roadmap' },
+        { icon: ListTodo, label: 'Tasks', path: `${boardPath}?view=backlog`, view: 'backlog' },
+        { icon: TrendingUp, label: 'Timeline', path: `${boardPath}?view=roadmap`, view: 'roadmap' },
     ] : [];
 
     return (

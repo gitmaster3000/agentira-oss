@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle, XCircle, Pause, Ban, RefreshCw } from 'lucide-react';
+import {
+    ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle,
+    XCircle, Pause, Ban, RefreshCw, User, Wrench, MessageSquare,
+} from 'lucide-react';
 import { api } from '../../api';
 
 const STATUS_CONFIG = {
@@ -162,23 +165,37 @@ export function RunDetail() {
                 </div>
             )}
 
-            {/* Related Events */}
-            {events.length > 0 && (
-                <div className="card">
-                    <h2 className="text-lg font-semibold text-text-primary mb-4">Related Events</h2>
-                    <div className="space-y-2">
-                        {events.map((re) => (
-                            <div key={re.id} className="flex items-center gap-3 px-3 py-2 rounded-md bg-bg-hover text-sm">
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-bg-tertiary text-text-secondary">
-                                    {re.relation}
-                                </span>
-                                <span className="text-text-primary font-mono text-xs">{re.event_id}</span>
-                                <span className="text-text-tertiary text-xs ml-auto">{timeAgo(re.created_at)}</span>
-                            </div>
+            {/* Conversation — messages tagged with this run_id (one row per
+                user prompt + every assistant text/tool event the daemon
+                streamed back). Polls every 5s along with run state. */}
+            <div className="card">
+                <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5" /> Conversation
+                </h2>
+                {events.length === 0 ? (
+                    <p className="text-sm text-text-tertiary">
+                        {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
+                    </p>
+                ) : (
+                    <div className="space-y-3">
+                        {events.map((m) => (
+                            <MessageRow key={m.id} m={m} />
                         ))}
                     </div>
-                </div>
-            )}
+                )}
+            </div>
+
+            {/* Trace ids — each turn shares one. Useful for grepping logs. */}
+            {(() => {
+                const traceIds = [...new Set(events.map(m => m.trace_id).filter(Boolean))];
+                if (traceIds.length === 0) return null;
+                return (
+                    <div className="text-xs text-text-tertiary">
+                        trace_id{traceIds.length > 1 ? 's' : ''}:{' '}
+                        {traceIds.map(t => <code key={t} className="font-mono mr-2">{t}</code>)}
+                    </div>
+                );
+            })()}
 
             {/* Metadata */}
             <div className="card">
@@ -196,6 +213,52 @@ export function RunDetail() {
         </div>
     );
 }
+
+function MessageRow({ m }) {
+    const role = m.role || 'assistant';
+    const cfg = ROLE_CONFIG[role] || ROLE_CONFIG.assistant;
+    const Icon = cfg.icon;
+    return (
+        <div className="flex gap-3">
+            <div
+                className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: cfg.color + '18' }}
+            >
+                <Icon className="w-4 h-4" style={{ color: cfg.color }} />
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-xs font-semibold text-text-primary capitalize">{cfg.label}</span>
+                    {m.tool_name && role === 'tool' && (
+                        <span className="text-xs text-text-tertiary font-mono">{m.tool_name}</span>
+                    )}
+                    {m.created_at && (
+                        <span className="text-xs text-text-tertiary ml-auto">{timeAgo(m.created_at)}</span>
+                    )}
+                </div>
+                <pre
+                    className="text-sm text-text-secondary whitespace-pre-wrap break-words font-sans bg-bg-app/40 rounded-md p-3 border border-border-subtle/30"
+                    style={{ wordBreak: 'break-word' }}
+                >
+                    {m.content || '(empty)'}
+                </pre>
+                {m.tool_input && (
+                    <details className="mt-1 text-xs">
+                        <summary className="cursor-pointer text-text-tertiary">tool input</summary>
+                        <pre className="mt-1 p-2 bg-bg-app/40 rounded font-mono text-text-secondary overflow-x-auto">{m.tool_input}</pre>
+                    </details>
+                )}
+            </div>
+        </div>
+    );
+}
+
+const ROLE_CONFIG = {
+    user:      { icon: User,          label: 'You',       color: '#3b82f6' },
+    assistant: { icon: Bot,           label: 'Agent',     color: '#10b981' },
+    tool:      { icon: Wrench,        label: 'Tool',      color: '#f97316' },
+    system:    { icon: MessageSquare, label: 'System',    color: '#a855f7' },
+};
 
 function MetricCard({ icon: Icon, label, value, sub, color }) {
     return (
