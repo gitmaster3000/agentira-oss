@@ -481,6 +481,26 @@ def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[
         epics = q.order_by(Epic.created_at.desc()).all()
         return [_epic_to_dict(e) for e in epics]
 
+def get_epic(epic_id: str) -> dict | None:
+    """Single-epic fetch — returns the dict or None if not found."""
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        return _epic_to_dict(epic) if epic else None
+
+
+def list_epic_tasks(epic_id: str) -> list[dict]:
+    """All tasks linked to this epic, newest first."""
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        if not epic:
+            return []
+        tasks = (db.query(Task)
+                 .filter(Task.epic_id == epic_id)
+                 .order_by(Task.updated_at.desc())
+                 .all())
+        return [_task_to_dict(t) for t in tasks]
+
+
 def update_epic(epic_id: str, title: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None, actor: str = "system") -> dict:
     with _session() as db:
         epic = db.get(Epic, epic_id)
@@ -974,8 +994,10 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
 
         STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
 
-        # Group by epic or tag
+        # Group by epic or tag. For epic grouping we also remember the
+        # epic id + color per group so the UI can link to the epic page.
         groups: dict[str, list] = {}
+        group_meta: dict[str, dict] = {}
         milestones = []
         all_dates = []
 
@@ -985,6 +1007,8 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 group_key = tags[0] if tags else "Ungrouped"
             else:
                 group_key = t.epic.title if t.epic else "Ungrouped"
+                if t.epic and group_key not in group_meta:
+                    group_meta[group_key] = {"id": t.epic.id, "color": t.epic.color}
 
             start = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
             end = t.due_date.isoformat() if t.due_date else None
@@ -1023,8 +1047,11 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
             total = len(tasks_in_group)
             done = sum(1 for t in tasks_in_group if t["progress"] == 100)
             in_flight = sum(1 for t in tasks_in_group if 0 < t["progress"] < 100)
+            meta = group_meta.get(name, {})
             group_list.append({
+                "id": meta.get("id"),
                 "name": name,
+                "color": meta.get("color"),
                 "tasks": tasks_in_group,
                 "total": total,
                 "done": done,

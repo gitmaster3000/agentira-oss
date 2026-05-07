@@ -565,6 +565,19 @@ def api_delete_attachment(attachment_id: str):
 epics_router = APIRouter(prefix="/api/epics", tags=["epics"],
                          dependencies=[Depends(get_current_user)])
 
+@epics_router.get("/{epic_id}")
+def api_get_epic(epic_id: str):
+    epic = services.get_epic(epic_id)
+    if not epic:
+        raise HTTPException(404, "Epic not found")
+    return epic
+
+
+@epics_router.get("/{epic_id}/tasks")
+def api_list_epic_tasks(epic_id: str):
+    return services.list_epic_tasks(epic_id)
+
+
 @epics_router.patch("/{epic_id}")
 def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_current_user)):
     try:

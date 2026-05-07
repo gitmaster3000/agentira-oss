@@ -31,6 +31,7 @@ class AgentCreate(BaseModel):
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
+    profile_id: Optional[str] = None
     executor_type: Optional[str] = None
     model: Optional[str] = None
     status: Optional[str] = None
@@ -257,6 +258,28 @@ def create_run(body: RunCreate):
         trigger_event=body.trigger_event,
         model_used=body.model_used,
     )
+
+
+class ScheduleTaskRunRequest(BaseModel):
+    agent_id: str
+
+
+@router.post("/tasks/{task_id}/run", status_code=201)
+def schedule_task_run(task_id: str, body: ScheduleTaskRunRequest):
+    """Schedule a Run against a task with the chosen agent.
+
+    Builds the prompt from task content (title + description + DoD),
+    creates a Run row, and dispatches the trigger that the daemon picks up.
+    """
+    result = services.schedule_task_run(task_id=task_id, agent_id=body.agent_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/tasks/{task_id}/runs")
+def list_task_runs(task_id: str):
+    return services.list_runs_for_task(task_id)
 
 
 @router.get("/runs/{run_id}")

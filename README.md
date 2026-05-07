@@ -53,13 +53,30 @@ npm run dev
 
 ## 🐳 Running via Docker Compose
 
-Three explicit environments — pick one. All target the same images, just with different config.
+Three explicit environments. **All three can run simultaneously** on one host — they use distinct ports + isolated compose project names so containers, volumes, and networks don't collide.
 
-| Env | Command | DB | JWT survives rebuild | Source hot-reloads |
-|---|---|---|---|---|
-| **dev** | `docker compose up -d` | SQLite (in `agentira-data` volume) | Yes (hard-coded dev secret) | Yes (volume-mounted source) |
-| **qa** | `docker compose -f docker-compose.yml -f docker-compose.qa.yml --env-file .env.qa up -d` | Postgres | Yes (from `.env.qa`) | No |
-| **prod** | `docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.prod up -d` | Postgres | Yes (from `.env.prod`) | No |
+| Env | Frontend URL | Backend | MCP | DB | Hot reload | Project name |
+|---|---|---|---|---|---|---|
+| **dev** | http://localhost:3111 | :8111 | :8000 | SQLite | ✅ vite + uvicorn | `agentira` (default) |
+| **qa** | http://localhost:3112 | :8112 | :8001 | Postgres | ❌ | `agentira-qa` |
+| **prod** | http://localhost:3113 | (internal) | (internal) | Postgres | ❌ | `agentira-prod` |
+
+### Bring them up
+
+```bash
+# Dev — auto-loads docker-compose.override.yml
+docker compose up -d
+
+# QA — alongside dev
+docker compose -p agentira-qa \
+  -f docker-compose.yml -f docker-compose.qa.yml \
+  --env-file .env.qa up -d
+
+# Prod — alongside dev + qa
+docker compose -p agentira-prod \
+  -f docker-compose.yml -f docker-compose.prod.yml \
+  --env-file .env.prod up -d
+```
 
 ### First-time setup (qa or prod)
 
@@ -72,15 +89,17 @@ Both files are gitignored. Compose refuses to start qa or prod if `JWT_SECRET` o
 
 ### What each environment differs on
 
-- **dev**: `docker-compose.override.yml` is loaded automatically. Source mounted as a volume → uvicorn `--reload` picks up edits without rebuilds. JWT secret is hard-coded so logins survive `docker compose up --build`. Ports `8111` / `8000` / `3111` exposed.
-- **qa**: Postgres replaces SQLite; otherwise mirrors prod. Ports still exposed for E2E test runners.
-- **prod**: Backend + MCP NOT exposed to the host (frontend is the only public surface). `restart: unless-stopped`, healthchecks, resource limits. Hot reload disabled (`RAILWAY_ENVIRONMENT=production`).
+- **dev**: `docker-compose.override.yml` auto-loads. Frontend runs Vite dev server (HMR), backend runs uvicorn `--reload` over volume-mounted source. JWT secret is hard-coded so logins survive `--build`. Default ports.
+- **qa**: Postgres replaces SQLite; image is the truth (no source mount). Ports +1 from dev so it coexists.
+- **prod**: Backend + MCP NOT exposed to host (frontend is the only public surface). `restart: unless-stopped`, healthchecks, resource limits. Hot reload disabled (`RAILWAY_ENVIRONMENT=production`). Frontend port defaults to 3113 for local-side-by-side; override via `FRONTEND_PORT` in `.env.prod` for real deploys.
 
 ### Stop / wipe
 
 ```bash
-docker compose down              # stop containers
-docker compose down -v           # also delete volumes (DB wiped)
+docker compose down                    # dev only
+docker compose -p agentira-qa down     # qa only
+docker compose -p agentira-prod down   # prod only
+docker compose down -v                 # also delete volumes (DB wiped)
 ```
 
 ## 🤖 MCP Configuration

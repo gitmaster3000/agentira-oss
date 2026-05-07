@@ -301,11 +301,12 @@ async def update_task(
     branch: str = None,
     pr_url: str = None,
     dod_items: list[dict] = None,
+    epic_id: str = None,
     ctx: Context = None,
 ) -> dict:
-    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning."""
+    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning. Use epic_id to attach to an epic (or empty string to detach)."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, actor=actor)
+    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, actor=actor)
 
 @mcp.tool()
 async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:

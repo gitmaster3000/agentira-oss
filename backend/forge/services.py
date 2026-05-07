@@ -1092,6 +1092,12 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         system_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
 
+    # If this trigger belongs to a Run (cron, scheduled task, …), flip the
+    # run state to RUNNING before dispatching. complete_trigger will close
+    # it out at the daemon side.
+    if run_id:
+        start_run(run_id)
+
     asyncio.ensure_future(hub.dispatch_trigger(
         trace_id=trace_id,
         runtime_id=runtime_id,
@@ -1106,7 +1112,77 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         gateway_url=gateway_url,
         gateway_token=gateway_token,
     ))
-    return {"ok": True, "trace_id": trace_id}
+    return {"ok": True, "trace_id": trace_id, "run_id": run_id}
+
+
+def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
+    """Kick off a Run for a task with the chosen agent.
+
+    Builds the prompt from the task's title + description + DoD items
+    (the work-defining content the human authored), then dispatches a
+    trigger of kind=run_step with the new run_id. The agent's
+    system_prompt rides on the trigger frame so the runtime sees it.
+    """
+    from backend.models import Task
+    with _session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return {"error": "Task not found"}
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            return {"error": "Agent not found"}
+        if not agent.runtime_id:
+            return {"error": "Agent has no bound runtime"}
+
+        task_title = task.title or ""
+        task_description = task.description or ""
+        project_id = task.project_id
+        dod_text = ""
+        if task.dod_items:
+            try:
+                items = json.loads(task.dod_items)
+                if isinstance(items, list) and items:
+                    dod_text = "\n".join(
+                        f"- [{'x' if it.get('checked') else ' '}] {it.get('text','')}"
+                        for it in items if isinstance(it, dict)
+                    )
+            except Exception:
+                pass
+
+    # Compose the prompt outside the session — clean, deterministic.
+    parts = [f"# Task: {task_title}"]
+    if task_description:
+        parts.append("\n## Description\n" + task_description)
+    if dod_text:
+        parts.append("\n## Definition of Done\n" + dod_text)
+    parts.append(
+        "\nWork on this task. When you have a clear deliverable, summarize "
+        "what changed; if you're blocked, say so explicitly."
+    )
+    prompt = "\n".join(parts)
+
+    # Create the Run row first; dispatch_trigger will flip it to RUNNING.
+    run = create_run(
+        agent_id=agent_id,
+        task_id=task_id,
+        project_id=project_id,
+        trigger_event="task.scheduled",
+        model_used=agent.model or "",
+    )
+    run_id = run["id"]
+
+    result = dispatch_trigger(agent_id, prompt, run_id=run_id, kind="run_step")
+    return {**result, "run_id": run_id, "task_id": task_id}
+
+
+def list_runs_for_task(task_id: str) -> list[dict]:
+    """Return all runs scheduled against a task, newest first."""
+    with _session() as db:
+        runs = (db.query(Run)
+                .filter(Run.task_id == task_id)
+                .order_by(Run.created_at.desc())
+                .all())
+        return [_run_to_dict(r) for r in runs]
 
 
 def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
