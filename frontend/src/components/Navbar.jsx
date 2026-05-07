@@ -35,9 +35,14 @@ export function Navbar({ onNewProject }) {
     const [isProjectOpen, setIsProjectOpen] = useState(false);
     const [isUserOpen, setIsUserOpen] = useState(false);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [notifications, setNotifications] = useState([]);
+    const [isNotifOpen, setIsNotifOpen] = useState(false);
     const projectRef = useRef(null);
     const userRef = useRef(null);
     const createRef = useRef(null);
+    const notifRef = useRef(null);
+
+    const unreadCount = notifications.filter(n => !n.read).length;
 
     const activeProject = projects.find(p => p.id === projectId);
 
@@ -62,10 +67,49 @@ export function Navbar({ onNewProject }) {
             if (createRef.current && !createRef.current.contains(event.target)) {
                 setIsCreateOpen(false);
             }
+            if (notifRef.current && !notifRef.current.contains(event.target)) {
+                setIsNotifOpen(false);
+            }
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [projectId]);
+
+    // Poll notifications every 30s. Inbox view requests both read + unread
+    // so the dropdown can show recent history. Per ADR-007 this is the
+    // poll half of the push+poll hybrid.
+    useEffect(() => {
+        let cancelled = false;
+        const fetchNotifs = async () => {
+            try {
+                const data = await api.getNotifications(false);
+                if (!cancelled) setNotifications(Array.isArray(data) ? data : []);
+            } catch (err) {
+                // 401 or network — silently ignore, retry next tick
+            }
+        };
+        fetchNotifs();
+        const id = setInterval(fetchNotifs, 30_000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    const handleNotifClick = async (n) => {
+        try {
+            if (!n.read) {
+                await api.markNotificationRead(n.id);
+                setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+            }
+            if (n.link) navigate(n.link);
+        } finally {
+            setIsNotifOpen(false);
+        }
+    };
+
+    const handleMarkAllRead = async () => {
+        const unread = notifications.filter(x => !x.read);
+        await Promise.all(unread.map(n => api.markNotificationRead(n.id).catch(() => {})));
+        setNotifications(prev => prev.map(x => ({ ...x, read: true })));
+    };
 
     const handleLogout = () => {
         logout();
@@ -81,7 +125,7 @@ export function Navbar({ onNewProject }) {
                         <ActiveIcon className="w-5 h-5" style={{ color: activeProduct.color }} />
                     </span>
                     <div className="hidden md:flex flex-col leading-tight">
-                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>Flowty</span>
+                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>AgentIRA</span>
                         <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{activeProduct.name}</span>
                     </div>
                 </Link>
@@ -192,10 +236,65 @@ export function Navbar({ onNewProject }) {
                 </div>
 
                 <div className="flex items-center gap-1 border-l pl-3 ml-1">
-                    <button className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary relative transition-colors">
-                        <Bell className="w-5 h-5" />
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-                    </button>
+                    {/* Notifications */}
+                    <div className="relative" ref={notifRef}>
+                        <button
+                            onClick={() => setIsNotifOpen(o => !o)}
+                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary relative transition-colors"
+                            aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+                        >
+                            <Bell className="w-5 h-5" />
+                            {unreadCount > 0 && (
+                                <span
+                                    className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center"
+                                >
+                                    {unreadCount > 99 ? '99+' : unreadCount}
+                                </span>
+                            )}
+                        </button>
+
+                        {isNotifOpen && (
+                            <div className="dropdown-menu top-full right-0 mt-1 w-80">
+                                <div className="px-3 py-2 border-b mb-1 flex items-center justify-between">
+                                    <span className="text-label-sm text-text-tertiary uppercase tracking-wider">Notifications</span>
+                                    {unreadCount > 0 && (
+                                        <button
+                                            onClick={handleMarkAllRead}
+                                            className="text-label-sm text-text-tertiary hover:text-text-primary"
+                                        >
+                                            Mark all read
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="max-h-96 overflow-y-auto">
+                                    {notifications.length === 0 ? (
+                                        <div className="px-3 py-8 text-center text-body-sm text-text-tertiary">
+                                            You're all caught up.
+                                        </div>
+                                    ) : (
+                                        notifications.slice(0, 25).map(n => (
+                                            <button
+                                                key={n.id}
+                                                onClick={() => handleNotifClick(n)}
+                                                className={`w-full text-left px-3 py-2 hover:bg-bg-hover transition-colors flex gap-2 items-start ${n.read ? 'opacity-60' : ''}`}
+                                            >
+                                                <span
+                                                    className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${n.read ? 'bg-transparent' : 'bg-red-500'}`}
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-body-sm text-text-primary truncate">{n.title}</div>
+                                                    <div className="text-label-sm text-text-tertiary mt-0.5">
+                                                        {n.type}
+                                                        {n.created_at && ` · ${new Date(n.created_at).toLocaleString()}`}
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                     <ThemeToggle />
                     <AppSwitcher />
 

@@ -264,5 +264,10 @@ export const api = {
         getOpenClawModels: () => request('/forge/openclaw/models'),
         setOpenClawAgentModel: (agentName, model) => request('/forge/openclaw/agent-model', { method: 'POST', body: JSON.stringify({ agent_name: agentName, model }) }),
         resetAgentStatus: (agentId) => request(`/forge/agents/${agentId}/reset-status`, { method: 'POST' }),
+        listRuntimes: (params) => {
+            const q = new URLSearchParams(params || {}).toString();
+            return request(`/forge/runtimes${q ? '?' + q : ''}`);
+        },
+        getRuntime: (id) => request(`/forge/runtimes/${id}`),
     },
 };
