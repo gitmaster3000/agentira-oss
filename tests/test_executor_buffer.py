@@ -17,7 +17,15 @@ import sys
 
 import pytest
 
-from agentira_cli.daemon.executor import run_cli_stream
+# The daemon CLI is a separate package (agentira-cli/) installed via
+# `pip install -e ./agentira-cli`. CI's unit-tests job installs only
+# the backend, so this test is opt-in: it runs locally and on any
+# job that has the CLI installed, and skips cleanly otherwise.
+agentira_cli_executor = pytest.importorskip(
+    "agentira_cli.daemon.executor",
+    reason="agentira-cli package not installed",
+)
+run_cli_stream = agentira_cli_executor.run_cli_stream
 
 
 class _FakeRuntime:
