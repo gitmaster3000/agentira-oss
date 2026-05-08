@@ -61,7 +61,8 @@ class AgentiraClient:
     def post_trigger_complete(self, agent_id: str, *, daemon_id: str,
                               trace_id: str, run_id: str = "",
                               success: bool, input_tokens: int = 0,
-                              output_tokens: int = 0, error: str = "") -> dict:
+                              output_tokens: int = 0, error: str = "",
+                              diff_stat: str = "", diff: str = "") -> dict:
         return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
             "trace_id": trace_id,
@@ -70,6 +71,8 @@ class AgentiraClient:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "error": error,
+            "diff_stat": diff_stat,
+            "diff": diff,
         })
 
     def get_agent(self, agent_id: str) -> dict:

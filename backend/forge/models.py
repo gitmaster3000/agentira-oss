@@ -160,6 +160,12 @@ class Run(Base):
     # summary: one-paragraph human-readable result (also from finish_run).
     outcome: Mapped[RunOutcome | None] = mapped_column(SAEnum(RunOutcome), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Captured by the daemon when the run's workdir is a git repo. diff_stat
+    # is the human-readable `git diff --stat` summary; diff is the full patch
+    # capped at ~50KB to keep DB rows reasonable. Both null when not a repo
+    # or when nothing changed.
+    diff_stat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diff: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

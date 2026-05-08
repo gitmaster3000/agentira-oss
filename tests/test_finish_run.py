@@ -170,6 +170,36 @@ def test_complete_trigger_defaults_to_failed_when_process_died(test_db):
     assert forge_services.get_run(rid)["outcome"] == "failed"
 
 
+def test_complete_trigger_persists_diff_and_diff_stat(test_db):
+    rid = _make_run(test_db)
+    forge_services.complete_trigger(
+        agent_id="any", trace_id="t", run_id=rid,
+        success=True, error=None,
+        diff_stat=" README.md | 2 ++\n 1 file changed",
+        diff="--- a/README.md\n+++ b/README.md\n@@ +new line",
+    )
+    run = forge_services.get_run(rid)
+    assert "README.md" in run["diff_stat"]
+    assert "+new line" in run["diff"]
+
+
+def test_complete_trigger_empty_diff_does_not_overwrite(test_db):
+    rid = _make_run(test_db)
+    # Pre-seed a diff via the same path (a hypothetical earlier completion).
+    forge_services.complete_trigger(
+        agent_id="any", trace_id="t1", run_id=rid,
+        success=True, diff_stat="stat-1", diff="diff-1",
+    )
+    # Second call without diff payload — must not blank existing values.
+    forge_services.complete_trigger(
+        agent_id="any", trace_id="t2", run_id=rid,
+        success=True,
+    )
+    run = forge_services.get_run(rid)
+    assert run["diff_stat"] == "stat-1"
+    assert run["diff"] == "diff-1"
+
+
 def test_complete_trigger_does_not_clobber_agent_set_outcome(test_db):
     """If finish_run already set outcome=blocked, complete_trigger must
     NOT downgrade it to succeeded just because the process exited 0."""

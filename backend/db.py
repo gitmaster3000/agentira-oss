@@ -199,6 +199,8 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_runs", "workdir", "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runs", "outcome", "VARCHAR(20)")
             added |= _ensure_column(conn, "forge_runs", "summary", "TEXT")
+            added |= _ensure_column(conn, "forge_runs", "diff_stat", "TEXT")
+            added |= _ensure_column(conn, "forge_runs", "diff", "TEXT")
             if added:
                 conn.commit()
 

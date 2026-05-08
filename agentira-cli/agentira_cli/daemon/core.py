@@ -296,6 +296,16 @@ class AgentiraDaemon:
             success = False
             error = "Cancelled by user."
 
+        # Capture git diff of the workdir if it's a repo — best-effort,
+        # never fails the run on its own.
+        diff_stat, diff_body = "", ""
+        if cwd_path:
+            try:
+                from agentira_cli.daemon.diff_capture import capture
+                diff_stat, diff_body = capture(cwd_path)
+            except Exception as exc:
+                logger.debug("diff capture failed trace=%s: %s", trace_id, exc)
+
         try:
             self.client.post_trigger_complete(
                 agent_id,
@@ -304,6 +314,7 @@ class AgentiraDaemon:
                 run_id=run_id,
                 success=success, input_tokens=input_tokens,
                 output_tokens=output_tokens, error=error,
+                diff_stat=diff_stat, diff=diff_body,
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)

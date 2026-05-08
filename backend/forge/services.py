@@ -145,6 +145,8 @@ def _run_to_dict(r: Run) -> dict:
         "status": r.status.value,
         "outcome": r.outcome.value if r.outcome else None,
         "summary": r.summary or "",
+        "diff_stat": r.diff_stat or "",
+        "diff": r.diff or "",
         "model_used": r.model_used,
         "started_at": _iso(r.started_at),
         "finished_at": _iso(r.finished_at),
@@ -1473,7 +1475,8 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
 
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
-                     error: str | None = None) -> dict:
+                     error: str | None = None,
+                     diff_stat: str = "", diff: str = "") -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -1487,14 +1490,18 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             output_tokens=output_tokens,
             error=error if not success else None,
         )
-        # Default outcome when the agent didn't call finish_run itself —
-        # process exit alone is a weak signal but better than null. The
-        # agent's explicit verdict (if any) is set first by finish_run
-        # and we don't clobber it here.
+        # Default outcome + persist diff. We do these together so we only
+        # round-trip to the DB once; the agent's explicit outcome (if any)
+        # is set first by finish_run and we don't clobber it here.
         with _session() as db:
             r = db.query(Run).filter(Run.id == run_id).first()
-            if r and r.outcome is None:
-                r.outcome = RunOutcome.SUCCEEDED if success else RunOutcome.FAILED
+            if r:
+                if r.outcome is None:
+                    r.outcome = RunOutcome.SUCCEEDED if success else RunOutcome.FAILED
+                if diff_stat:
+                    r.diff_stat = diff_stat
+                if diff:
+                    r.diff = diff
                 db.commit()
 
     # Failure surfacing — the daemon already logs server-side, but the

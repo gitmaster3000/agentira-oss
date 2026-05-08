@@ -83,6 +83,10 @@ class DaemonTriggerComplete(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     error: str = ""
+    # Captured by daemon when workdir is a git repo. Both empty for non-repo
+    # runs or when nothing changed; backend just persists what's sent.
+    diff_stat: str = ""
+    diff: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -174,6 +178,8 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         error=body.error if not body.success else None,
+        diff_stat=body.diff_stat,
+        diff=body.diff,
     )
 
 
