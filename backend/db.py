@@ -137,7 +137,11 @@ def run_migrations():
 
         # projects
         if "projects" in tables:
-            if _ensure_column(conn, "projects", "webhook_config", "TEXT"):
+            added = False
+            added |= _ensure_column(conn, "projects", "webhook_config", "TEXT")
+            added |= _ensure_column(conn, "projects", "repo_path", "VARCHAR(500)")
+            added |= _ensure_column(conn, "projects", "conventions_md", "TEXT")
+            if added:
                 conn.commit()
 
         # tasks
@@ -149,7 +153,13 @@ def run_migrations():
             added |= _ensure_column(conn, "tasks", "start_date", "TIMESTAMP")
             added |= _ensure_column(conn, "tasks", "due_date", "TIMESTAMP")
             added |= _ensure_column(conn, "tasks", "epic_id", "VARCHAR(12)")
+            added |= _ensure_column(conn, "tasks", "creator", "VARCHAR(120) DEFAULT ''")
             if added:
+                conn.commit()
+
+        # epics
+        if "epics" in tables:
+            if _ensure_column(conn, "epics", "creator", "VARCHAR(120) DEFAULT ''"):
                 conn.commit()
 
         # forge_runtimes — for SQLite-only legacy DBs we need to bootstrap

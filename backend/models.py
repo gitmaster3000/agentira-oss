@@ -162,6 +162,11 @@ class Project(Base):
     key_prefix: Mapped[str] = mapped_column(String(10), nullable=False, default="PROJ")
     next_task_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Run context — used when an agent is dispatched against a task in this project.
+    # repo_path: filesystem path the daemon symlinks into the workdir.
+    # conventions_md: runtime-agnostic markdown materialized to .agentira/CONVENTIONS.md.
+    repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    conventions_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -179,6 +184,7 @@ class Epic(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="backlog")  # backlog | in_progress | done
     assignee: Mapped[str] = mapped_column(String(120), default="")
+    creator: Mapped[str] = mapped_column(String(120), default="")
     color: Mapped[str] = mapped_column(String(7), default="#7c4dff")  # hex color
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -198,6 +204,7 @@ class Task(Base):
     status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False)
     priority: Mapped[TaskPriority] = mapped_column(SAEnum(TaskPriority), default=TaskPriority.MEDIUM)
     assignee: Mapped[str] = mapped_column(String(120), default="")
+    creator: Mapped[str] = mapped_column(String(120), default="")
     tags: Mapped[str] = mapped_column(String(500), default="")
     dod_items: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: [{"text": "...", "checked": false}]
     branch: Mapped[str] = mapped_column(String(255), default="")

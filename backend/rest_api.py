@@ -52,6 +52,8 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    repo_path: Optional[str] = None
+    conventions_md: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -336,7 +338,13 @@ def api_get_project(project_id: str):
 @projects.patch("/{project_id}")
 def api_update_project(project_id: str, body: ProjectUpdate):
     try:
-        return services.update_project(project_id, name=body.name, description=body.description)
+        return services.update_project(
+            project_id,
+            name=body.name,
+            description=body.description,
+            repo_path=body.repo_path,
+            conventions_md=body.conventions_md,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 

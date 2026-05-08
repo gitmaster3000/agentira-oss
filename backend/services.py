@@ -84,6 +84,7 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "status": t.status.name,
         "priority": t.priority.value,
         "assignee": t.assignee,
+        "creator": t.creator,
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
         "start_date": t.start_date.isoformat() if t.start_date else None,
         "due_date": t.due_date.isoformat() if t.due_date else None,
@@ -123,6 +124,8 @@ def _project_to_dict(p: Project) -> dict:
         "key_prefix": p.key_prefix or "PROJ",
         "name": p.name,
         "description": p.description,
+        "repo_path": p.repo_path or "",
+        "conventions_md": p.conventions_md or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -337,7 +340,8 @@ def get_project(project_id: str) -> dict | None:
         return _project_to_dict(p) if p else None
 
 
-def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None) -> dict:
+def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
+                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -346,6 +350,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.name = name
         if description is not None:
             p.description = description
+        if repo_path is not None:
+            p.repo_path = repo_path
+        if conventions_md is not None:
+            p.conventions_md = conventions_md
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -438,6 +446,7 @@ def _epic_to_dict(e: Epic) -> dict:
         "description": e.description,
         "status": e.status,
         "assignee": e.assignee,
+        "creator": e.creator,
         "color": e.color,
         "task_count": len(e.tasks),
         "created_at": e.created_at.isoformat(),
@@ -453,6 +462,7 @@ def create_epic(project_id: str, title: str, description: str = "", color: str =
             title=title,
             description=description,
             color=color,
+            creator=actor,
         )
         db.add(epic)
         db.flush()
@@ -594,6 +604,7 @@ def create_task(
             status_id=status_id,
             priority=TaskPriority(priority),
             assignee=assignee,
+            creator=actor,
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
