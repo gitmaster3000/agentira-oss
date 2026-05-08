@@ -106,6 +106,10 @@ class Agent(Base):
     schedule_enabled: Mapped[bool] = mapped_column(default=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(60), nullable=True)
     runtime_id: Mapped[str | None] = mapped_column(ForeignKey("forge_runtimes.id"), nullable=True)
+    # JSON list of MCP server names from backend.forge.mcp_registry.REGISTRY.
+    # Excludes auto-injected servers (agentira, memory) — those are added
+    # at dispatch by build_mcp_config regardless of this list.
+    mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     profile = relationship("Profile")

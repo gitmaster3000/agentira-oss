@@ -91,6 +91,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_agent_name": a.runtime_agent_name or "",
         "runtime_id": a.runtime_id,
         "schedule_cron": a.schedule_cron or "",
+        "mcp_servers": json.loads(a.mcp_servers) if a.mcp_servers else [],
         "created_at": _iso(a.created_at),
     }
 
@@ -402,12 +403,22 @@ def update_agent(agent_id: str, **fields) -> dict | None:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return None
+        # mcp_servers comes in as a list[str]; persist as JSON.
+        if "mcp_servers" in fields and fields["mcp_servers"] is not None:
+            fields["mcp_servers"] = json.dumps(list(fields["mcp_servers"]))
         for k, v in fields.items():
             if v is not None and hasattr(a, k):
                 setattr(a, k, v)
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)
+
+
+def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
+    """Expose the MCP registry to the frontend's agent edit form. By
+    default hides auto-injected servers — users can't toggle them."""
+    from backend.forge.mcp_registry import list_servers
+    return list_servers(include_auto=include_auto)
 
 
 def delete_agent(agent_id: str) -> bool:

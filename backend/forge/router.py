@@ -46,6 +46,7 @@ class AgentUpdate(BaseModel):
     runtime_agent_name: Optional[str] = None
     runtime_id: Optional[str] = None
     schedule_cron: Optional[str] = None
+    mcp_servers: Optional[list[str]] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -187,6 +188,16 @@ def get_runtime(runtime_id: str):
     if not result:
         raise HTTPException(404, "Runtime not found")
     return result
+
+
+# ── MCP server registry ──────────────────────────────────────────────────
+
+@router.get("/mcp-servers")
+def list_mcp_servers(include_auto: bool = False):
+    """Available MCP servers for the agent toolkit picker. By default
+    hides auto-injected servers (agentira, memory) — those ride on every
+    run regardless of the agent's selection."""
+    return services.list_mcp_servers(include_auto=include_auto)
 
 
 # ── Agent endpoints ──────────────────────────────────────────────────────
