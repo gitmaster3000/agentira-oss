@@ -16,7 +16,9 @@ agentira_cli_materializer = pytest.importorskip(
 )
 materialize = agentira_cli_materializer.materialize
 compose_system_prompt = agentira_cli_materializer.compose_system_prompt
+ensure_memory_dirs = agentira_cli_materializer.ensure_memory_dirs
 SYSTEM_PROMPT_ADDENDUM = agentira_cli_materializer.SYSTEM_PROMPT_ADDENDUM
+MEMORY_ADDENDUM = agentira_cli_materializer.MEMORY_ADDENDUM
 
 
 @pytest.fixture
@@ -143,3 +145,70 @@ def test_compose_system_prompt_no_conventions_skips_addendum():
 def test_compose_system_prompt_empty_persona_with_conventions():
     out = compose_system_prompt("", have_conventions=True)
     assert out == SYSTEM_PROMPT_ADDENDUM
+
+
+# ── Memory addendum + dir prep (AP-55) ────────────────────────────────
+
+def test_compose_system_prompt_includes_memory_addendum_when_have_memory():
+    out = compose_system_prompt(
+        "You are X.", have_conventions=True, have_memory=True,
+    )
+    assert MEMORY_ADDENDUM in out
+    assert SYSTEM_PROMPT_ADDENDUM in out
+    assert "You are X." in out
+
+
+def test_compose_system_prompt_omits_memory_when_not_configured():
+    out = compose_system_prompt(
+        "You are X.", have_conventions=True, have_memory=False,
+    )
+    assert MEMORY_ADDENDUM not in out
+
+
+def test_compose_system_prompt_memory_only():
+    """If conventions weren't materialized but memory is on, only memory
+    addendum should ride. No half-empty pointers."""
+    out = compose_system_prompt(
+        "", have_conventions=False, have_memory=True,
+    )
+    assert MEMORY_ADDENDUM in out
+    assert SYSTEM_PROMPT_ADDENDUM not in out
+
+
+def test_ensure_memory_dirs_creates_parent(tmp_path):
+    target = tmp_path / "agentX" / "projY" / "memory.json"
+    cfg = (
+        '{"mcpServers": {"memory": {"command": "npx", '
+        '"env": {"MEMORY_FILE_PATH": "' + str(target) + '"}}}}'
+    )
+    assert not target.parent.exists()
+    ensure_memory_dirs(cfg)
+    assert target.parent.exists()
+    # File itself is NOT pre-created — the memory MCP server writes it
+    # on first call. We only ensure the directory.
+    assert not target.exists()
+
+
+def test_ensure_memory_dirs_handles_missing_env_block(tmp_path):
+    """A server without env shouldn't crash — same for missing memory entry."""
+    cfg = '{"mcpServers": {"agentira": {"type": "http", "url": "x"}}}'
+    ensure_memory_dirs(cfg)  # must not raise
+
+
+def test_ensure_memory_dirs_handles_malformed_json():
+    ensure_memory_dirs("not json at all")  # silently no-op
+
+
+def test_ensure_memory_dirs_handles_empty_string():
+    ensure_memory_dirs("")  # silently no-op
+
+
+def test_ensure_memory_dirs_idempotent(tmp_path):
+    target = tmp_path / "a" / "b" / "memory.json"
+    cfg = (
+        '{"mcpServers": {"memory": {"command": "npx", '
+        '"env": {"MEMORY_FILE_PATH": "' + str(target) + '"}}}}'
+    )
+    ensure_memory_dirs(cfg)
+    ensure_memory_dirs(cfg)  # second call must be a no-op, not raise
+    assert target.parent.exists()

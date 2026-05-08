@@ -178,7 +178,7 @@ class AgentiraDaemon:
         """
         from agentira_cli.daemon.executor import run_cli_stream, run_gateway
         from agentira_cli.daemon.materializer import (
-            materialize, compose_system_prompt,
+            materialize, compose_system_prompt, ensure_memory_dirs,
         )
 
         trace_id = frame.get("trace_id", "")
@@ -225,11 +225,16 @@ class AgentiraDaemon:
                 conventions_md=conventions_md,
             )
 
-        # Compose the system prompt: addendum (if conventions were
-        # materialized) + the agent's persona.
+        # Pre-create per-(agent, project) memory dir so the memory MCP
+        # server can write on first call. Cheap and safe to always run.
+        ensure_memory_dirs(mcp_config_json)
+        have_memory = "memory" in (mcp_config_json or "")  # cheap probe
+
+        # Compose the system prompt: conventions + memory addenda + persona.
         system_prompt = compose_system_prompt(
             agent_system_prompt,
             have_conventions=bool(cwd_path and conventions_md),
+            have_memory=have_memory,
         )
 
         logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",

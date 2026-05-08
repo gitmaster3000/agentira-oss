@@ -34,10 +34,21 @@ logger = logging.getLogger("agentira.daemon.materializer")
 CONVENTIONS_REL = ".agentira/CONVENTIONS.md"
 COURTESY_NAMES = ("AGENTS.md", "CLAUDE.md", "GEMINI.md")
 
-SYSTEM_PROMPT_ADDENDUM = (
+CONVENTIONS_ADDENDUM = (
     "Project conventions are in `.agentira/CONVENTIONS.md`. "
     "Read this file before starting any work."
 )
+
+MEMORY_ADDENDUM = (
+    "You have a memory tool (knowledge graph) scoped to this project. "
+    "At the start of a run, read what you already know about this project. "
+    "Before finishing, write down decisions, gotchas, and lessons learned "
+    "so future runs benefit. Memory is per-(agent, project) — what you "
+    "store here won't leak into other projects."
+)
+
+# Kept for backward compatibility with anything that imported it directly.
+SYSTEM_PROMPT_ADDENDUM = CONVENTIONS_ADDENDUM
 
 
 def materialize(
@@ -111,16 +122,54 @@ def _link_courtesy_files(cwd: Path) -> None:
 
 
 def compose_system_prompt(agent_system_prompt: str, *,
-                          have_conventions: bool) -> str:
-    """Prepend the addendum so any runtime obeys it.
+                          have_conventions: bool,
+                          have_memory: bool = False) -> str:
+    """Prepend addenda so any runtime obeys them.
 
-    `have_conventions` lets us skip the addendum when no conventions were
-    materialized — pointing the agent at a non-existent file is worse
-    than not pointing at all.
+    `have_conventions` skips the conventions pointer when none were
+    materialized (pointing at a non-existent file is worse than not
+    pointing). `have_memory` adds the memory-tool instruction when the
+    memory MCP is in this run's config.
     """
     parts: list[str] = []
     if have_conventions:
-        parts.append(SYSTEM_PROMPT_ADDENDUM)
+        parts.append(CONVENTIONS_ADDENDUM)
+    if have_memory:
+        parts.append(MEMORY_ADDENDUM)
     if agent_system_prompt:
         parts.append(agent_system_prompt)
     return "\n\n".join(parts)
+
+
+def ensure_memory_dirs(mcp_config_json: str) -> None:
+    """Pre-create parent dirs for any MEMORY_FILE_PATH the dispatch
+    bundle declares. The memory MCP server can't create its own data
+    directory — it expects the path to be writable on first call.
+
+    Best-effort: silently swallow malformed JSON, missing keys, and
+    permission errors. Whatever's missing will surface when the agent
+    actually tries to write memory.
+    """
+    if not mcp_config_json:
+        return
+    import json
+    try:
+        cfg = json.loads(mcp_config_json)
+    except (json.JSONDecodeError, TypeError):
+        return
+    servers = cfg.get("mcpServers") if isinstance(cfg, dict) else None
+    if not isinstance(servers, dict):
+        return
+    for entry in servers.values():
+        if not isinstance(entry, dict):
+            continue
+        env = entry.get("env") or {}
+        path = env.get("MEMORY_FILE_PATH")
+        if not path:
+            continue
+        try:
+            from pathlib import Path as _Path
+            parent = _Path(path).parent
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.debug("memory dir prep failed for %s: %s", path, exc)
