@@ -177,13 +177,25 @@ class AgentiraDaemon:
         route on runtime capability (http_gateway vs stream-json subprocess).
         """
         from agentira_cli.daemon.executor import run_cli_stream, run_gateway
+        from agentira_cli.daemon.materializer import (
+            materialize, compose_system_prompt,
+        )
 
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "") or ""
         agent_id = frame.get("agent_id", "")
+        task_id = frame.get("env_extra", {}).get("AGENTIRA_TASK_ID", "") if isinstance(frame.get("env_extra"), dict) else ""
         prompt = frame.get("prompt", "")
         provider = frame.get("provider", "")
         kind = frame.get("kind", "chat")
+
+        # Run-context bundle (Phase C dispatched these; empty for free-floating chat).
+        repo_path = frame.get("repo_path", "") or ""
+        conventions_md = frame.get("conventions_md", "") or ""
+        mcp_config_json = frame.get("mcp_config_json", "") or ""
+        env_extra = frame.get("env_extra", {}) or {}
+        if not isinstance(env_extra, dict):
+            env_extra = {}
 
         runtime_cls = get_runtime_cls(provider)
         if runtime_cls is None:
@@ -198,8 +210,27 @@ class AgentiraDaemon:
         gateway_url = frame.get("gateway_url") or runtime_info.get("gateway_url", "")
         gateway_token = frame.get("gateway_token") or runtime_info.get("gateway_token", "")
         model = frame.get("model", runtime_info.get("models", [""])[0] if runtime_info.get("models") else "")
-        system_prompt = frame.get("system_prompt", "")
+        agent_system_prompt = frame.get("system_prompt", "")
         agent_name = frame.get("agent_name", "")
+
+        # Materialize the run env when there's a run_id (i.e. real task work,
+        # not free-floating chat). For chat triggers without run_id, skip
+        # materialization entirely — it would just clutter ~/.agentira/.
+        cwd_path = None
+        if run_id and task_id:
+            cwd_path, _ = materialize(
+                workspace_id=agent_id,
+                task_id=task_id,
+                repo_path=repo_path,
+                conventions_md=conventions_md,
+            )
+
+        # Compose the system prompt: addendum (if conventions were
+        # materialized) + the agent's persona.
+        system_prompt = compose_system_prompt(
+            agent_system_prompt,
+            have_conventions=bool(cwd_path and conventions_md),
+        )
 
         logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",
                     trace_id, kind, agent_id, run_id or "-", provider)
@@ -243,6 +274,9 @@ class AgentiraDaemon:
                     runtime_cls, binary_path, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
                     on_proc=on_proc,
+                    workdir=str(cwd_path) if cwd_path else None,
+                    mcp_config_json=mcp_config_json or None,
+                    env_extra=env_extra,
                 )
             success = result.success
             error = result.error
