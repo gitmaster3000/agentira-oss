@@ -1175,6 +1175,112 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
     return {**result, "run_id": run_id, "task_id": task_id}
 
 
+def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None") -> dict:
+    """Shared body for pause/resume — both fire a WS frame to the daemon
+    and optionally flip the Run state. Cancel uses a different path
+    because it's terminal and races the daemon's complete event."""
+    import asyncio
+    from backend.forge.ws_dispatch import hub
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        if run.status not in (RunStatus.RUNNING, RunStatus.PAUSED, RunStatus.PENDING):
+            return {"error": f"Run is {run.status.value}; cannot {frame_type}"}
+        agent = db.get(Agent, run.agent_id)
+        runtime_id = agent.runtime_id if agent else None
+        last_msg = (db.query(AgentMessage)
+                    .filter(AgentMessage.run_id == run_id)
+                    .order_by(AgentMessage.created_at.desc())
+                    .first())
+        trace_id = last_msg.trace_id if last_msg else ""
+        if target_status is not None:
+            run.status = target_status
+            db.commit()
+            db.refresh(run)
+        run_dict = _run_to_dict(run)
+
+    if runtime_id:
+        try:
+            asyncio.ensure_future(hub.dispatch_signal(
+                runtime_id=runtime_id,
+                signal=frame_type,
+                trace_id=trace_id,
+                run_id=run_id,
+            ))
+        except Exception:
+            pass
+    return {"ok": True, "run": run_dict}
+
+
+def pause_run(run_id: str) -> dict:
+    """Pause a running CLI subprocess (SIGSTOP). Best-effort: openclaw
+    HTTP runs aren't pausable (the request completes naturally). Long
+    pauses can break the LLM API timeout — use cancel + resume-by-session
+    for anything beyond a few minutes."""
+    return _signal_run(run_id, "pause", RunStatus.PAUSED)
+
+
+def resume_run(run_id: str) -> dict:
+    """Resume a paused CLI subprocess (SIGCONT)."""
+    return _signal_run(run_id, "resume", RunStatus.RUNNING)
+
+
+def cancel_run(run_id: str) -> dict:
+    """Cancel a pending or running Run.
+
+    Resolves the agent's runtime, fires a cancel WS frame so the daemon
+    kills the in-flight subprocess (if any), and immediately marks the
+    Run as cancelled in the DB. The daemon will also post a complete
+    when it sees the kill, but we don't wait for that — the user
+    pressing cancel needs immediate feedback.
+    """
+    import asyncio
+    from backend.forge.ws_dispatch import hub
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+            return {"error": f"Run already {run.status.value}"}
+        agent = db.get(Agent, run.agent_id)
+        runtime_id = agent.runtime_id if agent else None
+
+        # Look up the latest trace_id for this run so the daemon can match.
+        last_msg = (db.query(AgentMessage)
+                    .filter(AgentMessage.run_id == run_id)
+                    .order_by(AgentMessage.created_at.desc())
+                    .first())
+        trace_id = last_msg.trace_id if last_msg else ""
+
+        # Mark run cancelled now — don't make the user wait for the daemon's
+        # complete-event round-trip. complete_trigger from the daemon will
+        # see the run already cancelled and skip the state flip.
+        now = datetime.now(timezone.utc)
+        run.status = RunStatus.CANCELLED
+        run.finished_at = now
+        run.error = "Cancelled by user."
+        if run.started_at:
+            run.duration_ms = int((now - _utc(run.started_at)).total_seconds() * 1000)
+        if run.agent and run.agent.status == AgentStatus.BUSY:
+            run.agent.status = AgentStatus.ONLINE
+        db.commit()
+        db.refresh(run)
+        run_dict = _run_to_dict(run)
+
+    # Best-effort cancel signal to the daemon
+    if runtime_id:
+        try:
+            asyncio.ensure_future(hub.dispatch_cancel(
+                runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
+            ))
+        except Exception as exc:
+            # WS dispatch is best-effort — the run is already marked cancelled.
+            pass
+
+    return {"ok": True, "run": run_dict}
+
+
 def list_runs_for_task(task_id: str) -> list[dict]:
     """Return all runs scheduled against a task, newest first."""
     with _session() as db:
@@ -1233,8 +1339,10 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None) -> dict:
-    """Finalize a trigger. Updates the Run if `run_id` is set; chat triggers
-    have no persistent state to update beyond the messages already stored."""
+    """Finalize a trigger. Updates the Run if `run_id` is set; for chat
+    triggers we still surface the failure as a system-role message on
+    the agent so the chat UI shows what actually went wrong instead of
+    sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
     if run_id:
@@ -1244,6 +1352,22 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             output_tokens=output_tokens,
             error=error if not success else None,
         )
+
+    # Failure surfacing — the daemon already logs server-side, but the
+    # human in the UI only sees what's in the chat thread. Drop a
+    # system-role message tagged with this trace so the existing chat
+    # poll picks it up.
+    if not success and error:
+        with _session() as db:
+            db.add(AgentMessage(
+                agent_id=agent_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                role=MessageRole.SYSTEM,
+                content=f"⚠ Agent execution failed: {error[:600]}",
+            ))
+            db.commit()
+
     return {"ok": True, "trace_id": trace_id, "logged": logger_msg}
 
 

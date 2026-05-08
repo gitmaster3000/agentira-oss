@@ -38,6 +38,7 @@ class MessageRole(str, enum.Enum):
 class RunStatus(str, enum.Enum):
     PENDING   = "pending"
     RUNNING   = "running"
+    PAUSED    = "paused"
     COMPLETED = "completed"
     FAILED    = "failed"
     CANCELLED = "cancelled"

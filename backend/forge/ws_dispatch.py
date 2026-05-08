@@ -98,6 +98,51 @@ class WsHub:
                 trace_id, kind, agent_id, run_id or "-", conn.daemon_id[:8],
             )
 
+    async def dispatch_signal(self, *, runtime_id: str, signal: str,
+                              trace_id: str = "", run_id: str = "") -> None:
+        """Generic in-flight control signal — pause / resume / etc.
+
+        Uses signal name as the frame type so the daemon's WS client
+        routes it the same way as cancel.
+        """
+        import uuid
+        event_id = f"{signal}-{trace_id or run_id or uuid.uuid4()}"
+        payload = {
+            "type": signal,
+            "trace_id": trace_id,
+            "run_id": run_id,
+            "runtime_id": runtime_id,
+        }
+        async with self._lock:
+            targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
+        for conn in targets:
+            await conn.send(event_id, payload)
+            logger.info("Dispatched %s trace=%s run=%s → daemon=%s",
+                        signal, trace_id or "-", run_id or "-", conn.daemon_id[:8])
+
+    async def dispatch_cancel(self, *, runtime_id: str, trace_id: str = "",
+                              run_id: str = "") -> None:
+        """Send a cancel frame to whatever daemon owns runtime_id.
+
+        The daemon resolves trace_id (or run_id → trace_id), marks the
+        in-flight execution cancelled, and kills the subprocess. If
+        nothing is in flight on the daemon side, the cancel is a no-op.
+        """
+        import uuid
+        event_id = f"cancel-{trace_id or run_id or uuid.uuid4()}"
+        payload = {
+            "type": "cancel",
+            "trace_id": trace_id,
+            "run_id": run_id,
+            "runtime_id": runtime_id,
+        }
+        async with self._lock:
+            targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
+        for conn in targets:
+            await conn.send(event_id, payload)
+            logger.info("Dispatched cancel trace=%s run=%s → daemon=%s",
+                        trace_id or "-", run_id or "-", conn.daemon_id[:8])
+
     def connected_daemon_ids(self) -> list[str]:
         return list(self._conns.keys())
 

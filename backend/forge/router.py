@@ -265,11 +265,16 @@ class ScheduleTaskRunRequest(BaseModel):
 
 
 @router.post("/tasks/{task_id}/run", status_code=201)
-def schedule_task_run(task_id: str, body: ScheduleTaskRunRequest):
+async def schedule_task_run(task_id: str, body: ScheduleTaskRunRequest):
     """Schedule a Run against a task with the chosen agent.
 
     Builds the prompt from task content (title + description + DoD),
     creates a Run row, and dispatches the trigger that the daemon picks up.
+
+    `async def` is mandatory: the service calls `asyncio.ensure_future`
+    on the WS hub dispatch coroutine, which requires a running loop in
+    the current thread. Sync handlers run in a worker thread with no
+    loop, so the dispatch silently no-ops.
     """
     result = services.schedule_task_run(task_id=task_id, agent_id=body.agent_id)
     if "error" in result:
@@ -300,6 +305,35 @@ def get_trigger_events(trace_id: str):
 def get_run_events(run_id: str):
     """Messages tagged with this run_id (across all of its triggers)."""
     return services.get_run_events(run_id)
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    """Cancel a pending/running Run. Marks it cancelled immediately and
+    fires a cancel signal to the daemon to kill any in-flight subprocess."""
+    result = services.cancel_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/runs/{run_id}/pause")
+async def pause_run(run_id: str):
+    """Pause a running CLI subprocess (SIGSTOP). Async required so the
+    WS dispatch coroutine has a loop to schedule on."""
+    result = services.pause_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str):
+    """Resume a paused CLI subprocess (SIGCONT)."""
+    result = services.resume_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
 
 
 @router.post("/runs/{run_id}/start")

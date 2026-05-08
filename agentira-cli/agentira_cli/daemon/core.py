@@ -43,6 +43,15 @@ class AgentiraDaemon:
         self.client = AgentiraClient(base_url=config.api_url, api_key=config.api_key)
         self._daemon_id = _load_or_create_daemon_id()
         self._registered: list[dict] = []
+        # Track in-flight executions so a cancel frame can kill the right
+        # subprocess. Keyed by trace_id (the dispatch primary key); we also
+        # keep a parallel run_id → trace_id map so backend cancels by
+        # run_id resolve correctly. CLI runs register their proc here;
+        # http_gateway runs register None (cancel is best-effort: nothing
+        # to kill mid-request, the run completes naturally).
+        self._inflight: dict[str, dict] = {}
+        self._run_to_trace: dict[str, str] = {}
+        self._inflight_lock = threading.Lock()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -82,13 +91,21 @@ class AgentiraDaemon:
                 break
             self._wake_event.clear()
             self._heartbeat()
-            # Drain pending tasks from the WS queue
+            # Drain pending tasks from the WS queue. Frames carry a
+            # `type` so we can route triggers and cancels through the
+            # same channel without an extra queue.
             while True:
                 try:
                     frame = self._task_queue.get_nowait()
                 except queue.Empty:
                     break
-                self._dispatch_task(frame)
+                ftype = frame.get("type", "trigger")
+                if ftype == "cancel":
+                    self._cancel(frame)
+                elif ftype in ("pause", "resume"):
+                    self._signal_proc(frame, ftype)
+                else:
+                    self._dispatch_task(frame)
 
         self._shutdown()
 
@@ -187,6 +204,18 @@ class AgentiraDaemon:
         logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",
                     trace_id, kind, agent_id, run_id or "-", provider)
 
+        # Register in-flight bookkeeping so a cancel frame can find us.
+        with self._inflight_lock:
+            self._inflight[trace_id] = {"proc": None, "cancelled": False}
+            if run_id:
+                self._run_to_trace[run_id] = trace_id
+
+        def on_proc(proc):
+            with self._inflight_lock:
+                entry = self._inflight.get(trace_id)
+                if entry is not None:
+                    entry["proc"] = proc
+
         async def on_event(evts: list) -> None:
             try:
                 self.client.post_trigger_events(
@@ -213,6 +242,7 @@ class AgentiraDaemon:
                 result = await run_cli_stream(
                     runtime_cls, binary_path, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
+                    on_proc=on_proc,
                 )
             success = result.success
             error = result.error
@@ -221,6 +251,16 @@ class AgentiraDaemon:
         except Exception as exc:
             error = str(exc)
             logger.exception("trigger execution failed trace=%s", trace_id)
+
+        # If a cancel hit us mid-flight, override success/error so the
+        # backend marks the run cancelled instead of just "failed".
+        with self._inflight_lock:
+            entry = self._inflight.pop(trace_id, None)
+            if run_id:
+                self._run_to_trace.pop(run_id, None)
+        if entry and entry.get("cancelled"):
+            success = False
+            error = "Cancelled by user."
 
         try:
             self.client.post_trigger_complete(
@@ -233,6 +273,56 @@ class AgentiraDaemon:
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
+
+    def _signal_proc(self, frame: dict, signal_kind: str) -> None:
+        """Send SIGSTOP (pause) or SIGCONT (resume) to the in-flight
+        subprocess. CLI runtimes only — http_gateway has no proc to
+        signal. Best-effort; long pauses can hit LLM API timeouts."""
+        import signal as _signal
+        trace_id = frame.get("trace_id", "")
+        run_id = frame.get("run_id", "")
+        with self._inflight_lock:
+            if not trace_id and run_id:
+                trace_id = self._run_to_trace.get(run_id, "")
+            entry = self._inflight.get(trace_id)
+            proc = entry.get("proc") if entry else None
+        if proc is None:
+            logger.info("%s for trace=%s run=%s — no live proc to signal",
+                        signal_kind, trace_id or "-", run_id or "-")
+            return
+        sig = _signal.SIGSTOP if signal_kind == "pause" else _signal.SIGCONT
+        try:
+            proc.send_signal(sig)
+            logger.info("%s trace=%s — sent %s to pid %s",
+                        signal_kind, trace_id, sig.name, proc.pid)
+        except (ProcessLookupError, AttributeError, Exception) as exc:
+            logger.warning("%s failed for trace=%s: %s", signal_kind, trace_id, exc)
+
+    def _cancel(self, frame: dict) -> None:
+        """Handle a cancel frame from the WS hub.
+
+        Resolves to a trace_id (directly given, or via the run_id map),
+        marks the in-flight entry cancelled, and kills the subprocess
+        if one is registered. The execute loop notices the kill on
+        stdout EOF and the cancelled flag drives the complete payload.
+        """
+        trace_id = frame.get("trace_id", "")
+        run_id = frame.get("run_id", "")
+        with self._inflight_lock:
+            if not trace_id and run_id:
+                trace_id = self._run_to_trace.get(run_id, "")
+            entry = self._inflight.get(trace_id)
+            if entry is None:
+                logger.info("cancel for unknown trace=%s run=%s — already finished", trace_id, run_id)
+                return
+            entry["cancelled"] = True
+            proc = entry.get("proc")
+        logger.info("cancel trace=%s run=%s — killing proc=%s", trace_id, run_id or "-", bool(proc))
+        if proc is not None:
+            try:
+                proc.kill()
+            except (ProcessLookupError, Exception) as exc:
+                logger.debug("proc.kill ignored: %s", exc)
 
     def _heartbeat(self) -> None:
         if not self._registered:

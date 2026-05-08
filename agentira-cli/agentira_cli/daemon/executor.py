@@ -51,6 +51,7 @@ async def run_cli_stream(
     workdir: Optional[str] = None,
     env_extra: Optional[dict] = None,
     on_event=None,        # async callable(event_list) for batching to backend
+    on_proc=None,         # called with the spawned proc (and again with None on exit) so callers can kill() externally
 ) -> StreamResult:
     """Spawn a CLI runtime with stream-json I/O; drain stdout line-by-line; return StreamResult."""
     result = StreamResult()
@@ -71,13 +72,23 @@ async def run_cli_stream(
 
         env = _build_env(env_extra or {})
 
+        # Stream-json lines from claude can exceed asyncio's default 64KB
+        # readline limit (single tool_result with a big diff, e.g.). Bump
+        # to 10MB to match multica's bufio scanner.
         proc = await asyncio.create_subprocess_exec(
             binary_path, *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workdir,
             env=env,
+            limit=10 * 1024 * 1024,
         )
+        # Hand the proc up so the caller can kill() us on cancel.
+        if on_proc:
+            try:
+                on_proc(proc)
+            except Exception:
+                pass
 
         batch: list = []
         last_flush = time.monotonic()
@@ -131,6 +142,11 @@ async def run_cli_stream(
             result.success = False
 
     finally:
+        if on_proc:
+            try:
+                on_proc(None)
+            except Exception:
+                pass
         if mcp_config_path:
             try:
                 os.unlink(mcp_config_path)

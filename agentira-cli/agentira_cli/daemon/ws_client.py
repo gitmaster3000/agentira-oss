@@ -102,3 +102,13 @@ class DaemonWsClient:
                     if self._task_queue is not None:
                         self._task_queue.put(msg)
                     self._wake.set()
+                elif msg.get("type") in ("cancel", "pause", "resume"):
+                    logger.info(
+                        "WS %s received: trace=%s run=%s",
+                        msg.get("type"),
+                        msg.get("trace_id", ""),
+                        msg.get("run_id", "") or "-",
+                    )
+                    if self._task_queue is not None:
+                        self._task_queue.put(msg)
+                    self._wake.set()
