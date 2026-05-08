@@ -1059,7 +1059,10 @@ def sync_openclaw_agents() -> list[dict]:
 
 
 def dispatch_trigger(agent_id: str, prompt: str, *,
-                     run_id: str | None = None, kind: str = "chat") -> dict:
+                     run_id: str | None = None, kind: str = "chat",
+                     repo_path: str = "", conventions_md: str = "",
+                     mcp_config_json: str = "", env_extra: dict | None = None,
+                     run_token: str = "") -> dict:
     """Single rail for invoking an agent.
 
     Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
@@ -1069,6 +1072,15 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     `kind` is a label for audit/logging only — the daemon does not branch on it.
     `run_id` attaches the trigger to a Run when the work is part of a workflow
     (cron, task assignment); for free-floating chat it stays None.
+
+    Run-context bundle (used by Phase D's daemon materializer; chat triggers
+    pass empty values and the daemon falls back to its existing behavior):
+    - repo_path: filesystem path the daemon will symlink into the workdir
+    - conventions_md: runtime-agnostic markdown the daemon writes to
+      .agentira/CONVENTIONS.md
+    - mcp_config_json: serialized {"mcpServers": {...}} for --mcp-config
+    - env_extra: dict of env vars to inject (AGENTIRA_RUN_ID, etc.)
+    - run_token: per-run uuid the agent uses to authenticate finish_run
     """
     import asyncio
     import uuid
@@ -1122,6 +1134,11 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         agent_name=agent_name,
         gateway_url=gateway_url,
         gateway_token=gateway_token,
+        repo_path=repo_path,
+        conventions_md=conventions_md,
+        mcp_config_json=mcp_config_json,
+        env_extra=env_extra or {},
+        run_token=run_token,
     ))
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
@@ -1133,8 +1150,17 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
     (the work-defining content the human authored), then dispatches a
     trigger of kind=run_step with the new run_id. The agent's
     system_prompt rides on the trigger frame so the runtime sees it.
+
+    Assembles the run-context bundle (project repo_path + conventions_md,
+    agent's MCP toolkit, per-run token + env vars) and ships it on the
+    dispatch frame. Phase D wires the daemon to consume it; until then
+    the daemon ignores the extra fields and chat continues to work.
     """
-    from backend.models import Task
+    import json as _json
+    import uuid
+    from backend.models import Task, Project
+    from backend.forge.mcp_registry import build_mcp_config
+
     with _session() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -1160,6 +1186,22 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
             except Exception:
                 pass
 
+        # Project run-context — empty strings if unset; daemon falls back
+        # to its existing cwd-and-no-conventions behavior in that case.
+        project = db.get(Project, project_id) if project_id else None
+        repo_path = (project.repo_path or "") if project else ""
+        conventions_md = (project.conventions_md or "") if project else ""
+
+        # Agent toolkit — list of opt-in MCP server names.
+        agent_mcp_servers: list[str] = []
+        if agent.mcp_servers:
+            try:
+                parsed = _json.loads(agent.mcp_servers)
+                if isinstance(parsed, list):
+                    agent_mcp_servers = [str(s) for s in parsed]
+            except Exception:
+                pass
+
     # Compose the prompt outside the session — clean, deterministic.
     parts = [f"# Task: {task_title}"]
     if task_description:
@@ -1182,7 +1224,39 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
     )
     run_id = run["id"]
 
-    result = dispatch_trigger(agent_id, prompt, run_id=run_id, kind="run_step")
+    # Build the MCP config (auto servers + agent's picks; memory scoped per
+    # (agent, project)). Serialize to JSON so it rides on the WS frame as a
+    # single string — the daemon writes it to a tmpfile for --mcp-config.
+    mcp_config = build_mcp_config(
+        agent_mcp_servers=agent_mcp_servers,
+        agent_id=agent_id,
+        project_id=project_id,
+    )
+    mcp_config_json = _json.dumps(mcp_config)
+
+    # Per-run token — used by finish_run (Phase E) to scope the agent's
+    # outcome to this specific run. Generated here, rides on the frame as
+    # AGENTIRA_RUN_TOKEN. Not persisted yet; tighten with a proper token
+    # store when per-run scoping moves out of "trust the agent" mode.
+    run_token = uuid.uuid4().hex
+
+    env_extra = {
+        "AGENTIRA_RUN_ID": run_id,
+        "AGENTIRA_TASK_ID": task_id,
+        "AGENTIRA_PROJECT_ID": project_id or "",
+        "AGENTIRA_AGENT_ID": agent_id,
+        "AGENTIRA_RUN_TOKEN": run_token,
+    }
+
+    result = dispatch_trigger(
+        agent_id, prompt,
+        run_id=run_id, kind="run_step",
+        repo_path=repo_path,
+        conventions_md=conventions_md,
+        mcp_config_json=mcp_config_json,
+        env_extra=env_extra,
+        run_token=run_token,
+    )
     return {**result, "run_id": run_id, "task_id": task_id}
 
 
