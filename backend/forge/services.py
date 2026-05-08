@@ -11,7 +11,7 @@ from backend.db import SessionLocal
 from backend.models import Profile, Role
 from backend.forge.models import (
     Agent, Run, AgentMessage, WebhookLog,
-    AgentStatus, RunStatus, MessageRole,
+    AgentStatus, RunStatus, RunOutcome, MessageRole,
     ForgeRuntime, RuntimeStatus,
 )
 
@@ -143,6 +143,8 @@ def _run_to_dict(r: Run) -> dict:
         "project_name": r.project.name if r.project else None,
         "trigger_event": r.trigger_event,
         "status": r.status.value,
+        "outcome": r.outcome.value if r.outcome else None,
+        "summary": r.summary or "",
         "model_used": r.model_used,
         "started_at": _iso(r.started_at),
         "finished_at": _iso(r.finished_at),
@@ -1208,11 +1210,19 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         parts.append("\n## Description\n" + task_description)
     if dod_text:
         parts.append("\n## Definition of Done\n" + dod_text)
+    parts.append("\nWork on this task.")
+    # Stash run_id placeholder; we substitute the real one once it's created
+    # (the prompt is composed before create_run runs). The literal {run_id}
+    # is replaced below.
     parts.append(
-        "\nWork on this task. When you have a clear deliverable, summarize "
-        "what changed; if you're blocked, say so explicitly."
+        "\nWhen you finish, call mcp__agentira__finish_run with:\n"
+        "  - run_id: \"{run_id}\"\n"
+        "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
+        "  - summary: one paragraph describing what changed (or what's blocking).\n"
+        "Use \"blocked\" when you can't proceed without external input "
+        "(missing credentials, ambiguous spec, broken dependency)."
     )
-    prompt = "\n".join(parts)
+    prompt_template = "\n".join(parts)
 
     # Create the Run row first; dispatch_trigger will flip it to RUNNING.
     run = create_run(
@@ -1223,6 +1233,10 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         model_used=agent.model or "",
     )
     run_id = run["id"]
+
+    # Substitute the real run_id into the finish_run instructions now that
+    # the run row exists.
+    prompt = prompt_template.replace("{run_id}", run_id)
 
     # Build the MCP config (auto servers + agent's picks; memory scoped per
     # (agent, project)). Serialize to JSON so it rides on the WS frame as a
@@ -1366,6 +1380,42 @@ def cancel_run(run_id: str) -> dict:
     return {"ok": True, "run": run_dict}
 
 
+def finish_run(run_id: str, *, outcome: str, summary: str = "",
+               run_token: str = "") -> dict:
+    """Agent-declared semantic completion (called from finish_run MCP tool).
+
+    Sets Run.outcome (the semantic verdict — succeeded / blocked / needs_input
+    / failed) and Run.summary (one-paragraph human-readable result).
+
+    `outcome` validation rejects unknown values so a typo doesn't silently
+    leave the field unset. The MCP tool surfaces the error to the agent.
+
+    `run_token` is plumbed through for future per-run scoping; today we
+    trust the run_id arg (Phase G hardening). When implemented it will
+    cross-check run_token against the dispatch frame's AGENTIRA_RUN_TOKEN.
+
+    Idempotent: re-calling with the same outcome is a no-op. Calling
+    after a run has been cancelled/failed terminally still updates
+    outcome/summary so the agent's last-word verdict is preserved.
+    """
+    try:
+        outcome_enum = RunOutcome(outcome)
+    except ValueError:
+        valid = [o.value for o in RunOutcome]
+        return {"ok": False, "error": f"Invalid outcome '{outcome}'. Must be one of: {valid}"}
+
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"ok": False, "error": "Run not found"}
+        r.outcome = outcome_enum
+        if summary:
+            r.summary = summary
+        db.commit()
+        db.refresh(r)
+        return {"ok": True, "run": _run_to_dict(r)}
+
+
 def list_runs_for_task(task_id: str) -> list[dict]:
     """Return all runs scheduled against a task, newest first."""
     with _session() as db:
@@ -1437,6 +1487,15 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             output_tokens=output_tokens,
             error=error if not success else None,
         )
+        # Default outcome when the agent didn't call finish_run itself —
+        # process exit alone is a weak signal but better than null. The
+        # agent's explicit verdict (if any) is set first by finish_run
+        # and we don't clobber it here.
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r and r.outcome is None:
+                r.outcome = RunOutcome.SUCCEEDED if success else RunOutcome.FAILED
+                db.commit()
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a

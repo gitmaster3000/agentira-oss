@@ -44,6 +44,19 @@ class RunStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class RunOutcome(str, enum.Enum):
+    """Semantic verdict of a run, set by the agent via the finish_run MCP
+    tool. Distinct from RunStatus, which tracks process lifecycle.
+
+    A run can be status=COMPLETED + outcome=BLOCKED (process exited cleanly,
+    but the agent says it can't proceed without external help). Both are
+    meaningful and the UI shows outcome as the primary badge."""
+    SUCCEEDED   = "succeeded"
+    BLOCKED     = "blocked"
+    NEEDS_INPUT = "needs_input"
+    FAILED      = "failed"
+
+
 # ── Runtime ──────────────────────────────────────────────────────────────
 
 class RuntimeStatus(str, enum.Enum):
@@ -143,6 +156,10 @@ class Run(Base):
     error: Mapped[str | None]   = mapped_column(Text, nullable=True)
     session_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     workdir: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # outcome: agent-declared semantic result (set by finish_run MCP tool).
+    # summary: one-paragraph human-readable result (also from finish_run).
+    outcome: Mapped[RunOutcome | None] = mapped_column(SAEnum(RunOutcome), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

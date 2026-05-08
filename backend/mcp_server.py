@@ -407,6 +407,49 @@ async def list_permissions() -> list[dict]:
     """List all available permissions."""
     return services.list_permissions()
 
+
+# ── Forge run lifecycle ───────────────────────────────────────────────────────
+
+@mcp.tool()
+async def finish_run(
+    run_id: str,
+    outcome: str,
+    summary: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Declare the semantic verdict of a Forge run you're working.
+
+    Call this when you've finished (or stopped) work on a task that was
+    dispatched to you. The Run.outcome field is what humans see in the
+    UI as the primary "did this get done?" signal.
+
+    Arguments:
+      run_id:  the AGENTIRA_RUN_ID env var value passed to your process
+               (also surfaced in your task prompt).
+      outcome: one of:
+        - "succeeded"   — the deliverable is in place
+        - "blocked"     — couldn't proceed; needs human/external input
+        - "needs_input" — paused with a specific question for the human
+        - "failed"      — something is wrong; not recoverable mid-run
+      summary: one paragraph describing what changed or what's blocking
+               you. This is the line humans read first — be specific.
+
+    The run's process status (running/completed/failed/cancelled) is
+    tracked separately by the daemon. A run can be status=completed +
+    outcome=blocked: the process exited cleanly but the agent declared
+    it can't proceed.
+    """
+    from backend.forge import services as forge_services
+    try:
+        logger.info(f"Tool finish_run called: run={run_id} outcome={outcome}")
+        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary)
+        if not res.get("ok"):
+            logger.warning(f"Tool finish_run rejected: {res.get('error')}")
+        return res
+    except Exception as e:
+        logger.error(f"Tool finish_run failed: {e}\n{traceback.format_exc()}")
+        raise
+
 # ── Transport: Streamable HTTP ─────────────────────────────────────────────────
 # json_response=True → plain JSON body on POST (simpler, Bruno-compatible).
 # Switch to False when enabling server-push notifications via GET /mcp.
