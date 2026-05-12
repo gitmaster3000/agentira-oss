@@ -737,11 +737,21 @@ def update_schedule(agent_id: str, *, start: str | None = None, end: str | None 
 
 # Pricing per 1M tokens (input, output) — updated periodically
 MODEL_PRICING = {
-    # Anthropic
-    "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},
+    # Anthropic — Claude 4 family (4-5, 4-6, 4-7 generations).
+    # 4-7 is the current generation as of 2026; older entries kept for
+    # legacy agents whose model field still references prior model ids.
+    "claude-opus-4-7":            {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-7":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-7":           {"input": 0.80, "output": 4.0},
     "claude-opus-4-6":            {"input": 15.0, "output": 75.0},
-    "claude-sonnet-4-20250514":   {"input": 3.0,  "output": 15.0},
     "claude-sonnet-4-6":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-6":           {"input": 0.80, "output": 4.0},
+    "claude-opus-4-5":            {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-5":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-5":           {"input": 0.80, "output": 4.0},
+    # Legacy / dated SKUs
+    "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-20250514":   {"input": 3.0,  "output": 15.0},
     "claude-haiku-4-5-20251001":  {"input": 0.80, "output": 4.0},
     "claude-3-5-sonnet-20241022": {"input": 3.0,  "output": 15.0},
     "claude-3-5-haiku-20241022":  {"input": 0.80, "output": 4.0},

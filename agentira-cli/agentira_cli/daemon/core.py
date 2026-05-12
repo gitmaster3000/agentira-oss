@@ -131,6 +131,19 @@ class AgentiraDaemon:
         if not detected:
             logger.info("No runtimes detected on PATH.")
             return []
+
+        # If OpenClaw is detected, idempotently add the generic
+        # `agentira-runner` agent to ~/.openclaw/openclaw.json. Agentira
+        # routes ALL its OpenClaw chats through this runner so OpenClaw's
+        # per-agent bootstrap/persona doesn't fight our system_prompt.
+        # See agentira_cli/runtimes/openclaw.py::ensure_runner_agent.
+        if any(d.provider == "openclaw" for d in detected):
+            try:
+                from agentira_cli.runtimes.openclaw import ensure_runner_agent
+                ensure_runner_agent()
+            except Exception as exc:
+                logger.warning("ensure_runner_agent failed: %s", exc)
+
         runtimes = [
             {
                 "provider": d.provider,
@@ -273,6 +286,7 @@ class AgentiraDaemon:
                 result = await run_gateway(
                     gateway_url, gateway_token, agent_name, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
+                    provider=provider,
                 )
             else:
                 result = await run_cli_stream(

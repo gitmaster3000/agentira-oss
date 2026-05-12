@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+import logging
+import os
+from dataclasses import dataclass
 from typing import Any
 
 from .base import Runtime
+
+logger = logging.getLogger("agentira.runtime.claude")
 
 
 class ClaudeRuntime(Runtime):
@@ -12,10 +16,31 @@ class ClaudeRuntime(Runtime):
     default_binary = "claude"
     env_path_override = "AGENTIRA_CLAUDE_PATH"
     capabilities = ("stream_json", "mcp_config", "resume")
+    # Static list mixing claude-code's stable aliases (always-latest) with
+    # a curated set of dated SKUs so users can pin an older generation if
+    # they need reproducibility or a specific behavior. The CLI accepts
+    # any of these directly — no API key, no introspection, no staleness
+    # beyond what we ship here.
+    #
+    # Order: aliases first (most users want "latest"), then dated SKUs
+    # newest-first. Users who want something not on this list can still
+    # type a free-form value.
     models = (
-        "claude-sonnet-4-5",
+        # Always-latest aliases — resolved by claude-code at call time.
+        "sonnet",
+        "opus",
+        "haiku",
+        # Pinned dated SKUs (newest first). 4.5+ only — older generations
+        # aren't worth keeping in the dropdown; users who need them can
+        # type the SKU as a free-form value.
         "claude-opus-4-5",
+        "claude-sonnet-4-5",
         "claude-haiku-4-5",
+        # 1M-context variants (Sonnet only — Opus/Haiku stay at 200K).
+        # Higher per-token cost; pick when the task genuinely needs the
+        # extra window.
+        "claude-sonnet-4-5[1m]",
+        "sonnet[1m]",
     )
     fallback_paths = (
         "~/.claude/local/claude",
@@ -40,9 +65,16 @@ class ClaudeRuntime(Runtime):
         args = [
             "-p", prompt,
             "--output-format", "stream-json",
-            "--input-format", "stream-json",
+            # Note: do NOT pass --input-format stream-json. With both -p and
+            # stream-json input set, claude-code waits for stream-json frames
+            # on stdin and silently ignores -p, then exits 0 with no output
+            # when stdin EOFs. We supply the prompt via -p; output parsing
+            # is the only side that needs stream-json.
             "--verbose",
-            "--strict-mcp-config",
+            # Note: do NOT pass --strict-mcp-config. We want claude-code to
+            # merge the user's host MCP servers (~/.claude.json) with our
+            # per-task additions in --mcp-config. Strict mode would replace
+            # the host config entirely and break user-installed integrations.
             "--permission-mode", "bypassPermissions",
             "--max-turns", str(max_turns),
         ]
@@ -59,6 +91,34 @@ class ClaudeRuntime(Runtime):
     @classmethod
     def parse_event(cls, line: str):
         return parse_stream_line(line)
+
+    @classmethod
+    def introspect(cls, binary_path: str) -> dict:
+        """Resolve the model catalog without requiring an API key.
+
+        claude-code authenticates via the user's logged-in session
+        (Anthropic subscription), not a developer API key — and the
+        /v1/models endpoint requires the latter. So we don't try to
+        introspect Anthropic's catalog at all.
+
+        Resolution order:
+          1. AGENTIRA_CLAUDE_MODELS env var (comma-separated list) —
+             power-user override. Lets users pin their preferred set
+             without forking the package.
+          2. cls.models tuple — base class falls back to this when
+             introspect returns {}.
+
+        The hardcoded tuple is kept current-generation-first so most
+        users never need the override.
+        """
+        override = os.environ.get("AGENTIRA_CLAUDE_MODELS", "").strip()
+        if not override:
+            return {}
+        ids = [m.strip() for m in override.split(",") if m.strip()]
+        if not ids:
+            return {}
+        logger.info("Using AGENTIRA_CLAUDE_MODELS override: %d model(s)", len(ids))
+        return {"models": ids}
 
 
 # ── stream-json event types ───────────────────────────────────────────────
@@ -141,10 +201,19 @@ def parse_stream_line(line: str):
 
     elif msg_type == "result":
         usage = msg.get("usage", {})
+        # claude-code emits subtype="success" even on rejected models or
+        # API errors; the actual failure flag is `is_error`. When both
+        # are present and is_error=true, treat the `result` text as the
+        # error message (it's the human-readable explanation, e.g. "There's
+        # an issue with the selected model …").
+        is_error = bool(msg.get("is_error"))
+        success = (msg.get("subtype") == "success") and not is_error
+        result_text = msg.get("result", "")
+        explicit_error = msg.get("error", "")
         return ResultEvent(
-            success=msg.get("subtype") == "success",
-            text=msg.get("result", ""),
-            error=msg.get("error", ""),
+            success=success,
+            text="" if is_error else result_text,
+            error=explicit_error or (result_text if is_error else ""),
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
         )

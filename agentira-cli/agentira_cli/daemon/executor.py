@@ -92,6 +92,28 @@ async def run_cli_stream(
 
         batch: list = []
         last_flush = time.monotonic()
+        # Track whether the runtime ever emitted a final ResultEvent. If
+        # not, the subprocess died without telling us what happened —
+        # treat that as failure regardless of returncode (claude-code
+        # has been observed to exit 0 after rejecting an unentitled
+        # model string, which would otherwise look like silent success).
+        saw_result_event = False
+        # Drain stderr concurrently. If we only read it on failure we
+        # risk a PIPE-buffer deadlock on chatty runtimes, AND we miss
+        # the human-readable error message on the no-ResultEvent path.
+        stderr_chunks: list[bytes] = []
+
+        async def _drain_stderr():
+            try:
+                while True:
+                    chunk = await proc.stderr.read(8192)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                logger.debug("stderr drain error: %s", exc)
+
+        stderr_task = asyncio.create_task(_drain_stderr())
 
         async def flush():
             nonlocal batch, last_flush
@@ -114,6 +136,7 @@ async def run_cli_stream(
                 logger.debug("Session ID: %s", result.session_id)
 
             elif isinstance(event, ResultEvent):
+                saw_result_event = True
                 result.success = event.success
                 result.text = event.text
                 result.error = event.error
@@ -135,11 +158,45 @@ async def run_cli_stream(
 
         await flush()
         await proc.wait()
+        # Make sure the stderr drain has finished before we read its
+        # accumulator. proc.wait() returning means stdout closed; stderr
+        # should follow quickly. Bound the wait so a stuck pipe doesn't
+        # hang us forever.
+        try:
+            await asyncio.wait_for(stderr_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            stderr_task.cancel()
 
-        if proc.returncode != 0 and not result.text:
-            stderr = await proc.stderr.read()
-            result.error = stderr.decode(errors="replace").strip()
+        stderr_text = b"".join(stderr_chunks).decode(errors="replace").strip()
+        # Tail the stderr so a crash dump doesn't blow up the run row.
+        # 4KB is enough to read a stack trace + the actionable line.
+        if len(stderr_text) > 4000:
+            stderr_text = "…" + stderr_text[-4000:]
+
+        # Decide success/error. Three failure modes:
+        #   1. proc.returncode != 0 — clear-cut crash/rejection.
+        #   2. proc.returncode == 0 but no ResultEvent ever arrived —
+        #      runtime exited cleanly without telling us anything.
+        #      claude-code does this on model-string rejection.
+        #   3. ResultEvent itself reported failure (already in result.success).
+        if proc.returncode != 0:
             result.success = False
+            if not result.error:
+                result.error = (
+                    stderr_text
+                    or f"subprocess exited with code {proc.returncode}"
+                )
+            elif stderr_text and stderr_text not in result.error:
+                # Append stderr context so we don't lose the actionable
+                # human-readable message when ResultEvent gave us a
+                # generic error.
+                result.error = f"{result.error}\n\n{stderr_text}"
+        elif not saw_result_event:
+            result.success = False
+            result.error = (
+                stderr_text
+                or "subprocess exited cleanly without emitting a result frame"
+            )
 
     finally:
         if on_proc:
@@ -171,12 +228,16 @@ async def run_gateway(
     model: str = "",
     system_prompt: str = "",
     on_event=None,
+    provider: str = "openclaw",
 ) -> StreamResult:
-    """POST prompt to an OpenAI-compatible HTTP gateway (e.g. openclaw).
+    """POST prompt to an OpenAI-compatible HTTP gateway.
 
-    Mirrors backend/forge/runtime_client.py:OpenClawAdapter.chat — must stay
-    in sync with that adapter so chat works identically from either side.
-    Non-streaming: full request → single text event with the reply.
+    Supports two shapes:
+    - **openclaw**: routes through the generic `agentira-runner` agent so
+      OpenClaw's tools/workspace apply; persona comes from system_prompt.
+    - **ollama** (and other bare gateways): sends the model directly with
+      no agent-routing prefix, no auth header (Ollama has no auth by
+      default).
     """
     result = StreamResult()
     url = gateway_url.rstrip("/") + "/v1/chat/completions"
@@ -184,15 +245,25 @@ async def run_gateway(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
+
+    # Pick the model string the gateway expects.
+    if provider == "openclaw":
+        body_model = "openclaw:agentira-runner"
+    elif provider == "ollama":
+        # Strip the `ollama/` prefix Agentira surfaces internally so Ollama's
+        # OpenAI-compatible endpoint sees the bare model id.
+        body_model = (model or "").split("ollama/", 1)[-1] if model else ""
+    else:
+        body_model = model or agent_name
+
     body = json.dumps({
-        "model": f"openclaw:{agent_name}",
+        "model": body_model,
         "messages": messages,
         "stream": False,
     }).encode()
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {gateway_token}",
-    }
+    headers = {"Content-Type": "application/json"}
+    if gateway_token:
+        headers["Authorization"] = f"Bearer {gateway_token}"
     try:
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=120) as resp:

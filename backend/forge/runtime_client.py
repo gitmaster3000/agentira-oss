@@ -179,8 +179,14 @@ class OpenClawAdapter(RuntimeAdapter):
     def chat(self, url: str, token: str, agent: str,
              messages: list[dict]) -> dict:
         endpoint = url.rstrip("/") + "/v1/chat/completions"
+        # Route through the generic `agentira-runner` agent regardless of
+        # which Agentira agent is asking. Agentira owns the persona; OpenClaw
+        # contributes only its tools/workspace via this runner. The `agent`
+        # parameter is unused for routing — kept for signature compatibility
+        # with the legacy /hooks/agent path. See AP-70 + the runtime
+        # architecture plan.
         body = {
-            "model": f"openclaw:{agent}",
+            "model": "openclaw:agentira-runner",
             "messages": messages,
             "stream": False,
         }
@@ -334,11 +340,32 @@ class GenericAdapter(RuntimeAdapter):
         return {}
 
 
+# ── Ollama adapter ─────────────────────────────────────────────────────
+
+class OllamaAdapter(GenericAdapter):
+    """Ollama runtime — bare LLM gateway via OpenAI-compatible endpoint.
+
+    Per the runtime architecture: Agentira owns persona/MCP/workspace; Ollama
+    just generates tokens. The only thing this adapter does on top of
+    GenericAdapter is strip the `ollama/` prefix from model strings before
+    sending — Agentira surfaces models as `ollama/qwen3.6:latest` for
+    unambiguous routing, but Ollama's own API expects just `qwen3.6:latest`.
+    """
+
+    def chat(self, url: str, token: str, agent: str,
+             messages: list[dict]) -> dict:
+        # `agent` here is the model id (the chat path passes a.model down).
+        if agent.startswith("ollama/"):
+            agent = agent[len("ollama/"):]
+        return super().chat(url, token, agent, messages)
+
+
 # ── Adapter registry ──────────────────────────────────────────────────
 
 _ADAPTERS: dict[str, RuntimeAdapter] = {
     "openclaw": OpenClawAdapter(),
     "zeroclaw": OpenClawAdapter(),   # same protocol for now
+    "ollama":   OllamaAdapter(),
     "openai":   GenericAdapter(),
     "generic":  GenericAdapter(),
 }

@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
 from .base import Runtime
 
+logger = logging.getLogger("agentira.runtime.openclaw")
+
 _DEFAULT_STATE_DIR = Path.home() / ".openclaw"
 _DEFAULT_PORT = 18789
+
+# Generic runner-agent that Agentira routes ALL its OpenClaw chats through.
+# Per the runtime architecture: Agentira owns the agent (persona,
+# system_prompt, conversation history) and OpenClaw owns the engine
+# (MCP tools, workspace, code execution). The runner has bootstrap=null
+# and contextInjection=never so it doesn't inject identity-shaping
+# content that would fight Agentira's system_prompt.
+_RUNNER_AGENT_ID = "agentira-runner"
 
 
 class OpenClawRuntime(Runtime):
@@ -62,3 +73,112 @@ class OpenClawRuntime(Runtime):
             "gateway_token": gateway_token,
             "models": models,
         }
+
+
+def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") -> bool:
+    """Idempotently add the `agentira-runner` agent to OpenClaw's config.
+
+    Why: Agentira owns the agent layer (persona, system_prompt, conversation
+    history). OpenClaw owns the engine layer (MCP tools, workspace, code
+    execution). To get the latter without the former, we route every Agentira
+    chat through ONE generic OpenClaw agent whose `systemPromptOverride` is
+    empty (so OpenClaw doesn't inject identity-shaping content) and whose
+    `tools.profile` is "full" (so all OpenClaw-side tools are available).
+
+    Persona is supplied by Agentira via the system message in the chat body.
+
+    Implementation note: we MUST use the `openclaw` CLI rather than mutating
+    `~/.openclaw/openclaw.json` directly. The OpenClaw gateway holds the
+    config in memory and rewrites the file on its own schedule, so direct
+    edits get clobbered. The CLI is the supported mutation path and the
+    gateway picks up changes after a restart.
+
+    Returns True if the entry was created, False if already present or if
+    OpenClaw isn't installed/usable.
+    """
+    import subprocess
+
+    # Probe whether the runner agent already exists.
+    try:
+        result = subprocess.run(
+            [binary_path, "agents", "list", "--json"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        logger.debug("openclaw CLI not available: %s", exc)
+        return False
+    if result.returncode != 0:
+        logger.warning("openclaw agents list failed: %s", result.stderr.strip())
+        return False
+    try:
+        agents = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        logger.warning("openclaw agents list returned non-JSON")
+        return False
+
+    if any(isinstance(a, dict) and a.get("id") == _RUNNER_AGENT_ID for a in agents):
+        logger.debug("runner-agent %s already present", _RUNNER_AGENT_ID)
+        return False
+
+    # Pick a model: caller's hint, else the existing default agent's model.
+    # If we can't determine one, let `openclaw agents add` use its own default.
+    model = default_model
+    if not model and agents:
+        model = next((a.get("model") for a in agents if a.get("isDefault")), "") or ""
+    if not model and agents:
+        model = agents[0].get("model", "")
+
+    cmd = [binary_path, "agents", "add", _RUNNER_AGENT_ID, "--non-interactive", "--json"]
+    if model:
+        cmd += ["--model", model]
+    # Reuse the default workspace so we don't create a separate filesystem
+    # tree just for the runner. The runner is shared across all Agentira
+    # agents — they're distinguished by Agentira's system message, not by
+    # workspace.
+    if agents:
+        default_ws = next((a.get("workspace") for a in agents if a.get("isDefault")), "") or ""
+        if default_ws:
+            cmd += ["--workspace", default_ws]
+
+    try:
+        add_result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        logger.warning("openclaw agents add timed out")
+        return False
+    if add_result.returncode != 0:
+        logger.warning("openclaw agents add failed: %s", add_result.stderr.strip())
+        return False
+
+    logger.info("added %s runner-agent (model=%s)", _RUNNER_AGENT_ID, model or "<default>")
+
+    # Now configure the runner: empty systemPromptOverride (no identity
+    # injection) + tools.profile=full (all engine tools available).
+    # We need the runner's index in agents.list — reload to find it.
+    try:
+        list2 = subprocess.run(
+            [binary_path, "agents", "list", "--json"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if list2.returncode == 0:
+            updated = json.loads(list2.stdout)
+            idx = next(
+                (i for i, a in enumerate(updated)
+                 if isinstance(a, dict) and a.get("id") == _RUNNER_AGENT_ID),
+                -1,
+            )
+            if idx >= 0:
+                for path, value in [
+                    (f"agents.list[{idx}].systemPromptOverride", ""),
+                    (f"agents.list[{idx}].tools", '{"profile":"full"}'),
+                ]:
+                    sub = subprocess.run(
+                        [binary_path, "config", "set", path, value],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if sub.returncode != 0:
+                        logger.debug("openclaw config set %s failed: %s",
+                                     path, sub.stderr.strip())
+    except Exception as exc:
+        logger.debug("post-add configuration of runner failed (non-fatal): %s", exc)
+
+    return True
