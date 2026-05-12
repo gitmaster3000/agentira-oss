@@ -123,15 +123,21 @@ def _link_courtesy_files(cwd: Path) -> None:
 
 def compose_system_prompt(agent_system_prompt: str, *,
                           have_conventions: bool,
-                          have_memory: bool = False) -> str:
+                          have_memory: bool = False,
+                          user_context: dict | None = None) -> str:
     """Prepend addenda so any runtime obeys them.
 
-    `have_conventions` skips the conventions pointer when none were
-    materialized (pointing at a non-existent file is worse than not
-    pointing). `have_memory` adds the memory-tool instruction when the
-    memory MCP is in this run's config.
+    Order: user-context preamble (AP-76) → conventions pointer → memory
+    instruction → agent persona. The user-context preamble goes first so
+    the agent knows where the user is BEFORE applying its persona — it
+    disambiguates "this project" / "this task" / etc. for the rest of
+    the prompt.
     """
     parts: list[str] = []
+    if user_context:
+        preamble = _render_user_context(user_context)
+        if preamble:
+            parts.append(preamble)
     if have_conventions:
         parts.append(CONVENTIONS_ADDENDUM)
     if have_memory:
@@ -139,6 +145,55 @@ def compose_system_prompt(agent_system_prompt: str, *,
     if agent_system_prompt:
         parts.append(agent_system_prompt)
     return "\n\n".join(parts)
+
+
+def _render_user_context(ctx: dict) -> str:
+    """Render the per-call user-context dict as a system-message preamble.
+
+    Tolerant: missing fields are skipped silently. Output stays short so
+    it doesn't dominate context budget on small models.
+    """
+    if not isinstance(ctx, dict):
+        return ""
+    lines: list[str] = []
+    surface = ctx.get("surface") or ""
+    route = ctx.get("route") or ""
+    project_name = ctx.get("project_name") or ""
+    project_id = ctx.get("project_id") or ""
+    task_title = ctx.get("task_title") or ""
+    task_id = ctx.get("task_id") or ""
+
+    where_bits: list[str] = []
+    if surface:
+        where_bits.append(surface)
+    if project_name:
+        where_bits.append(f"project '{project_name}'")
+    elif project_id:
+        where_bits.append(f"project {project_id}")
+    if task_title:
+        where_bits.append(f"task '{task_title}'")
+    elif task_id:
+        where_bits.append(f"task {task_id}")
+    if route:
+        where_bits.append(f"path={route}")
+
+    if where_bits:
+        lines.append(
+            "The user is currently viewing: " + " · ".join(where_bits) + "."
+        )
+
+    nav = ctx.get("nav_history") or []
+    if isinstance(nav, list) and nav:
+        recent = [str(n) for n in nav[:5] if n]
+        if recent:
+            lines.append("Recent pages: " + " ← ".join(recent) + ".")
+
+    if lines:
+        lines.append(
+            "When the user says \"this project\" / \"this task\", "
+            "resolve it from the above before reading further instructions."
+        )
+    return "\n".join(lines)
 
 
 def ensure_memory_dirs(mcp_config_json: str) -> None:

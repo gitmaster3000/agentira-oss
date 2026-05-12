@@ -119,6 +119,14 @@ class CostEstimateRequest(BaseModel):
 class RuntimeChatRequest(BaseModel):
     content: str
     run_id: Optional[str] = None
+    # AP-76: per-call user-context bundle. Carries the surface, route,
+    # and resolved project/task ids so the agent knows what the user is
+    # looking at. Shape is intentionally loose — frontend evolves it
+    # without backend schema changes. Backend uses project_id (if any)
+    # to populate repo_path + MCP config on the dispatch frame, and
+    # forwards the whole dict so the daemon can render it as a
+    # synthetic system message.
+    user_context: Optional[dict] = None
 
 
 
@@ -447,7 +455,12 @@ def runtime_status(agent_id: str):
 
 @router.post("/agents/{agent_id}/runtime/chat")
 async def runtime_chat(agent_id: str, body: RuntimeChatRequest):
-    return services.send_runtime_message(agent_id, content=body.content, run_id=body.run_id)
+    return services.send_runtime_message(
+        agent_id,
+        content=body.content,
+        run_id=body.run_id,
+        user_context=body.user_context,
+    )
 
 
 @router.get("/openclaw/overview")

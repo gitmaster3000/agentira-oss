@@ -839,6 +839,111 @@ def get_agent_cost_breakdown(agent_id: str) -> dict:
         }
 
 
+def get_agent_involvement(agent_id: str) -> dict:
+    """Per-(agent) summary of runs across projects — feeds get_my_involvement.
+
+    Joins forge_runs → tasks → projects so each project gets a roll-up of
+    run_count, last_active, and the tasks the agent has touched. Tokens
+    and cost come straight off forge_runs aggregates.
+    """
+    from backend.models import Task, Project
+    with _session() as db:
+        runs = (db.query(Run)
+                  .filter(Run.agent_id == agent_id)
+                  .order_by(Run.created_at.desc())
+                  .all())
+        if not runs:
+            return {
+                "agent_id": agent_id,
+                "total_runs": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost_usd": 0.0,
+                "projects": [],
+            }
+
+        total_in = 0
+        total_out = 0
+        total_cost = 0.0
+        # project_id -> {project_name, run_count, last_active, tasks: {task_id: {title, last_at}}}
+        by_project: dict[str, dict] = {}
+
+        for r in runs:
+            total_in += r.input_tokens
+            total_out += r.output_tokens
+            total_cost += r.cost_usd
+
+            # Resolve project — prefer the run's own project_id, fall back
+            # to the task's project. Both can be null for free-form chat.
+            project_id = r.project_id
+            task_title = ""
+            if r.task_id:
+                task = db.get(Task, r.task_id)
+                if task:
+                    task_title = task.title or ""
+                    if not project_id:
+                        project_id = task.project_id
+
+            if not project_id:
+                continue  # skip free-form runs that aren't project-scoped
+
+            bucket = by_project.setdefault(project_id, {
+                "project_name": "",
+                "run_count": 0,
+                "last_active": None,
+                "tasks": {},
+            })
+            bucket["run_count"] += 1
+            bucket["last_active"] = max(
+                bucket["last_active"] or r.created_at,
+                r.created_at,
+            )
+            if r.task_id:
+                t = bucket["tasks"].setdefault(r.task_id, {
+                    "task_id": r.task_id,
+                    "task_title": task_title,
+                    "last_run_at": r.created_at,
+                })
+                if r.created_at > t["last_run_at"]:
+                    t["last_run_at"] = r.created_at
+
+        # Backfill project names in one pass
+        for pid, bucket in by_project.items():
+            proj = db.get(Project, pid)
+            if proj:
+                bucket["project_name"] = proj.name or ""
+
+        projects_out = []
+        for pid, bucket in sorted(
+            by_project.items(),
+            key=lambda kv: kv[1]["last_active"] or datetime.min,
+            reverse=True,
+        ):
+            projects_out.append({
+                "project_id": pid,
+                "project_name": bucket["project_name"],
+                "run_count": bucket["run_count"],
+                "last_active": _iso(bucket["last_active"]),
+                "tasks_touched": sorted(
+                    [
+                        {**t, "last_run_at": _iso(t["last_run_at"])}
+                        for t in bucket["tasks"].values()
+                    ],
+                    key=lambda x: x["last_run_at"] or "",
+                    reverse=True,
+                ),
+            })
+
+        return {
+            "agent_id": agent_id,
+            "total_runs": len(runs),
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "total_cost_usd": round(total_cost, 4),
+            "projects": projects_out,
+        }
+
+
 def get_model_pricing() -> dict:
     """Return the pricing table so the frontend can estimate costs."""
     return MODEL_PRICING
@@ -1076,7 +1181,8 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      run_id: str | None = None, kind: str = "chat",
                      repo_path: str = "", conventions_md: str = "",
                      mcp_config_json: str = "", env_extra: dict | None = None,
-                     run_token: str = "") -> dict:
+                     run_token: str = "",
+                     user_context: dict | None = None) -> dict:
     """Single rail for invoking an agent.
 
     Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
@@ -1135,6 +1241,13 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     if run_id:
         start_run(run_id)
 
+    # Bundle user_context into env_extra so daemon-side code that already
+    # consumes env_extra (per AP-51's dispatch shape) picks it up without
+    # a new field on the WS frame. The daemon JSON-decodes it.
+    env_extra_combined = dict(env_extra or {})
+    if user_context:
+        env_extra_combined["AGENTIRA_USER_CONTEXT_JSON"] = json.dumps(user_context)
+
     asyncio.ensure_future(hub.dispatch_trigger(
         trace_id=trace_id,
         runtime_id=runtime_id,
@@ -1151,7 +1264,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         repo_path=repo_path,
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
-        env_extra=env_extra or {},
+        env_extra=env_extra_combined,
         run_token=run_token,
     ))
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
@@ -1553,15 +1666,51 @@ def get_run_events(run_id: str) -> list[dict]:
         return [_message_to_dict(m) for m in msgs]
 
 
-def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = None) -> dict:
-    """Send a message to the agent via runtime adapter, log both sides."""
+def send_runtime_message(
+    agent_id: str,
+    *,
+    content: str,
+    run_id: str | None = None,
+    user_context: dict | None = None,
+) -> dict:
+    """Send a message to the agent via runtime adapter, log both sides.
+
+    `user_context` (AP-76): per-call hint about where the user is. If it
+    carries a `project_id`, we resolve the project's repo_path / conventions
+    / mcp_config and forward them on the dispatch frame so the daemon can
+    spawn the runtime in the right cwd. The whole dict is also forwarded
+    so the daemon can render a synthetic system message ("you are helping
+    the user who is currently viewing …").
+    """
     from backend.forge import runtime_client
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"error": "Agent not found"}
         if a.runtime_id:
-            return dispatch_trigger(agent_id, content, run_id=run_id, kind="chat")
+            # Resolve project context from user_context's project_id (if any).
+            # No project_id → free-form chat, no cwd, no MCP project tools.
+            repo_path = ""
+            conventions_md = ""
+            mcp_config_json = ""
+            ctx = user_context if isinstance(user_context, dict) else {}
+            project_id = ctx.get("project_id")
+            if project_id:
+                from backend.forge.mcp_registry import build_mcp_config
+                from backend.models import Project
+                proj = db.get(Project, project_id)
+                if proj:
+                    repo_path = proj.repo_path or ""
+                    conventions_md = proj.conventions_md or ""
+                    cfg = build_mcp_config(a, project_id)
+                    mcp_config_json = json.dumps(cfg) if cfg else ""
+            return dispatch_trigger(
+                agent_id, content, run_id=run_id, kind="chat",
+                repo_path=repo_path,
+                conventions_md=conventions_md,
+                mcp_config_json=mcp_config_json,
+                user_context=user_context,
+            )
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"

@@ -226,14 +226,39 @@ class AgentiraDaemon:
         agent_system_prompt = frame.get("system_prompt", "")
         agent_name = frame.get("agent_name", "")
 
-        # Materialize the run env when there's a run_id (i.e. real task work,
-        # not free-floating chat). For chat triggers without run_id, skip
-        # materialization entirely — it would just clutter ~/.agentira/.
+        # Decode AP-76 user-context bundle if present. Frontend ships it
+        # via env_extra to avoid a new WS-frame field.
+        user_context: dict = {}
+        uc_raw = env_extra.get("AGENTIRA_USER_CONTEXT_JSON", "")
+        if uc_raw:
+            try:
+                import json as _json
+                parsed = _json.loads(uc_raw)
+                if isinstance(parsed, dict):
+                    user_context = parsed
+            except Exception as exc:
+                logger.debug("invalid user_context: %s", exc)
+
+        # Materialize the run env when we have somewhere to put it:
+        # - Task runs (run_id + task_id) → per-task workdir under ~/.agentira/.
+        # - Chat with a project (repo_path resolved from user_context) → write
+        #   CONVENTIONS.md + courtesy symlinks straight into the repo.
+        # - Free-form chat with no project → skip; runtime stays in daemon cwd.
         cwd_path = None
         if run_id and task_id:
             cwd_path, _ = materialize(
                 workspace_id=agent_id,
                 task_id=task_id,
+                repo_path=repo_path,
+                conventions_md=conventions_md,
+            )
+        elif repo_path:
+            # Chat in a project: don't allocate a workdir, just resolve the
+            # repo path so the runtime cwd is right. Materialize conventions
+            # there too — repo-local, idempotent, safe.
+            cwd_path, _ = materialize(
+                workspace_id=agent_id,
+                task_id="chat",
                 repo_path=repo_path,
                 conventions_md=conventions_md,
             )
@@ -243,11 +268,13 @@ class AgentiraDaemon:
         ensure_memory_dirs(mcp_config_json)
         have_memory = "memory" in (mcp_config_json or "")  # cheap probe
 
-        # Compose the system prompt: conventions + memory addenda + persona.
+        # Compose the system prompt: user-context preamble + conventions +
+        # memory addenda + persona, in that order.
         system_prompt = compose_system_prompt(
             agent_system_prompt,
             have_conventions=bool(cwd_path and conventions_md),
             have_memory=have_memory,
+            user_context=user_context or None,
         )
 
         logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",

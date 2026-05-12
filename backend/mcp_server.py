@@ -450,6 +450,43 @@ async def finish_run(
         logger.error(f"Tool finish_run failed: {e}\n{traceback.format_exc()}")
         raise
 
+@mcp.tool()
+async def get_my_involvement(ctx: Context = None) -> dict:
+    """Summarize what THIS agent has been involved in across projects.
+
+    Scoped to the calling agent — uses the AGENTIRA_AGENT_ID env var the
+    daemon injects on every dispatch (so the answer is always "you", never
+    another agent's data).
+
+    Returns a project-level summary:
+      {
+        agent_id: "<id>",
+        total_runs: N,
+        total_input_tokens: N,
+        total_output_tokens: N,
+        total_cost_usd: float,
+        projects: [{
+          project_id, project_name,
+          run_count, last_active,
+          tasks_touched: [{task_id, task_title, last_run_at}]
+        }],
+      }
+
+    Returns {error: "..."} if AGENTIRA_AGENT_ID isn't set (e.g. invoked
+    outside a dispatched run).
+    """
+    import os
+    agent_id = os.environ.get("AGENTIRA_AGENT_ID", "")
+    if not agent_id:
+        return {"error": "AGENTIRA_AGENT_ID env var not set; cannot scope involvement query."}
+    from backend.forge import services as forge_services
+    try:
+        return forge_services.get_agent_involvement(agent_id)
+    except Exception as e:
+        logger.error(f"Tool get_my_involvement failed: {e}\n{traceback.format_exc()}")
+        raise
+
+
 # ── Transport: Streamable HTTP ─────────────────────────────────────────────────
 # json_response=True → plain JSON body on POST (simpler, Bruno-compatible).
 # Switch to False when enabling server-push notifications via GET /mcp.
