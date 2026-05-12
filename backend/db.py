@@ -189,6 +189,7 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_agents", "runtime_id", "VARCHAR(12)")
             added |= _ensure_column(conn, "forge_agents", "schedule_cron", "VARCHAR(60)")
             added |= _ensure_column(conn, "forge_agents", "mcp_servers", "TEXT")
+            added |= _ensure_column(conn, "forge_agents", "default_project_id", "VARCHAR(12)")
             if added:
                 conn.commit()
 

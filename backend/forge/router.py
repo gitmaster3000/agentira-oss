@@ -45,6 +45,7 @@ class AgentUpdate(BaseModel):
     runtime_hooks_token: Optional[str] = None
     runtime_agent_name: Optional[str] = None
     runtime_id: Optional[str] = None
+    default_project_id: Optional[str] = None
     schedule_cron: Optional[str] = None
     mcp_servers: Optional[list[str]] = None
 
