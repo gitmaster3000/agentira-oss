@@ -90,7 +90,6 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_hooks_token": a.runtime_hooks_token or "",
         "runtime_agent_name": a.runtime_agent_name or "",
         "runtime_id": a.runtime_id,
-        "default_project_id": a.default_project_id,
         "schedule_cron": a.schedule_cron or "",
         "mcp_servers": json.loads(a.mcp_servers) if a.mcp_servers else [],
         "created_at": _iso(a.created_at),
@@ -1562,27 +1561,7 @@ def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = No
         if not a:
             return {"error": "Agent not found"}
         if a.runtime_id:
-            # Resolve project context from the agent's default project (if set)
-            # so chat picks up the right cwd + conventions + MCP. Free-form
-            # chat without a default project stays context-less.
-            repo_path = ""
-            conventions_md = ""
-            mcp_config_json = ""
-            if a.default_project_id:
-                from backend.forge.mcp_registry import build_mcp_config
-                from backend.models import Project
-                proj = db.get(Project, a.default_project_id)
-                if proj:
-                    repo_path = proj.repo_path or ""
-                    conventions_md = proj.conventions_md or ""
-                    cfg = build_mcp_config(a, a.default_project_id)
-                    mcp_config_json = json.dumps(cfg) if cfg else ""
-            return dispatch_trigger(
-                agent_id, content, run_id=run_id, kind="chat",
-                repo_path=repo_path,
-                conventions_md=conventions_md,
-                mcp_config_json=mcp_config_json,
-            )
+            return dispatch_trigger(agent_id, content, run_id=run_id, kind="chat")
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"
