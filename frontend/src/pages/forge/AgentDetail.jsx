@@ -424,11 +424,31 @@ function ChatTab({ agentId }) {
     const [autoScroll, setAutoScroll] = useState(true);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
+    // AP-76: per-chat-session project context. Stays in component state; we
+    // persist the last selection per-agent in localStorage so picking it
+    // every time gets annoying.
+    const projectStorageKey = `agentira:chat:${agentId}:projectId`;
+    const [projects, setProjects] = useState([]);
+    const [chatProjectId, setChatProjectId] = useState(
+        () => localStorage.getItem(projectStorageKey) || ''
+    );
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
 
     const msgCountRef = useRef(0);
+
+    useEffect(() => {
+        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
+    }, []);
+
+    useEffect(() => {
+        if (chatProjectId) {
+            localStorage.setItem(projectStorageKey, chatProjectId);
+        } else {
+            localStorage.removeItem(projectStorageKey);
+        }
+    }, [chatProjectId, projectStorageKey]);
 
     const loadMessages = useCallback(async () => {
         try {
@@ -459,7 +479,24 @@ function ChatTab({ agentId }) {
         if (!input.trim() || sending) return;
         setSending(true);
         try {
-            await api.forge.sendRuntimeChat(agentId, { content: input.trim() });
+            // AP-76: ride the per-call user-context bundle so the agent
+            // spawns in the right project cwd with conventions/MCP wired up.
+            const selectedProject = projects.find((p) => p.id === chatProjectId);
+            const user_context = chatProjectId
+                ? {
+                      surface: 'forge_agent_chat',
+                      route: window.location.pathname,
+                      project_id: chatProjectId,
+                      project_name: selectedProject?.name || '',
+                  }
+                : {
+                      surface: 'forge_agent_chat',
+                      route: window.location.pathname,
+                  };
+            await api.forge.sendRuntimeChat(agentId, {
+                content: input.trim(),
+                user_context,
+            });
             setInput('');
             await loadMessages();
         } catch (err) {
@@ -483,7 +520,23 @@ function ChatTab({ agentId }) {
         <div className="flex flex-col h-full">
             {/* Toolbar */}
             <div className="flex items-center justify-between px-6 py-2 border-b border-border-subtle bg-bg-panel">
-                <span className="text-sm text-text-secondary">{messages.length} messages</span>
+                <div className="flex items-center gap-3">
+                    <span className="text-sm text-text-secondary">{messages.length} messages</span>
+                    <div className="flex items-center gap-1.5">
+                        <label className="text-xs text-text-tertiary">Project:</label>
+                        <select
+                            className="input py-0.5 px-2 text-xs"
+                            value={chatProjectId}
+                            onChange={(e) => setChatProjectId(e.target.value)}
+                            title="Run this chat with a project's repo as cwd + CONVENTIONS.md + MCP toolset. Stays in localStorage per agent."
+                        >
+                            <option value="">— none —</option>
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
                 <div className="flex items-center gap-2">
                     <button onClick={loadMessages} className="btn btn-ghost py-1 px-2 text-xs">
                         <RefreshCw className="w-3 h-3" /> Refresh
@@ -755,6 +808,9 @@ function ConfigTab({ agent, onSaved }) {
                 <h3 className="text-sm font-semibold text-text-primary">Daemon Runtime</h3>
                 <p className="text-xs text-text-tertiary">
                     Which detected daemon runtime executes this agent. Runtimes are auto-registered when <code>agentira daemon start</code> runs.
+                </p>
+                <p className="text-xs text-text-tertiary">
+                    The runtime is an <strong>execution engine</strong> for this agent. Persona, tools, conventions, and memory are owned by Agentira and travel with the agent across runtimes — change the runtime here and the same agent runs on a different engine.
                 </p>
                 {runtimes.length === 0 ? (
                     <div className="px-3 py-4 rounded-md bg-bg-hover text-sm text-text-tertiary">
