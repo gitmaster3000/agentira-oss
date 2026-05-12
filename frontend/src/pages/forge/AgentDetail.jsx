@@ -670,55 +670,35 @@ function RunsTab({ agentId }) {
 
 function ConfigTab({ agent, onSaved }) {
     const [form, setForm] = useState({
-        name: agent.name,
-        model: agent.model,
-        executor_type: agent.executor_type,
-        webhook_url: agent.webhook_url,
-        system_prompt: agent.system_prompt,
-        personality: agent.personality,
-        runtime_type: agent.runtime_type,
-        runtime_url: agent.runtime_url,
-        runtime_gateway_token: agent.runtime_gateway_token,
-        runtime_hooks_token: agent.runtime_hooks_token,
-        runtime_agent_name: agent.runtime_agent_name,
+        name: agent.name || '',
+        profile_id: agent.profile_id || '',
+        model: agent.model || '',
+        runtime_id: agent.runtime_id || '',
+        default_project_id: agent.default_project_id || '',
+        system_prompt: agent.system_prompt || '',
+        personality: agent.personality || '',
     });
-    const [schedule, setSchedule] = useState({
-        start: agent.schedule_start,
-        end: agent.schedule_end,
-        tz: agent.schedule_tz,
-        days: agent.schedule_days,
-        enabled: agent.schedule_enabled,
-    });
+    const [botProfiles, setBotProfiles] = useState([]);
+    const [runtimes, setRuntimes] = useState([]);
+    const [projects, setProjects] = useState([]);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
-    const [showGwToken, setShowGwToken] = useState(false);
-    const [showHooksToken, setShowHooksToken] = useState(false);
-    const [availableModels, setAvailableModels] = useState([]);
 
     useEffect(() => {
-        api.forge.getOpenClawModels().then((data) => {
-            // Merge openclaw + pricing models, dedupe
-            const all = [...(data.openclaw_models || []), ...(data.pricing_models || [])];
-            const seen = new Set();
-            const deduped = all.filter((m) => {
-                if (seen.has(m.id)) return false;
-                seen.add(m.id);
-                return true;
-            });
-            setAvailableModels(deduped);
-        }).catch(() => {});
+        api.getProfiles('bot').catch(() => []).then(setBotProfiles);
+        api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
+        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
     }, []);
+
+    const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
+    // Models surfaced by the daemon for the selected runtime. Free-form input
+    // still works via the datalist — type anything claude-code accepts.
+    const runtimeModels = selectedRuntime?.models || [];
 
     const saveAgent = async () => {
         setSaving(true);
         try {
-            // Update OpenClaw config if model changed and agent has a runtime name
-            const runtimeName = form.runtime_agent_name || agent.runtime_agent_name;
-            if (form.model !== agent.model && runtimeName) {
-                await api.forge.setOpenClawAgentModel(runtimeName, form.model).catch(() => {});
-            }
             await api.forge.updateAgent(agent.id, form);
-            await api.forge.updateSchedule(agent.id, schedule);
             setMsg('Saved');
             onSaved();
             setTimeout(() => setMsg(''), 2000);
@@ -727,16 +707,6 @@ function ConfigTab({ agent, onSaved }) {
         } finally {
             setSaving(false);
         }
-    };
-
-    const DAY_OPTIONS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-    const activeDays = schedule.days.split(',').filter(Boolean);
-
-    const toggleDay = (day) => {
-        const newDays = activeDays.includes(day)
-            ? activeDays.filter(d => d !== day)
-            : [...activeDays, day];
-        setSchedule({ ...schedule, days: newDays.join(',') });
     };
 
     return (
@@ -751,78 +721,101 @@ function ConfigTab({ agent, onSaved }) {
                     </div>
                     <div>
                         <label className="block text-xs text-text-tertiary mb-1">Model</label>
-                        <select className="input" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}>
-                            <option value="">— select model —</option>
-                            {availableModels.length > 0 ? (
-                                availableModels.map((m) => (
-                                    <option key={m.id} value={m.id}>
-                                        {m.alias ? `${m.alias} (${m.id})` : m.id}
-                                    </option>
-                                ))
-                            ) : (
-                                <option value={form.model}>{form.model || 'loading...'}</option>
-                            )}
-                            {/* Keep current value if not in list */}
-                            {form.model && !availableModels.some(m => m.id === form.model) && (
-                                <option value={form.model}>{form.model} (current)</option>
-                            )}
+                        <input
+                            className="input"
+                            list="agent-model-options"
+                            value={form.model}
+                            onChange={(e) => setForm({ ...form, model: e.target.value })}
+                            placeholder={runtimeModels[0] || 'sonnet'}
+                        />
+                        <datalist id="agent-model-options">
+                            {runtimeModels.map((m) => <option key={m} value={m} />)}
+                        </datalist>
+                        <p className="text-xs text-text-tertiary mt-1">
+                            Pick from the daemon's catalog or type any value (e.g. <code>sonnet</code>, <code>claude-sonnet-4-5</code>, <code>sonnet[1m]</code>).
+                        </p>
+                    </div>
+                    <div className="col-span-2">
+                        <label className="block text-xs text-text-tertiary mb-1">Bot Profile</label>
+                        <select
+                            className="input"
+                            value={form.profile_id}
+                            onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
+                        >
+                            <option value="">— none —</option>
+                            {botProfiles.map(p => (
+                                <option key={p.id} value={p.id}>
+                                    {p.display_name || p.name} (@{p.name})
+                                </option>
+                            ))}
                         </select>
                     </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Executor</label>
-                        <select className="input" value={form.executor_type} onChange={(e) => setForm({ ...form, executor_type: e.target.value })}>
-                            <option value="http">HTTP</option>
-                            <option value="zeroclaw">ZeroClaw</option>
-                            <option value="cli">CLI</option>
+                    <div className="col-span-2">
+                        <label className="block text-xs text-text-tertiary mb-1">Default Project</label>
+                        <select
+                            className="input"
+                            value={form.default_project_id}
+                            onChange={(e) => setForm({ ...form, default_project_id: e.target.value })}
+                        >
+                            <option value="">— none (chat runs without project context) —</option>
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>
+                                    {p.name}{p.repo_path ? ` · ${p.repo_path}` : ''}
+                                </option>
+                            ))}
                         </select>
-                    </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Webhook URL</label>
-                        <input className="input" value={form.webhook_url} onChange={(e) => setForm({ ...form, webhook_url: e.target.value })} />
+                        <p className="text-xs text-text-tertiary mt-1">
+                            When set, free-form chat runs with the project's repo as cwd + CONVENTIONS.md + MCP toolset. Task runs always inherit from the task's project regardless of this setting.
+                        </p>
                     </div>
                 </div>
             </section>
 
-            {/* Runtime Connection */}
+            {/* Daemon Runtime */}
             <section className="card space-y-4">
-                <h3 className="text-sm font-semibold text-text-primary">Runtime Connection</h3>
-                <p className="text-xs text-text-tertiary">Connect to the OpenClaw (or other) gateway that runs this agent. Forge proxies through this to show real data.</p>
-                <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Runtime Type</label>
-                        <select className="input" value={form.runtime_type} onChange={(e) => setForm({ ...form, runtime_type: e.target.value })}>
-                            <option value="openclaw">OpenClaw</option>
-                            <option value="zeroclaw">ZeroClaw</option>
-                            <option value="openai">OpenAI-compatible</option>
-                        </select>
+                <h3 className="text-sm font-semibold text-text-primary">Daemon Runtime</h3>
+                <p className="text-xs text-text-tertiary">
+                    Which detected daemon runtime executes this agent. Runtimes are auto-registered when <code>agentira daemon start</code> runs.
+                </p>
+                {runtimes.length === 0 ? (
+                    <div className="px-3 py-4 rounded-md bg-bg-hover text-sm text-text-tertiary">
+                        No daemon runtimes registered. Start the daemon on a machine with claude-code / codex / gemini-cli installed.
                     </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Agent Name (model routing)</label>
-                        <input className="input" placeholder="e.g. architect, frontend" value={form.runtime_agent_name} onChange={(e) => setForm({ ...form, runtime_agent_name: e.target.value })} />
-                    </div>
-                    <div className="col-span-2">
-                        <label className="block text-xs text-text-tertiary mb-1">Gateway URL</label>
-                        <input className="input" placeholder="http://127.0.0.1:18789" value={form.runtime_url} onChange={(e) => setForm({ ...form, runtime_url: e.target.value })} />
-                    </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Gateway Token</label>
-                        <div className="relative">
-                            <input className="input pr-9" type={showGwToken ? 'text' : 'password'} placeholder="For /v1/chat/completions + WS RPC" value={form.runtime_gateway_token} onChange={(e) => setForm({ ...form, runtime_gateway_token: e.target.value })} />
-                            <button type="button" onClick={() => setShowGwToken(!showGwToken)} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary transition-colors">
-                                {showGwToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
+                ) : (
+                    <>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Runtime</label>
+                            <select
+                                className="input"
+                                value={form.runtime_id}
+                                onChange={(e) => setForm({ ...form, runtime_id: e.target.value, model: '' })}
+                            >
+                                <option value="">— select runtime —</option>
+                                {runtimes.map((r) => (
+                                    <option key={r.id} value={r.id}>
+                                        {r.provider} {r.version ? `· ${r.version}` : ''} {r.device_name ? `· ${r.device_name}` : ''} ({r.status})
+                                    </option>
+                                ))}
+                            </select>
                         </div>
-                    </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Hooks Token</label>
-                        <div className="relative">
-                            <input className="input pr-9" type={showHooksToken ? 'text' : 'password'} placeholder="For /hooks/agent triggers" value={form.runtime_hooks_token} onChange={(e) => setForm({ ...form, runtime_hooks_token: e.target.value })} />
-                            <button type="button" onClick={() => setShowHooksToken(!showHooksToken)} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary transition-colors">
-                                {showHooksToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                        {selectedRuntime && (
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                <Info label="Provider" value={selectedRuntime.provider} />
+                                <Info label="Version" value={selectedRuntime.version || '—'} />
+                                <Info label="Device" value={selectedRuntime.device_name || '—'} />
+                                <Info label="Status" value={selectedRuntime.status} accent={selectedRuntime.status === 'online' ? '#10b981' : '#9aa0a6'} />
+                                <div className="col-span-2">
+                                    <Info label="Binary" value={selectedRuntime.binary_path} mono />
+                                </div>
+                                {selectedRuntime.models?.length > 0 && (
+                                    <div className="col-span-2">
+                                        <Info label={`Models (${selectedRuntime.models.length})`} value={selectedRuntime.models.join(', ')} mono />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </>
+                )}
             </section>
 
             {/* Personality */}
@@ -848,52 +841,18 @@ function ConfigTab({ agent, onSaved }) {
                 </div>
             </section>
 
-            {/* Schedule */}
-            <section className="card space-y-4">
+            {/* Schedule — placeholder */}
+            <section className="card space-y-2 opacity-60">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-text-primary">Work Schedule</h3>
-                    <button
-                        onClick={() => setSchedule({ ...schedule, enabled: !schedule.enabled })}
-                        className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1 rounded-full transition-colors ${
-                            schedule.enabled ? 'bg-emerald-500/15 text-emerald-400' : 'bg-bg-hover text-text-tertiary'
-                        }`}
-                    >
-                        {schedule.enabled ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                        {schedule.enabled ? 'Enabled' : 'Disabled'}
-                    </button>
+                    <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        Work Schedule
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-bg-hover text-text-tertiary">Coming soon</span>
                 </div>
-                <div className="grid grid-cols-3 gap-4">
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Start Time</label>
-                        <input type="time" className="input" value={schedule.start} onChange={(e) => setSchedule({ ...schedule, start: e.target.value })} />
-                    </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">End Time</label>
-                        <input type="time" className="input" value={schedule.end} onChange={(e) => setSchedule({ ...schedule, end: e.target.value })} />
-                    </div>
-                    <div>
-                        <label className="block text-xs text-text-tertiary mb-1">Timezone</label>
-                        <input className="input" value={schedule.tz} onChange={(e) => setSchedule({ ...schedule, tz: e.target.value })} />
-                    </div>
-                </div>
-                <div>
-                    <label className="block text-xs text-text-tertiary mb-2">Work Days</label>
-                    <div className="flex gap-2">
-                        {DAY_OPTIONS.map((day) => (
-                            <button
-                                key={day}
-                                onClick={() => toggleDay(day)}
-                                className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase transition-colors ${
-                                    activeDays.includes(day)
-                                        ? 'bg-accent-primary text-white'
-                                        : 'bg-bg-hover text-text-tertiary hover:text-text-secondary'
-                                }`}
-                            >
-                                {day}
-                            </button>
-                        ))}
-                    </div>
-                </div>
+                <p className="text-xs text-text-tertiary">
+                    Cron-style scheduling will be wired up via the daemon's scheduler. For now, agents only fire on explicit triggers.
+                </p>
             </section>
 
             {/* Save */}
@@ -902,6 +861,20 @@ function ConfigTab({ agent, onSaved }) {
                     {saving ? 'Saving...' : 'Save Configuration'}
                 </button>
                 {msg && <span className={`text-sm ${msg.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'}`}>{msg}</span>}
+            </div>
+        </div>
+    );
+}
+
+function Info({ label, value, mono, accent }) {
+    return (
+        <div>
+            <div className="text-text-tertiary uppercase tracking-wider text-[10px] mb-0.5">{label}</div>
+            <div
+                className={`text-text-primary ${mono ? 'font-mono break-all' : ''}`}
+                style={accent ? { color: accent } : undefined}
+            >
+                {value}
             </div>
         </div>
     );
