@@ -674,20 +674,17 @@ function ConfigTab({ agent, onSaved }) {
         profile_id: agent.profile_id || '',
         model: agent.model || '',
         runtime_id: agent.runtime_id || '',
-        default_project_id: agent.default_project_id || '',
         system_prompt: agent.system_prompt || '',
         personality: agent.personality || '',
     });
     const [botProfiles, setBotProfiles] = useState([]);
     const [runtimes, setRuntimes] = useState([]);
-    const [projects, setProjects] = useState([]);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
 
     useEffect(() => {
         api.getProfiles('bot').catch(() => []).then(setBotProfiles);
         api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
-        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
     }, []);
 
     const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
@@ -749,24 +746,6 @@ function ConfigTab({ agent, onSaved }) {
                                 </option>
                             ))}
                         </select>
-                    </div>
-                    <div className="col-span-2">
-                        <label className="block text-xs text-text-tertiary mb-1">Default Project</label>
-                        <select
-                            className="input"
-                            value={form.default_project_id}
-                            onChange={(e) => setForm({ ...form, default_project_id: e.target.value })}
-                        >
-                            <option value="">— none (chat runs without project context) —</option>
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>
-                                    {p.name}{p.repo_path ? ` · ${p.repo_path}` : ''}
-                                </option>
-                            ))}
-                        </select>
-                        <p className="text-xs text-text-tertiary mt-1">
-                            When set, free-form chat runs with the project's repo as cwd + CONVENTIONS.md + MCP toolset. Task runs always inherit from the task's project regardless of this setting.
-                        </p>
                     </div>
                 </div>
             </section>
