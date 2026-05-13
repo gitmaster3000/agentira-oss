@@ -471,10 +471,15 @@ function ChatTab({ agentId, agent }) {
         try {
             const data = await api.forge.listMessages(agentId, { limit: 200 });
             // Preserve any local-only messages (e.g. /context output) so the
-            // 3s poll doesn't wipe them. They have id prefix "local-".
+            // 3s poll doesn't wipe them, and interleave them by created_at
+            // so the local card sits chronologically where the user typed it.
             setMessages((prev) => {
                 const locals = (prev || []).filter(m => String(m.id).startsWith('local-'));
-                return [...(data || []), ...locals];
+                return [...(data || []), ...locals].sort((a, b) => {
+                    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+                    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+                    return ta - tb;
+                });
             });
         } catch (err) {
             console.error('Failed to load messages:', err);
