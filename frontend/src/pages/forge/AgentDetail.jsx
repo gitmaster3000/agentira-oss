@@ -727,21 +727,18 @@ function RunsTab({ agentId }) {
 function ConfigTab({ agent, onSaved }) {
     const [form, setForm] = useState({
         name: agent.name || '',
-        profile_id: agent.profile_id || '',
         model: agent.model || '',
         runtime_id: agent.runtime_id || '',
         default_project_id: agent.default_project_id || '',
         system_prompt: agent.system_prompt || '',
         personality: agent.personality || '',
     });
-    const [botProfiles, setBotProfiles] = useState([]);
     const [runtimes, setRuntimes] = useState([]);
     const [projects, setProjects] = useState([]);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
 
     useEffect(() => {
-        api.getProfiles('bot').catch(() => []).then(setBotProfiles);
         api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
         api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
     }, []);
@@ -791,21 +788,8 @@ function ConfigTab({ agent, onSaved }) {
                             Pick from the daemon's catalog or type any value (e.g. <code>sonnet</code>, <code>claude-sonnet-4-5</code>, <code>sonnet[1m]</code>).
                         </p>
                     </div>
-                    <div className="col-span-2">
-                        <label className="block text-xs text-text-tertiary mb-1">Bot Profile</label>
-                        <select
-                            className="input"
-                            value={form.profile_id}
-                            onChange={(e) => setForm({ ...form, profile_id: e.target.value })}
-                        >
-                            <option value="">— none —</option>
-                            {botProfiles.map(p => (
-                                <option key={p.id} value={p.id}>
-                                    {p.display_name || p.name} (@{p.name})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                    {/* AP-86: no more "bot profile" picker. The agent IS the
+                        profile (1:1 by id). Identity is implicit. */}
                     <div className="col-span-2">
                         <label className="block text-xs text-text-tertiary mb-1">Project assignment</label>
                         <select

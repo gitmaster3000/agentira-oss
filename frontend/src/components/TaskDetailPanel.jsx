@@ -114,15 +114,27 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         }
     };
 
+    // AP-86: if the task is assigned to an agent (any profile that has a
+    // runtime is an agent), dispatch to that agent directly — no picker.
+    // Only show the picker when there's no agent assignee.
     const openAgentPicker = async () => {
-        setPickingAgent(true);
         try {
             const data = await api.forge.listAgents();
-            // Only agents bound to a runtime can run anything.
-            setForgeAgents(Array.isArray(data) ? data.filter(a => a.runtime_id) : []);
+            const runnable = (Array.isArray(data) ? data : []).filter(a => a.runtime_id);
+            const assignedAgent = task?.assignee
+                ? runnable.find(a => a.name === task.assignee)
+                : null;
+            if (assignedAgent && assignedAgent.status === 'online') {
+                // Fast path: skip picker, run as the assignee.
+                handleScheduleRun(assignedAgent.id);
+                return;
+            }
+            setForgeAgents(runnable);
+            setPickingAgent(true);
         } catch (err) {
             console.error('Failed to load agents:', err);
             setForgeAgents([]);
+            setPickingAgent(true);
         }
     };
 
@@ -693,7 +705,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
                                     className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
                                 >
-                                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
+                                    <Play className="w-3 h-3" /> {pickingAgent
+                                        ? 'Cancel'
+                                        : (task?.assignee ? `Run as @${task.assignee}` : 'Pick agent to run')}
                                 </button>
                             </div>
 

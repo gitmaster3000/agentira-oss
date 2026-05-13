@@ -5,15 +5,18 @@ import { api } from '../api';
 export function CreateAgentModal({ onClose, onSuccess }) {
     const [name, setName] = useState('');
     const [runtimeId, setRuntimeId] = useState('');
+    const [profileId, setProfileId] = useState('');
     const [model, setModel] = useState('');
     const [customModel, setCustomModel] = useState('');
     const [runtimes, setRuntimes] = useState([]);
+    const [botProfiles, setBotProfiles] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const modalRef = useRef(null);
 
     useEffect(() => {
         api.forge.listRuntimes().catch(() => []).then(setRuntimes);
+        api.getProfiles('bot').catch(() => []).then(setBotProfiles);
     }, []);
 
     const onlineRuntimes = useMemo(
@@ -48,6 +51,7 @@ export function CreateAgentModal({ onClose, onSuccess }) {
                 runtime_id: runtimeId,
                 model: effectiveModel,
                 executor_type: 'cli',
+                profile_id: profileId || null,
             });
             onSuccess?.();
             onClose();
@@ -119,6 +123,8 @@ export function CreateAgentModal({ onClose, onSuccess }) {
                         />
                     </div>
 
+                    {/* AP-86: bot↔agent merge. No "bot profile" picker — the agent's
+                        backing profile is auto-created with the same id when you save. */}
                     <div>
                         <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
                             Runtime <span style={{ color: '#ef4444' }}>*</span>

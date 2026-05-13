@@ -112,8 +112,8 @@ export function Settings() {
     // ... handleCreateBot, handleCopyKey, handleCopyConfig, handleDeleteBot, handleDeleteProfile unchanged ...
     async function handleCreateBot() {
         setPromptState({
-            title: "Create New Bot",
-            description: "Enter a name for your new service account:",
+            title: "Create New Agent",
+            description: "Enter a name for your new agent (service account):",
             value: "",
             onConfirm: async (name) => {
                 if (!name) return;
@@ -168,8 +168,8 @@ export function Settings() {
 
     async function handleDeleteBot(id, name) {
         setConfirmState({
-            title: "Delete Bot",
-            description: `Are you sure you want to delete bot "${name}"? This cannot be undone.`,
+            title: "Delete Agent",
+            description: `Are you sure you want to delete agent "${name}"? This cannot be undone.`,
             onConfirm: async () => {
                 try {
                     await api.deleteServiceAccount(id);
@@ -318,48 +318,8 @@ export function Settings() {
                             </section>
                         )}
 
-                        {/* ── Service Accounts / Bots ─────────────────────────────────── */}
-                        <section className="grid gap-3">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-                                    <Bot className="w-4 h-4" /> Service Accounts (Bots)
-                                </h3>
-                                <button
-                                    onClick={handleCreateBot}
-                                    className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-white font-medium transition-colors flex items-center gap-1.5"
-                                >
-                                    <Plus className="w-3 h-3" /> Create Bot
-                                </button>
-                            </div>
-
-                            <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
-                                <div className="space-y-3">
-                                    {bots.length === 0 && (
-                                        <div className="text-center py-8 text-xs italic flex flex-col items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-                                            <Bot className="w-8 h-8 opacity-20" />
-                                            No service accounts yet.
-                                        </div>
-                                    )}
-                                    {bots.map(bot => (
-                                        <div key={bot.id} className="flex items-center justify-between p-3 rounded border transition-colors hover:bg-white/5" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'var(--border-subtle)' }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                                                    <Bot className="w-5 h-5" />
-                                                </div>
-                                                <div>
-                                                    <div className="font-medium text-sm">{bot.display_name}</div>
-                                                    <div className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>@{bot.name}</div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1"><Copy className="w-3 h-3" /> Config</button>
-                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors"><Trash2 className="w-4 h-4" /></button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </section>
+                        {/* AP-86: Service Accounts section removed — agents (bots+runtime) are
+                            managed in Forge → Agents. The api-key + MCP config live there now. */}
 
                         {/* ── Admin: All Profiles ────────────────────────────────────── */}
                         {isAdmin && (
