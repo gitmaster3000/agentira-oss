@@ -1011,6 +1011,7 @@ function Info({ label, value, mono, accent }) {
 // ── Projects Tab ───────────────────────────────────────────────────────
 
 function ProjectsTab({ agentId }) {
+    const navigate = useNavigate();
     const [projects, setProjects] = useState(null);
 
     useEffect(() => {
@@ -1035,7 +1036,6 @@ function ProjectsTab({ agentId }) {
         );
     }
 
-    const navigate = useNavigate();
     return (
         <div className="p-6">
             <div className="card p-0 overflow-hidden">
