@@ -11,9 +11,18 @@ Read this before adding UI. The codebase follows **Material Design 3** loosely, 
 | Inline edit (Pencil) | `p-0.5 text-text-tertiary hover:text-text-secondary transition-colors` + `<Pencil className="w-3 h-3"/>` | Tiny icon-only button next to an editable field. Triggers an inline `<input>` swap. See `TaskDetailPanel.jsx` branch/pr_url for the canonical pattern. |
 | Inline copy | Same as above but with `<Copy/>` + `hover:text-accent-primary` | Copy-to-clipboard next to a value. Use `<Check className="text-green-500"/>` for the brief "copied!" confirmation state. |
 | Destructive | `text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10` | Delete buttons. Icon-only with `<Trash2 className="w-4 h-4"/>`. NEVER use `.btn-primary` for destructive — confusing. |
-| Small action chip | `text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 flex items-center gap-1` | Compact row actions where `.btn` would dominate. Used in service-account rows, file attachment rows, etc. |
+| Row action (icon-only) | `p-1.5 rounded text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors` + `title="…"` | **Required** style for action buttons sitting in a list row (rename, copy key, copy config, delete, etc.). Always icon-only with a `title` tooltip — NEVER mix icon+text chips with icon-only chips in the same row, they look inconsistent. Destructive variant: swap `text-red-400 hover:text-red-300 hover:bg-red-500/10`. Canonical example: `TaskDetailPanel.jsx` branch/pr_url row, `Settings.jsx` service-account row. |
 
 **Never** write `bg-purple-600 hover:bg-purple-500 rounded text-white` inline for a primary button. That's just `.btn .btn-primary`. The accent color is theme-token-driven; hard-coding purple breaks dark/light or future re-themes.
+
+## Create / trigger buttons
+
+Two contexts, two looks:
+
+- **Top-of-list / header trigger** (opens a create modal): `btn btn-primary` with a leading `<Plus className="w-4 h-4"/>` icon + text label. Label format is `New X` or `Create X`. Examples: `Settings.jsx` "New Service Account", `AgentsDashboard.jsx` "New Agent", Navbar dropdown "Create Project".
+- **Modal submit** (commits the create): `btn btn-primary` with **text only, no icon**. Label is `Create X` (or `Saving…`/`Creating…` while pending). Examples: `CreateTaskModal.jsx` "Create Task", `CreateProjectModal.jsx` "Create Project".
+
+Don't mix the two. Triggers use the icon for discoverability in a crowded header; submits are committal and text-only is the MD3 convention.
 
 ## Inline editing pattern
 

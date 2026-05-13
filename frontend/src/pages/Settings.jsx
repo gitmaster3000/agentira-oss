@@ -416,9 +416,15 @@ export function Settings() {
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1 shrink-0">
-                                                <button onClick={() => handleCopyApiKey(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy API key"><Key className="w-3 h-3" /> Key</button>
-                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy MCP server config"><Copy className="w-3 h-3" /> MCP</button>
-                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                                                <button onClick={() => handleCopyApiKey(bot.id)} className="p-1.5 rounded text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors" title="Copy API key">
+                                                    <Key className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleCopyConfig(bot.id)} className="p-1.5 rounded text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors" title="Copy MCP server config">
+                                                    <Copy className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="p-1.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors" title="Delete">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </div>
                                         );
