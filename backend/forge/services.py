@@ -1807,7 +1807,11 @@ def send_runtime_message(
                 if proj:
                     repo_path = proj.repo_path or ""
                     conventions_md = proj.conventions_md or ""
-                    cfg = build_mcp_config(a, project_id)
+                    cfg = build_mcp_config(
+                        agent_mcp_servers=json.loads(a.mcp_servers) if a.mcp_servers else None,
+                        agent_id=a.id,
+                        project_id=project_id,
+                    )
                     mcp_config_json = json.dumps(cfg) if cfg else ""
             return dispatch_trigger(
                 agent_id, content, run_id=run_id, kind="chat",
