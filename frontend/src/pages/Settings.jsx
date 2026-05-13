@@ -184,26 +184,22 @@ export function Settings() {
         });
     }
 
-    // AP-87 follow-up: rename service account (updates profile display_name).
-    async function handleRenameServiceAccount(id, currentName) {
-        setPromptState({
-            title: "Rename service account",
-            description: "New display name:",
-            value: currentName || "",
-            onConfirm: async (val) => {
-                const trimmed = (val || "").trim();
-                if (!trimmed) { setPromptState(null); return; }
-                try {
-                    await api.updateProfile(id, { display_name: trimmed });
-                    await loadGeneralData();
-                } catch (err) {
-                    alert(err.message);
-                } finally {
-                    setPromptState(null);
-                }
-            },
-            onCancel: () => setPromptState(null),
-        });
+    // AP-87 follow-up: inline rename. Click the display_name → becomes
+    // an <input> → Enter or blur saves. Matches the editing pattern used
+    // elsewhere (TaskDetailPanel branch/pr_url).
+    const [editingBotId, setEditingBotId] = useState(null);
+    const [editingBotValue, setEditingBotValue] = useState("");
+
+    async function commitBotRename(id) {
+        const trimmed = (editingBotValue || "").trim();
+        setEditingBotId(null);
+        if (!trimmed) return;
+        try {
+            await api.updateProfile(id, { display_name: trimmed });
+            await loadGeneralData();
+        } catch (err) {
+            alert(err.message);
+        }
     }
 
     // AP-87 follow-up: copy the service account's raw API key to clipboard.
@@ -366,9 +362,9 @@ export function Settings() {
                                 </div>
                                 <button
                                     onClick={handleCreateBot}
-                                    className="shrink-0 text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-white font-medium transition-colors flex items-center gap-1.5"
+                                    className="btn btn-primary shrink-0"
                                 >
-                                    <Plus className="w-3 h-3" /> New Service Account
+                                    <Plus className="w-4 h-4" /> New Service Account
                                 </button>
                             </div>
 
@@ -380,25 +376,53 @@ export function Settings() {
                                             No service accounts yet.
                                         </div>
                                     )}
-                                    {bots.filter(b => !b.runtime_id).map(bot => (
+                                    {bots.filter(b => !b.runtime_id).map(bot => {
+                                        const isEditing = editingBotId === bot.id;
+                                        return (
                                         <div key={bot.id} className="flex items-center justify-between p-3 rounded border transition-colors hover:bg-white/5" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'var(--border-subtle)' }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
                                                     <Bot className="w-5 h-5" />
                                                 </div>
-                                                <div>
-                                                    <div className="font-medium text-sm">{bot.display_name}</div>
+                                                <div className="min-w-0 flex-1">
+                                                    {isEditing ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editingBotValue}
+                                                            onChange={(e) => setEditingBotValue(e.target.value)}
+                                                            onBlur={() => commitBotRename(bot.id)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') { e.preventDefault(); commitBotRename(bot.id); }
+                                                                if (e.key === 'Escape') { setEditingBotId(null); }
+                                                            }}
+                                                            className="font-medium text-sm bg-transparent border-b focus:outline-none w-full max-w-[280px] py-0.5 text-text-primary"
+                                                            style={{ borderColor: 'var(--accent-primary)' }}
+                                                        />
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 group">
+                                                            <span className="font-medium text-sm text-text-primary truncate max-w-[260px]">
+                                                                {bot.display_name}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => { setEditingBotId(bot.id); setEditingBotValue(bot.display_name || ''); }}
+                                                                className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                                                                title="Rename"
+                                                            >
+                                                                <Pencil className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                     <div className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>@{bot.name}</div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => handleRenameServiceAccount(bot.id, bot.display_name)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Rename"><Pencil className="w-3 h-3" /> Rename</button>
-                                                <button onClick={() => handleCopyApiKey(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy API key"><Key className="w-3 h-3" /> Copy key</button>
-                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy MCP server config"><Copy className="w-3 h-3" /> MCP Config</button>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                <button onClick={() => handleCopyApiKey(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy API key"><Key className="w-3 h-3" /> Key</button>
+                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy MCP server config"><Copy className="w-3 h-3" /> MCP</button>
                                                 <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </section>
