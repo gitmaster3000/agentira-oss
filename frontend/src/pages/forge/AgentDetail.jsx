@@ -671,50 +671,53 @@ function ChatTab({ agentId, agent }) {
             </div>
 
             {/* Send bar */}
-            <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel">
-                {/* Attached-context chip + project picker popover */}
-                {(attachedProject || contextOpen) && (
-                    <div className="mb-2 flex items-start gap-2 flex-wrap">
-                        {attachedProject && (
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-accent-subtle text-accent-primary text-xs">
-                                <span>📎 {attachedProject.name}</span>
-                                <button
-                                    onClick={() => setAttachedProject(null)}
-                                    className="hover:text-text-primary"
-                                    title="Remove attachment"
-                                >
-                                    <X className="w-3 h-3" />
-                                </button>
-                            </div>
-                        )}
-                        {contextOpen && (
-                            <div className="rounded-md border border-border-subtle bg-bg-panel p-2 w-full max-w-sm">
-                                <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5 px-1">
-                                    Attach project context
-                                </div>
-                                {agentProjects.length === 0 ? (
-                                    <div className="text-xs text-text-tertiary px-2 py-2">
-                                        Agent isn't assigned to any project yet.
-                                    </div>
-                                ) : (
-                                    agentProjects.map((p) => (
-                                        <button
-                                            key={p.id}
-                                            onClick={() => { setAttachedProject(p); setContextOpen(false); }}
-                                            className="w-full text-left px-2 py-1.5 rounded hover:bg-bg-hover text-sm text-text-primary flex items-center justify-between"
-                                        >
-                                            <span className="truncate">{p.name}</span>
-                                            {p.key_prefix && (
-                                                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary ml-2">{p.key_prefix}</span>
-                                            )}
-                                        </button>
-                                    ))
-                                )}
-                            </div>
-                        )}
+            <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel relative">
+                {/* Floating: attached-project chip (sits above the input row, doesn't push it) */}
+                {attachedProject && (
+                    <div className="absolute bottom-full left-6 mb-1 flex">
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-accent-subtle text-accent-primary text-xs shadow-md">
+                            <span>📎 {attachedProject.name}</span>
+                            <button
+                                onClick={() => setAttachedProject(null)}
+                                className="hover:text-text-primary"
+                                title="Remove attachment"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        </div>
                     </div>
                 )}
-                {/* Slash-command auto-suggest */}
+                {/* Floating: project picker popover, anchored to the + button. Closes
+                    on outside click via a transparent backdrop. */}
+                {contextOpen && (
+                    <>
+                        <div className="fixed inset-0 z-10" onClick={() => setContextOpen(false)} />
+                        <div className="absolute bottom-full left-6 mb-2 z-20 rounded-md border border-border-subtle bg-bg-panel p-2 w-72 shadow-lg">
+                            <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5 px-1">
+                                Attach project context
+                            </div>
+                            {agentProjects.length === 0 ? (
+                                <div className="text-xs text-text-tertiary px-2 py-2">
+                                    Agent isn't assigned to any project yet.
+                                </div>
+                            ) : (
+                                agentProjects.map((p) => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => { setAttachedProject(p); setContextOpen(false); }}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-bg-hover text-sm text-text-primary flex items-center justify-between"
+                                    >
+                                        <span className="truncate">{p.name}</span>
+                                        {p.key_prefix && (
+                                            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary ml-2">{p.key_prefix}</span>
+                                        )}
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </>
+                )}
+                {/* Floating: slash-command suggestions, anchored above the input */}
                 <SlashCommandSuggest input={input} onPick={(cmd) => {
                     setInput(cmd + ' ');
                     inputRef.current?.focus();
@@ -758,14 +761,14 @@ function SlashCommandSuggest({ input, onPick }) {
     const matches = SLASH_COMMANDS.filter(c => c.name.slice(1).startsWith(query));
     if (matches.length === 0) return null;
     return (
-        <div className="mb-2 rounded-md border border-border-subtle bg-bg-panel shadow-lg overflow-hidden">
+        <div className="absolute bottom-full left-16 right-16 mb-1 z-20 rounded-md border border-border-subtle bg-bg-panel shadow-lg overflow-hidden max-w-md">
             <div className="text-[10px] uppercase tracking-wider text-text-tertiary px-3 py-1.5 bg-bg-hover/50">
                 Slash commands
             </div>
             {matches.map(cmd => (
                 <button
                     key={cmd.name}
-                    onClick={() => onPick(cmd.name)}
+                    onMouseDown={(e) => { e.preventDefault(); onPick(cmd.name); }}
                     className="w-full text-left px-3 py-2 hover:bg-bg-hover flex items-center gap-3 transition-colors"
                 >
                     <code className="text-sm text-accent-primary font-mono">{cmd.name}</code>
