@@ -470,7 +470,12 @@ function ChatTab({ agentId, agent }) {
     const loadMessages = useCallback(async () => {
         try {
             const data = await api.forge.listMessages(agentId, { limit: 200 });
-            setMessages(data);
+            // Preserve any local-only messages (e.g. /context output) so the
+            // 3s poll doesn't wipe them. They have id prefix "local-".
+            setMessages((prev) => {
+                const locals = (prev || []).filter(m => String(m.id).startsWith('local-'));
+                return [...(data || []), ...locals];
+            });
         } catch (err) {
             console.error('Failed to load messages:', err);
         } finally {
@@ -525,26 +530,76 @@ function ChatTab({ agentId, agent }) {
                 else if (ctx.project_id === agent?.default_project_id) projectSource = 'from agent assignment';
                 else projectSource = 'from current screen';
             }
-            const summary = [
-                `Surface: ${ctx.surface}`,
-                `Route: ${ctx.route}`,
-                ctx.project_id
-                    ? `Project: ${ctx.project_name || ctx.project_id} (${projectSource})`
-                    : 'Project: — none (agent has no assignment, no screen context, nothing attached)',
-                '',
-                'Task context (when the agent calls mcp__agentira__get_task): pulled on demand from the Agentira MCP — not eagerly attached.',
-            ].join('\n');
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: `local-context-${Date.now()}`,
-                    role: 'system',
-                    content: summary,
-                    created_at: new Date().toISOString(),
-                },
-            ]);
+            // Pull the live dispatch preview so the user sees the FULL picture
+            // (MCP servers, env vars, system-prompt addenda) computed by the
+            // same code path that real dispatches use.
             setInput('');
             inputRef.current?.focus();
+            try {
+                const preview = await api.forge.getDispatchPreview(agentId, ctx.project_id);
+                const lines = [
+                    `━━━ /context for @${preview.agent?.name || agent?.name} ━━━`,
+                    '',
+                    `Surface: ${ctx.surface}`,
+                    `Route: ${ctx.route}`,
+                    '',
+                    'PROJECT',
+                    ctx.project_id
+                        ? `  ${preview.project?.name || ctx.project_id} (${projectSource})`
+                        : '  none — chat runs without a project cwd',
+                    preview.project?.repo_path
+                        ? `  repo_path: ${preview.project.repo_path}`
+                        : null,
+                    preview.project?.conventions_md_preview
+                        ? `  conventions: "${preview.project.conventions_md_preview.replace(/\n/g, ' ⏎ ').slice(0, 120)}…"`
+                        : null,
+                    '',
+                    'RUNTIME',
+                    `  provider: ${preview.agent?.runtime_provider || '—'}`,
+                    `  model:    ${preview.agent?.model || '—'}`,
+                    '',
+                    'MCP SERVERS',
+                    preview.mcp_servers?.length
+                        ? preview.mcp_servers.map(s => `  · ${s}`).join('\n')
+                        : '  none (free-form chat with no project)',
+                    '',
+                    'ENV VARS (injected at dispatch)',
+                    ...preview.env_vars?.injected_by_daemon?.map(k => `  · ${k}`) || [],
+                    preview.env_vars?.user_provided_names?.length
+                        ? `  user-provided: ${preview.env_vars.user_provided_names.join(', ')}`
+                        : null,
+                    '',
+                    'SYSTEM-PROMPT ADDENDA',
+                    `  conventions pointer: ${preview.system_prompt_addenda?.conventions_pointer_will_be_added ? 'yes' : 'no'}`,
+                    `  memory addendum:     ${preview.system_prompt_addenda?.memory_addendum_will_be_added ? 'yes' : 'no'}`,
+                    `  screen/page preamble: yes (built per-call from route)`,
+                    '',
+                    preview.persona_system_prompt
+                        ? `PERSONA SYSTEM PROMPT\n  "${preview.persona_system_prompt.slice(0, 200)}${preview.persona_system_prompt.length > 200 ? '…' : ''}"`
+                        : 'PERSONA SYSTEM PROMPT\n  (not set)',
+                    '',
+                    'Task context (mcp__agentira__get_task): pulled on demand by the agent, never eagerly attached.',
+                ].filter(Boolean).join('\n');
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `local-context-${Date.now()}`,
+                        role: 'system',
+                        content: lines,
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+            } catch (err) {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `local-context-${Date.now()}`,
+                        role: 'system',
+                        content: `Could not load dispatch preview: ${err.message || err}`,
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+            }
             return;
         }
 

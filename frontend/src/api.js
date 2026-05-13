@@ -283,5 +283,8 @@ export const api = {
         },
         getRuntime: (id) => request(`/forge/runtimes/${id}`),
         listAgentProjects: (agentId) => request(`/forge/agents/${agentId}/projects`),
+        getDispatchPreview: (agentId, projectId) => request(
+            `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
+        ),
     },
 };
