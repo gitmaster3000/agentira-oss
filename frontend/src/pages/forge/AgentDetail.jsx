@@ -4,7 +4,7 @@ import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
     ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
-    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X,
+    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -165,7 +165,7 @@ function OverviewTab({ agent }) {
         <div className="p-6 space-y-6">
             {/* Quick Stats */}
             {!costFocus && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <StatCard icon={Play} label="Total Runs" value={agent.total_runs} color="#7c4dff" />
                     <StatCard
                         icon={DollarSign}
@@ -174,6 +174,15 @@ function OverviewTab({ agent }) {
                         color="#f1c40f"
                         onClick={() => { setCostFocus(true); setTimeout(() => costRef.current?.scrollIntoView({ behavior: 'smooth' }), 50); }}
                         expandable
+                    />
+                    <StatCard
+                        icon={Folder}
+                        label="Assigned Projects"
+                        value={projects.length}
+                        sub={projects.length > 0
+                            ? projects.slice(0, 2).map(p => p.name).join(', ') + (projects.length > 2 ? ` +${projects.length - 2} more` : '')
+                            : 'Not in any project'}
+                        color="#ec4899"
                     />
                     <StatCard icon={Clock} label="Last Heartbeat" value={agent.last_heartbeat ? timeAgo(agent.last_heartbeat) : 'Never'} color="#00bcd4" />
                     <StatCard
@@ -414,41 +423,6 @@ function OverviewTab({ agent }) {
                 </div>
             </div>
 
-            {/* Projects this agent is assigned to (via ProjectMember on the
-                agent's profile — same model as Studio's RBAC). */}
-            <div className="card">
-                <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-text-primary">Assigned projects</h3>
-                    <span className="text-xs text-text-tertiary">{projects.length}</span>
-                </div>
-                {projects.length === 0 ? (
-                    <p className="text-xs text-text-tertiary">
-                        Not assigned to any project. Add this agent as a member from the project's settings to give it access.
-                    </p>
-                ) : (
-                    <div className="space-y-1.5">
-                        {projects.map((p) => (
-                            <Link
-                                key={p.id}
-                                to={`/studio/board/${p.id}`}
-                                className="flex items-center justify-between px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-active transition-colors"
-                            >
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <span className="text-sm text-text-primary truncate">{p.name}</span>
-                                    {p.key_prefix && (
-                                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-panel text-text-tertiary">{p.key_prefix}</span>
-                                    )}
-                                </div>
-                                {p.repo_path && (
-                                    <span className="text-xs text-text-tertiary truncate ml-3 max-w-[40%]" title={p.repo_path}>
-                                        {p.repo_path}
-                                    </span>
-                                )}
-                            </Link>
-                        ))}
-                    </div>
-                )}
-            </div>
         </div>
     );
 }
