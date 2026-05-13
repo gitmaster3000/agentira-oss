@@ -249,6 +249,17 @@ def list_agent_projects(agent_id: str):
     return services.list_agent_projects(agent_id)
 
 
+@router.get("/agents/{agent_id}/dispatch-preview")
+def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
+    """Dry-run what a chat dispatch would send to the daemon for this agent.
+
+    Returns the resolved repo_path, conventions snippet, MCP server list,
+    env vars, and system-prompt addenda. UI uses this for the /context
+    inspector so users can see what's being sent without firing a run.
+    """
+    return services.dispatch_preview(agent_id, project_id=project_id)
+
+
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, body: AgentUpdate):
     result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))

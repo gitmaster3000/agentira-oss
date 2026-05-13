@@ -498,6 +498,89 @@ def update_agent(agent_id: str, **fields) -> dict | None:
         return _agent_to_dict(a)
 
 
+def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
+    """Return what a chat dispatch would send — without dispatching.
+
+    Mirrors `send_runtime_message`'s resolution logic so the UI can show
+    the user exactly what's about to ride on the WS frame: repo_path,
+    conventions snippet, MCP server list, env vars, system-prompt
+    addenda. This is the source of truth for the /context inspector.
+    """
+    from backend.forge.mcp_registry import build_mcp_config
+    from backend.models import Profile, Project
+    with _session() as db:
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a:
+            return {"error": "agent not found"}
+        prof = db.get(Profile, a.profile_id) if a.profile_id else None
+
+        # Project resolution — explicit arg wins; else fall back to the
+        # agent's default project, else free-form.
+        proj_id = project_id or (prof.default_project_id if prof else None)
+        proj = db.get(Project, proj_id) if proj_id else None
+        repo_path = proj.repo_path if proj else ""
+        conventions_md = proj.conventions_md if proj else ""
+
+        # MCP — even free-form chat gets the auto-injected servers
+        # (agentira, memory). Project-bound chats also get the per-project
+        # memory scoping.
+        agent_mcp_list = json.loads(a.mcp_servers) if a.mcp_servers else None
+        mcp_cfg = build_mcp_config(
+            agent_mcp_servers=agent_mcp_list,
+            agent_id=a.id,
+            project_id=proj_id,
+        ) if proj_id else None
+
+        # Env vars the daemon will inject when spawning the runtime. Mirrors
+        # what dispatch_trigger packs onto env_extra.
+        env_keys = ["AGENTIRA_AGENT_ID", "AGENTIRA_PROJECT_ID"]
+        if proj_id:
+            env_keys.append("AGENTIRA_REPO_PATH")
+        # User-provided agent env_vars (secrets like GH_TOKEN) — names only
+        # (don't leak the values to the inspector).
+        user_env_names: list[str] = []
+        if prof and prof.env_vars:
+            try:
+                ev = json.loads(prof.env_vars)
+                if isinstance(ev, dict):
+                    user_env_names = sorted(ev.keys())
+            except (ValueError, TypeError):
+                pass
+
+        return {
+            "agent": {
+                "id": a.id,
+                "name": a.name,
+                "model": (prof.model if prof else a.model) or "",
+                "runtime_provider": (a.runtime.provider if a.runtime else "") or "",
+            },
+            "project": {
+                "id": proj_id or "",
+                "name": (proj.name if proj else ""),
+                "repo_path": repo_path or "",
+                "conventions_md_preview": (conventions_md or "")[:300],
+                "source": ("explicit" if project_id else
+                           ("agent_default" if proj_id else "none")),
+            },
+            "mcp_servers": (
+                sorted((mcp_cfg or {}).get("mcpServers", {}).keys())
+                if mcp_cfg else []
+            ),
+            "env_vars": {
+                "injected_by_daemon": env_keys,
+                "user_provided_names": user_env_names,  # names only, no values
+            },
+            "system_prompt_addenda": {
+                "conventions_pointer_will_be_added": bool(repo_path and conventions_md),
+                "memory_addendum_will_be_added": bool(
+                    mcp_cfg and "memory" in (mcp_cfg.get("mcpServers") or {})
+                ),
+                "user_context_preamble": "added per-call from screen route + project",
+            },
+            "persona_system_prompt": (prof.system_prompt if prof else a.system_prompt) or "",
+        }
+
+
 def list_agent_projects(agent_id: str) -> list[dict]:
     """AP-86: projects this agent is assigned to. After the bot↔agent merge,
     agent.id == profile.id, so we walk the profile's ProjectMember rows."""
