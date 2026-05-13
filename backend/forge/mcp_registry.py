@@ -71,6 +71,7 @@ def get_server(name: str) -> dict[str, Any] | None:
 
 def build_mcp_config(*, agent_mcp_servers: list[str] | None,
                      agent_id: str, project_id: str | None,
+                     agent_api_key: str | None = None,
                      memory_root: str = "~/.agentira/memory") -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
@@ -106,6 +107,13 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
         defn = REGISTRY[name]
         if defn["transport"] == "http":
             entry: dict[str, Any] = {"type": "http", "url": defn["url"]}
+            # Bake the agent's own API key as the Bearer header so this
+            # agent's MCP calls authenticate AS itself — actions attribute
+            # correctly in audit/activity feeds. The registry says which
+            # env var carries the key; for agentira-MCP that's the agent's
+            # own profile.api_key (the same one passed at chat-API auth).
+            if defn.get("auth_env_var") == "AGENTIRA_API_KEY" and agent_api_key:
+                entry["headers"] = {"Authorization": f"Bearer {agent_api_key}"}
         elif defn["transport"] == "stdio":
             entry = {"command": defn["command"][0]}
             if len(defn["command"]) > 1:

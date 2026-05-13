@@ -540,13 +540,14 @@ def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
 
         # MCP — even free-form chat gets the auto-injected servers
         # (agentira, memory). Project-bound chats also get the per-project
-        # memory scoping.
+        # memory scoping. Always called now — matches the dispatch path.
         agent_mcp_list = json.loads(a.mcp_servers) if a.mcp_servers else None
         mcp_cfg = build_mcp_config(
             agent_mcp_servers=agent_mcp_list,
             agent_id=a.id,
             project_id=proj_id,
-        ) if proj_id else None
+            agent_api_key=(prof.api_key if prof else None),
+        )
 
         # Env vars the daemon will inject when spawning the runtime. Mirrors
         # what dispatch_trigger packs onto env_extra.
@@ -1573,10 +1574,17 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
     # Build the MCP config (auto servers + agent's picks; memory scoped per
     # (agent, project)). Serialize to JSON so it rides on the WS frame as a
     # single string — the daemon writes it to a tmpfile for --mcp-config.
+    # Pull the agent's own api_key so build_mcp_config can bake it into
+    # the agentira MCP entry — tool calls authenticate as this agent.
+    from backend.models import Profile as _Profile
+    with _session() as db2:
+        prof = db2.get(_Profile, agent.profile_id) if agent.profile_id else None
+        agent_api_key = prof.api_key if prof else None
     mcp_config = build_mcp_config(
         agent_mcp_servers=agent_mcp_servers,
         agent_id=agent_id,
         project_id=project_id,
+        agent_api_key=agent_api_key,
     )
     mcp_config_json = _json.dumps(mcp_config)
 
@@ -1895,26 +1903,31 @@ def send_runtime_message(
         if not a:
             return {"error": "Agent not found"}
         if a.runtime_id:
-            # Resolve project context from user_context's project_id (if any).
-            # No project_id → free-form chat, no cwd, no MCP project tools.
+            # AP-86/87: auto-injected MCP servers (agentira, memory) ride on
+            # every dispatch regardless of project. Project-bound chats also
+            # resolve repo_path + conventions; free-form chats just get the
+            # default toolset and screen context.
+            from backend.forge.mcp_registry import build_mcp_config
+            from backend.models import Project, Profile
             repo_path = ""
             conventions_md = ""
-            mcp_config_json = ""
             ctx = user_context if isinstance(user_context, dict) else {}
             project_id = ctx.get("project_id")
             if project_id:
-                from backend.forge.mcp_registry import build_mcp_config
-                from backend.models import Project
                 proj = db.get(Project, project_id)
                 if proj:
                     repo_path = proj.repo_path or ""
                     conventions_md = proj.conventions_md or ""
-                    cfg = build_mcp_config(
-                        agent_mcp_servers=json.loads(a.mcp_servers) if a.mcp_servers else None,
-                        agent_id=a.id,
-                        project_id=project_id,
-                    )
-                    mcp_config_json = json.dumps(cfg) if cfg else ""
+            # Bake the AGENT's own api_key into the agentira MCP entry so
+            # tool calls authenticate as the agent (visible in audit).
+            agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
+            cfg = build_mcp_config(
+                agent_mcp_servers=json.loads(a.mcp_servers) if a.mcp_servers else None,
+                agent_id=a.id,
+                project_id=project_id,
+                agent_api_key=(agent_prof.api_key if agent_prof else None),
+            )
+            mcp_config_json = json.dumps(cfg) if cfg else ""
             return dispatch_trigger(
                 agent_id, content, run_id=run_id, kind="chat",
                 repo_path=repo_path,
