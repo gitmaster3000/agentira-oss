@@ -424,35 +424,14 @@ function ChatTab({ agentId, agent }) {
     const [autoScroll, setAutoScroll] = useState(true);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
-    // Per-chat-session project context. Defaults to the agent's
-    // default_project_id (the project the agent is "assigned to"), so the
-    // user never has to pick. Per-call user_context still wins — they can
-    // override by changing the dropdown for this chat session, persisted
-    // in localStorage so the override sticks.
-    const projectStorageKey = `agentira:chat:${agentId}:projectId`;
-    const [projects, setProjects] = useState([]);
-    const [chatProjectId, setChatProjectId] = useState(
-        () => localStorage.getItem(projectStorageKey)
-            ?? agent?.default_project_id
-            ?? ''
-    );
+    // Project context for chat is no longer picked here. It resolves at
+    // send time from the agent's assigned project + the current screen.
+    // Users can inspect what's being sent via the `/context` slash command.
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
 
     const msgCountRef = useRef(0);
-
-    useEffect(() => {
-        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
-    }, []);
-
-    useEffect(() => {
-        if (chatProjectId) {
-            localStorage.setItem(projectStorageKey, chatProjectId);
-        } else {
-            localStorage.removeItem(projectStorageKey);
-        }
-    }, [chatProjectId, projectStorageKey]);
 
     const loadMessages = useCallback(async () => {
         try {
@@ -479,27 +458,60 @@ function ChatTab({ agentId, agent }) {
         msgCountRef.current = messages.length;
     }, [messages.length, autoScroll]);
 
+    // Resolve context client-side: prefer the URL-derived project (if we're
+    // on a project page) and otherwise hand the agent its default project
+    // (set on the agent's Studio profile). Backend resolves repo_path /
+    // conventions / MCP from this; agent uses it for cwd.
+    const buildUserContext = () => {
+        const route = window.location.pathname;
+        // Detect studio/forge project routes — extract project id from the path.
+        const studioProj = route.match(/\/studio\/board\/([^/]+)/);
+        const forgeProj = route.match(/\/forge\/projects\/([^/]+)/);
+        const screenProjectId = (studioProj || forgeProj)?.[1] || '';
+        const project_id = screenProjectId || agent?.default_project_id || '';
+        const ctx = {
+            surface: 'forge_agent_chat',
+            route,
+        };
+        if (project_id) ctx.project_id = project_id;
+        return ctx;
+    };
+
     const handleSend = async () => {
         if (!input.trim() || sending) return;
+        const trimmed = input.trim();
+
+        // `/context` slash command — show what would be sent, don't dispatch.
+        if (trimmed === '/context' || trimmed.startsWith('/context ')) {
+            const ctx = buildUserContext();
+            const summary = [
+                `Surface: ${ctx.surface}`,
+                `Route: ${ctx.route}`,
+                ctx.project_id
+                    ? `Project: ${ctx.project_id}${ctx.project_id === agent?.default_project_id ? ' (from agent assignment)' : ' (from current screen)'}`
+                    : 'Project: — none (agent has no default project, and current screen has no project context)',
+                '',
+                'Task context (when the agent calls mcp__agentira__get_task): pulled on demand from the Agentira MCP — not eagerly attached.',
+            ].join('\n');
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `local-context-${Date.now()}`,
+                    role: 'system',
+                    content: summary,
+                    created_at: new Date().toISOString(),
+                },
+            ]);
+            setInput('');
+            inputRef.current?.focus();
+            return;
+        }
+
         setSending(true);
         try {
-            // AP-76: ride the per-call user-context bundle so the agent
-            // spawns in the right project cwd with conventions/MCP wired up.
-            const selectedProject = projects.find((p) => p.id === chatProjectId);
-            const user_context = chatProjectId
-                ? {
-                      surface: 'forge_agent_chat',
-                      route: window.location.pathname,
-                      project_id: chatProjectId,
-                      project_name: selectedProject?.name || '',
-                  }
-                : {
-                      surface: 'forge_agent_chat',
-                      route: window.location.pathname,
-                  };
             await api.forge.sendRuntimeChat(agentId, {
-                content: input.trim(),
-                user_context,
+                content: trimmed,
+                user_context: buildUserContext(),
             });
             setInput('');
             await loadMessages();
@@ -524,23 +536,10 @@ function ChatTab({ agentId, agent }) {
         <div className="flex flex-col h-full">
             {/* Toolbar */}
             <div className="flex items-center justify-between px-6 py-2 border-b border-border-subtle bg-bg-panel">
-                <div className="flex items-center gap-3">
-                    <span className="text-sm text-text-secondary">{messages.length} messages</span>
-                    <div className="flex items-center gap-1.5">
-                        <label className="text-xs text-text-tertiary">Project:</label>
-                        <select
-                            className="input py-0.5 px-2 text-xs"
-                            value={chatProjectId}
-                            onChange={(e) => setChatProjectId(e.target.value)}
-                            title="Run this chat with a project's repo as cwd + CONVENTIONS.md + MCP toolset. Stays in localStorage per agent."
-                        >
-                            <option value="">— none —</option>
-                            {projects.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
+                <span className="text-sm text-text-secondary">
+                    {messages.length} messages
+                    <span className="text-text-tertiary ml-2">· type <code>/context</code> to inspect what's being sent</span>
+                </span>
                 <div className="flex items-center gap-2">
                     <button onClick={loadMessages} className="btn btn-ghost py-1 px-2 text-xs">
                         <RefreshCw className="w-3 h-3" /> Refresh
