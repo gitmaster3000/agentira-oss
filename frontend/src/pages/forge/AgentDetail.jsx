@@ -126,7 +126,7 @@ export function AgentDetail() {
             {/* Tab Content */}
             <div className="flex-1 overflow-auto">
                 {tab === 'overview' && <OverviewTab agent={agent} />}
-                {tab === 'chat' && <ChatTab agentId={agentId} />}
+                {tab === 'chat' && <ChatTab agentId={agentId} agent={agent} />}
                 {tab === 'runs' && <RunsTab agentId={agentId} />}
                 {tab === 'config' && <ConfigTab agent={agent} onSaved={loadAgent} />}
                 {tab === 'webhooks' && <WebhooksTab agentId={agentId} />}
@@ -418,19 +418,23 @@ function OverviewTab({ agent }) {
 
 // ── Chat Tab ───────────────────────────────────────────────────────────
 
-function ChatTab({ agentId }) {
+function ChatTab({ agentId, agent }) {
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [autoScroll, setAutoScroll] = useState(true);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
-    // AP-76: per-chat-session project context. Stays in component state; we
-    // persist the last selection per-agent in localStorage so picking it
-    // every time gets annoying.
+    // Per-chat-session project context. Defaults to the agent's
+    // default_project_id (the project the agent is "assigned to"), so the
+    // user never has to pick. Per-call user_context still wins — they can
+    // override by changing the dropdown for this chat session, persisted
+    // in localStorage so the override sticks.
     const projectStorageKey = `agentira:chat:${agentId}:projectId`;
     const [projects, setProjects] = useState([]);
     const [chatProjectId, setChatProjectId] = useState(
-        () => localStorage.getItem(projectStorageKey) || ''
+        () => localStorage.getItem(projectStorageKey)
+            ?? agent?.default_project_id
+            ?? ''
     );
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
@@ -727,17 +731,20 @@ function ConfigTab({ agent, onSaved }) {
         profile_id: agent.profile_id || '',
         model: agent.model || '',
         runtime_id: agent.runtime_id || '',
+        default_project_id: agent.default_project_id || '',
         system_prompt: agent.system_prompt || '',
         personality: agent.personality || '',
     });
     const [botProfiles, setBotProfiles] = useState([]);
     const [runtimes, setRuntimes] = useState([]);
+    const [projects, setProjects] = useState([]);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
 
     useEffect(() => {
         api.getProfiles('bot').catch(() => []).then(setBotProfiles);
         api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
+        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
     }, []);
 
     const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
@@ -799,6 +806,24 @@ function ConfigTab({ agent, onSaved }) {
                                 </option>
                             ))}
                         </select>
+                    </div>
+                    <div className="col-span-2">
+                        <label className="block text-xs text-text-tertiary mb-1">Project assignment</label>
+                        <select
+                            className="input"
+                            value={form.default_project_id}
+                            onChange={(e) => setForm({ ...form, default_project_id: e.target.value })}
+                        >
+                            <option value="">— none (generic agent) —</option>
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>
+                                    {p.name}{p.repo_path ? ` · ${p.repo_path}` : ''}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-text-tertiary mt-1">
+                            Chats from this agent default to this project's repo + conventions + MCP — no need to pick per chat. Users can still override for a single chat session via the dropdown on the Chat tab.
+                        </p>
                     </div>
                 </div>
             </section>
