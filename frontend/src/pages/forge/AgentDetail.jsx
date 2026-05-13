@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
@@ -1035,6 +1035,7 @@ function ProjectsTab({ agentId }) {
         );
     }
 
+    const navigate = useNavigate();
     return (
         <div className="p-6">
             <div className="card p-0 overflow-hidden">
@@ -1044,12 +1045,15 @@ function ProjectsTab({ agentId }) {
                             <th className="text-left px-4 py-3 font-medium">Project</th>
                             <th className="text-left px-4 py-3 font-medium">Key</th>
                             <th className="text-left px-4 py-3 font-medium">Repo Path</th>
-                            <th className="px-4 py-3"></th>
                         </tr>
                     </thead>
                     <tbody>
                         {projects.map(p => (
-                            <tr key={p.id} className="border-b border-border-subtle hover:bg-bg-hover transition-colors">
+                            <tr
+                                key={p.id}
+                                onClick={() => navigate(`/studio/board/${p.id}`)}
+                                className="border-b border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer"
+                            >
                                 <td className="px-4 py-3 text-text-primary font-medium">{p.name}</td>
                                 <td className="px-4 py-3 text-text-tertiary text-xs">
                                     {p.key_prefix
@@ -1058,14 +1062,6 @@ function ProjectsTab({ agentId }) {
                                 </td>
                                 <td className="px-4 py-3 text-text-tertiary text-xs font-mono truncate max-w-[400px]">
                                     {p.repo_path || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                    <Link
-                                        to={`/studio/board/${p.id}`}
-                                        className="text-xs text-accent-primary hover:underline"
-                                    >
-                                        Open →
-                                    </Link>
                                 </td>
                             </tr>
                         ))}
