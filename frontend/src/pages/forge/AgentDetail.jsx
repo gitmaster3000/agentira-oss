@@ -457,6 +457,7 @@ function ChatTab({ agentId, agent }) {
     const [agentProjects, setAgentProjects] = useState([]);
     const [contextOpen, setContextOpen] = useState(false);
     const [attachedProject, setAttachedProject] = useState(null);
+    const [inputFocused, setInputFocused] = useState(false);
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
@@ -717,11 +718,14 @@ function ChatTab({ agentId, agent }) {
                         </div>
                     </>
                 )}
-                {/* Floating: slash-command suggestions, anchored above the input */}
-                <SlashCommandSuggest input={input} onPick={(cmd) => {
-                    setInput(cmd + ' ');
-                    inputRef.current?.focus();
-                }} />
+                {/* Floating: slash-command suggestions, only while the input
+                    is focused. Blur (clicking anywhere else) hides them. */}
+                {inputFocused && (
+                    <SlashCommandSuggest input={input} onPick={(cmd) => {
+                        setInput(cmd + ' ');
+                        inputRef.current?.focus();
+                    }} />
+                )}
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => setContextOpen(!contextOpen)}
@@ -737,6 +741,8 @@ function ChatTab({ agentId, agent }) {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                        onFocus={() => setInputFocused(true)}
+                        onBlur={() => setInputFocused(false)}
                         disabled={sending}
                     />
                     <button onClick={handleSend} disabled={sending || !input.trim()} className="btn btn-primary py-2.5">
