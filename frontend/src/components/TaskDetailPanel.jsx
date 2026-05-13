@@ -114,27 +114,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         }
     };
 
-    // AP-86: if the task is assigned to an agent (any profile that has a
-    // runtime is an agent), dispatch to that agent directly — no picker.
-    // Only show the picker when there's no agent assignee.
     const openAgentPicker = async () => {
+        setPickingAgent(true);
         try {
             const data = await api.forge.listAgents();
-            const runnable = (Array.isArray(data) ? data : []).filter(a => a.runtime_id);
-            const assignedAgent = task?.assignee
-                ? runnable.find(a => a.name === task.assignee)
-                : null;
-            if (assignedAgent && assignedAgent.status === 'online') {
-                // Fast path: skip picker, run as the assignee.
-                handleScheduleRun(assignedAgent.id);
-                return;
-            }
-            setForgeAgents(runnable);
-            setPickingAgent(true);
+            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
         } catch (err) {
             console.error('Failed to load agents:', err);
             setForgeAgents([]);
-            setPickingAgent(true);
         }
     };
 
@@ -705,9 +692,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
                                     className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
                                 >
-                                    <Play className="w-3 h-3" /> {pickingAgent
-                                        ? 'Cancel'
-                                        : (task?.assignee ? `Run as @${task.assignee}` : 'Pick agent to run')}
+                                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
                                 </button>
                             </div>
 
@@ -717,20 +702,33 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                         <p className="text-xs text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
                                     ) : (
                                         <div className="space-y-1">
-                                            {forgeAgents.map(a => {
+                                            {/* Sort: assigned agent first (if any), then by name. */}
+                                            {[...forgeAgents].sort((a, b) => {
+                                                const aAssigned = task?.assignee && a.name === task.assignee;
+                                                const bAssigned = task?.assignee && b.name === task.assignee;
+                                                if (aAssigned && !bAssigned) return -1;
+                                                if (bAssigned && !aAssigned) return 1;
+                                                return (a.name || '').localeCompare(b.name || '');
+                                            }).map(a => {
                                                 const online = a.status === 'online';
+                                                const isAssigned = task?.assignee && a.name === task.assignee;
                                                 return (
                                                     <button
                                                         key={a.id}
                                                         disabled={scheduling || !online}
                                                         onClick={() => handleScheduleRun(a.id)}
-                                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors border ${isAssigned ? 'border-accent-primary/40 bg-accent-subtle/30' : 'border-transparent'} ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
                                                     >
                                                         <div className="w-7 h-7 rounded-md bg-bg-panel border border-border-subtle flex items-center justify-center text-xs font-bold text-text-secondary">
                                                             {a.name?.[0]?.toUpperCase() || 'A'}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
-                                                            <div className="text-sm text-text-primary truncate">{a.name}</div>
+                                                            <div className="text-sm text-text-primary truncate flex items-center gap-2">
+                                                                {a.name}
+                                                                {isAssigned && (
+                                                                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-primary/15 text-accent-primary">assignee</span>
+                                                                )}
+                                                            </div>
                                                             <div className="text-xs text-text-tertiary truncate">{a.model || a.runtime_type || 'no model'}</div>
                                                         </div>
                                                         <span className={`text-xs ${online ? 'text-green-400' : 'text-text-tertiary'}`}>
