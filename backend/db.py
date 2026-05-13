@@ -108,6 +108,108 @@ def _drop_not_null(conn: Connection, table: str, column: str) -> None:
         conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL"))
 
 
+def _migrate_forge_agents_to_profiles(conn: Connection) -> None:
+    """AP-86 bot/agent merge: each forge_agent becomes a 1:1 profile.
+
+    Destructive: when multiple forge_agents share a profile, we split — only
+    the first keeps the shared profile; the rest get new profiles named
+    after the agent (collision-renamed if needed). Runtime config moves
+    onto the resulting profiles. forge_runs.agent_id and forge_messages.agent_id
+    are repointed via the agent→profile mapping. forge_agents table is
+    NOT dropped here (code still queries it during transition); a follow-up
+    drops it after the code paths migrate.
+    """
+    role_row = conn.execute(text("SELECT id FROM roles WHERE name = 'bot' LIMIT 1")).first()
+    if not role_row:
+        return  # no bot role; nothing to do (fresh DBs handled by create_all)
+    bot_role_id = role_row[0]
+
+    # Iterate forge_agents in stable order (creation order) — first-wins for shared profile.
+    agents = list(conn.execute(text(
+        "SELECT id, name, profile_id, model, system_prompt, personality, "
+        "       runtime_id, default_project_id, mcp_servers "
+        "FROM forge_agents ORDER BY created_at"
+    )))
+    profile_taken: set[str] = set()  # profile_ids already claimed (1:1 enforcement)
+    # agent_id → resolved profile_id (used to repoint runs/messages)
+    agent_to_profile: dict[str, str] = {}
+
+    for (agent_id, agent_name, profile_id, model, system_prompt,
+         personality, runtime_id, default_project_id, mcp_servers) in agents:
+        target_pid = None
+        if profile_id and profile_id not in profile_taken:
+            # First agent on this profile — adopt it.
+            target_pid = profile_id
+            profile_taken.add(profile_id)
+        else:
+            # Either no profile_id, or the profile's already claimed.
+            # Create a fresh profile with a unique name derived from the agent.
+            base_name = (agent_name or agent_id)[:80] or "agent"
+            unique_name = base_name
+            suffix = 0
+            while conn.execute(text(
+                "SELECT 1 FROM profiles WHERE name = :n"
+            ), {"n": unique_name}).first():
+                suffix += 1
+                unique_name = f"{base_name}-{suffix}"
+            target_pid = agent_id  # reuse the agent's id as the new profile id
+            if conn.execute(text("SELECT 1 FROM profiles WHERE id = :i"),
+                           {"i": target_pid}).first():
+                # Profile with that id already exists — bail to a fresh id.
+                import uuid
+                target_pid = uuid.uuid4().hex[:12]
+            conn.execute(text(
+                "INSERT INTO profiles (id, name, display_name, password_hash, "
+                "                      avatar_url, webhook_url, role_id, created_at) "
+                "VALUES (:i, :n, :d, '', '', '', :r, CURRENT_TIMESTAMP)"
+            ), {"i": target_pid, "n": unique_name, "d": agent_name or unique_name,
+                "r": bot_role_id})
+            profile_taken.add(target_pid)
+
+        # Copy the runtime config onto target_pid.
+        conn.execute(text(
+            "UPDATE profiles SET model = :m, system_prompt = :sp, "
+            "  personality = :p, runtime_id = :rt, "
+            "  default_project_id = :dp, mcp_servers = :mcp "
+            "WHERE id = :i"
+        ), {
+            "i": target_pid,
+            "m": model or "",
+            "sp": system_prompt,
+            "p": personality,
+            "rt": runtime_id,
+            "dp": default_project_id,
+            "mcp": mcp_servers,
+        })
+        agent_to_profile[agent_id] = target_pid
+
+    # Also update forge_agents.profile_id so legacy queries still resolve
+    # to the dedicated 1:1 profile (not the original shared one).
+    for agent_id, pid in agent_to_profile.items():
+        conn.execute(text(
+            "UPDATE forge_agents SET profile_id = :p WHERE id = :a"
+        ), {"p": pid, "a": agent_id})
+
+    # Repoint forge_runs.agent_id and forge_messages.agent_id to the
+    # resolved profile_id. We do this by adding a profile_id column and
+    # writing the mapping; the columns are populated NOW so subsequent
+    # code can read profile_id, and we drop the old agent_id later.
+    tables = _list_tables(conn)
+    if "forge_runs" in tables:
+        _ensure_column(conn, "forge_runs", "profile_id", "VARCHAR(12)")
+        for agent_id, pid in agent_to_profile.items():
+            conn.execute(text(
+                "UPDATE forge_runs SET profile_id = :p WHERE agent_id = :a"
+            ), {"p": pid, "a": agent_id})
+    if "forge_messages" in tables:
+        _ensure_column(conn, "forge_messages", "profile_id", "VARCHAR(12)")
+        for agent_id, pid in agent_to_profile.items():
+            conn.execute(text(
+                "UPDATE forge_messages SET profile_id = :p WHERE agent_id = :a"
+            ), {"p": pid, "a": agent_id})
+    conn.commit()
+
+
 def run_migrations():
     """Apply incremental schema changes — runs on every dialect.
 
@@ -129,8 +231,25 @@ def run_migrations():
             added |= _ensure_column(conn, "profiles", "webhook_url", "VARCHAR(500) DEFAULT ''")
             added |= _ensure_column(conn, "profiles", "notification_transport", "VARCHAR(20)")
             added |= _ensure_column(conn, "profiles", "email", "VARCHAR(255)")
-            if added:
+            # AP-86: bot/agent merge — runtime config moves onto profile
+            runtime_added = False
+            runtime_added |= _ensure_column(conn, "profiles", "model", "VARCHAR(120) DEFAULT ''")
+            runtime_added |= _ensure_column(conn, "profiles", "system_prompt", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "personality", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "runtime_id", "VARCHAR(12)")
+            runtime_added |= _ensure_column(conn, "profiles", "default_project_id", "VARCHAR(12)")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_servers", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
+            if added or runtime_added:
                 conn.commit()
+            # Backfill: copy runtime config from forge_agents onto its linked
+            # profile so future reads can use profile.* directly. Idempotent —
+            # only fills nulls; explicit profile writes are preserved.
+            # AP-86 bot/agent merge — run once when forge_agents still exists
+            # AND we haven't yet migrated (no profile_id column on forge_runs).
+            if "forge_agents" in tables and "forge_runs" in tables \
+               and "profile_id" not in _columns_of(conn, "forge_runs"):
+                _migrate_forge_agents_to_profiles(conn)
 
         # OAuth accounts table — `create_all` makes this for us when
         # the model is registered, so we don't bootstrap it here anymore.

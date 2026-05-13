@@ -36,20 +36,45 @@ def _iso(dt: datetime | None) -> str | None:
 # ── Serializers ──────────────────────────────────────────────────────────
 
 def _sync_bots(db) -> None:
-    """Ensure every bot profile has a corresponding forge Agent record."""
+    """AP-86: maintain 1:1 link between bot profile and Agent. Same id.
+
+    For each bot profile, ensure exactly one Agent row exists sharing that
+    id. Runtime fields mirror from profile (post-merge source of truth).
+    Skips orphans (Agent rows whose profile_id was deleted).
+    """
     bot_role = db.query(Role).filter(Role.name == "bot").first()
     if not bot_role:
         return
     bots = db.query(Profile).filter(Profile.role_id == bot_role.id).all()
-    existing = {a.profile_id for a in db.query(Agent.profile_id).all()}
+    # Index existing agents by profile_id and by id; same-id is the new
+    # invariant but we tolerate old random-id rows during transition.
+    existing_by_pid = {a.profile_id: a for a in db.query(Agent).all() if a.profile_id}
     for bot in bots:
-        if bot.id not in existing:
+        agent = existing_by_pid.get(bot.id)
+        if agent is None:
             agent = Agent(
+                id=bot.id,                # AP-86: 1:1, same id
                 profile_id=bot.id,
                 name=bot.display_name or bot.name,
                 webhook_url=bot.webhook_url or "",
             )
             db.add(agent)
+        # Mirror runtime config from profile onto the agent so the OLD
+        # code paths that read agent.model / agent.runtime_id keep working
+        # during transition. New code should read from profile directly.
+        agent.name = bot.display_name or bot.name
+        if bot.model:
+            agent.model = bot.model
+        if bot.system_prompt is not None:
+            agent.system_prompt = bot.system_prompt
+        if bot.personality is not None:
+            agent.personality = bot.personality
+        if bot.runtime_id:
+            agent.runtime_id = bot.runtime_id
+        if bot.default_project_id:
+            agent.default_project_id = bot.default_project_id
+        if bot.mcp_servers:
+            agent.mcp_servers = bot.mcp_servers
     db.commit()
 
 
@@ -387,8 +412,37 @@ def get_agent(agent_id: str) -> dict | None:
 def create_agent(*, profile_id: str | None = None, name: str, executor_type: str = "http",
                  model: str = "", webhook_url: str = "", config_json: str | None = None,
                  runtime_id: str | None = None) -> dict:
+    """Create an agent. AP-86: every agent has a 1:1 backing Profile (bot
+    identity) sharing the same id. Runtime config + identity persist together.
+
+    If `profile_id` is given, reuse it (link an existing bot profile to a
+    new runtime). Otherwise create both the profile and the agent here.
+    """
+    from backend.models import Profile, Role
     with _session() as db:
+        if profile_id:
+            prof = db.get(Profile, profile_id)
+            if not prof:
+                return {"error": "profile not found"}
+        else:
+            # Create a bot profile to back this agent. Same id as the agent
+            # so they're 1:1 at the schema level too.
+            role_row = db.query(Role).filter(Role.name == "bot").first()
+            if not role_row:
+                return {"error": "bot role missing"}
+            new_id = _new_id()
+            prof = Profile(
+                id=new_id, name=name, display_name=name,
+                password_hash="", avatar_url="", webhook_url="",
+                role_id=role_row.id,
+                model=model,
+                runtime_id=runtime_id,
+            )
+            db.add(prof)
+            db.flush()
+            profile_id = prof.id
         a = Agent(
+            id=profile_id,  # 1:1 with profile
             profile_id=profile_id,
             name=name,
             executor_type=executor_type,
@@ -398,12 +452,26 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
             runtime_id=runtime_id,
         )
         db.add(a)
+        # Mirror runtime fields onto the profile (source of truth post-merge).
+        prof.name = name
+        prof.display_name = name
+        prof.model = model
+        prof.runtime_id = runtime_id
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)
 
 
+# Fields that, when set via update_agent, must mirror onto the backing Profile
+# (post-AP-86 merge, the profile holds the canonical runtime config).
+_AGENT_TO_PROFILE_MIRROR = {
+    "name", "model", "system_prompt", "personality", "runtime_id",
+    "default_project_id", "mcp_servers", "webhook_url",
+}
+
+
 def update_agent(agent_id: str, **fields) -> dict | None:
+    from backend.models import Profile
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
@@ -414,6 +482,15 @@ def update_agent(agent_id: str, **fields) -> dict | None:
         for k, v in fields.items():
             if v is not None and hasattr(a, k):
                 setattr(a, k, v)
+        # Mirror runtime-relevant fields onto the linked profile so the
+        # post-merge "agent IS the profile" view stays consistent.
+        prof = db.get(Profile, a.profile_id) if a.profile_id else None
+        if prof:
+            for k, v in fields.items():
+                if v is None or k not in _AGENT_TO_PROFILE_MIRROR:
+                    continue
+                if hasattr(prof, k):
+                    setattr(prof, k, v)
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)

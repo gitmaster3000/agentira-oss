@@ -105,6 +105,25 @@ class Profile(Base):
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    # ── Runtime config (agents only; humans leave these null) ────────────
+    # AP-86: bot ↔ agent merge. Bot profiles ARE agents. These columns used
+    # to live on forge_agents — folded onto Profile so there's one identity
+    # row per AI worker. forge_agents stays as a transitional FK target
+    # until callers migrate; new writes go here.
+    model: Mapped[str] = mapped_column(String(120), default="")
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    personality: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    runtime_id: Mapped[str | None] = mapped_column(
+        ForeignKey("forge_runtimes.id"), nullable=True, default=None
+    )
+    default_project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, default=None
+    )
+    mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # User-provided secrets injected into the dispatched runtime's env
+    # (GH_TOKEN, OPENAI_API_KEY, etc.). JSON object {KEY: VALUE}.
+    env_vars: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     project_memberships: Mapped[list["ProjectMember"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
