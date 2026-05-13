@@ -61,13 +61,40 @@ class WsHub:
 
     async def connect(self, conn: DaemonConnection) -> None:
         async with self._lock:
+            old = self._conns.get(conn.daemon_id)
             self._conns[conn.daemon_id] = conn
+        if old is not None and old is not conn:
+            # Force the previous WS shut so its handler task exits and
+            # doesn't later call disconnect() against the new registration.
+            # The old task's finally block will check identity (see below)
+            # and refuse to pop the new connection — but closing the old
+            # socket ensures the old loop exits in the first place.
+            try:
+                await old.ws.close()
+            except Exception:
+                pass
         logger.info("Daemon connected: %s runtimes=%s", conn.daemon_id[:8], conn.runtime_ids)
 
-    async def disconnect(self, daemon_id: str) -> None:
+    async def disconnect(self, daemon_id: str, expected: "DaemonConnection | None" = None) -> None:
+        """Remove the daemon iff the current registration matches `expected`.
+
+        When `expected` is given (the WS handler passes its own connection
+        object), we only pop if it's still the registered one. This prevents
+        an old reconnecting WS's finally-block from clobbering the new
+        connection's registration — the race that made agents appear
+        offline after every daemon reconnect cycle.
+        """
         async with self._lock:
-            self._conns.pop(daemon_id, None)
-        logger.info("Daemon disconnected: %s", daemon_id[:8])
+            current = self._conns.get(daemon_id)
+            if expected is None or current is expected:
+                self._conns.pop(daemon_id, None)
+                stale = False
+            else:
+                stale = True
+        if stale:
+            logger.debug("Stale disconnect for %s ignored — newer WS holds the slot", daemon_id[:8])
+        else:
+            logger.info("Daemon disconnected: %s", daemon_id[:8])
 
     async def dispatch_trigger(self, *, trace_id: str, runtime_id: str, agent_id: str,
                                kind: str, prompt: str, run_id: str = "",
@@ -184,4 +211,6 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
         pass
     finally:
         pump_task.cancel()
-        await hub.disconnect(daemon_id)
+        # Pass our own connection object so the hub only pops the slot if
+        # WE'RE the one still registered (reconnect-safe).
+        await hub.disconnect(daemon_id, expected=conn)
