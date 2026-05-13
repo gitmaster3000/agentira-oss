@@ -496,6 +496,33 @@ def update_agent(agent_id: str, **fields) -> dict | None:
         return _agent_to_dict(a)
 
 
+def list_agent_projects(agent_id: str) -> list[dict]:
+    """AP-86: projects this agent is assigned to. After the bot↔agent merge,
+    agent.id == profile.id, so we walk the profile's ProjectMember rows."""
+    from backend.models import Profile, Project, ProjectMember
+    with _session() as db:
+        # agent.id == profile.id post-merge; fall back to profile_id for any
+        # transitional rows where they still differ.
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a:
+            return []
+        pid = a.profile_id or a.id
+        rows = (db.query(Project)
+                  .join(ProjectMember, ProjectMember.project_id == Project.id)
+                  .filter(ProjectMember.profile_id == pid)
+                  .order_by(Project.name.asc())
+                  .all())
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "key_prefix": p.key_prefix or "",
+                "repo_path": p.repo_path or "",
+            }
+            for p in rows
+        ]
+
+
 def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
     """Expose the MCP registry to the frontend's agent edit form. By
     default hides auto-injected servers — users can't toggle them."""

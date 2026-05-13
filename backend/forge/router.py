@@ -243,6 +243,12 @@ def get_agent(agent_id: str):
     return result
 
 
+@router.get("/agents/{agent_id}/projects")
+def list_agent_projects(agent_id: str):
+    """Projects this agent is a member of (resolved via the 1:1 profile)."""
+    return services.list_agent_projects(agent_id)
+
+
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, body: AgentUpdate):
     result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
