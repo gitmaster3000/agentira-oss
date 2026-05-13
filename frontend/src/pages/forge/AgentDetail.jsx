@@ -673,21 +673,6 @@ function ChatTab({ agentId, agent }) {
 
             {/* Send bar */}
             <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel relative">
-                {/* Floating: attached-project chip (sits above the input row, doesn't push it) */}
-                {attachedProject && (
-                    <div className="absolute bottom-full left-6 mb-1 flex">
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-accent-subtle text-accent-primary text-xs shadow-md">
-                            <span>📎 {attachedProject.name}</span>
-                            <button
-                                onClick={() => setAttachedProject(null)}
-                                className="hover:text-text-primary"
-                                title="Remove attachment"
-                            >
-                                <X className="w-3 h-3" />
-                            </button>
-                        </div>
-                    </div>
-                )}
                 {/* Floating: project picker popover, anchored to the + button. Closes
                     on outside click via a transparent backdrop. */}
                 {contextOpen && (
@@ -734,17 +719,36 @@ function ChatTab({ agentId, agent }) {
                     >
                         <Plus className="w-4 h-4" />
                     </button>
-                    <input
-                        ref={inputRef}
-                        className="input flex-1"
-                        placeholder="Send a message — / for commands"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                        onFocus={() => setInputFocused(true)}
-                        onBlur={() => setInputFocused(false)}
-                        disabled={sending}
-                    />
+                    {/* Input wrapper styled like an .input so the attached-project
+                        chip sits inline next to the caret, not above the row. */}
+                    <div
+                        className="input flex-1 flex items-center gap-2 cursor-text"
+                        onClick={() => inputRef.current?.focus()}
+                    >
+                        {attachedProject && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent-subtle text-accent-primary text-xs shrink-0">
+                                <span className="truncate max-w-[140px]">📎 {attachedProject.name}</span>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setAttachedProject(null); }}
+                                    className="hover:text-text-primary"
+                                    title="Remove attachment"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </span>
+                        )}
+                        <input
+                            ref={inputRef}
+                            className="flex-1 bg-transparent border-0 outline-none text-text-primary placeholder:text-text-tertiary min-w-0"
+                            placeholder={attachedProject ? 'Add a message…' : 'Send a message — / for commands'}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                            onFocus={() => setInputFocused(true)}
+                            onBlur={() => setInputFocused(false)}
+                            disabled={sending}
+                        />
+                    </div>
                     <button onClick={handleSend} disabled={sending || !input.trim()} className="btn btn-primary py-2.5">
                         {sending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                     </button>
