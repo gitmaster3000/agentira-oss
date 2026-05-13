@@ -4,7 +4,7 @@ import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
     ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
-    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder,
+    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder, Check,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -1005,16 +1005,29 @@ function ConfigTab({ agent, onSaved }) {
         default_project_id: agent.default_project_id || '',
         system_prompt: agent.system_prompt || '',
         personality: agent.personality || '',
+        mcp_servers: Array.isArray(agent.mcp_servers) ? agent.mcp_servers : [],
     });
     const [runtimes, setRuntimes] = useState([]);
     const [projects, setProjects] = useState([]);
+    const [mcpServers, setMcpServers] = useState([]); // full registry incl. auto
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
 
     useEffect(() => {
         api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
         api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
+        api.forge.listMcpServers(true).catch(() => []).then(setMcpServers);
     }, []);
+
+    const toggleMcp = (name) => {
+        setForm((f) => {
+            const current = f.mcp_servers || [];
+            const next = current.includes(name)
+                ? current.filter((s) => s !== name)
+                : [...current, name];
+            return { ...f, mcp_servers: next };
+        });
+    };
 
     const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
     // Models surfaced by the daemon for the selected runtime. Free-form input
@@ -1132,6 +1145,44 @@ function ConfigTab({ agent, onSaved }) {
                         )}
                     </>
                 )}
+            </section>
+
+            {/* Toolset (MCP servers) */}
+            <section className="card space-y-3">
+                <div>
+                    <h3 className="text-sm font-semibold text-text-primary">Toolset</h3>
+                    <p className="text-xs text-text-tertiary mt-1">
+                        MCP servers this agent gets at dispatch. The agentira + memory tools are <strong>auto-injected</strong> for every agent (greyed below). Toggle opt-in servers to extend the toolset.
+                    </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {mcpServers.map((s) => {
+                        const isAuto = !!s.auto;
+                        const isOn = isAuto || form.mcp_servers.includes(s.name);
+                        return (
+                            <button
+                                key={s.name}
+                                type="button"
+                                onClick={isAuto ? undefined : () => toggleMcp(s.name)}
+                                title={s.description || s.name}
+                                className={
+                                    isAuto
+                                        ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-tertiary cursor-not-allowed'
+                                        : isOn
+                                            ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 transition-colors'
+                                            : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-secondary hover:bg-bg-active transition-colors'
+                                }
+                            >
+                                <code className="font-mono">{s.name}</code>
+                                {isAuto && <span className="text-[10px] uppercase tracking-wider">always</span>}
+                                {!isAuto && isOn && <Check className="w-3 h-3" />}
+                            </button>
+                        );
+                    })}
+                    {mcpServers.length === 0 && (
+                        <p className="text-xs text-text-tertiary italic">No MCP servers registered.</p>
+                    )}
+                </div>
             </section>
 
             {/* Personality */}

@@ -283,6 +283,7 @@ export const api = {
         },
         getRuntime: (id) => request(`/forge/runtimes/${id}`),
         listAgentProjects: (agentId) => request(`/forge/agents/${agentId}/projects`),
+        listMcpServers: (includeAuto = true) => request(`/forge/mcp-servers?include_auto=${includeAuto}`),
         getDispatchPreview: (agentId, projectId) => request(
             `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
         ),
