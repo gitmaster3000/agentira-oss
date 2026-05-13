@@ -526,66 +526,21 @@ function ChatTab({ agentId, agent }) {
             const ctx = buildUserContext();
             let projectSource = 'none';
             if (ctx.project_id) {
-                if (attachedProject?.id === ctx.project_id) projectSource = 'attached via + button';
-                else if (ctx.project_id === agent?.default_project_id) projectSource = 'from agent assignment';
-                else projectSource = 'from current screen';
+                if (attachedProject?.id === ctx.project_id) projectSource = 'attached via +';
+                else if (ctx.project_id === agent?.default_project_id) projectSource = 'agent assignment';
+                else projectSource = 'current screen';
             }
-            // Pull the live dispatch preview so the user sees the FULL picture
-            // (MCP servers, env vars, system-prompt addenda) computed by the
-            // same code path that real dispatches use.
             setInput('');
             inputRef.current?.focus();
             try {
                 const preview = await api.forge.getDispatchPreview(agentId, ctx.project_id);
-                const lines = [
-                    `━━━ /context for @${preview.agent?.name || agent?.name} ━━━`,
-                    '',
-                    `Surface: ${ctx.surface}`,
-                    `Route: ${ctx.route}`,
-                    '',
-                    'PROJECT',
-                    ctx.project_id
-                        ? `  ${preview.project?.name || ctx.project_id} (${projectSource})`
-                        : '  none — chat runs without a project cwd',
-                    preview.project?.repo_path
-                        ? `  repo_path: ${preview.project.repo_path}`
-                        : null,
-                    preview.project?.conventions_md_preview
-                        ? `  conventions: "${preview.project.conventions_md_preview.replace(/\n/g, ' ⏎ ').slice(0, 120)}…"`
-                        : null,
-                    '',
-                    'RUNTIME',
-                    `  provider: ${preview.agent?.runtime_provider || '—'}`,
-                    `  model:    ${preview.agent?.model || '—'}`,
-                    '',
-                    'MCP SERVERS',
-                    preview.mcp_servers?.length
-                        ? preview.mcp_servers.map(s => `  · ${s}`).join('\n')
-                        : '  none (free-form chat with no project)',
-                    '',
-                    'ENV VARS (injected at dispatch)',
-                    ...preview.env_vars?.injected_by_daemon?.map(k => `  · ${k}`) || [],
-                    preview.env_vars?.user_provided_names?.length
-                        ? `  user-provided: ${preview.env_vars.user_provided_names.join(', ')}`
-                        : null,
-                    '',
-                    'SYSTEM-PROMPT ADDENDA',
-                    `  conventions pointer: ${preview.system_prompt_addenda?.conventions_pointer_will_be_added ? 'yes' : 'no'}`,
-                    `  memory addendum:     ${preview.system_prompt_addenda?.memory_addendum_will_be_added ? 'yes' : 'no'}`,
-                    `  screen/page preamble: yes (built per-call from route)`,
-                    '',
-                    preview.persona_system_prompt
-                        ? `PERSONA SYSTEM PROMPT\n  "${preview.persona_system_prompt.slice(0, 200)}${preview.persona_system_prompt.length > 200 ? '…' : ''}"`
-                        : 'PERSONA SYSTEM PROMPT\n  (not set)',
-                    '',
-                    'Task context (mcp__agentira__get_task): pulled on demand by the agent, never eagerly attached.',
-                ].filter(Boolean).join('\n');
                 setMessages((prev) => [
                     ...prev,
                     {
                         id: `local-context-${Date.now()}`,
                         role: 'system',
-                        content: lines,
+                        content: '',  // unused — preview field drives the render
+                        preview: { ...preview, ctx, projectSource },
                         created_at: new Date().toISOString(),
                     },
                 ]);
@@ -681,7 +636,9 @@ function ChatTab({ agentId, agent }) {
                                     )}
                                     <span className="text-xs text-text-tertiary ml-auto">{formatTime(msg.created_at)}</span>
                                 </div>
-                                <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono leading-relaxed">{msg.content}</pre>
+                                {msg.preview
+                                    ? <ContextPreviewCard preview={msg.preview} />
+                                    : <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono leading-relaxed">{msg.content}</pre>}
                                 {msg.tool_name && (
                                     <div className="mt-2 pt-2 border-t border-border-subtle">
                                         <div className="text-xs font-medium text-text-secondary mb-1">
@@ -752,6 +709,11 @@ function ChatTab({ agentId, agent }) {
                         )}
                     </div>
                 )}
+                {/* Slash-command auto-suggest */}
+                <SlashCommandSuggest input={input} onPick={(cmd) => {
+                    setInput(cmd + ' ');
+                    inputRef.current?.focus();
+                }} />
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => setContextOpen(!contextOpen)}
@@ -776,6 +738,152 @@ function ChatTab({ agentId, agent }) {
             </div>
         </div>
     );
+}
+
+
+// ── Slash-command suggestion popover ───────────────────────────────────
+
+const SLASH_COMMANDS = [
+    { name: '/context', desc: 'Show what context (project, MCP, env, prompts) will be sent on the next message' },
+];
+
+function SlashCommandSuggest({ input, onPick }) {
+    if (!input.startsWith('/')) return null;
+    const query = input.slice(1).split(/\s/)[0].toLowerCase();
+    const matches = SLASH_COMMANDS.filter(c => c.name.slice(1).startsWith(query));
+    if (matches.length === 0) return null;
+    return (
+        <div className="mb-2 rounded-md border border-border-subtle bg-bg-panel shadow-lg overflow-hidden">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary px-3 py-1.5 bg-bg-hover/50">
+                Slash commands
+            </div>
+            {matches.map(cmd => (
+                <button
+                    key={cmd.name}
+                    onClick={() => onPick(cmd.name)}
+                    className="w-full text-left px-3 py-2 hover:bg-bg-hover flex items-center gap-3 transition-colors"
+                >
+                    <code className="text-sm text-accent-primary font-mono">{cmd.name}</code>
+                    <span className="text-xs text-text-tertiary truncate">{cmd.desc}</span>
+                </button>
+            ))}
+        </div>
+    );
+}
+
+
+// ── Context preview card (renders the /context output as a structured panel) ───
+
+function ContextPreviewCard({ preview }) {
+    const p = preview || {};
+    const proj = p.project || {};
+    const ag = p.agent || {};
+    const env = p.env_vars || {};
+    const sp = p.system_prompt_addenda || {};
+    const persona = p.persona_system_prompt || '';
+    return (
+        <div className="text-sm">
+            <div className="text-xs text-text-tertiary mb-3 flex items-center gap-2">
+                <span className="font-mono px-1.5 py-0.5 rounded bg-bg-hover">/context</span>
+                <span>for @{ag.name || '—'}</span>
+            </div>
+
+            <Section label="Project">
+                {proj.id ? (
+                    <>
+                        <Row k="name" v={proj.name || proj.id} />
+                        {proj.source && <Row k="source" v={proj.source.replace('_', ' ')} />}
+                        {proj.repo_path && <Row k="repo" v={<code className="text-xs">{proj.repo_path}</code>} />}
+                        {proj.conventions_md_preview && (
+                            <Row k="conventions" v={<em className="text-text-tertiary">"{proj.conventions_md_preview.slice(0, 140)}{proj.conventions_md_preview.length > 140 ? '…' : ''}"</em>} />
+                        )}
+                    </>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">— none. Chat runs without a project cwd.</div>
+                )}
+            </Section>
+
+            <Section label="Runtime">
+                <Row k="provider" v={<span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-xs">{ag.runtime_provider || '—'}</span>} />
+                <Row k="model" v={ag.model || '—'} />
+            </Section>
+
+            <Section label="MCP servers">
+                {p.mcp_servers?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                        {p.mcp_servers.map(s => (
+                            <span key={s} className="px-2 py-0.5 rounded bg-accent-subtle text-accent-primary text-xs font-mono">{s}</span>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">— none (no project bound)</div>
+                )}
+            </Section>
+
+            <Section label="Env vars">
+                <div className="text-xs text-text-tertiary mb-1">Injected by daemon:</div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                    {(env.injected_by_daemon || []).map(k => (
+                        <span key={k} className="px-2 py-0.5 rounded bg-bg-hover text-text-secondary text-xs font-mono">{k}</span>
+                    ))}
+                </div>
+                {env.user_provided_names?.length > 0 ? (
+                    <>
+                        <div className="text-xs text-text-tertiary mb-1">User-provided secrets (names only):</div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {env.user_provided_names.map(k => (
+                                <span key={k} className="px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-400 text-xs font-mono">{k}</span>
+                            ))}
+                        </div>
+                    </>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">No user-provided secrets yet</div>
+                )}
+            </Section>
+
+            <Section label="System-prompt addenda">
+                <Row k="conventions pointer" v={<Yes v={sp.conventions_pointer_will_be_added} />} />
+                <Row k="memory tool hint" v={<Yes v={sp.memory_addendum_will_be_added} />} />
+                <Row k="screen/page preamble" v={<Yes v={true} />} />
+            </Section>
+
+            {persona && (
+                <Section label="Persona system prompt">
+                    <div className="text-xs text-text-secondary italic max-h-24 overflow-auto bg-bg-hover/50 rounded p-2 font-mono">
+                        "{persona.slice(0, 400)}{persona.length > 400 ? '…' : ''}"
+                    </div>
+                </Section>
+            )}
+
+            <div className="text-[11px] text-text-tertiary mt-3 pt-2 border-t border-border-subtle/40">
+                Task context (<code>mcp__agentira__get_task</code>) is pulled on demand by the agent — not eagerly attached.
+            </div>
+        </div>
+    );
+}
+
+function Section({ label, children }) {
+    return (
+        <div className="mb-3">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5">{label}</div>
+            {children}
+        </div>
+    );
+}
+
+function Row({ k, v }) {
+    return (
+        <div className="flex items-baseline gap-2 mb-0.5">
+            <span className="text-text-tertiary text-xs w-28 shrink-0">{k}</span>
+            <span className="text-sm text-text-primary flex-1 min-w-0 truncate">{v}</span>
+        </div>
+    );
+}
+
+function Yes({ v }) {
+    return v
+        ? <span className="text-emerald-400 text-xs">✓ yes</span>
+        : <span className="text-text-tertiary text-xs">— no</span>;
 }
 
 
