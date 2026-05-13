@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight } from 'lucide-react';
+import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, Pencil } from 'lucide-react';
 
 export function Settings() {
     const { user } = useAuth();
@@ -184,6 +184,41 @@ export function Settings() {
         });
     }
 
+    // AP-87 follow-up: rename service account (updates profile display_name).
+    async function handleRenameServiceAccount(id, currentName) {
+        setPromptState({
+            title: "Rename service account",
+            description: "New display name:",
+            value: currentName || "",
+            onConfirm: async (val) => {
+                const trimmed = (val || "").trim();
+                if (!trimmed) { setPromptState(null); return; }
+                try {
+                    await api.updateProfile(id, { display_name: trimmed });
+                    await loadGeneralData();
+                } catch (err) {
+                    alert(err.message);
+                } finally {
+                    setPromptState(null);
+                }
+            },
+            onCancel: () => setPromptState(null),
+        });
+    }
+
+    // AP-87 follow-up: copy the service account's raw API key to clipboard.
+    async function handleCopyApiKey(botId) {
+        try {
+            const data = await api.getServiceAccount(botId);
+            if (!data?.api_key) { alert("No API key found for this service account."); return; }
+            await navigator.clipboard.writeText(data.api_key);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            alert("Failed to copy key: " + err.message);
+        }
+    }
+
     async function handleDeleteProfile(id, name) {
         setConfirmState({
             title: "Delete Profile",
@@ -357,8 +392,10 @@ export function Settings() {
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1">
-                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1"><Copy className="w-3 h-3" /> MCP Config</button>
-                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                                <button onClick={() => handleRenameServiceAccount(bot.id, bot.display_name)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Rename"><Pencil className="w-3 h-3" /> Rename</button>
+                                                <button onClick={() => handleCopyApiKey(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy API key"><Key className="w-3 h-3" /> Copy key</button>
+                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1" title="Copy MCP server config"><Copy className="w-3 h-3" /> MCP Config</button>
+                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
                                             </div>
                                         </div>
                                     ))}
