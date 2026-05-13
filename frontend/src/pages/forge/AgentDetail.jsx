@@ -4,7 +4,7 @@ import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
     ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
-    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle,
+    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -144,6 +144,7 @@ function OverviewTab({ agent }) {
     const [runtimeCosts, setRuntimeCosts] = useState(null);
     const [runtimeStatus, setRuntimeStatus] = useState(null);
     const [pricing, setPricing] = useState(null);
+    const [projects, setProjects] = useState([]);
     const [costFocus, setCostFocus] = useState(false);
     const costRef = useRef(null);
 
@@ -152,6 +153,7 @@ function OverviewTab({ agent }) {
         api.forge.getRuntimeStatus(agent.id).then(setRuntimeStatus).catch(console.error);
         api.forge.getRuntimeCosts(agent.id).then(setRuntimeCosts).catch(console.error);
         api.forge.getPricing().then(setPricing).catch(console.error);
+        api.forge.listAgentProjects(agent.id).then(setProjects).catch(() => setProjects([]));
     }, [agent.id]);
 
     const _price = (model) => {
@@ -411,6 +413,42 @@ function OverviewTab({ agent }) {
                     </pre>
                 </div>
             </div>
+
+            {/* Projects this agent is assigned to (via ProjectMember on the
+                agent's profile — same model as Studio's RBAC). */}
+            <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-text-primary">Assigned projects</h3>
+                    <span className="text-xs text-text-tertiary">{projects.length}</span>
+                </div>
+                {projects.length === 0 ? (
+                    <p className="text-xs text-text-tertiary">
+                        Not assigned to any project. Add this agent as a member from the project's settings to give it access.
+                    </p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {projects.map((p) => (
+                            <Link
+                                key={p.id}
+                                to={`/studio/board/${p.id}`}
+                                className="flex items-center justify-between px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-active transition-colors"
+                            >
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-sm text-text-primary truncate">{p.name}</span>
+                                    {p.key_prefix && (
+                                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-panel text-text-tertiary">{p.key_prefix}</span>
+                                    )}
+                                </div>
+                                {p.repo_path && (
+                                    <span className="text-xs text-text-tertiary truncate ml-3 max-w-[40%]" title={p.repo_path}>
+                                        {p.repo_path}
+                                    </span>
+                                )}
+                            </Link>
+                        ))}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
@@ -427,11 +465,21 @@ function ChatTab({ agentId, agent }) {
     // Project context for chat is no longer picked here. It resolves at
     // send time from the agent's assigned project + the current screen.
     // Users can inspect what's being sent via the `/context` slash command.
+    // OR explicitly attach via the + button (popover lists the agent's
+    // assigned projects); attached project overrides screen/default for
+    // the next sends until removed.
+    const [agentProjects, setAgentProjects] = useState([]);
+    const [contextOpen, setContextOpen] = useState(false);
+    const [attachedProject, setAttachedProject] = useState(null);
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
 
     const msgCountRef = useRef(0);
+
+    useEffect(() => {
+        api.forge.listAgentProjects(agentId).then(setAgentProjects).catch(() => setAgentProjects([]));
+    }, [agentId]);
 
     const loadMessages = useCallback(async () => {
         try {
@@ -458,22 +506,23 @@ function ChatTab({ agentId, agent }) {
         msgCountRef.current = messages.length;
     }, [messages.length, autoScroll]);
 
-    // Resolve context client-side: prefer the URL-derived project (if we're
-    // on a project page) and otherwise hand the agent its default project
-    // (set on the agent's Studio profile). Backend resolves repo_path /
-    // conventions / MCP from this; agent uses it for cwd.
+    // Resolve context client-side. Priority:
+    //   1. explicit attached project (via + popover) — user override wins
+    //   2. URL-derived project (when chatting from a project page)
+    //   3. agent's default project (its Studio assignment)
+    // Backend uses project_id to set the runtime cwd + load conventions + MCP.
     const buildUserContext = () => {
         const route = window.location.pathname;
-        // Detect studio/forge project routes — extract project id from the path.
         const studioProj = route.match(/\/studio\/board\/([^/]+)/);
         const forgeProj = route.match(/\/forge\/projects\/([^/]+)/);
         const screenProjectId = (studioProj || forgeProj)?.[1] || '';
-        const project_id = screenProjectId || agent?.default_project_id || '';
+        const project_id = attachedProject?.id || screenProjectId || agent?.default_project_id || '';
         const ctx = {
             surface: 'forge_agent_chat',
             route,
         };
         if (project_id) ctx.project_id = project_id;
+        if (attachedProject?.name) ctx.project_name = attachedProject.name;
         return ctx;
     };
 
@@ -484,12 +533,18 @@ function ChatTab({ agentId, agent }) {
         // `/context` slash command — show what would be sent, don't dispatch.
         if (trimmed === '/context' || trimmed.startsWith('/context ')) {
             const ctx = buildUserContext();
+            let projectSource = 'none';
+            if (ctx.project_id) {
+                if (attachedProject?.id === ctx.project_id) projectSource = 'attached via + button';
+                else if (ctx.project_id === agent?.default_project_id) projectSource = 'from agent assignment';
+                else projectSource = 'from current screen';
+            }
             const summary = [
                 `Surface: ${ctx.surface}`,
                 `Route: ${ctx.route}`,
                 ctx.project_id
-                    ? `Project: ${ctx.project_id}${ctx.project_id === agent?.default_project_id ? ' (from agent assignment)' : ' (from current screen)'}`
-                    : 'Project: — none (agent has no default project, and current screen has no project context)',
+                    ? `Project: ${ctx.project_name || ctx.project_id} (${projectSource})`
+                    : 'Project: — none (agent has no assignment, no screen context, nothing attached)',
                 '',
                 'Task context (when the agent calls mcp__agentira__get_task): pulled on demand from the Agentira MCP — not eagerly attached.',
             ].join('\n');
@@ -613,19 +668,70 @@ function ChatTab({ agentId, agent }) {
             </div>
 
             {/* Send bar */}
-            <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel flex items-center gap-2">
-                <input
-                    ref={inputRef}
-                    className="input flex-1"
-                    placeholder="Send a message to the agent via OpenClaw..."
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                    disabled={sending}
-                />
-                <button onClick={handleSend} disabled={sending || !input.trim()} className="btn btn-primary py-2.5">
-                    {sending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                </button>
+            <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel">
+                {/* Attached-context chip + project picker popover */}
+                {(attachedProject || contextOpen) && (
+                    <div className="mb-2 flex items-start gap-2 flex-wrap">
+                        {attachedProject && (
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-accent-subtle text-accent-primary text-xs">
+                                <span>📎 {attachedProject.name}</span>
+                                <button
+                                    onClick={() => setAttachedProject(null)}
+                                    className="hover:text-text-primary"
+                                    title="Remove attachment"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </div>
+                        )}
+                        {contextOpen && (
+                            <div className="rounded-md border border-border-subtle bg-bg-panel p-2 w-full max-w-sm">
+                                <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5 px-1">
+                                    Attach project context
+                                </div>
+                                {agentProjects.length === 0 ? (
+                                    <div className="text-xs text-text-tertiary px-2 py-2">
+                                        Agent isn't assigned to any project yet.
+                                    </div>
+                                ) : (
+                                    agentProjects.map((p) => (
+                                        <button
+                                            key={p.id}
+                                            onClick={() => { setAttachedProject(p); setContextOpen(false); }}
+                                            className="w-full text-left px-2 py-1.5 rounded hover:bg-bg-hover text-sm text-text-primary flex items-center justify-between"
+                                        >
+                                            <span className="truncate">{p.name}</span>
+                                            {p.key_prefix && (
+                                                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary ml-2">{p.key_prefix}</span>
+                                            )}
+                                        </button>
+                                    ))
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setContextOpen(!contextOpen)}
+                        className="btn btn-ghost py-2.5 px-2.5"
+                        title="Attach a project to this chat"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                    <input
+                        ref={inputRef}
+                        className="input flex-1"
+                        placeholder="Send a message — / for commands"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                        disabled={sending}
+                    />
+                    <button onClick={handleSend} disabled={sending || !input.trim()} className="btn btn-primary py-2.5">
+                        {sending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
+                </div>
             </div>
         </div>
     );

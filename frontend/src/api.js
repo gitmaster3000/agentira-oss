@@ -206,6 +206,9 @@ export const api = {
         getRun: (id) => request(`/forge/runs/${id}`),
         createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
         startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
+        cancelRun: (id) => request(`/forge/runs/${id}/cancel`, { method: 'POST' }),
+        pauseRun: (id) => request(`/forge/runs/${id}/pause`, { method: 'POST' }),
+        resumeRun: (id) => request(`/forge/runs/${id}/resume`, { method: 'POST' }),
         completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
         updateRunStatus: (id, data) => request(`/forge/runs/${id}/status`, { method: 'POST', body: JSON.stringify(data) }),
         listRunEvents: (runId) => request(`/forge/runs/${runId}/events`),
@@ -279,5 +282,6 @@ export const api = {
             return request(`/forge/runtimes${q ? '?' + q : ''}`);
         },
         getRuntime: (id) => request(`/forge/runtimes/${id}`),
+        listAgentProjects: (agentId) => request(`/forge/agents/${agentId}/projects`),
     },
 };
