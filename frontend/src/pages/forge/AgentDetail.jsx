@@ -18,6 +18,7 @@ const TABS = [
     { id: 'overview', label: 'Overview', icon: Activity },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'runs', label: 'Runs', icon: Play },
+    { id: 'projects', label: 'Projects', icon: Folder },
     { id: 'config', label: 'Config', icon: Settings2 },
     { id: 'webhooks', label: 'Webhooks', icon: Webhook },
     { id: 'live', label: 'Live', icon: Eye },
@@ -125,9 +126,10 @@ export function AgentDetail() {
 
             {/* Tab Content */}
             <div className="flex-1 overflow-auto">
-                {tab === 'overview' && <OverviewTab agent={agent} />}
+                {tab === 'overview' && <OverviewTab agent={agent} onTab={setTab} />}
                 {tab === 'chat' && <ChatTab agentId={agentId} agent={agent} />}
                 {tab === 'runs' && <RunsTab agentId={agentId} />}
+                {tab === 'projects' && <ProjectsTab agentId={agentId} />}
                 {tab === 'config' && <ConfigTab agent={agent} onSaved={loadAgent} />}
                 {tab === 'webhooks' && <WebhooksTab agentId={agentId} />}
                 {tab === 'live' && <LiveTab agentId={agentId} agent={agent} />}
@@ -139,7 +141,7 @@ export function AgentDetail() {
 
 // ── Overview Tab ────────────────────────────────────────────────────────
 
-function OverviewTab({ agent }) {
+function OverviewTab({ agent, onTab }) {
     const [costs, setCosts] = useState(null);
     const [runtimeCosts, setRuntimeCosts] = useState(null);
     const [runtimeStatus, setRuntimeStatus] = useState(null);
@@ -183,6 +185,8 @@ function OverviewTab({ agent }) {
                             ? projects.slice(0, 2).map(p => p.name).join(', ') + (projects.length > 2 ? ` +${projects.length - 2} more` : '')
                             : 'Not in any project'}
                         color="#ec4899"
+                        onClick={() => onTab && onTab('projects')}
+                        expandable={projects.length > 0}
                     />
                     <StatCard icon={Clock} label="Last Heartbeat" value={agent.last_heartbeat ? timeAgo(agent.last_heartbeat) : 'Never'} color="#00bcd4" />
                     <StatCard
@@ -998,6 +1002,75 @@ function Info({ label, value, mono, accent }) {
                 style={accent ? { color: accent } : undefined}
             >
                 {value}
+            </div>
+        </div>
+    );
+}
+
+
+// ── Projects Tab ───────────────────────────────────────────────────────
+
+function ProjectsTab({ agentId }) {
+    const [projects, setProjects] = useState(null);
+
+    useEffect(() => {
+        api.forge.listAgentProjects(agentId)
+            .then(d => setProjects(Array.isArray(d) ? d : []))
+            .catch(() => setProjects([]));
+    }, [agentId]);
+
+    if (projects === null) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading projects...</div>;
+    }
+
+    if (projects.length === 0) {
+        return (
+            <div className="p-6">
+                <div className="text-center py-16 text-text-tertiary">
+                    <Folder className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <p>This agent isn't assigned to any project yet.</p>
+                    <p className="text-xs mt-2">Add the agent as a member from a project's settings to give it access.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-6">
+            <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="border-b border-border-subtle text-text-tertiary text-xs uppercase">
+                            <th className="text-left px-4 py-3 font-medium">Project</th>
+                            <th className="text-left px-4 py-3 font-medium">Key</th>
+                            <th className="text-left px-4 py-3 font-medium">Repo Path</th>
+                            <th className="px-4 py-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {projects.map(p => (
+                            <tr key={p.id} className="border-b border-border-subtle hover:bg-bg-hover transition-colors">
+                                <td className="px-4 py-3 text-text-primary font-medium">{p.name}</td>
+                                <td className="px-4 py-3 text-text-tertiary text-xs">
+                                    {p.key_prefix
+                                        ? <span className="px-1.5 py-0.5 rounded bg-bg-hover">{p.key_prefix}</span>
+                                        : '—'}
+                                </td>
+                                <td className="px-4 py-3 text-text-tertiary text-xs font-mono truncate max-w-[400px]">
+                                    {p.repo_path || '—'}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                    <Link
+                                        to={`/studio/board/${p.id}`}
+                                        className="text-xs text-accent-primary hover:underline"
+                                    >
+                                        Open →
+                                    </Link>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
