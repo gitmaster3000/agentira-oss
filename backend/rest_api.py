@@ -292,7 +292,7 @@ svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"],
 
 @svc_accounts.get("")
 def api_list_service_accounts():
-    return services.list_profiles(role="bot")
+    return services.list_service_accounts()
 
 @svc_accounts.post("")
 def api_create_service_account(body: dict):
@@ -306,6 +306,9 @@ def api_get_service_account(profile_id: str):
     result = services.get_service_account(profile_id)
     if not result:
         raise HTTPException(404, "Service account not found")
+    # Block leakage of managed agents (bot + runtime_id) through this endpoint.
+    if result.get("runtime_id"):
+        raise HTTPException(404, "Not a service account")
     return result
 
 @svc_accounts.delete("/{profile_id}")

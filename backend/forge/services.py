@@ -117,6 +117,10 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_id": a.runtime_id,
         "runtime_provider": a.runtime.provider if a.runtime else "",
         "runtime_version": a.runtime.version if a.runtime else "",
+        # Three-kind identity: derived from role + runtime_id presence.
+        # Defensive — list_agents already filters out service_account rows,
+        # but a single agent fetched by id might return either kind.
+        "kind": "managed_agent" if a.runtime_id else "service_account",
         "default_project_id": a.default_project_id,
         "schedule_cron": a.schedule_cron or "",
         "mcp_servers": json.loads(a.mcp_servers) if a.mcp_servers else [],
@@ -395,7 +399,12 @@ def _refresh_status(db, agents: list[Agent]) -> dict[str, float]:
 def list_agents(status: Optional[str] = None) -> list[dict]:
     with _session() as db:
         _sync_bots(db)
-        agents = db.query(Agent).order_by(Agent.created_at.desc()).all()
+        # Forge surfaces only MANAGED agents — bot profiles bound to a
+        # runtime. Service accounts (bot, no runtime) live in Settings
+        # → Service Accounts and never appear here.
+        agents = (db.query(Agent)
+                    .filter(Agent.runtime_id.isnot(None))
+                    .order_by(Agent.created_at.desc()).all())
         live_costs = _refresh_status(db, agents)
         if status:
             agents = [a for a in agents if a.status.value == status]
@@ -414,12 +423,20 @@ def get_agent(agent_id: str) -> dict | None:
 def create_agent(*, profile_id: str | None = None, name: str, executor_type: str = "http",
                  model: str = "", webhook_url: str = "", config_json: str | None = None,
                  runtime_id: str | None = None) -> dict:
-    """Create an agent. AP-86: every agent has a 1:1 backing Profile (bot
-    identity) sharing the same id. Runtime config + identity persist together.
+    """Create a MANAGED agent. AP-86: every agent has a 1:1 backing Profile
+    (bot identity) sharing the same id. Runtime config + identity persist
+    together.
+
+    `runtime_id` is REQUIRED — Forge agents are dispatchable by definition.
+    To create an API-key-only identity (no runtime), call
+    `services.create_service_account()` instead, surfaced via Settings →
+    Service Accounts.
 
     If `profile_id` is given, reuse it (link an existing bot profile to a
     new runtime). Otherwise create both the profile and the agent here.
     """
+    if not runtime_id:
+        return {"error": "runtime_id is required — managed agents must be bound to a runtime. Use Settings → Service Accounts for an API-key-only identity."}
     from backend.models import Profile, Role
     with _session() as db:
         if profile_id:

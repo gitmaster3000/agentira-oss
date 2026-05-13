@@ -153,16 +153,27 @@ def _activity_to_dict(a: Activity) -> dict:
 
 def _profile_to_dict(p: Profile) -> dict:
     extra = [pp.permission.codename for pp in p.extra_permissions]
+    role_name = p.role.name
+    # Derived identity kind. Three values:
+    #   user            — role=user
+    #   managed_agent   — role=bot AND runtime_id IS NOT NULL
+    #   service_account — role=bot AND runtime_id IS NULL
+    if role_name == "bot":
+        kind = "managed_agent" if p.runtime_id else "service_account"
+    else:
+        kind = "user"
     return {
         "id": p.id,
         "name": p.name,
         "display_name": p.display_name or p.name,
-        "role": p.role.name,
+        "role": role_name,
+        "kind": kind,
         "email": p.email,
         "avatar_url": p.avatar_url,
         "webhook_url": p.webhook_url,
         "extra_permissions": extra,
         "projects": [pm.project_id for pm in p.project_memberships],
+        "runtime_id": p.runtime_id,
         "created_at": p.created_at.isoformat(),
     }
 
@@ -1432,6 +1443,24 @@ def list_profiles(role: Optional[str] = None) -> list[dict]:
         q = db.query(Profile)
         if role:
             q = q.join(Role).filter(Role.name == role)
+        return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
+
+
+def list_service_accounts() -> list[dict]:
+    """Service accounts: bot-role profiles WITHOUT a runtime binding.
+
+    These are API-key-only identities used by external systems (CI, plugins,
+    external MCP/Claude sessions). They're project-membership-capable but
+    NOT dispatched by Forge — Forge agents live in `forge_agents` with a
+    non-null `runtime_id` and are surfaced by `forge.services.list_agents`.
+    """
+    from sqlalchemy import or_
+    with _session() as db:
+        q = (db.query(Profile)
+               .join(Role).filter(Role.name == "bot")
+               # Defensive: data may have empty-string runtime_id from older
+               # rows; treat either NULL or "" as "no runtime".
+               .filter(or_(Profile.runtime_id.is_(None), Profile.runtime_id == "")))
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
 
 

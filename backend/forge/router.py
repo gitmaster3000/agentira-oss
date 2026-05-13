@@ -21,12 +21,14 @@ daemon_router = APIRouter(prefix="/api/forge", tags=["forge-daemon"])
 
 class AgentCreate(BaseModel):
     name: str
+    # runtime_id REQUIRED — Forge agents are dispatchable identities. For
+    # API-key-only identities use Settings → Service Accounts instead.
+    runtime_id: str
     profile_id: Optional[str] = None
     executor_type: str = "http"
     model: str = ""
     webhook_url: str = ""
     config_json: Optional[str] = None
-    runtime_id: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
