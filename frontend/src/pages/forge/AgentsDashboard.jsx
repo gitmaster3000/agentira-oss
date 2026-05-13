@@ -190,14 +190,12 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                         {agent.model}
                     </span>
                 )}
-                {agent.runtime_id && (
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400 flex items-center gap-1" title="Bound local runtime">
-                        <Cpu className="w-3 h-3" /> local CLI
-                    </span>
-                )}
-                {!agent.runtime_id && agent.runtime_agent_name && (
-                    <span className="px-2 py-0.5 rounded bg-accent-primary/15 text-xs text-accent-primary" title="OpenClaw agent ID">
-                        {agent.runtime_agent_name}
+                {agent.runtime_id && agent.runtime_provider && (
+                    <span
+                        className="px-2 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400 flex items-center gap-1"
+                        title={agent.runtime_version || agent.runtime_provider}
+                    >
+                        <Cpu className="w-3 h-3" /> {agent.runtime_provider}
                     </span>
                 )}
             </div>

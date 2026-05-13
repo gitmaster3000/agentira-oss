@@ -79,8 +79,16 @@ export function AgentDetail() {
                                 {status.label}
                             </span>
                         </div>
-                        <div className="text-sm text-text-tertiary">
-                            {agent.profile_name} &middot; {agent.executor_type} &middot; {agent.model || 'no model set'}
+                        <div className="text-sm text-text-tertiary flex items-center gap-2">
+                            {agent.runtime_provider && (
+                                <span
+                                    className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400"
+                                    title={agent.runtime_version || agent.runtime_provider}
+                                >
+                                    {agent.runtime_provider}
+                                </span>
+                            )}
+                            <span>{agent.model || 'no model set'}</span>
                         </div>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-text-secondary">
