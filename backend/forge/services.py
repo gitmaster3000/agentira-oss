@@ -90,6 +90,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_hooks_token": a.runtime_hooks_token or "",
         "runtime_agent_name": a.runtime_agent_name or "",
         "runtime_id": a.runtime_id,
+        "default_project_id": a.default_project_id,
         "schedule_cron": a.schedule_cron or "",
         "mcp_servers": json.loads(a.mcp_servers) if a.mcp_servers else [],
         "created_at": _iso(a.created_at),

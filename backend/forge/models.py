@@ -119,6 +119,11 @@ class Agent(Base):
     schedule_enabled: Mapped[bool] = mapped_column(default=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(60), nullable=True)
     runtime_id: Mapped[str | None] = mapped_column(ForeignKey("forge_runtimes.id"), nullable=True)
+    # Default project this agent works in. UX-only: when set, chat surfaces
+    # use it as the default project_id in user_context so the user doesn't
+    # have to pick every time. Per-call user_context still wins — AP-76's
+    # plumbing isn't replaced. This is a default, not a constraint.
+    default_project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     # JSON list of MCP server names from backend.forge.mcp_registry.REGISTRY.
     # Excludes auto-injected servers (agentira, memory) — those are added
     # at dispatch by build_mcp_config regardless of this list.
