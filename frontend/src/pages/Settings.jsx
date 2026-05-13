@@ -318,8 +318,53 @@ export function Settings() {
                             </section>
                         )}
 
-                        {/* AP-86: Service Accounts section removed — agents (bots+runtime) are
-                            managed in Forge → Agents. The api-key + MCP config live there now. */}
+                        {/* ── Service Accounts (AP-87) — API keys for external systems ────── */}
+                        <section className="grid gap-3">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
+                                        <Bot className="w-4 h-4" /> Service Accounts
+                                    </h3>
+                                    <p className="text-xs mt-1 max-w-xl" style={{ color: 'var(--text-tertiary)' }}>
+                                        API keys for external systems — CI, plugins, external MCP/Claude sessions. Not dispatched by Forge. Add to a project's members to grant access.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={handleCreateBot}
+                                    className="shrink-0 text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-white font-medium transition-colors flex items-center gap-1.5"
+                                >
+                                    <Plus className="w-3 h-3" /> New Service Account
+                                </button>
+                            </div>
+
+                            <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
+                                <div className="space-y-3">
+                                    {bots.filter(b => !b.runtime_id).length === 0 && (
+                                        <div className="text-center py-8 text-xs italic flex flex-col items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
+                                            <Bot className="w-8 h-8 opacity-20" />
+                                            No service accounts yet.
+                                        </div>
+                                    )}
+                                    {bots.filter(b => !b.runtime_id).map(bot => (
+                                        <div key={bot.id} className="flex items-center justify-between p-3 rounded border transition-colors hover:bg-white/5" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'var(--border-subtle)' }}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                                                    <Bot className="w-5 h-5" />
+                                                </div>
+                                                <div>
+                                                    <div className="font-medium text-sm">{bot.display_name}</div>
+                                                    <div className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>@{bot.name}</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1"><Copy className="w-3 h-3" /> MCP Config</button>
+                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
 
                         {/* ── Admin: All Profiles ────────────────────────────────────── */}
                         {isAdmin && (

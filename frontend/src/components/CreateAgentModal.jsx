@@ -129,6 +129,9 @@ export function CreateAgentModal({ onClose, onSuccess }) {
                         <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
                             Runtime <span style={{ color: '#ef4444' }}>*</span>
                         </label>
+                        <p className="text-[11px] mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                            Required — Forge agents are dispatchable by definition. For API-key-only identities (CI, plugins, external sessions), use <strong>Settings → Service Accounts</strong> instead.
+                        </p>
                         {onlineRuntimes.length === 0 ? (
                             <div
                                 className="rounded-lg p-3 text-xs"

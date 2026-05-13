@@ -22,7 +22,9 @@ export function AgentsDashboard() {
         try {
             const statusParam = filter === 'all' ? undefined : filter;
             const data = await api.forge.listAgents(statusParam);
-            setAgents(data);
+            // Defensive: Forge only surfaces managed agents (backend already
+            // filters, but belt-and-suspenders if any service-account row leaks).
+            setAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
         } catch (err) {
             console.error('Failed to load agents:', err);
         } finally {
