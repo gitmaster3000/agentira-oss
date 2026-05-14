@@ -118,6 +118,26 @@ class WsHub:
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
 
+        # No daemon online with this runtime — the trigger would vanish
+        # silently and the run row would stay stuck in PENDING/RUNNING
+        # forever. Mark the run failed (if any) and write a SYSTEM message
+        # to the chat thread so the user sees what happened.
+        if not targets:
+            logger.warning(
+                "Dispatch dropped: no daemon online for runtime=%s "
+                "trace=%s kind=%s agent=%s run=%s",
+                runtime_id[:8] if runtime_id else "-",
+                trace_id, kind, agent_id, run_id or "-",
+            )
+            try:
+                from backend.forge import services as _svc
+                _svc.mark_dispatch_dropped(
+                    agent_id=agent_id, trace_id=trace_id, run_id=run_id or None,
+                )
+            except Exception as exc:  # noqa: BLE001 — best-effort surface
+                logger.warning("mark_dispatch_dropped failed: %s", exc)
+            return
+
         for conn in targets:
             await conn.send(trace_id, payload)
             logger.info(
