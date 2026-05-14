@@ -4,7 +4,9 @@ import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
     ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
-    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder, Check,
+    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder, FolderPlus, Check,
+    MessageSquarePlus, ClipboardList,
+    Info as InfoIcon,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -442,6 +444,22 @@ function OverviewTab({ agent, onTab }) {
 
 // ── Chat Tab ───────────────────────────────────────────────────────────
 
+// Local mirror of services._scope_label — used when a scope is newly
+// selected but the conversation row doesn't exist yet, so the backend
+// /conversations endpoint hasn't returned a label for it.
+function _localScopeLabel(scopeKey, projects) {
+    if (!scopeKey) return 'Chat';
+    if (scopeKey === 'chat:default') return 'General';
+    if (scopeKey.startsWith('chat:user:')) return `General (${scopeKey.slice(10, 14)})`;
+    if (scopeKey.startsWith('chat:project:')) {
+        const pid = scopeKey.split(':', 3)[2];
+        const p = (projects || []).find((x) => x.id === pid);
+        return p ? `About ${p.name}` : `About project ${pid.slice(0, 8)}`;
+    }
+    if (scopeKey.startsWith('run:')) return `Task run ${scopeKey.slice(4, 12)}`;
+    return scopeKey;
+}
+
 function ChatTab({ agentId, agent }) {
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -458,6 +476,21 @@ function ChatTab({ agentId, agent }) {
     const [contextOpen, setContextOpen] = useState(false);
     const [attachedProject, setAttachedProject] = useState(null);
     const [inputFocused, setInputFocused] = useState(false);
+    const [conversation, setConversation] = useState(null);
+    const [conversations, setConversations] = useState([]);
+    const [selectedScope, setSelectedScope] = useState(null); // null = follow attached/screen
+    const [chatPickerOpen, setChatPickerOpen] = useState(false);
+    const [newChatFlyoutOpen, setNewChatFlyoutOpen] = useState(false);
+    const [projectFlyoutOpen, setProjectFlyoutOpen] = useState(false);
+    // Close-delay refs so the cursor can transit the gap between menu and
+    // its flyout without the flyout slamming shut. Clear on re-enter; close
+    // after ~180ms of "left" state.
+    const newChatCloseTimer = useRef(null);
+    const projectCloseTimer = useRef(null);
+    const openNewChat = () => { clearTimeout(newChatCloseTimer.current); setNewChatFlyoutOpen(true); };
+    const closeNewChat = () => { newChatCloseTimer.current = setTimeout(() => { setNewChatFlyoutOpen(false); setProjectFlyoutOpen(false); }, 180); };
+    const openProject = () => { clearTimeout(projectCloseTimer.current); setProjectFlyoutOpen(true); };
+    const closeProject = () => { projectCloseTimer.current = setTimeout(() => setProjectFlyoutOpen(false), 180); };
     const bottomRef = useRef(null);
     const containerRef = useRef(null);
     const inputRef = useRef(null);
@@ -468,9 +501,23 @@ function ChatTab({ agentId, agent }) {
         api.forge.listAgentProjects(agentId).then(setAgentProjects).catch(() => setAgentProjects([]));
     }, [agentId]);
 
+    // Scope is auto-derived from the screen (which project/task page you're
+    // on) and can be explicitly overridden via the dropdown. The attached
+    // project (+ button) does NOT change scope — it's a per-message
+    // reference, layered into user_context separately.
+    const screenProjectId = (() => {
+        const route = window.location.pathname;
+        const m = route.match(/\/studio\/board\/([^/]+)/) || route.match(/\/forge\/projects\/([^/]+)/);
+        return m ? m[1] : '';
+    })();
+    const screenScope = screenProjectId
+        ? `chat:project:${screenProjectId}`
+        : (agent?.default_project_id ? `chat:project:${agent.default_project_id}` : 'chat:default');
+    const activeScope = selectedScope || screenScope;
+
     const loadMessages = useCallback(async () => {
         try {
-            const data = await api.forge.listMessages(agentId, { limit: 200 });
+            const data = await api.forge.listMessages(agentId, { limit: 200, scope_key: activeScope });
             // Preserve any local-only messages (e.g. /context output) so the
             // 3s poll doesn't wipe them, and interleave them by created_at
             // so the local card sits chronologically where the user typed it.
@@ -487,13 +534,35 @@ function ChatTab({ agentId, agent }) {
         } finally {
             setLoading(false);
         }
+    }, [agentId, activeScope]);
+
+    // Look up conversation state from the activeScope (which already factors
+    // in the user's explicit selection vs attached project fallback). The
+    // /conversation endpoint takes a project_id and computes the scope; for
+    // an explicit non-project scope (e.g. a task run, or chat:default) we
+    // pull the row from the conversations list directly.
+    const loadConversation = useCallback(() => {
+        if (!activeScope) { setConversation(null); return; }
+        if (activeScope.startsWith('chat:project:')) {
+            const pid = activeScope.split(':', 3)[2];
+            api.forge.getConversation(agentId, pid).then(setConversation).catch(() => setConversation(null));
+        } else {
+            const match = conversations.find((c) => c.scope_key === activeScope);
+            setConversation(match || { scope_key: activeScope, has_session: false, session_id: '', message_count: 0 });
+        }
+    }, [agentId, activeScope, conversations]);
+    useEffect(() => { loadConversation(); }, [loadConversation]);
+
+    const loadConversations = useCallback(() => {
+        api.forge.listConversations(agentId).then(setConversations).catch(() => setConversations([]));
     }, [agentId]);
+    useEffect(() => { loadConversations(); }, [loadConversations]);
 
     useEffect(() => {
         loadMessages();
-        const interval = setInterval(loadMessages, 3000);
+        const interval = setInterval(() => { loadMessages(); loadConversation(); }, 3000);
         return () => clearInterval(interval);
-    }, [loadMessages]);
+    }, [loadMessages, loadConversation]);
 
     useEffect(() => {
         // Only auto-scroll when new messages arrive, not on every poll
@@ -510,16 +579,30 @@ function ChatTab({ agentId, agent }) {
     // Backend uses project_id to set the runtime cwd + load conventions + MCP.
     const buildUserContext = () => {
         const route = window.location.pathname;
-        const studioProj = route.match(/\/studio\/board\/([^/]+)/);
-        const forgeProj = route.match(/\/forge\/projects\/([^/]+)/);
-        const screenProjectId = (studioProj || forgeProj)?.[1] || '';
-        const project_id = attachedProject?.id || screenProjectId || agent?.default_project_id || '';
+        // project_id drives scope + cwd. Pull from activeScope when it
+        // points at a project (the source of truth for which conversation
+        // we're in); fallback to screen/default.
+        let project_id = '';
+        if (activeScope && activeScope.startsWith('chat:project:')) {
+            project_id = activeScope.split(':', 3)[2];
+        } else {
+            project_id = screenProjectId || agent?.default_project_id || '';
+        }
         const ctx = {
             surface: 'forge_agent_chat',
             route,
         };
         if (project_id) ctx.project_id = project_id;
-        if (attachedProject?.name) ctx.project_name = attachedProject.name;
+        // Attached project is a per-message reference, not the scope. Pass
+        // it as a separate `references` list so the agent knows "hey, also
+        // think about this project" without losing the current conversation.
+        if (attachedProject?.id && attachedProject.id !== project_id) {
+            ctx.references = [{
+                kind: 'project',
+                id: attachedProject.id,
+                name: attachedProject.name || '',
+            }];
+        }
         return ctx;
     };
 
@@ -593,10 +676,179 @@ function ChatTab({ agentId, agent }) {
         <div className="flex flex-col h-full">
             {/* Toolbar */}
             <div className="flex items-center justify-between px-6 py-2 border-b border-border-subtle bg-bg-panel">
-                <span className="text-sm text-text-secondary">
-                    {messages.length} messages
-                    <span className="text-text-tertiary ml-2">· type <code>/context</code> to inspect what's being sent</span>
-                </span>
+                {/* Current chat name + switcher. One button. Click opens a
+                    clean popover with all chats + "new chat" actions. */}
+                <div className="relative flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setChatPickerOpen((v) => !v)}
+                        className="flex items-center gap-1.5 text-sm text-text-primary hover:bg-bg-hover rounded-md px-2 py-1 transition-colors"
+                        title="Switch chat or start a new one"
+                    >
+                        <span
+                            className={
+                                conversation?.has_session
+                                    ? 'w-1.5 h-1.5 rounded-full bg-accent-primary'
+                                    : 'w-1.5 h-1.5 rounded-full bg-text-tertiary opacity-50'
+                            }
+                            title={conversation?.has_session ? 'Resumable' : 'Fresh'}
+                        />
+                        <span className="font-medium">
+                            {(conversations.find((c) => c.scope_key === activeScope)?.label) || _localScopeLabel(activeScope, agentProjects)}
+                        </span>
+                        <span className="text-text-tertiary text-xs">({messages.length})</span>
+                        <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
+                    </button>
+                    {chatPickerOpen && (() => {
+                        // Optimistic active list: include selected scope even
+                        // if its conversation row doesn't exist yet (no message
+                        // sent → no row in forge_conversations). The synthetic
+                        // entry shows 0 messages and resolves to the real row
+                        // after first dispatch.
+                        const known = new Map(conversations.map((c) => [c.scope_key, c]));
+                        if (activeScope && !known.has(activeScope)) {
+                            known.set(activeScope, {
+                                scope_key: activeScope,
+                                label: _localScopeLabel(activeScope, agentProjects),
+                                message_count: 0,
+                                has_session: false,
+                            });
+                        }
+                        const activeList = Array.from(known.values());
+                        const existingKeys = new Set(activeList.map((c) => c.scope_key));
+                        const startableProjects = (agentProjects || []).filter((p) => !existingKeys.has(`chat:project:${p.id}`));
+                        const generalExists = existingKeys.has('chat:default');
+                        return (
+                            <>
+                                <div className="fixed inset-0 z-30" onClick={() => { setChatPickerOpen(false); setNewChatFlyoutOpen(false); setProjectFlyoutOpen(false); }} />
+                                <div className="absolute left-0 top-full mt-1 z-40 w-72 rounded-md border border-border-subtle shadow-xl"
+                                     style={{ backgroundColor: '#1a1a1a' }}>
+                                    {activeList.length > 0 && (
+                                        <div className="py-1.5">
+                                            <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Active</div>
+                                            {activeList.map((c) => {
+                                                const isActive = c.scope_key === activeScope;
+                                                return (
+                                                    <button
+                                                        key={c.scope_key}
+                                                        type="button"
+                                                        onClick={() => { setSelectedScope(c.scope_key); setChatPickerOpen(false); }}
+                                                        className={`w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-hover ${isActive ? 'bg-bg-hover' : ''}`}
+                                                    >
+                                                        <span className={c.has_session ? 'w-1.5 h-1.5 rounded-full bg-accent-primary' : 'w-1.5 h-1.5 rounded-full bg-text-tertiary opacity-40'} />
+                                                        <span className="text-sm text-text-primary flex-1 truncate">{c.label}</span>
+                                                        <span className="text-xs text-text-tertiary">{c.message_count}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* New Chat — single hover/click menu item that
+                                        flyouts to a submenu with General / Project / Task.
+                                        Project nests one level deeper into a project list. */}
+                                    <div className="py-1 border-t border-border-subtle">
+                                        <div
+                                            className="relative"
+                                            onMouseEnter={openNewChat}
+                                            onMouseLeave={closeNewChat}
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={() => setNewChatFlyoutOpen((v) => !v)}
+                                                className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                            >
+                                                <Plus className="w-3.5 h-3.5 text-accent-primary" />
+                                                <span className="text-sm text-text-primary flex-1 font-medium">New Chat</span>
+                                                <ChevronDown className="w-3 h-3 text-text-tertiary -rotate-90" />
+                                            </button>
+                                            {newChatFlyoutOpen && (
+                                                <div
+                                                    onMouseEnter={openNewChat}
+                                                    onMouseLeave={closeNewChat}
+                                                    className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1"
+                                                    style={{ backgroundColor: '#1a1a1a' }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const key = generalExists
+                                                                ? `chat:user:${Math.random().toString(36).slice(2, 10)}`
+                                                                : 'chat:default';
+                                                            setSelectedScope(key);
+                                                            setChatPickerOpen(false);
+                                                            setNewChatFlyoutOpen(false);
+                                                        }}
+                                                        className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                                    >
+                                                        <MessageSquarePlus className="w-3.5 h-3.5 text-accent-primary" />
+                                                        <span className="text-sm text-text-primary flex-1">General</span>
+                                                        {generalExists && (
+                                                            <span className="text-[10px] text-text-tertiary">new</span>
+                                                        )}
+                                                    </button>
+                                                    {/* Project nested flyout */}
+                                                    <div
+                                                        className="relative"
+                                                        onMouseEnter={() => startableProjects.length > 0 && openProject()}
+                                                        onMouseLeave={closeProject}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            disabled={startableProjects.length === 0}
+                                                            className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                                                            title={startableProjects.length === 0 ? 'All assigned projects already have chats' : ''}
+                                                        >
+                                                            <FolderPlus className="w-3.5 h-3.5 text-accent-primary" />
+                                                            <span className="text-sm text-text-primary flex-1">Project</span>
+                                                            <ChevronDown className="w-3 h-3 text-text-tertiary -rotate-90" />
+                                                        </button>
+                                                        {projectFlyoutOpen && startableProjects.length > 0 && (
+                                                            <div
+                                                                onMouseEnter={openProject}
+                                                                onMouseLeave={closeProject}
+                                                                className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1"
+                                                                style={{ backgroundColor: '#1a1a1a' }}
+                                                            >
+                                                                <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Pick a project</div>
+                                                                {startableProjects.map((p) => (
+                                                                    <button
+                                                                        key={p.id}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setSelectedScope(`chat:project:${p.id}`);
+                                                                            setChatPickerOpen(false);
+                                                                            setNewChatFlyoutOpen(false);
+                                                                            setProjectFlyoutOpen(false);
+                                                                        }}
+                                                                        className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                                                    >
+                                                                        <Folder className="w-3.5 h-3.5 text-text-tertiary" />
+                                                                        <span className="text-sm text-text-primary truncate">{p.name}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        disabled
+                                                        className="w-full text-left px-3 py-1.5 flex items-center gap-2 opacity-40 cursor-not-allowed"
+                                                        title="Coming soon — task-scoped chats land with AP-93"
+                                                    >
+                                                        <ClipboardList className="w-3.5 h-3.5 text-accent-primary" />
+                                                        <span className="text-sm text-text-primary flex-1">Task</span>
+                                                        <span className="text-[10px] text-text-tertiary">soon</span>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        );
+                    })()}
+                </div>
                 <div className="flex items-center gap-2">
                     <button onClick={loadMessages} className="btn btn-ghost py-1 px-2 text-xs">
                         <RefreshCw className="w-3 h-3" /> Refresh
@@ -880,6 +1132,49 @@ function ContextPreviewCard({ preview }) {
     );
 }
 
+// Click-toggle info popover. Hover works too (Safari/touch don't reliably
+// show native title tooltips, so we render our own).
+function InfoTip({ text }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e) => {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open]);
+    return (
+        <span ref={ref} className="relative inline-flex items-center">
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                onMouseEnter={() => setOpen(true)}
+                onMouseLeave={() => setOpen(false)}
+                className="inline-flex items-center text-text-tertiary hover:text-text-secondary"
+                aria-label="info"
+            >
+                <InfoIcon className="w-3.5 h-3.5" />
+            </button>
+            {open && (
+                <span
+                    role="tooltip"
+                    className="absolute left-4 top-full mt-1 z-50 w-72 p-2.5 rounded-md text-[11px] leading-snug border shadow-xl"
+                    style={{
+                        backgroundColor: '#1a1a1a',
+                        color: '#e8e8e8',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        pointerEvents: 'auto',
+                    }}
+                >
+                    {text}
+                </span>
+            )}
+        </span>
+    );
+}
+
 function Section({ label, children }) {
     return (
         <div className="mb-3">
@@ -1006,27 +1301,62 @@ function ConfigTab({ agent, onSaved }) {
         system_prompt: agent.system_prompt || '',
         personality: agent.personality || '',
         mcp_servers: Array.isArray(agent.mcp_servers) ? agent.mcp_servers : [],
+        mcp_disabled: Array.isArray(agent.mcp_disabled) ? agent.mcp_disabled : [],
+        mcp_strict: !!agent.mcp_strict,
+        mcp_config_override: agent.mcp_config_override || '',
     });
     const [runtimes, setRuntimes] = useState([]);
     const [projects, setProjects] = useState([]);
     const [mcpServers, setMcpServers] = useState([]); // full registry incl. auto
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
+    const [editingMcp, setEditingMcp] = useState(false);
+    const [mcpConfig, setMcpConfig] = useState(null);
+    const [hostTools, setHostTools] = useState(null);
+    const [runtimeProvider, setRuntimeProvider] = useState('');
 
     useEffect(() => {
         api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
         api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
         api.forge.listMcpServers(true).catch(() => []).then(setMcpServers);
-    }, []);
+        api.forge.getDispatchPreview(agent.id).catch(() => null).then((p) => {
+            if (!p) return;
+            if (p.mcp_config) setMcpConfig(p.mcp_config);
+            if (p.host_tools) setHostTools(p.host_tools);
+            if (p.runtime_provider) setRuntimeProvider(p.runtime_provider);
+        });
+    }, [agent.id]);
 
-    const toggleMcp = (name) => {
-        setForm((f) => {
-            const current = f.mcp_servers || [];
-            const next = current.includes(name)
+    const toggleMcp = async (name) => {
+        // A name is "built-in" (auto) when the registry says so. Built-ins
+        // toggle into/out of `mcp_disabled` (kill-switch list). Opt-ins
+        // toggle into/out of `mcp_servers` (allow-list).
+        const regEntry = mcpServers.find((s) => s.name === name);
+        const isAuto = !!regEntry?.auto;
+        let next;
+        if (isAuto) {
+            const cur = form.mcp_disabled || [];
+            const nextDisabled = cur.includes(name)
+                ? cur.filter((s) => s !== name)
+                : [...cur, name];
+            next = { ...form, mcp_disabled: nextDisabled };
+        } else {
+            const current = form.mcp_servers || [];
+            const nextList = current.includes(name)
                 ? current.filter((s) => s !== name)
                 : [...current, name];
-            return { ...f, mcp_servers: next };
-        });
+            next = { ...form, mcp_servers: nextList };
+        }
+        setForm(next);
+        // Persist immediately so the chip change matches the live config.
+        try {
+            await api.forge.updateAgent(agent.id, next);
+            const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+            if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+            onSaved();
+        } catch (err) {
+            setMsg('Error: ' + err.message);
+        }
     };
 
     const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
@@ -1035,9 +1365,21 @@ function ConfigTab({ agent, onSaved }) {
     const runtimeModels = selectedRuntime?.models || [];
 
     const saveAgent = async () => {
+        // AP-91: managed agents must keep a runtime. Block client-side too
+        // so the user sees the rule before round-tripping; backend enforces
+        // anyway (returns 400 with the same message).
+        if (!form.runtime_id) {
+            setMsg('Runtime is required — a managed agent can\'t be downgraded to a service account. Delete the agent or pick a different runtime.');
+            return;
+        }
         setSaving(true);
         try {
             await api.forge.updateAgent(agent.id, form);
+            // Re-fetch the resolved MCP config so the "Live config" preview
+            // reflects what just got saved (otherwise it stays stale).
+            const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+            if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+            setEditingMcp(false);
             setMsg('Saved');
             onSaved();
             setTimeout(() => setMsg(''), 2000);
@@ -1099,13 +1441,10 @@ function ConfigTab({ agent, onSaved }) {
 
             {/* Daemon Runtime */}
             <section className="card space-y-4">
-                <h3 className="text-sm font-semibold text-text-primary">Daemon Runtime</h3>
-                <p className="text-xs text-text-tertiary">
-                    Which detected daemon runtime executes this agent. Runtimes are auto-registered when <code>agentira daemon start</code> runs.
-                </p>
-                <p className="text-xs text-text-tertiary">
-                    The runtime is an <strong>execution engine</strong> for this agent. Persona, tools, conventions, and memory are owned by Agentira and travel with the agent across runtimes — change the runtime here and the same agent runs on a different engine.
-                </p>
+                <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-text-primary">Daemon Runtime</h3>
+                    <InfoTip text="The execution engine that runs this agent. Runtimes auto-register when 'agentira daemon start' runs on a machine with claude-code / codex / gemini-cli / openclaw / ollama installed. Persona, tools, conventions, and memory are owned by Agentira and travel with the agent — change the runtime here and the same agent runs on a different engine." />
+                </div>
                 {runtimes.length === 0 ? (
                     <div className="px-3 py-4 rounded-md bg-bg-hover text-sm text-text-tertiary">
                         No daemon runtimes registered. Start the daemon on a machine with claude-code / codex / gemini-cli installed.
@@ -1119,7 +1458,7 @@ function ConfigTab({ agent, onSaved }) {
                                 value={form.runtime_id}
                                 onChange={(e) => setForm({ ...form, runtime_id: e.target.value, model: '' })}
                             >
-                                <option value="">— select runtime —</option>
+                                {!agent.runtime_id && <option value="">— select runtime —</option>}
                                 {runtimes.map((r) => (
                                     <option key={r.id} value={r.id}>
                                         {r.provider} {r.version ? `· ${r.version}` : ''} {r.device_name ? `· ${r.device_name}` : ''} ({r.status})
@@ -1147,41 +1486,205 @@ function ConfigTab({ agent, onSaved }) {
                 )}
             </section>
 
-            {/* Toolset (MCP servers) */}
-            <section className="card space-y-3">
-                <div>
+            {/* Toolset — three layers, what comes from where */}
+            <section className="card space-y-4">
+                <div className="flex items-center gap-1.5">
                     <h3 className="text-sm font-semibold text-text-primary">Toolset</h3>
-                    <p className="text-xs text-text-tertiary mt-1">
-                        MCP servers this agent gets at dispatch. The agentira + memory tools are <strong>auto-injected</strong> for every agent (greyed below). Toggle opt-in servers to extend the toolset.
-                    </p>
+                    <InfoTip text="Tools available to this agent at dispatch, layered. Agentira composes on top of the runtime's own tools — it doesn't replace them. See docs/mcp_layering.md for the full model." />
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    {mcpServers.map((s) => {
-                        const isAuto = !!s.auto;
-                        const isOn = isAuto || form.mcp_servers.includes(s.name);
-                        return (
-                            <button
-                                key={s.name}
-                                type="button"
-                                onClick={isAuto ? undefined : () => toggleMcp(s.name)}
-                                title={s.description || s.name}
-                                className={
-                                    isAuto
-                                        ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-tertiary cursor-not-allowed'
-                                        : isOn
-                                            ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 transition-colors'
-                                            : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-secondary hover:bg-bg-active transition-colors'
-                                }
-                            >
-                                <code className="font-mono">{s.name}</code>
-                                {isAuto && <span className="text-[10px] uppercase tracking-wider">always</span>}
-                                {!isAuto && isOn && <Check className="w-3 h-3" />}
-                            </button>
-                        );
-                    })}
-                    {mcpServers.length === 0 && (
-                        <p className="text-xs text-text-tertiary italic">No MCP servers registered.</p>
-                    )}
+
+                {/* Layer 1 — runtime built-ins */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">Layer 1 · Runtime built-ins</span>
+                        {runtimeProvider && (
+                            <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary">{runtimeProvider}</code>
+                        )}
+                        <InfoTip text="Tools the runtime binary ships with (Read, Edit, Bash, Grep, etc. for claude-code). Not configurable by Agentira — they come with the engine." />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(hostTools?.builtins || []).map((t) => (
+                            <code key={t} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary">{t}</code>
+                        ))}
+                        {(!hostTools || (hostTools.builtins || []).length === 0) && (
+                            <span className="text-xs text-text-tertiary italic">{hostTools ? 'none' : 'daemon hasn\'t reported yet'}</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Layer 2 — user host config */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">Layer 2 · Host config (user-owned)</span>
+                        <InfoTip text="MCP servers and md files the user has installed on their own machine (e.g. ~/.claude.json, ~/.claude/CLAUDE.md). Inherited automatically — Agentira merges these into every agent's config. Enable strict mode on the profile to ignore them." />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(hostTools?.host_mcp_servers || []).map((s) => (
+                            <span key={s.name} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary inline-flex items-center gap-1">
+                                {s.name}
+                                <span className="text-[10px] text-text-tertiary">·{s.transport}</span>
+                            </span>
+                        ))}
+                        {(hostTools?.host_md_files || []).map((f) => (
+                            <span key={f.path} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary" title={`${f.size} bytes`}>{f.path}</span>
+                        ))}
+                        {hostTools && (hostTools.host_mcp_servers || []).length === 0 && (hostTools.host_md_files || []).length === 0 && (
+                            <span className="text-xs text-text-tertiary italic">no host MCP or md files discovered</span>
+                        )}
+                        {!hostTools && (
+                            <span className="text-xs text-text-tertiary italic">daemon hasn't reported yet</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Layer 3 — Agentira-managed: one unified editor.
+                    View shows the resolved config (read-only); Edit mode lets
+                    the user modify the JSON directly. Saving stores it as the
+                    override, which merges over registry defaults at dispatch. */}
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-accent-primary font-semibold">Layer 3 · Agentira-managed</span>
+                        <InfoTip text="Servers Agentira controls per-agent. Click any chip to toggle on/off. Built-ins (agentira, memory) come from the registry; entries you add via Custom JSON appear as 'custom'. Same name in Custom JSON = your version wins." />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-2 items-center">
+                            {mcpServers.map((s) => {
+                                const isAuto = !!s.auto;
+                                const isDisabled = isAuto && (form.mcp_disabled || []).includes(s.name);
+                                const isOn = isAuto ? !isDisabled : form.mcp_servers.includes(s.name);
+                                return (
+                                    <button
+                                        key={s.name}
+                                        type="button"
+                                        onClick={() => toggleMcp(s.name)}
+                                        title={s.description || s.name}
+                                        className={
+                                            isOn
+                                                ? (isAuto
+                                                    ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle/60 text-accent-primary hover:bg-accent-subtle transition-colors'
+                                                    : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 transition-colors')
+                                                : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-tertiary opacity-60 hover:opacity-100 hover:bg-bg-active transition-all'
+                                        }
+                                    >
+                                        <code className="font-mono">{s.name}</code>
+                                        {isAuto && <span className="text-[10px] uppercase tracking-wider">{isOn ? 'built-in' : 'off'}</span>}
+                                        {!isAuto && isOn && <Check className="w-3 h-3" />}
+                                        {!isAuto && !isOn && <span className="text-[10px] uppercase tracking-wider">off</span>}
+                                    </button>
+                                );
+                            })}
+                            {/* Custom-only entries — servers in the resolved config
+                                that aren't in the registry (added via JSON override). */}
+                            {(() => {
+                                const registryNames = new Set(mcpServers.map((s) => s.name));
+                                const liveNames = mcpConfig ? Object.keys(mcpConfig.mcpServers || {}) : [];
+                                const customOnly = liveNames.filter((n) => !registryNames.has(n));
+                                return customOnly.map((name) => (
+                                    <span
+                                        key={`custom-${name}`}
+                                        className="px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle/40 text-accent-primary border border-accent-primary/40"
+                                        title="Added via Custom JSON override below"
+                                    >
+                                        <code className="font-mono">{name}</code>
+                                        <span className="text-[10px] uppercase tracking-wider">custom</span>
+                                    </span>
+                                ));
+                            })()}
+                        </div>
+                    </div>
+
+                    {/* Live config preview + edit mode */}
+                    <div className="pt-2 mt-1 border-t border-border-subtle space-y-1.5">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-text-secondary inline-flex items-center gap-1.5">
+                                Live config
+                                <InfoTip text="The full resolved MCP config the agent gets at dispatch. Built-ins + opt-ins from Layer 3 + any Custom JSON, with disabled entries stripped. Not a file on disk — Agentira writes a temp file (/tmp/agentira-mcp-*.json) and passes it to the runtime each time, then deletes it." />
+                                {form.mcp_config_override ? (
+                                    <span className="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary">custom</span>
+                                ) : (
+                                    <span className="ml-1 text-[10px] uppercase tracking-wider text-text-tertiary">defaults</span>
+                                )}
+                            </span>
+                            <div className="flex items-center gap-3">
+                                {!editingMcp && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditingMcp(true);
+                                            if (!form.mcp_config_override && mcpConfig) {
+                                                setForm((f) => ({ ...f, mcp_config_override: JSON.stringify(mcpConfig, null, 2) }));
+                                            }
+                                        }}
+                                        className="text-[11px] text-accent-primary hover:underline"
+                                    >
+                                        Edit JSON
+                                    </button>
+                                )}
+                                {editingMcp && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                // Parse-check before saving to give immediate feedback.
+                                                if (form.mcp_config_override.trim()) {
+                                                    try { JSON.parse(form.mcp_config_override); }
+                                                    catch (e) { setMsg('Invalid JSON: ' + e.message); return; }
+                                                }
+                                                await saveAgent();
+                                            }}
+                                            className="text-[11px] text-accent-primary hover:underline font-semibold"
+                                        >
+                                            Save JSON
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditingMcp(false)}
+                                            className="text-[11px] text-text-tertiary hover:text-text-secondary hover:underline"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </>
+                                )}
+                                {form.mcp_config_override && (
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            setEditingMcp(false);
+                                            const next = { ...form, mcp_config_override: '' };
+                                            setForm(next);
+                                            try {
+                                                await api.forge.updateAgent(agent.id, next);
+                                                const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+                                                if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+                                                setMsg('Reset to defaults');
+                                                onSaved();
+                                                setTimeout(() => setMsg(''), 2000);
+                                            } catch (err) {
+                                                setMsg('Error: ' + err.message);
+                                            }
+                                        }}
+                                        className="text-[11px] text-text-tertiary hover:text-text-secondary hover:underline"
+                                    >
+                                        Reset to defaults
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {editingMcp ? (
+                            <textarea
+                                className="input min-h-[180px] font-mono text-xs"
+                                value={form.mcp_config_override}
+                                onChange={(e) => setForm({ ...form, mcp_config_override: e.target.value })}
+                            />
+                        ) : (
+                            <pre className="p-3 rounded-md bg-bg-hover text-xs font-mono overflow-x-auto text-text-secondary whitespace-pre-wrap max-h-[200px]">
+{mcpConfig ? JSON.stringify(mcpConfig, null, 2) : '// loading…'}
+                            </pre>
+                        )}
+
+                    </div>
                 </div>
             </section>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
     ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle,
-    XCircle, Pause, Ban, RefreshCw, User, Wrench, MessageSquare,
+    XCircle, Pause, Play, Ban, RefreshCw, User, Wrench, MessageSquare,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -89,6 +89,58 @@ export function RunDetail() {
                         {run.project_name && <> &middot; Project: {run.project_name}</>}
                     </p>
                 </div>
+                {/* Run controls — pause / resume / stop. Pause is best-effort
+                    for CLI runtimes (SIGSTOP); openclaw HTTP runs ignore
+                    pause. Stop is terminal. */}
+                {run.status === 'running' && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                await api.forge.pauseRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Pause failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-yellow-500 hover:bg-yellow-500/10"
+                        title="Pause (best-effort — long pauses may hit API timeouts)"
+                    >
+                        <Pause className="w-4 h-4" /> Pause
+                    </button>
+                )}
+                {run.status === 'paused' && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                await api.forge.resumeRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Resume failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-green-500 hover:bg-green-500/10"
+                        title="Resume"
+                    >
+                        <Play className="w-4 h-4" /> Resume
+                    </button>
+                )}
+                {isActive && (
+                    <button
+                        onClick={async () => {
+                            if (!window.confirm('Stop this run? The agent will be killed; this cannot be undone.')) return;
+                            try {
+                                await api.forge.cancelRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Stop failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                        title="Stop this run (terminal — cannot be resumed)"
+                    >
+                        <Ban className="w-4 h-4" /> Stop
+                    </button>
+                )}
                 <button onClick={load} className="btn btn-ghost" title="Refresh">
                     <RefreshCw className="w-4 h-4" />
                 </button>
