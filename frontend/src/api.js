@@ -287,5 +287,13 @@ export const api = {
         getDispatchPreview: (agentId, projectId) => request(
             `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
         ),
+        listConversations: (agentId) => request(`/forge/agents/${agentId}/conversations`),
+        getConversation: (agentId, projectId, taskId) => {
+            const params = new URLSearchParams();
+            if (projectId) params.set('project_id', projectId);
+            if (taskId) params.set('task_id', taskId);
+            const qs = params.toString() ? `?${params}` : '';
+            return request(`/forge/agents/${agentId}/conversation${qs}`);
+        },
     },
 };
