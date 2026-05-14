@@ -147,6 +147,30 @@ export function ProjectLayout() {
 
     useEffect(() => { panelEditingRef.current = isEditing; }, [isEditing]);
 
+    // Guarded task selection — child views (Board, Backlog) call this
+    // instead of setSearchParams directly so an in-progress edit doesn't
+    // get blown away silently when the user clicks another task or the
+    // close button. If editing, queue the action and show ConfirmModal;
+    // otherwise apply immediately.
+    const requestSelectTask = useCallback((taskRefOrNull) => {
+        const apply = () => {
+            panelEditingRef.current = false;
+            setIsEditing(false);
+            const newParams = new URLSearchParams(searchParams);
+            if (taskRefOrNull == null) {
+                newParams.delete('selectedTask');
+            } else {
+                newParams.set('selectedTask', taskRefOrNull);
+            }
+            setSearchParams(newParams);
+        };
+        if (panelEditingRef.current) {
+            setPendingAction(() => apply);
+        } else {
+            apply();
+        }
+    }, [searchParams, setSearchParams]);
+
     const loadBoard = useCallback(async () => {
         try {
             const data = await api.getBoard(projectId);
@@ -268,7 +292,8 @@ export function ProjectLayout() {
     // Filters context
     const filters = {
         searchQuery, filterPriority, filterAssignee, filterEpic, board,
-        reloadBoard: loadBoard
+        reloadBoard: loadBoard,
+        requestSelectTask,
     };
 
     return (
@@ -325,12 +350,23 @@ export function ProjectLayout() {
                     task={selectedTask}
                     isEditing={isEditing}
                     setIsEditing={setIsEditing}
-                    onClose={() => {
-                        const newParams = new URLSearchParams(searchParams);
-                        newParams.delete('selectedTask');
-                        setSearchParams(newParams);
-                    }}
+                    onClose={() => requestSelectTask(null)}
                     onUpdate={loadBoard}
+                />
+            )}
+
+            {pendingAction && (
+                <ConfirmModal
+                    title="Unsaved Changes"
+                    message="You have unsaved changes on this task. Are you sure you want to discard them?"
+                    confirmText="Discard"
+                    cancelText="Keep Editing"
+                    onConfirm={() => {
+                        const fn = pendingAction;
+                        setPendingAction(null);
+                        fn();
+                    }}
+                    onCancel={() => setPendingAction(null)}
                 />
             )}
 
