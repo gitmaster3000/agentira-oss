@@ -17,4 +17,12 @@ export const ROUTES = {
     STUDIO_PROJECT_ROADMAP: (projectId) => `/studio/project/${projectId}/roadmap`,
     STUDIO_SETTINGS: '/studio/settings',
     STUDIO_TASK: (taskId) => `/studio/tasks/${taskId}`,
+    STUDIO_EPIC: (epicId) => `/studio/epics/${epicId}`,
+
+    // Forge
+    FORGE: '/forge',
+    FORGE_AGENTS: '/forge/agents',
+    FORGE_AGENT: (agentId) => `/forge/agents/${agentId}`,
+    FORGE_RUNS: '/forge/runs',
+    FORGE_RUN: (runId) => `/forge/runs/${runId}`,
 };

@@ -4,6 +4,7 @@ import {
     Bot,
     Play,
     BarChart3,
+    Cpu,
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ export function ForgeSidebar() {
     const navItems = [
         { icon: BarChart3, label: 'Overview', path: '/forge' },
         { icon: Bot, label: 'Agents', path: '/forge/agents' },
+        { icon: Cpu, label: 'Runtimes', path: '/forge/runtimes' },
         { icon: Play, label: 'Runs', path: '/forge/runs' },
     ];
 

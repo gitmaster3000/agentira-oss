@@ -11,19 +11,19 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { Settings } from './pages/Settings';
+import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
+import { EpicPage } from './pages/EpicPage';
+import { ForgeLayout } from './pages/forge/ForgeLayout';
+import { ForgeOverview } from './pages/forge/ForgeOverview';
+import { AgentsDashboard } from './pages/forge/AgentsDashboard';
+import { RuntimesDashboard } from './pages/forge/RuntimesDashboard';
+import { AgentDetail } from './pages/forge/AgentDetail';
+import { RunsDashboard } from './pages/forge/RunsDashboard';
+import { RunDetail } from './pages/forge/RunDetail';
 import { ROUTES } from './routes';
 
-function Welcome() {
-    return (
-        <div className="flex-1 flex flex-col items-center justify-center text-secondary">
-            <div className="text-center">
-                <h2 className="text-2xl font-bold text-primary mb-2">Welcome to Flowty Studio</h2>
-                <p>Select a project from the sidebar to get started.</p>
-            </div>
-        </div>
-    );
-}
+// Old "Welcome" stub replaced by StudioDashboard — see pages/StudioDashboard.jsx
 
 function RequireAuth({ children }) {
     const { user, loading } = useAuth();
@@ -45,6 +45,12 @@ function RootRedirect() {
     return user ? <Navigate to={ROUTES.STUDIO} replace /> : <Navigate to={ROUTES.WELCOME} replace />;
 }
 
+// /studio/board/:projectId → /studio/project/:projectId/board (PR #18 route rename)
+function LegacyBoardRedirect() {
+    const { projectId } = useParams();
+    return <Navigate to={`/studio/project/${projectId}/board`} replace />;
+}
+
 export default function App() {
     return (
         <AuthProvider>
@@ -58,15 +64,18 @@ export default function App() {
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
-                        <Route index element={<Welcome />} />
+                        <Route index element={<StudioDashboard />} />
                         <Route path="project/:projectId" element={<ProjectLayout />}>
                             <Route index element={<Navigate to="board" replace />} />
                             <Route path="board" element={<Board />} />
                             <Route path="backlog" element={<Backlog />} />
                             <Route path="roadmap" element={<RoadmapView />} />
                         </Route>
+                        {/* Legacy flat board route — redirect to the new nested form. */}
+                        <Route path="board/:projectId" element={<LegacyBoardRedirect />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
+                        <Route path="epics/:epicId" element={<EpicPage />} />
                     </Route>
 
                     {/* Root redirect */}
@@ -77,8 +86,15 @@ export default function App() {
                     <Route path="board/:projectId" element={<Navigate to={ROUTES.STUDIO_PROJECT(':projectId')} replace />} />
                     <Route path="/settings" element={<Navigate to={ROUTES.STUDIO_SETTINGS} replace />} />
 
-                    {/* Forge routes — disabled for now */}
-                    <Route path="/forge/*" element={<Navigate to={ROUTES.STUDIO} replace />} />
+                    {/* Forge routes */}
+                    <Route path="/forge" element={<RequireAuth><ForgeLayout /></RequireAuth>}>
+                        <Route index element={<ForgeOverview />} />
+                        <Route path="agents" element={<AgentsDashboard />} />
+                        <Route path="agents/:agentId" element={<AgentDetail />} />
+                        <Route path="runtimes" element={<RuntimesDashboard />} />
+                        <Route path="runs" element={<RunsDashboard />} />
+                        <Route path="runs/:runId" element={<RunDetail />} />
+                    </Route>
 
                     {/* Catch-all */}
                     <Route path="*" element={<Navigate to="/" replace />} />

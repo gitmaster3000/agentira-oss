@@ -95,15 +95,6 @@ export function Landing() {
             {/* ── Header ─────────────────────────────────────────── */}
             <header className="border-b sticky top-0 z-50" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
                 <div className="max-w-5xl mx-auto h-16 flex items-center justify-between px-6">
-                    <div className="flex items-center gap-2.5">
-                        <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201, 184, 255, 0.1)' }}>
-                            <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
-                        </span>
-                        <div className="flex flex-col leading-tight">
-                            <span className="text-[10px] font-medium tracking-widest uppercase text-text-tertiary">Flowty</span>
-                            <span className="text-title-sm font-semibold text-text-primary">Studio</span>
-                        </div>
-                    </div>
                     <nav className="hidden sm:flex items-center gap-6 text-body-md text-text-secondary">
                         <a href="#features" className="hover:text-text-primary transition-colors">Features</a>
                         <a href="#about" className="hover:text-text-primary transition-colors">About</a>
@@ -208,9 +199,9 @@ export function Landing() {
             {/* ── About ──────────────────────────────────────────── */}
             <section id="about" className="px-6 py-20 border-t" style={{ borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-panel)' }}>
                 <div className="max-w-3xl mx-auto text-center space-y-6">
-                    <h2 className="text-headline-md font-bold text-text-primary">Why Flowty?</h2>
+                    <h2 className="text-headline-md font-bold text-text-primary">Why AgentIRA?</h2>
                     <p className="text-body-lg text-text-secondary">
-                        Most project management tools treat AI as an afterthought. Flowty was built from the ground up with a dual-interface architecture: a REST API for humans and an MCP server for AI agents — sharing the same workspace, permissions, and data.
+                        Most project management tools treat AI as an afterthought. AgentIRA was built from the ground up with a dual-interface architecture: a REST API for humans and an MCP server for AI agents — sharing the same workspace, permissions, and data.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 pt-6">
                         <div className="space-y-2">
@@ -242,7 +233,7 @@ export function Landing() {
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
                         {[
                             { step: '1', title: 'Create a workspace', desc: 'Sign up, create a project, and invite your team members.' },
-                            { step: '2', title: 'Connect your agents', desc: 'Point any MCP-compatible AI agent at your Flowty server with an API key.' },
+                            { step: '2', title: 'Connect your agents', desc: 'Point any MCP-compatible AI agent at your AgentIRA server with an API key.' },
                             { step: '3', title: 'Ship together', desc: 'Humans and AI manage tasks on the same board with full visibility.' },
                         ].map((s) => (
                             <div key={s.step} className="text-center space-y-3">
@@ -282,7 +273,7 @@ export function Landing() {
                 <div className="max-w-3xl mx-auto text-center space-y-5">
                     <h2 className="text-headline-sm font-bold text-text-primary">Ready to build with AI?</h2>
                     <p className="text-body-lg text-text-secondary">
-                        Join Flowty and start managing tasks with your team and AI agents today.
+                        Join AgentIRA and start managing tasks with your team and AI agents today.
                     </p>
                     <Link to={ROUTES.SIGNUP} className="btn btn-primary text-body-md gap-2">
                         Get Started Free <ArrowRight className="w-4 h-4" />
@@ -297,7 +288,7 @@ export function Landing() {
                         <span className="w-7 h-7 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201, 184, 255, 0.1)' }}>
                             <Pencil className="w-4 h-4" style={{ color: 'var(--accent-primary)' }} />
                         </span>
-                        <span className="text-title-sm font-semibold text-text-primary">Flowty Studio</span>
+                        <span className="text-title-sm font-semibold text-text-primary">AgentIRA Studio</span>
                     </div>
                     <div className="flex items-center gap-6 text-body-sm text-text-tertiary">
                         <a href="#features" className="hover:text-text-secondary transition-colors">Features</a>
@@ -305,7 +296,7 @@ export function Landing() {
                         <a href="#contact" className="hover:text-text-secondary transition-colors">Contact</a>
                     </div>
                     <div className="text-label-sm text-text-tertiary">
-                        &copy; 2026 Flowty. Built for AI-Human collaboration.
+                        &copy; 2026 AgentIRA. Built for AI-Human collaboration.
                     </div>
                 </div>
             </footer>

@@ -30,7 +30,12 @@
   --status-review: #c58af9;
   --status-done: #81c995;
 
-  --font-sans: 'Inter', 'Roboto', system-ui, -apple-system, sans-serif;
+  /* Apple system stack — matches Claude Desktop's native look on macOS.
+     Falls back to Inter on Linux/Windows so the design language stays
+     consistent. SF Pro is the Mac system font and renders identically
+     to Claude Desktop's chrome. */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
+               'Inter', 'Helvetica Neue', system-ui, sans-serif;
 
   /* Layout */
   --navbar-height: 64px;

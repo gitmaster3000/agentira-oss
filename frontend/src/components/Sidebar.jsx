@@ -11,7 +11,7 @@ import { ROUTES } from '../routes';
 export function Sidebar() {
     const { projectId = 'default' } = useParams();
     const location = useLocation();
-    
+
     // Check if we are inside a project route to highlight nav items properly
     const isProjectRoute = location.pathname.includes('/studio/project/');
 

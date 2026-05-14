@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign } from 'lucide-react';
+import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus } from 'lucide-react';
 import { api } from '../../api';
+import { CreateAgentModal } from '../../components/CreateAgentModal';
 
 const STATUS_STYLES = {
     online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
@@ -12,14 +13,18 @@ const STATUS_STYLES = {
 export function AgentsDashboard() {
     const navigate = useNavigate();
     const [agents, setAgents] = useState([]);
+    const [runtimes, setRuntimes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
+    const [showCreate, setShowCreate] = useState(false);
 
     const loadAgents = async () => {
         try {
             const statusParam = filter === 'all' ? undefined : filter;
             const data = await api.forge.listAgents(statusParam);
-            setAgents(data);
+            // Defensive: Forge only surfaces managed agents (backend already
+            // filters, but belt-and-suspenders if any service-account row leaks).
+            setAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
         } catch (err) {
             console.error('Failed to load agents:', err);
         } finally {
@@ -27,9 +32,19 @@ export function AgentsDashboard() {
         }
     };
 
+    const loadRuntimes = async () => {
+        try {
+            const data = await api.forge.listRuntimes();
+            setRuntimes(data);
+        } catch (err) {
+            console.error('Failed to load runtimes:', err);
+        }
+    };
+
     useEffect(() => {
         loadAgents();
-        const interval = setInterval(loadAgents, 10000);
+        loadRuntimes();
+        const interval = setInterval(() => { loadAgents(); loadRuntimes(); }, 10000);
         return () => clearInterval(interval);
     }, [filter]);
 
@@ -67,14 +82,32 @@ export function AgentsDashboard() {
                         <option value="busy">Busy</option>
                     </select>
                     <button
-                        onClick={async () => { await api.forge.syncOpenClaw().catch(console.error); loadAgents(); }}
-                        className="btn btn-ghost text-xs"
-                        title="Sync models & status from OpenClaw"
+                        onClick={() => setShowCreate(true)}
+                        className="btn btn-primary text-xs"
                     >
-                        <RefreshCw className="w-4 h-4" /> Sync OpenClaw
+                        <Plus className="w-4 h-4" /> New Agent
                     </button>
                 </div>
             </div>
+
+            {/* Local Runtimes */}
+            {runtimes.length > 0 && (
+                <div className="space-y-2">
+                    <div className="text-xs font-semibold text-text-tertiary uppercase tracking-wider flex items-center gap-2">
+                        <Cpu className="w-3.5 h-3.5" /> Local Runtimes
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {runtimes.map((rt) => (
+                            <div key={rt.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-bg-hover border border-border-subtle text-xs">
+                                <span className={`w-1.5 h-1.5 rounded-full ${rt.status === 'online' ? 'bg-emerald-400' : 'bg-text-tertiary'}`} />
+                                <span className="font-medium text-text-primary">{rt.provider}</span>
+                                {rt.version && <span className="text-text-tertiary">{rt.version.split(' ')[0]}</span>}
+                                <span className="text-text-tertiary">· {rt.device_name || 'local'}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Agent Grid */}
             {loading ? (
@@ -91,6 +124,12 @@ export function AgentsDashboard() {
                 </div>
             )}
 
+            {showCreate && (
+                <CreateAgentModal
+                    onClose={() => setShowCreate(false)}
+                    onSuccess={() => { setShowCreate(false); loadAgents(); }}
+                />
+            )}
         </div>
     );
 }
@@ -153,9 +192,12 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                         {agent.model}
                     </span>
                 )}
-                {agent.runtime_agent_name && (
-                    <span className="px-2 py-0.5 rounded bg-accent-primary/15 text-xs text-accent-primary" title="OpenClaw agent ID">
-                        {agent.runtime_agent_name}
+                {agent.runtime_id && agent.runtime_provider && (
+                    <span
+                        className="px-2 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400 flex items-center gap-1"
+                        title={agent.runtime_version || agent.runtime_provider}
+                    >
+                        <Cpu className="w-3 h-3" /> {agent.runtime_provider}
                     </span>
                 )}
             </div>

@@ -99,9 +99,11 @@ export const api = {
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
+    getEpic: (id) => request(`/epics/${id}`),
     createEpic: (projectId, data) => request(`/projects/${projectId}/epics`, { method: 'POST', body: JSON.stringify(data) }),
     updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteEpic: (id) => request(`/epics/${id}`, { method: 'DELETE' }),
+    getEpicTasks: (id) => request(`/epics/${id}/tasks`),
 
     // Tasks
     listTasks: (projectId, status, assignee, priority) => {
@@ -204,10 +206,21 @@ export const api = {
         getRun: (id) => request(`/forge/runs/${id}`),
         createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
         startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
+        cancelRun: (id) => request(`/forge/runs/${id}/cancel`, { method: 'POST' }),
+        pauseRun: (id) => request(`/forge/runs/${id}/pause`, { method: 'POST' }),
+        resumeRun: (id) => request(`/forge/runs/${id}/resume`, { method: 'POST' }),
         completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
         updateRunStatus: (id, data) => request(`/forge/runs/${id}/status`, { method: 'POST', body: JSON.stringify(data) }),
         listRunEvents: (runId) => request(`/forge/runs/${runId}/events`),
         getTriggerEvent: (runId) => request(`/forge/runs/${runId}/trigger-event`),
+
+        // Task ↔ Forge bridge
+        scheduleTaskRun: (taskId, agentId) =>
+            request(`/forge/tasks/${taskId}/run`, {
+                method: 'POST',
+                body: JSON.stringify({ agent_id: agentId }),
+            }),
+        listTaskRuns: (taskId) => request(`/forge/tasks/${taskId}/runs`),
 
         // Events
         listEvents: (params = {}) => {
@@ -264,5 +277,15 @@ export const api = {
         getOpenClawModels: () => request('/forge/openclaw/models'),
         setOpenClawAgentModel: (agentName, model) => request('/forge/openclaw/agent-model', { method: 'POST', body: JSON.stringify({ agent_name: agentName, model }) }),
         resetAgentStatus: (agentId) => request(`/forge/agents/${agentId}/reset-status`, { method: 'POST' }),
+        listRuntimes: (params) => {
+            const q = new URLSearchParams(params || {}).toString();
+            return request(`/forge/runtimes${q ? '?' + q : ''}`);
+        },
+        getRuntime: (id) => request(`/forge/runtimes/${id}`),
+        listAgentProjects: (agentId) => request(`/forge/agents/${agentId}/projects`),
+        listMcpServers: (includeAuto = true) => request(`/forge/mcp-servers?include_auto=${includeAuto}`),
+        getDispatchPreview: (agentId, projectId) => request(
+            `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
+        ),
     },
 };

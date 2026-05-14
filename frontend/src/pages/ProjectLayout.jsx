@@ -118,6 +118,12 @@ export function ProjectLayout() {
     const { projectId } = useParams();
     const navigate = useNavigate();
     const location = useLocation();
+    // Persist last-visited project so StudioDashboard's "Resume" card works.
+    useEffect(() => {
+        if (projectId) {
+            try { localStorage.setItem('agentira:studio:lastProjectId', projectId); } catch {}
+        }
+    }, [projectId]);
     const [board, setBoard] = useState(null);
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);

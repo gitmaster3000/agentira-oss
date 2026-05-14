@@ -75,8 +75,7 @@ export function Login() {
                         <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
                     </span>
                     <div className="flex flex-col leading-tight">
-                        <span className="text-[10px] font-medium tracking-widest uppercase text-text-tertiary">Flowty</span>
-                        <span className="text-title-sm font-semibold text-text-primary">Studio</span>
+                        <span className="text-title-sm font-semibold text-text-primary">AgentIRA</span>
                     </div>
                 </Link>
 
