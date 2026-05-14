@@ -370,6 +370,7 @@ class AgentiraDaemon:
                 output_tokens=output_tokens, error=error,
                 diff_stat=diff_stat, diff=diff_body,
                 session_id=session_id,
+                workdir=str(cwd_path) if cwd_path else "",
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
