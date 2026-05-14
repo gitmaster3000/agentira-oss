@@ -120,6 +120,21 @@ class Profile(Base):
         ForeignKey("projects.id"), nullable=True, default=None
     )
     mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Names of built-in servers (agentira, memory) the user has explicitly
+    # disabled for this agent. JSON list of strings. Applied AFTER the
+    # registry merge so it can strip auto-injected servers too.
+    mcp_disabled: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Strict MCP mode: when true, daemon passes --strict-mcp-config (claude)
+    # so the agent ONLY sees Agentira-managed servers — user's host MCP
+    # (~/.claude.json) is ignored. Default false = merge host + ours.
+    mcp_strict: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Free-form MCP config override. Stores a raw JSON object of shape
+    # {"mcpServers": {name: {...definition...}}}. Whatever's here is
+    # merged INTO the resolved config from the registry, AFTER auto +
+    # opt-in servers. Last-write-wins on name collisions, so a key here
+    # named "agentira" or "memory" replaces the auto-injected one.
+    # Lets users add custom servers without modifying mcp_registry.py.
+    mcp_config_override: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # User-provided secrets injected into the dispatched runtime's env
     # (GH_TOKEN, OPENAI_API_KEY, etc.). JSON object {KEY: VALUE}.
     env_vars: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)

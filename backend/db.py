@@ -239,6 +239,12 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "runtime_id", "VARCHAR(12)")
             runtime_added |= _ensure_column(conn, "profiles", "default_project_id", "VARCHAR(12)")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_servers", "TEXT")
+            # forge_messages.scope_key — conversation-isolation column
+            if "forge_messages" in tables:
+                _ensure_column(conn, "forge_messages", "scope_key", "VARCHAR(120)")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_disabled", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_strict", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_config_override", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
             if added or runtime_added:
                 conn.commit()
@@ -330,6 +336,7 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_runtimes", "models", "TEXT")
             added |= _ensure_column(conn, "forge_runtimes", "gateway_url", "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runtimes", "gateway_token", "VARCHAR(500)")
+            added |= _ensure_column(conn, "forge_runtimes", "host_tools", "TEXT")
             if added:
                 conn.commit()
 

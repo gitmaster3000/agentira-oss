@@ -25,7 +25,12 @@ from typing import Any
 REGISTRY: dict[str, dict[str, Any]] = {
     "agentira": {
         "transport": "http",
-        "url": os.environ.get("AGENTIRA_MCP_URL", "http://mcp:8000/mcp"),
+        # NOTE: this URL is baked into the agent's --mcp-config and dialed
+        # by claude-code running on the daemon host. It must be reachable
+        # from the host, NOT from inside the backend container. Default to
+        # localhost:8000 (the dev compose maps mcp:8000 → host 8000). Prod
+        # deployments override via AGENTIRA_MCP_URL (e.g. public URL).
+        "url": os.environ.get("AGENTIRA_MCP_URL", "http://localhost:8000/mcp"),
         "auth_env_var": "AGENTIRA_API_KEY",
         "description": "Read/write tasks, projects, comments. Required for finish_run.",
         "auto": True,   # always injected; users can't deselect
@@ -38,13 +43,6 @@ REGISTRY: dict[str, dict[str, Any]] = {
         # Auto-injected with a per-(agent, project) MEMORY_FILE_PATH
         # set by build_mcp_config — kept out of the user-facing picker.
         "auto": True,
-    },
-    "filesystem": {
-        "transport": "stdio",
-        "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem"],
-        "auth_env_var": None,
-        "description": "Read/write files within the workdir. Opt-in.",
-        "auto": False,
     },
 }
 
@@ -72,6 +70,8 @@ def get_server(name: str) -> dict[str, Any] | None:
 def build_mcp_config(*, agent_mcp_servers: list[str] | None,
                      agent_id: str, project_id: str | None,
                      agent_api_key: str | None = None,
+                     mcp_config_override: str | dict | None = None,
+                     disabled_servers: list[str] | None = None,
                      memory_root: str = "~/.agentira/memory") -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
@@ -136,5 +136,31 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
         if env:
             entry["env"] = env
         mcp_servers[name] = entry
+
+    # Free-form override merge — last-write-wins on name collisions.
+    # Accepts either a JSON string or a parsed dict; tolerates either
+    # the full shape {"mcpServers": {...}} or just {name: {...}}.
+    override_obj: dict[str, Any] | None = None
+    if isinstance(mcp_config_override, str) and mcp_config_override.strip():
+        import json as _json
+        try:
+            override_obj = _json.loads(mcp_config_override)
+        except Exception:
+            override_obj = None
+    elif isinstance(mcp_config_override, dict):
+        override_obj = mcp_config_override
+    if isinstance(override_obj, dict):
+        override_servers = override_obj.get("mcpServers")
+        if not isinstance(override_servers, dict):
+            override_servers = override_obj  # bare {name: {...}} form
+        for k, v in (override_servers or {}).items():
+            if isinstance(v, dict):
+                mcp_servers[k] = v
+
+    # Per-agent kill switch — applied LAST so it can strip auto-injected
+    # servers too (e.g. an agent that's intentionally memory-less).
+    if disabled_servers:
+        for name in disabled_servers:
+            mcp_servers.pop(name, None)
 
     return {"mcpServers": mcp_servers}

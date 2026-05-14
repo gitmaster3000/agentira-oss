@@ -144,6 +144,7 @@ class AgentiraDaemon:
             except Exception as exc:
                 logger.warning("ensure_runner_agent failed: %s", exc)
 
+        from agentira_cli.daemon.host_tools import discover_for
         runtimes = [
             {
                 "provider": d.provider,
@@ -153,6 +154,7 @@ class AgentiraDaemon:
                 "models": d.models,
                 "gateway_url": d.gateway_url,
                 "gateway_token": d.gateway_token,
+                "host_tools": discover_for(d.provider),
             }
             for d in detected
         ]
@@ -206,6 +208,8 @@ class AgentiraDaemon:
         repo_path = frame.get("repo_path", "") or ""
         conventions_md = frame.get("conventions_md", "") or ""
         mcp_config_json = frame.get("mcp_config_json", "") or ""
+        mcp_strict = bool(frame.get("mcp_strict", False))
+        resume_session_id = frame.get("resume_session_id", "") or ""
         env_extra = frame.get("env_extra", {}) or {}
         if not isinstance(env_extra, dict):
             env_extra = {}
@@ -322,14 +326,18 @@ class AgentiraDaemon:
                     on_proc=on_proc,
                     workdir=str(cwd_path) if cwd_path else None,
                     mcp_config_json=mcp_config_json or None,
+                    mcp_strict=mcp_strict,
+                    resume_session_id=resume_session_id,
                     env_extra=env_extra,
                 )
             success = result.success
             error = result.error
             input_tokens = result.input_tokens
             output_tokens = result.output_tokens
+            session_id = getattr(result, 'session_id', '') or ''
         except Exception as exc:
             error = str(exc)
+            session_id = ''
             logger.exception("trigger execution failed trace=%s", trace_id)
 
         # If a cancel hit us mid-flight, override success/error so the
@@ -361,6 +369,7 @@ class AgentiraDaemon:
                 success=success, input_tokens=input_tokens,
                 output_tokens=output_tokens, error=error,
                 diff_stat=diff_stat, diff=diff_body,
+                session_id=session_id,
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)

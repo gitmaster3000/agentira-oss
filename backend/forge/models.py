@@ -80,6 +80,11 @@ class ForgeRuntime(Base):
     status: Mapped[RuntimeStatus] = mapped_column(SAEnum(RuntimeStatus), default=RuntimeStatus.UNKNOWN)
     capabilities: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     models: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list — supported model ids
+    # Host-side discovered tools the runtime brings on its own. JSON shape:
+    # {"builtins": ["Read","Edit",...], "host_mcp_servers": [{"name":"slack","transport":"stdio"}, ...], "host_md_files": ["~/.claude/CLAUDE.md", ...]}
+    # Daemon fills this at registration time so the UI can show Layer 1 + 2
+    # alongside Agentira's Layer 3 picks. Best-effort; nullable.
+    host_tools: Mapped[str | None] = mapped_column(Text, nullable=True)
     gateway_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     gateway_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -192,6 +197,11 @@ class AgentMessage(Base):
     # Persisted as a Trigger row in a future increment; today it's just a
     # correlation handle for grepping logs and grouping messages per turn.
     trace_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    # scope_key: which conversation this message belongs to. See
+    # services.conversation_scope_key for the scheme (run:<id>,
+    # chat:project:<pid>, chat:default). Used by gateway runtimes that
+    # rebuild history per-call to filter out cross-conversation leak.
+    scope_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     kind: Mapped[str | None]    = mapped_column(String(20), nullable=True)  # chat | run_step | …
     role: Mapped[MessageRole]   = mapped_column(SAEnum(MessageRole), nullable=False)
     content: Mapped[str]        = mapped_column(Text, default="")
@@ -208,6 +218,32 @@ class AgentMessage(Base):
 
 
 # ── WebhookLog ──────────────────────────────────────────────────────────
+
+class Conversation(Base):
+    """Continuity handle for a multi-turn exchange between an agent and a
+    runtime that supports resume.
+
+    `scope_key` identifies WHICH conversation this is (see
+    services.conversation_scope_key for the scheme: run:<id>,
+    chat:project:<pid>, chat:default, future thread:<id> etc.). The
+    (agent_id, scope_key) pair is unique — at most one active session
+    handle per conversation. `runtime_session_id` is the runtime-native
+    handle (claude session_id); empty/null for gateway runtimes that
+    rebuild history per call.
+
+    Chat dispatches do NOT create Runs. Conversation continuity lives
+    here so chat triggers stay lightweight while still being resumable.
+    """
+    __tablename__ = "forge_conversations"
+    __table_args__ = (UniqueConstraint("agent_id", "scope_key"),)
+
+    id: Mapped[str]                = mapped_column(String(12), primary_key=True, default=_new_id)
+    agent_id: Mapped[str]          = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    scope_key: Mapped[str]         = mapped_column(String(120), nullable=False)
+    runtime_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime]   = mapped_column(DateTime(timezone=True), default=_utcnow)
+
 
 class WebhookLog(Base):
     """Log entry for inbound/outbound webhook calls."""

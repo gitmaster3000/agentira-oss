@@ -50,6 +50,9 @@ class AgentUpdate(BaseModel):
     default_project_id: Optional[str] = None
     schedule_cron: Optional[str] = None
     mcp_servers: Optional[list[str]] = None
+    mcp_disabled: Optional[list[str]] = None
+    mcp_strict: Optional[bool] = None
+    mcp_config_override: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -90,6 +93,10 @@ class DaemonTriggerComplete(BaseModel):
     # runs or when nothing changed; backend just persists what's sent.
     diff_stat: str = ""
     diff: str = ""
+    # Runtime-native session handle captured during dispatch (e.g. claude
+    # session_id). Backend stores it on the agent profile so the next
+    # dispatch can pass --resume <id> for conversation continuity.
+    session_id: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -143,6 +150,8 @@ class RuntimeEntry(BaseModel):
     models: list[str] = Field(default_factory=list)
     gateway_url: Optional[str] = None
     gateway_token: Optional[str] = None
+    # Host-side discovered tools — opaque dict shape (see ForgeRuntime.host_tools).
+    host_tools: Optional[dict] = None
 
 
 class RuntimeRegisterRequest(BaseModel):
@@ -191,6 +200,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         error=body.error if not body.success else None,
         diff_stat=body.diff_stat,
         diff=body.diff,
+        session_id=body.session_id,
     )
 
 
@@ -251,6 +261,17 @@ def list_agent_projects(agent_id: str):
     return services.list_agent_projects(agent_id)
 
 
+@router.get("/agents/{agent_id}/conversation")
+def get_conversation(agent_id: str, project_id: Optional[str] = None,
+                     task_id: Optional[str] = None):
+    """Conversation state for a given (agent, scope): scope_key, whether a
+    runtime session has been captured (and thus next dispatch will resume),
+    and how many messages live in this scope."""
+    return services.get_conversation_info(
+        agent_id=agent_id, project_id=project_id, task_id=task_id,
+    )
+
+
 @router.get("/agents/{agent_id}/dispatch-preview")
 def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
     """Dry-run what a chat dispatch would send to the daemon for this agent.
@@ -264,7 +285,10 @@ def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
 
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, body: AgentUpdate):
-    result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
+    try:
+        result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if not result:
         raise HTTPException(404, "Agent not found")
     return result
@@ -414,8 +438,17 @@ def get_stats():
 
 @router.get("/agents/{agent_id}/messages")
 def list_messages(agent_id: str, run_id: Optional[str] = None,
+                  scope_key: Optional[str] = None,
                   limit: int = 100, offset: int = 0):
-    return services.list_messages(agent_id, run_id=run_id, limit=limit, offset=offset)
+    return services.list_messages(
+        agent_id, run_id=run_id, scope_key=scope_key,
+        limit=limit, offset=offset,
+    )
+
+
+@router.get("/agents/{agent_id}/conversations")
+def list_conversations(agent_id: str):
+    return services.list_conversations(agent_id)
 
 
 @router.post("/agents/{agent_id}/messages", status_code=201)

@@ -60,6 +60,7 @@ class ClaudeRuntime(Runtime):
         max_turns: int = 20,
         system_prompt: str = "",
         mcp_config_path: str = "",
+        mcp_strict: bool = False,
         resume_session_id: str = "",
     ) -> list[str]:
         args = [
@@ -71,13 +72,15 @@ class ClaudeRuntime(Runtime):
             # when stdin EOFs. We supply the prompt via -p; output parsing
             # is the only side that needs stream-json.
             "--verbose",
-            # Note: do NOT pass --strict-mcp-config. We want claude-code to
-            # merge the user's host MCP servers (~/.claude.json) with our
-            # per-task additions in --mcp-config. Strict mode would replace
-            # the host config entirely and break user-installed integrations.
             "--permission-mode", "bypassPermissions",
             "--max-turns", str(max_turns),
         ]
+        if mcp_strict:
+            # Override mode: agent ONLY sees Agentira-configured servers.
+            # Ignores the user's host ~/.claude.json MCP entries entirely.
+            # Default is to merge host + Agentira so user-installed
+            # integrations stay available.
+            args.append("--strict-mcp-config")
         if model:
             args += ["--model", model]
         if system_prompt:

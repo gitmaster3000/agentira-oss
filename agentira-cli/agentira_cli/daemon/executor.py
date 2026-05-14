@@ -12,6 +12,7 @@ import logging
 import os
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from typing import Optional
 
@@ -47,6 +48,7 @@ async def run_cli_stream(
     max_turns: int = 20,
     system_prompt: str = "",
     mcp_config_json: Optional[str] = None,
+    mcp_strict: bool = False,
     resume_session_id: str = "",
     workdir: Optional[str] = None,
     env_extra: Optional[dict] = None,
@@ -60,6 +62,20 @@ async def run_cli_stream(
     try:
         if mcp_config_json:
             mcp_config_path = _write_mcp_config(mcp_config_json)
+            # Preflight HTTP MCP servers. If a URL is unreachable from the
+            # daemon host (common deploy bug: backend baked an internal
+            # docker hostname into the config), claude-code silently
+            # drops the server and the agent says "those tools aren't
+            # available." Surface that loudly here so the user sees what
+            # broke instead of debugging blind.
+            warnings = _preflight_mcp_http(mcp_config_json)
+            if warnings and on_event:
+                try:
+                    await on_event([TextEvent(text=w) for w in warnings])
+                except Exception as exc:  # noqa: BLE001 — best-effort
+                    logger.debug("preflight emit failed: %s", exc)
+            for w in warnings:
+                logger.warning("%s", w)
 
         args = runtime_cls.build_args(
             prompt,
@@ -67,6 +83,7 @@ async def run_cli_stream(
             max_turns=max_turns,
             system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
+            mcp_strict=mcp_strict,
             resume_session_id=resume_session_id,
         )
 
@@ -286,6 +303,52 @@ async def run_gateway(
         result.success = False
         logger.warning("Gateway request failed: %s", exc)
     return result
+
+
+def _preflight_mcp_http(config_json: str) -> list[str]:
+    """Probe every HTTP MCP server in the config from the daemon host.
+
+    Returns a list of human-readable warning strings — one per server
+    that failed to respond. Connection errors (DNS, refused, timeout)
+    are the real signal: these mean the URL baked into the config isn't
+    reachable from where claude-code will dial it. 4xx/5xx are NOT
+    flagged — auth failures (401) and method-not-allowed (405) just
+    confirm the server is up. We only care about transport-level
+    failures here.
+    """
+    out: list[str] = []
+    try:
+        cfg = json.loads(config_json) if config_json else {}
+    except Exception as exc:  # noqa: BLE001
+        return [f"⚠ MCP preflight: config JSON parse failed — {exc}"]
+    for name, entry in (cfg.get("mcpServers") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") != "http":
+            continue  # stdio servers spawn locally; nothing to probe
+        url = entry.get("url") or ""
+        if not url:
+            continue
+        try:
+            req = urllib.request.Request(url, method="GET")
+            # Carry the auth header so servers that gate everything still
+            # answer (won't matter for transport-failure detection but
+            # avoids confusing logs).
+            for hk, hv in (entry.get("headers") or {}).items():
+                req.add_header(hk, hv)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                _ = resp.status  # any HTTP response = reachable
+        except urllib.error.HTTPError:
+            # Server answered with an error code — that's fine, it's UP.
+            pass
+        except Exception as exc:  # noqa: BLE001 — DNS, refused, timeout, etc.
+            out.append(
+                f"⚠ MCP server '{name}' unreachable at {url} ({type(exc).__name__}: {exc}). "
+                "The agent will run WITHOUT this server's tools. "
+                "If the URL is an internal hostname (e.g. http://mcp:8000), "
+                "set AGENTIRA_MCP_URL on the backend to a host-reachable URL."
+            )
+    return out
 
 
 def _write_mcp_config(config_json: str) -> str:
