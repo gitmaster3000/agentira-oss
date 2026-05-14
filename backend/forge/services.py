@@ -2109,6 +2109,46 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         if summary:
             r.summary = summary
         db.commit()
+
+        # Post a comment back to the linked task so the human reading
+        # the task feed sees the agent's verdict + summary. Without
+        # this, finish_run was invisible from the task view.
+        if r.task_id:
+            try:
+                from backend.models import Task as _Task, Activity as _Activity, Profile as _Profile
+                task = db.get(_Task, r.task_id)
+                if task:
+                    icon = {
+                        RunOutcome.SUCCEEDED: "✅",
+                        RunOutcome.BLOCKED: "⛔",
+                        RunOutcome.NEEDS_INPUT: "❓",
+                        RunOutcome.FAILED: "❌",
+                    }.get(outcome_enum, "•")
+                    actor_name = ""
+                    if r.agent_id:
+                        agent = db.get(Agent, r.agent_id)
+                        if agent and agent.profile_id:
+                            prof = db.get(_Profile, agent.profile_id)
+                            if prof:
+                                actor_name = prof.name
+                    comment_body = (
+                        f"{icon} **Run {outcome_enum.value}** "
+                        f"([run {r.id[:8]}](/forge/runs/{r.id}))\n\n"
+                        f"{summary or '(no summary provided)'}"
+                    )
+                    db.add(_Activity(
+                        project_id=task.project_id,
+                        task_id=task.id,
+                        actor=actor_name or "agent",
+                        action="commented",
+                        detail=comment_body,
+                    ))
+                    db.commit()
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                # Don't fail the agent's finish_run because the side-effect
+                # comment couldn't be posted; just print so it shows in logs.
+                print(f"[finish_run] task-comment failed: {exc}")
+
         db.refresh(r)
         return {"ok": True, "run": _run_to_dict(r)}
 
@@ -2216,7 +2256,7 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
                      diff_stat: str = "", diff: str = "",
-                     session_id: str = "") -> dict:
+                     session_id: str = "", workdir: str = "") -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -2242,6 +2282,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.diff_stat = diff_stat
                 if diff:
                     r.diff = diff
+                if workdir:
+                    r.workdir = workdir
                 db.commit()
 
     # Persist conversation continuity. Look up the scope this trace was

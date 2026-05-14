@@ -97,6 +97,9 @@ class DaemonTriggerComplete(BaseModel):
     # session_id). Backend stores it on the agent profile so the next
     # dispatch can pass --resume <id> for conversation continuity.
     session_id: str = ""
+    # Daemon-side filesystem path where the runtime ran. Surfaces in UI
+    # so the user can navigate to the workdir.
+    workdir: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -201,6 +204,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         diff_stat=body.diff_stat,
         diff=body.diff,
         session_id=body.session_id,
+        workdir=body.workdir,
     )
 
 
