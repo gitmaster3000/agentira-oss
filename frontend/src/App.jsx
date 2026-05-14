@@ -1,7 +1,10 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { ProjectLayout } from './pages/ProjectLayout';
 import { Board } from './pages/Board';
+import { Backlog } from './pages/Backlog';
+import { RoadmapView } from './components/RoadmapView/RoadmapView';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
@@ -42,9 +45,10 @@ function RootRedirect() {
     return user ? <Navigate to={ROUTES.STUDIO} replace /> : <Navigate to={ROUTES.WELCOME} replace />;
 }
 
+// /studio/board/:projectId → /studio/project/:projectId/board (PR #18 route rename)
 function LegacyBoardRedirect() {
     const { projectId } = useParams();
-    return <Navigate to={ROUTES.STUDIO_BOARD(projectId)} replace />;
+    return <Navigate to={`/studio/project/${projectId}/board`} replace />;
 }
 
 export default function App() {
@@ -59,11 +63,16 @@ export default function App() {
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
 
                     {/* Studio routes (authenticated) */}
-                    <Route path={ROUTES.STUDIO} element={
-                        <RequireAuth><Layout /></RequireAuth>
-                    }>
+                    <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
                         <Route index element={<StudioDashboard />} />
-                        <Route path="board/:projectId" element={<Board />} />
+                        <Route path="project/:projectId" element={<ProjectLayout />}>
+                            <Route index element={<Navigate to="board" replace />} />
+                            <Route path="board" element={<Board />} />
+                            <Route path="backlog" element={<Backlog />} />
+                            <Route path="roadmap" element={<RoadmapView />} />
+                        </Route>
+                        {/* Legacy flat board route — redirect to the new nested form. */}
+                        <Route path="board/:projectId" element={<LegacyBoardRedirect />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
                         <Route path="epics/:epicId" element={<EpicPage />} />
@@ -73,7 +82,8 @@ export default function App() {
                     <Route path="/" element={<RootRedirect />} />
 
                     {/* Legacy redirects */}
-                    <Route path="/board/:projectId" element={<LegacyBoardRedirect />} />
+                    <Route path="/board/:projectId" element={<Navigate to={ROUTES.STUDIO_PROJECT(':projectId')} replace />} />
+                    <Route path="board/:projectId" element={<Navigate to={ROUTES.STUDIO_PROJECT(':projectId')} replace />} />
                     <Route path="/settings" element={<Navigate to={ROUTES.STUDIO_SETTINGS} replace />} />
 
                     {/* Forge routes */}

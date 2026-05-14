@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useLocation } from 'react-router-dom';
 import {
     LayoutGrid,
     ListTodo,
@@ -9,10 +9,11 @@ import {
 import { ROUTES } from '../routes';
 
 export function Sidebar() {
-    const { projectId } = useParams();
-    const [searchParams] = useSearchParams();
-    const currentView = searchParams.get('view') || 'board';
-    const boardPath = projectId ? ROUTES.STUDIO_BOARD(projectId) : null;
+    const { projectId = 'default' } = useParams();
+    const location = useLocation();
+
+    // Check if we are inside a project route to highlight nav items properly
+    const isProjectRoute = location.pathname.includes('/studio/project/');
 
     const [isCollapsed, setIsCollapsed] = useState(() => {
         return localStorage.getItem('sidebar-collapsed') === 'true';
@@ -24,11 +25,11 @@ export function Sidebar() {
         localStorage.setItem('sidebar-collapsed', JSON.stringify(newState));
     };
 
-    const navItems = boardPath ? [
-        { icon: LayoutGrid, label: 'Board', path: boardPath, view: 'board' },
-        { icon: ListTodo, label: 'Tasks', path: `${boardPath}?view=backlog`, view: 'backlog' },
-        { icon: TrendingUp, label: 'Timeline', path: `${boardPath}?view=roadmap`, view: 'roadmap' },
-    ] : [];
+    const navItems = [
+        { icon: LayoutGrid, label: 'Board', path: ROUTES.STUDIO_PROJECT_BOARD(projectId), view: 'board' },
+        { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId), view: 'backlog' },
+        { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId), view: 'roadmap' },
+    ];
 
     return (
         <aside
@@ -50,8 +51,8 @@ export function Sidebar() {
                     </button>
                 </div>
 
-                {navItems.map((item) => {
-                    const isActive = currentView === item.view;
+                {isProjectRoute && navItems.map((item) => {
+                    const isActive = location.pathname === item.path;
                     return (
                         <Link
                             key={item.label}
