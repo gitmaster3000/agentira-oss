@@ -2180,6 +2180,38 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
         return {"ok": True, "count": len(events)}
 
 
+def mark_dispatch_dropped(*, agent_id: str, trace_id: str,
+                          run_id: str | None) -> None:
+    """Surface a dispatch that died silently because no daemon was online.
+
+    Writes a SYSTEM message to the chat thread so the user can see in the
+    UI what went wrong, and fails the Run row if one was created. Without
+    this the user just sees their message hang forever with no signal.
+    """
+    msg = (
+        "⚠ No daemon online — your message couldn't be delivered. "
+        "Start the daemon (`agentira daemon start --foreground`) and try again."
+    )
+    with _session() as db:
+        # Mark the run failed if we have one
+        if run_id:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r and r.status in (RunStatus.PENDING, RunStatus.RUNNING):
+                r.status = RunStatus.FAILED
+                r.error = "Daemon offline at dispatch — silent drop avoided"
+                r.finished_at = datetime.now(timezone.utc)
+        # Drop a SYSTEM message tagged with this trace so the chat UI
+        # picks it up via the existing poll.
+        db.add(AgentMessage(
+            agent_id=agent_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            role=MessageRole.SYSTEM,
+            content=msg,
+        ))
+        db.commit()
+
+
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
