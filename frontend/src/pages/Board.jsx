@@ -77,9 +77,9 @@ export function Board() {
                                 <TaskCard
                                     key={task.id}
                                     task={task}
-                                    onClick={() => {
+                                    onUpdate={(t) => {
                                         const newParams = new URLSearchParams(searchParams);
-                                        newParams.set('selectedTask', task.key || task.id);
+                                        newParams.set('selectedTask', t.key || t.id);
                                         setSearchParams(newParams);
                                     }}
                                     onDelete={reloadBoard}
