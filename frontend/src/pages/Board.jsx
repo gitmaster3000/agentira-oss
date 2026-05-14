@@ -20,7 +20,7 @@ const COLUMNS = [
 ];
 
 export function Board() {
-    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, reloadBoard } = useOutletContext();
+    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, reloadBoard, requestSelectTask } = useOutletContext();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const handleDrop = async (e, status) => {
@@ -77,11 +77,7 @@ export function Board() {
                                 <TaskCard
                                     key={task.id}
                                     task={task}
-                                    onUpdate={(t) => {
-                                        const newParams = new URLSearchParams(searchParams);
-                                        newParams.set('selectedTask', t.key || t.id);
-                                        setSearchParams(newParams);
-                                    }}
+                                    onUpdate={(t) => requestSelectTask(t.key || t.id)}
                                     onDelete={reloadBoard}
                                 />
                             ))}

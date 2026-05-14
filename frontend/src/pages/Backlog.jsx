@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useOutletContext } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
@@ -17,6 +17,10 @@ export function Backlog({ projectId }) {
     const [sortDirection, setSortDirection] = useState('desc');
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedTaskId = searchParams.get('selectedTask');
+    // ProjectLayout owns the unsaved-changes guard; route task selection
+    // through it so editing a task and clicking another row prompts first.
+    const outletCtx = useOutletContext() || {};
+    const requestSelectTask = outletCtx.requestSelectTask;
     const [isEditing, setIsEditing] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
     const [showCreateEpic, setShowCreateEpic] = useState(false);
@@ -237,9 +241,13 @@ export function Backlog({ projectId }) {
                                                 <div
                                                     key={task.id}
                                                     onClick={() => {
-                                                        const newParams = new URLSearchParams(searchParams);
-                                                        newParams.set('selectedTask', task.key || task.id);
-                                                        setSearchParams(newParams);
+                                                        if (requestSelectTask) {
+                                                            requestSelectTask(task.key || task.id);
+                                                        } else {
+                                                            const newParams = new URLSearchParams(searchParams);
+                                                            newParams.set('selectedTask', task.key || task.id);
+                                                            setSearchParams(newParams);
+                                                        }
                                                     }}
                                                     className={`flex items-center px-4 py-2 hover:bg-bg-hover cursor-pointer transition-colors ${selectedTaskId === String(task.key) || selectedTaskId === String(task.id) ? 'bg-bg-hover' : ''}`}
                                                     style={{ borderBottom: idx !== section.tasks.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}
