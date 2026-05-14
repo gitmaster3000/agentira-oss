@@ -10,10 +10,131 @@ from sqlalchemy import func
 from backend.db import SessionLocal
 from backend.models import Profile, Role
 from backend.forge.models import (
-    Agent, Run, AgentMessage, WebhookLog,
-    AgentStatus, RunStatus, MessageRole,
+    Agent, Run, AgentMessage, WebhookLog, Conversation,
+    AgentStatus, RunStatus, RunOutcome, MessageRole,
     ForgeRuntime, RuntimeStatus,
 )
+
+
+def conversation_scope_key(*, run_id: str | None, project_id: str | None) -> str:
+    """Decide which conversation a dispatch belongs to.
+
+    Three conversation buckets today:
+      - task run            → "run:<run_id>"           (sticky for the run)
+      - chat in a project   → "chat:project:<pid>"     (one per project)
+      - chat with no project → "chat:default"
+
+    Future buckets (per-thread, per-topic, etc.) extend the scheme without
+    touching call sites — change only this resolver.
+    """
+    if run_id:
+        return f"run:{run_id}"
+    if project_id:
+        return f"chat:project:{project_id}"
+    return "chat:default"
+
+
+def _prepend_history_for_prompt(*, agent_id: str, scope_key: str,
+                                current: str, limit: int = 20) -> str:
+    """For gateway runtimes that don't keep server-side conversation state,
+    rebuild a short history transcript and stitch it onto the prompt.
+
+    Pulls the last `limit` user+assistant messages for this agent (we don't
+    yet tag messages with scope_key — once we do, filter on it). Keeps the
+    current prompt verbatim at the bottom so the agent's instruction-following
+    isn't disrupted by the transcript framing.
+    """
+    with _session() as db:
+        q = (db.query(AgentMessage)
+               .filter(AgentMessage.agent_id == agent_id,
+                       AgentMessage.role.in_([MessageRole.USER, MessageRole.ASSISTANT])))
+        # Scope filter: only pull messages from this conversation. If
+        # scope_key is empty (legacy rows from before this column), they
+        # don't match and stay out, which is the safe default.
+        if scope_key:
+            q = q.filter(AgentMessage.scope_key == scope_key)
+        rows = (q.order_by(AgentMessage.created_at.desc())
+                  .limit(limit)
+                  .all())
+        rows.reverse()
+    if not rows:
+        return current
+    parts = ["<conversation history>"]
+    for m in rows:
+        who = "User" if m.role == MessageRole.USER else "Assistant"
+        parts.append(f"{who}: {m.content}")
+    parts.append("</conversation history>\n")
+    parts.append(current)
+    return "\n".join(parts)
+
+
+def get_conversation_info(*, agent_id: str, project_id: str | None = None,
+                          task_id: str | None = None) -> dict:
+    """Returns the conversation state for a given (agent, scope) so the UI
+    can show whether this is a fresh chat or a resumed one."""
+    run_id_arg = None  # task-scoped only matters for run dispatches
+    if task_id:
+        run_id_arg = None  # task scope keys aren't run-based; reserve later
+    scope = conversation_scope_key(run_id=run_id_arg, project_id=project_id)
+    with _session() as db:
+        conv = (db.query(Conversation)
+                  .filter_by(agent_id=agent_id, scope_key=scope)
+                  .first())
+        msg_count = (db.query(func.count(AgentMessage.id))
+                       .filter(AgentMessage.agent_id == agent_id,
+                               AgentMessage.scope_key == scope)
+                       .scalar() or 0)
+    return {
+        "scope_key": scope,
+        "has_session": bool(conv and conv.runtime_session_id),
+        "session_id": (conv.runtime_session_id if conv else "") or "",
+        "message_count": int(msg_count),
+        "last_used_at": _iso(conv.last_used_at) if conv else None,
+    }
+
+
+def get_runtime_session(*, agent_id: str, scope_key: str) -> str:
+    """Return the runtime-native session_id for this conversation (e.g.
+    the claude --resume handle), or empty string if no session yet."""
+    with _session() as db:
+        conv = (db.query(Conversation)
+                  .filter_by(agent_id=agent_id, scope_key=scope_key)
+                  .first())
+        return (conv.runtime_session_id if conv else "") or ""
+
+
+def upsert_conversation(*, agent_id: str, scope_key: str,
+                        runtime_session_id: str = "") -> None:
+    """Create or update the conversation row. Idempotent — bumps
+    last_used_at on every call; stores runtime_session_id if non-empty
+    (don't clobber a good handle with an empty one from a failed run)."""
+    if not agent_id or not scope_key:
+        return
+    with _session() as db:
+        conv = (db.query(Conversation)
+                  .filter_by(agent_id=agent_id, scope_key=scope_key)
+                  .first())
+        now = datetime.now(timezone.utc)
+        if conv:
+            conv.last_used_at = now
+            if runtime_session_id:
+                conv.runtime_session_id = runtime_session_id
+        else:
+            db.add(Conversation(
+                agent_id=agent_id,
+                scope_key=scope_key,
+                runtime_session_id=runtime_session_id or None,
+                last_used_at=now,
+            ))
+        db.commit()
+
+
+# trace_id → scope_key, populated at dispatch and drained on complete so
+# we can persist the runtime session handle to the right conversation.
+# In-memory map; if backend restarts mid-dispatch we lose the link and
+# silently skip session storage for that one trigger (correctness preserved,
+# just no resume for the next message).
+_TRACE_SCOPE: dict[str, str] = {}
 
 
 def _session() -> Session:
@@ -36,20 +157,45 @@ def _iso(dt: datetime | None) -> str | None:
 # ── Serializers ──────────────────────────────────────────────────────────
 
 def _sync_bots(db) -> None:
-    """Ensure every bot profile has a corresponding forge Agent record."""
+    """AP-86: maintain 1:1 link between bot profile and Agent. Same id.
+
+    For each bot profile, ensure exactly one Agent row exists sharing that
+    id. Runtime fields mirror from profile (post-merge source of truth).
+    Skips orphans (Agent rows whose profile_id was deleted).
+    """
     bot_role = db.query(Role).filter(Role.name == "bot").first()
     if not bot_role:
         return
     bots = db.query(Profile).filter(Profile.role_id == bot_role.id).all()
-    existing = {a.profile_id for a in db.query(Agent.profile_id).all()}
+    # Index existing agents by profile_id and by id; same-id is the new
+    # invariant but we tolerate old random-id rows during transition.
+    existing_by_pid = {a.profile_id: a for a in db.query(Agent).all() if a.profile_id}
     for bot in bots:
-        if bot.id not in existing:
+        agent = existing_by_pid.get(bot.id)
+        if agent is None:
             agent = Agent(
+                id=bot.id,                # AP-86: 1:1, same id
                 profile_id=bot.id,
                 name=bot.display_name or bot.name,
                 webhook_url=bot.webhook_url or "",
             )
             db.add(agent)
+        # Mirror runtime config from profile onto the agent so the OLD
+        # code paths that read agent.model / agent.runtime_id keep working
+        # during transition. New code should read from profile directly.
+        agent.name = bot.display_name or bot.name
+        if bot.model:
+            agent.model = bot.model
+        if bot.system_prompt is not None:
+            agent.system_prompt = bot.system_prompt
+        if bot.personality is not None:
+            agent.personality = bot.personality
+        if bot.runtime_id:
+            agent.runtime_id = bot.runtime_id
+        if bot.default_project_id:
+            agent.default_project_id = bot.default_project_id
+        if bot.mcp_servers:
+            agent.mcp_servers = bot.mcp_servers
     db.commit()
 
 
@@ -90,7 +236,20 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_hooks_token": a.runtime_hooks_token or "",
         "runtime_agent_name": a.runtime_agent_name or "",
         "runtime_id": a.runtime_id,
+        "runtime_provider": a.runtime.provider if a.runtime else "",
+        "runtime_version": a.runtime.version if a.runtime else "",
+        # Three-kind identity: derived from role + runtime_id presence.
+        # Defensive — list_agents already filters out service_account rows,
+        # but a single agent fetched by id might return either kind.
+        "kind": "managed_agent" if a.runtime_id else "service_account",
+        "default_project_id": a.default_project_id,
         "schedule_cron": a.schedule_cron or "",
+        "mcp_servers": json.loads(a.mcp_servers) if a.mcp_servers else [],
+        "mcp_disabled": (
+            json.loads(a.profile.mcp_disabled) if (a.profile and a.profile.mcp_disabled) else []
+        ),
+        "mcp_strict": bool(a.profile.mcp_strict) if a.profile else False,
+        "mcp_config_override": (a.profile.mcp_config_override if a.profile else "") or "",
         "created_at": _iso(a.created_at),
     }
 
@@ -142,6 +301,10 @@ def _run_to_dict(r: Run) -> dict:
         "project_name": r.project.name if r.project else None,
         "trigger_event": r.trigger_event,
         "status": r.status.value,
+        "outcome": r.outcome.value if r.outcome else None,
+        "summary": r.summary or "",
+        "diff_stat": r.diff_stat or "",
+        "diff": r.diff or "",
         "model_used": r.model_used,
         "started_at": _iso(r.started_at),
         "finished_at": _iso(r.finished_at),
@@ -170,6 +333,7 @@ def _runtime_to_dict(r: ForgeRuntime) -> dict:
         "models": json.loads(r.models) if r.models else [],
         "gateway_url": r.gateway_url or "",
         "gateway_token": r.gateway_token or "",
+        "host_tools": (json.loads(r.host_tools) if r.host_tools else None),
         "last_heartbeat": _iso(datetime.now(timezone.utc)) if live else None,
         "created_at": _iso(r.created_at),
     }
@@ -194,6 +358,8 @@ def register_runtimes(daemon_id: str, device_name: str | None, runtimes: list[di
                 existing.models = json.dumps(entry.get("models", []))
                 existing.gateway_url = entry.get("gateway_url") or None
                 existing.gateway_token = entry.get("gateway_token") or None
+                if entry.get("host_tools") is not None:
+                    existing.host_tools = json.dumps(entry["host_tools"])
                 existing.status = RuntimeStatus.ONLINE
                 existing.last_heartbeat = now
                 if device_name:
@@ -210,6 +376,7 @@ def register_runtimes(daemon_id: str, device_name: str | None, runtimes: list[di
                     models=json.dumps(entry.get("models", [])),
                     gateway_url=entry.get("gateway_url") or None,
                     gateway_token=entry.get("gateway_token") or None,
+                    host_tools=(json.dumps(entry["host_tools"]) if entry.get("host_tools") is not None else None),
                     status=RuntimeStatus.ONLINE,
                     last_heartbeat=now,
                 )
@@ -362,7 +529,12 @@ def _refresh_status(db, agents: list[Agent]) -> dict[str, float]:
 def list_agents(status: Optional[str] = None) -> list[dict]:
     with _session() as db:
         _sync_bots(db)
-        agents = db.query(Agent).order_by(Agent.created_at.desc()).all()
+        # Forge surfaces only MANAGED agents — bot profiles bound to a
+        # runtime. Service accounts (bot, no runtime) live in Settings
+        # → Service Accounts and never appear here.
+        agents = (db.query(Agent)
+                    .filter(Agent.runtime_id.isnot(None))
+                    .order_by(Agent.created_at.desc()).all())
         live_costs = _refresh_status(db, agents)
         if status:
             agents = [a for a in agents if a.status.value == status]
@@ -381,8 +553,45 @@ def get_agent(agent_id: str) -> dict | None:
 def create_agent(*, profile_id: str | None = None, name: str, executor_type: str = "http",
                  model: str = "", webhook_url: str = "", config_json: str | None = None,
                  runtime_id: str | None = None) -> dict:
+    """Create a MANAGED agent. AP-86: every agent has a 1:1 backing Profile
+    (bot identity) sharing the same id. Runtime config + identity persist
+    together.
+
+    `runtime_id` is REQUIRED — Forge agents are dispatchable by definition.
+    To create an API-key-only identity (no runtime), call
+    `services.create_service_account()` instead, surfaced via Settings →
+    Service Accounts.
+
+    If `profile_id` is given, reuse it (link an existing bot profile to a
+    new runtime). Otherwise create both the profile and the agent here.
+    """
+    if not runtime_id:
+        return {"error": "runtime_id is required — managed agents must be bound to a runtime. Use Settings → Service Accounts for an API-key-only identity."}
+    from backend.models import Profile, Role
     with _session() as db:
+        if profile_id:
+            prof = db.get(Profile, profile_id)
+            if not prof:
+                return {"error": "profile not found"}
+        else:
+            # Create a bot profile to back this agent. Same id as the agent
+            # so they're 1:1 at the schema level too.
+            role_row = db.query(Role).filter(Role.name == "bot").first()
+            if not role_row:
+                return {"error": "bot role missing"}
+            new_id = _new_id()
+            prof = Profile(
+                id=new_id, name=name, display_name=name,
+                password_hash="", avatar_url="", webhook_url="",
+                role_id=role_row.id,
+                model=model,
+                runtime_id=runtime_id,
+            )
+            db.add(prof)
+            db.flush()
+            profile_id = prof.id
         a = Agent(
+            id=profile_id,  # 1:1 with profile
             profile_id=profile_id,
             name=name,
             executor_type=executor_type,
@@ -392,22 +601,218 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
             runtime_id=runtime_id,
         )
         db.add(a)
+        # Mirror runtime fields onto the profile (source of truth post-merge).
+        prof.name = name
+        prof.display_name = name
+        prof.model = model
+        prof.runtime_id = runtime_id
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)
 
 
+# Fields that, when set via update_agent, must mirror onto the backing Profile
+# (post-AP-86 merge, the profile holds the canonical runtime config).
+_AGENT_TO_PROFILE_MIRROR = {
+    "name", "model", "system_prompt", "personality", "runtime_id",
+    "default_project_id", "mcp_servers", "webhook_url", "mcp_strict",
+    "mcp_config_override", "mcp_disabled",
+}
+
+
 def update_agent(agent_id: str, **fields) -> dict | None:
+    from backend.models import Profile
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return None
+        # AP-91: a managed agent can't be downgraded to a service account by
+        # clearing its runtime. If you want a service account, create one
+        # under Settings → Service Accounts; if you want this agent gone,
+        # delete it. Reject empty-string and explicit null.
+        if "runtime_id" in fields and a.runtime_id and not fields["runtime_id"]:
+            raise ValueError(
+                "Cannot clear runtime_id on a managed agent. "
+                "Delete the agent or pick a different runtime instead."
+            )
+        # mcp_servers / mcp_disabled come in as list[str]; persist as JSON.
+        if "mcp_servers" in fields and fields["mcp_servers"] is not None:
+            fields["mcp_servers"] = json.dumps(list(fields["mcp_servers"]))
+        if "mcp_disabled" in fields and fields["mcp_disabled"] is not None:
+            fields["mcp_disabled"] = json.dumps(list(fields["mcp_disabled"]))
         for k, v in fields.items():
             if v is not None and hasattr(a, k):
                 setattr(a, k, v)
+        # Mirror runtime-relevant fields onto the linked profile so the
+        # post-merge "agent IS the profile" view stays consistent.
+        prof = db.get(Profile, a.profile_id) if a.profile_id else None
+        if prof:
+            for k, v in fields.items():
+                if v is None or k not in _AGENT_TO_PROFILE_MIRROR:
+                    continue
+                if hasattr(prof, k):
+                    setattr(prof, k, v)
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)
+
+
+def _redact_mcp_config(cfg: dict | None) -> dict:
+    """Deep-copy and mask Authorization/secret-bearing fields for display."""
+    import copy
+    if not cfg:
+        return {}
+    out = copy.deepcopy(cfg)
+    for _name, entry in (out.get("mcpServers") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        hdrs = entry.get("headers")
+        if isinstance(hdrs, dict):
+            for hk in list(hdrs.keys()):
+                if hk.lower() == "authorization":
+                    val = hdrs[hk] or ""
+                    # show "Bearer ****abcd" — last 4 chars only
+                    tail = val[-4:] if len(val) > 8 else ""
+                    hdrs[hk] = f"Bearer ****{tail}"
+        env = entry.get("env")
+        if isinstance(env, dict):
+            for ek in list(env.keys()):
+                if any(s in ek.upper() for s in ("TOKEN", "KEY", "SECRET", "PASSWORD")):
+                    env[ek] = "****"
+    return out
+
+
+def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
+    """Return what a chat dispatch would send — without dispatching.
+
+    Mirrors `send_runtime_message`'s resolution logic so the UI can show
+    the user exactly what's about to ride on the WS frame: repo_path,
+    conventions snippet, MCP server list, env vars, system-prompt
+    addenda. This is the source of truth for the /context inspector.
+    """
+    from backend.forge.mcp_registry import build_mcp_config
+    from backend.models import Profile, Project
+    with _session() as db:
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a:
+            return {"error": "agent not found"}
+        prof = db.get(Profile, a.profile_id) if a.profile_id else None
+
+        # Project resolution — explicit arg wins; else fall back to the
+        # agent's default project, else free-form.
+        proj_id = project_id or (prof.default_project_id if prof else None)
+        proj = db.get(Project, proj_id) if proj_id else None
+        repo_path = proj.repo_path if proj else ""
+        conventions_md = proj.conventions_md if proj else ""
+
+        # MCP — even free-form chat gets the auto-injected servers
+        # (agentira, memory). Project-bound chats also get the per-project
+        # memory scoping. Always called now — matches the dispatch path.
+        agent_mcp_list = json.loads(a.mcp_servers) if a.mcp_servers else None
+        mcp_cfg = build_mcp_config(
+            agent_mcp_servers=agent_mcp_list,
+            agent_id=a.id,
+            project_id=proj_id,
+            agent_api_key=(prof.api_key if prof else None),
+            mcp_config_override=(prof.mcp_config_override if prof else None),
+            disabled_servers=(json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None),
+        )
+
+        # Env vars the daemon will inject when spawning the runtime. Mirrors
+        # what dispatch_trigger packs onto env_extra.
+        env_keys = ["AGENTIRA_AGENT_ID", "AGENTIRA_PROJECT_ID"]
+        if proj_id:
+            env_keys.append("AGENTIRA_REPO_PATH")
+        # User-provided agent env_vars (secrets like GH_TOKEN) — names only
+        # (don't leak the values to the inspector).
+        user_env_names: list[str] = []
+        if prof and prof.env_vars:
+            try:
+                ev = json.loads(prof.env_vars)
+                if isinstance(ev, dict):
+                    user_env_names = sorted(ev.keys())
+            except (ValueError, TypeError):
+                pass
+
+        return {
+            "agent": {
+                "id": a.id,
+                "name": a.name,
+                "model": (prof.model if prof else a.model) or "",
+                "runtime_provider": (a.runtime.provider if a.runtime else "") or "",
+            },
+            "project": {
+                "id": proj_id or "",
+                "name": (proj.name if proj else ""),
+                "repo_path": repo_path or "",
+                "conventions_md_preview": (conventions_md or "")[:300],
+                "source": ("explicit" if project_id else
+                           ("agent_default" if proj_id else "none")),
+            },
+            "mcp_servers": (
+                sorted((mcp_cfg or {}).get("mcpServers", {}).keys())
+                if mcp_cfg else []
+            ),
+            # Full resolved config — same shape that gets written to the
+            # tempfile and passed to claude-code via --mcp-config. Bearer
+            # tokens are redacted for display.
+            "mcp_config": _redact_mcp_config(mcp_cfg),
+            # Layer 1 + Layer 2 view — what the bound runtime brings on its
+            # own. Populated at daemon registration; null until the daemon
+            # checks in.
+            "host_tools": (
+                json.loads(a.runtime.host_tools)
+                if a.runtime and a.runtime.host_tools
+                else None
+            ),
+            "runtime_provider": a.runtime.provider if a.runtime else "",
+            "env_vars": {
+                "injected_by_daemon": env_keys,
+                "user_provided_names": user_env_names,  # names only, no values
+            },
+            "system_prompt_addenda": {
+                "conventions_pointer_will_be_added": bool(repo_path and conventions_md),
+                "memory_addendum_will_be_added": bool(
+                    mcp_cfg and "memory" in (mcp_cfg.get("mcpServers") or {})
+                ),
+                "user_context_preamble": "added per-call from screen route + project",
+            },
+            "persona_system_prompt": (prof.system_prompt if prof else a.system_prompt) or "",
+        }
+
+
+def list_agent_projects(agent_id: str) -> list[dict]:
+    """AP-86: projects this agent is assigned to. After the bot↔agent merge,
+    agent.id == profile.id, so we walk the profile's ProjectMember rows."""
+    from backend.models import Profile, Project, ProjectMember
+    with _session() as db:
+        # agent.id == profile.id post-merge; fall back to profile_id for any
+        # transitional rows where they still differ.
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not a:
+            return []
+        pid = a.profile_id or a.id
+        rows = (db.query(Project)
+                  .join(ProjectMember, ProjectMember.project_id == Project.id)
+                  .filter(ProjectMember.profile_id == pid)
+                  .order_by(Project.name.asc())
+                  .all())
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "key_prefix": p.key_prefix or "",
+                "repo_path": p.repo_path or "",
+            }
+            for p in rows
+        ]
+
+
+def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
+    """Expose the MCP registry to the frontend's agent edit form. By
+    default hides auto-injected servers — users can't toggle them."""
+    from backend.forge.mcp_registry import list_servers
+    return list_servers(include_auto=include_auto)
 
 
 def delete_agent(agent_id: str) -> bool:
@@ -582,9 +987,17 @@ def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
 
 def get_stats() -> dict:
     with _session() as db:
-        total_agents = db.query(func.count(Agent.id)).scalar() or 0
-        online_agents = db.query(func.count(Agent.id)).filter(Agent.status == AgentStatus.ONLINE).scalar() or 0
-        busy_agents = db.query(func.count(Agent.id)).filter(Agent.status == AgentStatus.BUSY).scalar() or 0
+        # AP-90: Forge counts only runtime-managed agents. Service accounts
+        # (role=bot, runtime_id IS NULL) live under Settings → Service Accounts
+        # and must not inflate Forge's "total agents" stat.
+        managed_filter = Agent.runtime_id.isnot(None)
+        total_agents = db.query(func.count(Agent.id)).filter(managed_filter).scalar() or 0
+        online_agents = db.query(func.count(Agent.id)).filter(
+            managed_filter, Agent.status == AgentStatus.ONLINE
+        ).scalar() or 0
+        busy_agents = db.query(func.count(Agent.id)).filter(
+            managed_filter, Agent.status == AgentStatus.BUSY
+        ).scalar() or 0
 
         total_runs = db.query(func.count(Run.id)).scalar() or 0
         completed_runs = db.query(func.count(Run.id)).filter(Run.status == RunStatus.COMPLETED).scalar() or 0
@@ -633,13 +1046,89 @@ def get_stats() -> dict:
 # ── Messages ────────────────────────────────────────────────────────────
 
 def list_messages(agent_id: str, *, run_id: str | None = None,
+                  scope_key: str | None = None,
                   limit: int = 100, offset: int = 0) -> list[dict]:
     with _session() as db:
         q = db.query(AgentMessage).filter(AgentMessage.agent_id == agent_id)
         if run_id:
             q = q.filter(AgentMessage.run_id == run_id)
+        if scope_key:
+            q = q.filter(AgentMessage.scope_key == scope_key)
         msgs = q.order_by(AgentMessage.created_at.asc()).offset(offset).limit(limit).all()
         return [_message_to_dict(m) for m in msgs]
+
+
+def list_conversations(agent_id: str) -> list[dict]:
+    """All conversations this agent has, with a friendly label + counts.
+
+    Returns one row per scope_key present in either forge_conversations
+    (resume-capable runtimes leave a session row) or forge_messages
+    (gateway runtimes only leave messages). Either way the user sees
+    a switchable list of past chats."""
+    with _session() as db:
+        # All scope_keys seen via messages
+        msg_rows = (db.query(AgentMessage.scope_key,
+                             func.count(AgentMessage.id),
+                             func.max(AgentMessage.created_at))
+                      .filter(AgentMessage.agent_id == agent_id,
+                              AgentMessage.scope_key.isnot(None))
+                      .group_by(AgentMessage.scope_key)
+                      .all())
+        # All scope_keys with a session row
+        conv_rows = (db.query(Conversation)
+                       .filter(Conversation.agent_id == agent_id)
+                       .all())
+        # Merge — key by scope_key
+        merged: dict[str, dict] = {}
+        for sk, cnt, last in msg_rows:
+            merged[sk] = {
+                "scope_key": sk,
+                "message_count": int(cnt or 0),
+                "last_used_at": _iso(last),
+                "has_session": False,
+                "session_id": "",
+            }
+        for c in conv_rows:
+            row = merged.setdefault(c.scope_key, {
+                "scope_key": c.scope_key,
+                "message_count": 0,
+                "last_used_at": _iso(c.last_used_at),
+                "has_session": False,
+                "session_id": "",
+            })
+            row["has_session"] = bool(c.runtime_session_id)
+            row["session_id"] = c.runtime_session_id or ""
+            if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
+                row["last_used_at"] = _iso(c.last_used_at)
+        # Pretty label per scope
+        from backend.models import Project as _Project
+        out = []
+        for sk, row in merged.items():
+            label = _scope_label(db, sk)
+            row["label"] = label
+            out.append(row)
+        out.sort(key=lambda r: r["last_used_at"] or "", reverse=True)
+        return out
+
+
+def _scope_label(db, scope_key: str) -> str:
+    """Render a scope key as a human label, e.g.
+    chat:project:abc → 'Chat — <project name>'
+    chat:default     → 'Chat — no project'
+    run:abc          → 'Task run abc'
+    """
+    if scope_key.startswith("chat:project:"):
+        pid = scope_key.split(":", 2)[2]
+        from backend.models import Project as _Project
+        p = db.get(_Project, pid)
+        return f"About {p.name}" if p else f"About project {pid[:8]}"
+    if scope_key == "chat:default":
+        return "General"
+    if scope_key.startswith("chat:user:"):
+        return f"General ({scope_key[10:14]})"
+    if scope_key.startswith("run:"):
+        return f"Task run {scope_key.split(':',1)[1][:8]}"
+    return scope_key
 
 
 def create_message(*, agent_id: str, role: str, content: str,
@@ -722,11 +1211,21 @@ def update_schedule(agent_id: str, *, start: str | None = None, end: str | None 
 
 # Pricing per 1M tokens (input, output) — updated periodically
 MODEL_PRICING = {
-    # Anthropic
-    "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},
+    # Anthropic — Claude 4 family (4-5, 4-6, 4-7 generations).
+    # 4-7 is the current generation as of 2026; older entries kept for
+    # legacy agents whose model field still references prior model ids.
+    "claude-opus-4-7":            {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-7":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-7":           {"input": 0.80, "output": 4.0},
     "claude-opus-4-6":            {"input": 15.0, "output": 75.0},
-    "claude-sonnet-4-20250514":   {"input": 3.0,  "output": 15.0},
     "claude-sonnet-4-6":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-6":           {"input": 0.80, "output": 4.0},
+    "claude-opus-4-5":            {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-5":          {"input": 3.0,  "output": 15.0},
+    "claude-haiku-4-5":           {"input": 0.80, "output": 4.0},
+    # Legacy / dated SKUs
+    "claude-opus-4-20250514":     {"input": 15.0, "output": 75.0},
+    "claude-sonnet-4-20250514":   {"input": 3.0,  "output": 15.0},
     "claude-haiku-4-5-20251001":  {"input": 0.80, "output": 4.0},
     "claude-3-5-sonnet-20241022": {"input": 3.0,  "output": 15.0},
     "claude-3-5-haiku-20241022":  {"input": 0.80, "output": 4.0},
@@ -811,6 +1310,111 @@ def get_agent_cost_breakdown(agent_id: str) -> dict:
             "total_output_tokens": total_output,
             "total_cost_usd": round(total_cost, 4),
             "by_model": by_model,
+        }
+
+
+def get_agent_involvement(agent_id: str) -> dict:
+    """Per-(agent) summary of runs across projects — feeds get_my_involvement.
+
+    Joins forge_runs → tasks → projects so each project gets a roll-up of
+    run_count, last_active, and the tasks the agent has touched. Tokens
+    and cost come straight off forge_runs aggregates.
+    """
+    from backend.models import Task, Project
+    with _session() as db:
+        runs = (db.query(Run)
+                  .filter(Run.agent_id == agent_id)
+                  .order_by(Run.created_at.desc())
+                  .all())
+        if not runs:
+            return {
+                "agent_id": agent_id,
+                "total_runs": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost_usd": 0.0,
+                "projects": [],
+            }
+
+        total_in = 0
+        total_out = 0
+        total_cost = 0.0
+        # project_id -> {project_name, run_count, last_active, tasks: {task_id: {title, last_at}}}
+        by_project: dict[str, dict] = {}
+
+        for r in runs:
+            total_in += r.input_tokens
+            total_out += r.output_tokens
+            total_cost += r.cost_usd
+
+            # Resolve project — prefer the run's own project_id, fall back
+            # to the task's project. Both can be null for free-form chat.
+            project_id = r.project_id
+            task_title = ""
+            if r.task_id:
+                task = db.get(Task, r.task_id)
+                if task:
+                    task_title = task.title or ""
+                    if not project_id:
+                        project_id = task.project_id
+
+            if not project_id:
+                continue  # skip free-form runs that aren't project-scoped
+
+            bucket = by_project.setdefault(project_id, {
+                "project_name": "",
+                "run_count": 0,
+                "last_active": None,
+                "tasks": {},
+            })
+            bucket["run_count"] += 1
+            bucket["last_active"] = max(
+                bucket["last_active"] or r.created_at,
+                r.created_at,
+            )
+            if r.task_id:
+                t = bucket["tasks"].setdefault(r.task_id, {
+                    "task_id": r.task_id,
+                    "task_title": task_title,
+                    "last_run_at": r.created_at,
+                })
+                if r.created_at > t["last_run_at"]:
+                    t["last_run_at"] = r.created_at
+
+        # Backfill project names in one pass
+        for pid, bucket in by_project.items():
+            proj = db.get(Project, pid)
+            if proj:
+                bucket["project_name"] = proj.name or ""
+
+        projects_out = []
+        for pid, bucket in sorted(
+            by_project.items(),
+            key=lambda kv: kv[1]["last_active"] or datetime.min,
+            reverse=True,
+        ):
+            projects_out.append({
+                "project_id": pid,
+                "project_name": bucket["project_name"],
+                "run_count": bucket["run_count"],
+                "last_active": _iso(bucket["last_active"]),
+                "tasks_touched": sorted(
+                    [
+                        {**t, "last_run_at": _iso(t["last_run_at"])}
+                        for t in bucket["tasks"].values()
+                    ],
+                    key=lambda x: x["last_run_at"] or "",
+                    reverse=True,
+                ),
+            })
+
+        return {
+            "agent_id": agent_id,
+            "total_runs": len(runs),
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "total_cost_usd": round(total_cost, 4),
+            "projects": projects_out,
         }
 
 
@@ -1048,7 +1652,14 @@ def sync_openclaw_agents() -> list[dict]:
 
 
 def dispatch_trigger(agent_id: str, prompt: str, *,
-                     run_id: str | None = None, kind: str = "chat") -> dict:
+                     run_id: str | None = None, kind: str = "chat",
+                     repo_path: str = "", conventions_md: str = "",
+                     mcp_config_json: str = "", env_extra: dict | None = None,
+                     run_token: str = "",
+                     user_context: dict | None = None,
+                     mcp_strict: bool = False,
+                     resume_session_id: str = "",
+                     scope_key: str = "") -> dict:
     """Single rail for invoking an agent.
 
     Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
@@ -1058,6 +1669,15 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     `kind` is a label for audit/logging only — the daemon does not branch on it.
     `run_id` attaches the trigger to a Run when the work is part of a workflow
     (cron, task assignment); for free-floating chat it stays None.
+
+    Run-context bundle (used by Phase D's daemon materializer; chat triggers
+    pass empty values and the daemon falls back to its existing behavior):
+    - repo_path: filesystem path the daemon will symlink into the workdir
+    - conventions_md: runtime-agnostic markdown the daemon writes to
+      .agentira/CONVENTIONS.md
+    - mcp_config_json: serialized {"mcpServers": {...}} for --mcp-config
+    - env_extra: dict of env vars to inject (AGENTIRA_RUN_ID, etc.)
+    - run_token: per-run uuid the agent uses to authenticate finish_run
     """
     import asyncio
     import uuid
@@ -1078,6 +1698,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
             agent_id=a.id,
             run_id=run_id,
             trace_id=trace_id,
+            scope_key=scope_key or None,
             kind=kind,
             role=MessageRole.USER,
             content=prompt,
@@ -1089,8 +1710,80 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         gateway_url = runtime.gateway_url or ""
         gateway_token = runtime.gateway_token or ""
         model = a.model or ""
-        system_prompt = a.system_prompt or ""
+        persona_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
+
+        # Auto-baked self/project/task awareness preamble.
+        # Identity + current screen + project + recent involvement so the
+        # agent doesn't open every chat with "this is the start of our
+        # conversation." Composed here so it rides on the same
+        # --append-system-prompt as the persona. Persona last so it wins
+        # on tone/voice conflicts.
+        from backend.models import Task as _Task, Project as _Project
+        ctx_pre = user_context if isinstance(user_context, dict) else {}
+        awareness_lines: list[str] = []
+        awareness_lines.append(f"You are {agent_name}, an agent in Agentira (Flowty Forge).")
+        if kind == "run_step" and run_id:
+            awareness_lines.append(f"This dispatch is part of run {run_id} (a scheduled task run, not free-form chat).")
+        else:
+            awareness_lines.append("This dispatch is a free-form chat from a human user in the Agentira UI.")
+        surface = ctx_pre.get("surface") or ctx_pre.get("route") or ""
+        proj_id_ctx = ctx_pre.get("project_id")
+        proj_name_ctx = ctx_pre.get("project_name") or ""
+        task_id_ctx = ctx_pre.get("task_id")
+        if proj_id_ctx:
+            if not proj_name_ctx:
+                _p = db.get(_Project, proj_id_ctx)
+                proj_name_ctx = (_p.name if _p else "") or ""
+            awareness_lines.append(f"User is currently viewing project: \"{proj_name_ctx}\" ({proj_id_ctx}).")
+        if task_id_ctx:
+            _t = db.get(_Task, task_id_ctx)
+            if _t:
+                awareness_lines.append(f"User has task open: \"{_t.title}\" ({task_id_ctx}).")
+        if surface:
+            awareness_lines.append(f"UI surface: {surface}.")
+        # Recent involvement: top projects by run count (cheap aggregate).
+        try:
+            inv_rows = (db.query(Run.project_id, func.count(Run.id))
+                          .filter(Run.agent_id == a.id, Run.project_id.isnot(None))
+                          .group_by(Run.project_id)
+                          .order_by(func.count(Run.id).desc())
+                          .limit(5).all())
+            if inv_rows:
+                bits = []
+                for pid, cnt in inv_rows:
+                    p = db.get(_Project, pid)
+                    if p:
+                        bits.append(f"{p.name} ({cnt})")
+                if bits:
+                    awareness_lines.append("Recent projects you've worked on: " + ", ".join(bits) + ".")
+            else:
+                awareness_lines.append("You have no prior runs on record (this may be your first dispatch).")
+        except Exception:
+            pass
+        awareness_lines.append("Use the agentira MCP tools (get_me, get_my_involvement, list_projects, get_task, list_tasks, add_comment, finish_run, etc.) to look up anything else you need before claiming you don't know.")
+        awareness_preamble = "\n".join(awareness_lines)
+
+        if persona_prompt:
+            system_prompt = awareness_preamble + "\n\n---\n\n" + persona_prompt
+        else:
+            system_prompt = awareness_preamble
+
+    # If this trigger belongs to a Run (cron, scheduled task, …), flip the
+    # run state to RUNNING before dispatching. complete_trigger will close
+    # it out at the daemon side.
+    if run_id:
+        start_run(run_id)
+
+    # Bundle user_context into env_extra so daemon-side code that already
+    # consumes env_extra (per AP-51's dispatch shape) picks it up without
+    # a new field on the WS frame. The daemon JSON-decodes it.
+    env_extra_combined = dict(env_extra or {})
+    if user_context:
+        env_extra_combined["AGENTIRA_USER_CONTEXT_JSON"] = json.dumps(user_context)
+
+    if scope_key:
+        _TRACE_SCOPE[trace_id] = scope_key
 
     asyncio.ensure_future(hub.dispatch_trigger(
         trace_id=trace_id,
@@ -1105,8 +1798,323 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         agent_name=agent_name,
         gateway_url=gateway_url,
         gateway_token=gateway_token,
+        repo_path=repo_path,
+        conventions_md=conventions_md,
+        mcp_config_json=mcp_config_json,
+        mcp_strict=mcp_strict,
+        resume_session_id=resume_session_id,
+        env_extra=env_extra_combined,
+        run_token=run_token,
     ))
-    return {"ok": True, "trace_id": trace_id}
+    return {"ok": True, "trace_id": trace_id, "run_id": run_id}
+
+
+def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
+    """Kick off a Run for a task with the chosen agent.
+
+    Builds the prompt from the task's title + description + DoD items
+    (the work-defining content the human authored), then dispatches a
+    trigger of kind=run_step with the new run_id. The agent's
+    system_prompt rides on the trigger frame so the runtime sees it.
+
+    Assembles the run-context bundle (project repo_path + conventions_md,
+    agent's MCP toolkit, per-run token + env vars) and ships it on the
+    dispatch frame. Phase D wires the daemon to consume it; until then
+    the daemon ignores the extra fields and chat continues to work.
+    """
+    import json as _json
+    import uuid
+    from backend.models import Task, Project
+    from backend.forge.mcp_registry import build_mcp_config
+
+    with _session() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return {"error": "Task not found"}
+        agent = db.query(Agent).filter(Agent.id == agent_id).first()
+        if not agent:
+            return {"error": "Agent not found"}
+        if not agent.runtime_id:
+            return {"error": "Agent has no bound runtime"}
+
+        task_title = task.title or ""
+        task_description = task.description or ""
+        project_id = task.project_id
+        dod_text = ""
+        if task.dod_items:
+            try:
+                items = json.loads(task.dod_items)
+                if isinstance(items, list) and items:
+                    dod_text = "\n".join(
+                        f"- [{'x' if it.get('checked') else ' '}] {it.get('text','')}"
+                        for it in items if isinstance(it, dict)
+                    )
+            except Exception:
+                pass
+
+        # Project run-context — empty strings if unset; daemon falls back
+        # to its existing cwd-and-no-conventions behavior in that case.
+        project = db.get(Project, project_id) if project_id else None
+        repo_path = (project.repo_path or "") if project else ""
+        conventions_md = (project.conventions_md or "") if project else ""
+
+        # Agent toolkit — list of opt-in MCP server names.
+        agent_mcp_servers: list[str] = []
+        if agent.mcp_servers:
+            try:
+                parsed = _json.loads(agent.mcp_servers)
+                if isinstance(parsed, list):
+                    agent_mcp_servers = [str(s) for s in parsed]
+            except Exception:
+                pass
+
+    # Compose the prompt outside the session — clean, deterministic.
+    parts = [f"# Task: {task_title}"]
+    if task_description:
+        parts.append("\n## Description\n" + task_description)
+    if dod_text:
+        parts.append("\n## Definition of Done\n" + dod_text)
+    parts.append("\nWork on this task.")
+    # Stash run_id placeholder; we substitute the real one once it's created
+    # (the prompt is composed before create_run runs). The literal {run_id}
+    # is replaced below.
+    parts.append(
+        "\nWhen you finish, call mcp__agentira__finish_run with:\n"
+        "  - run_id: \"{run_id}\"\n"
+        "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
+        "  - summary: one paragraph describing what changed (or what's blocking).\n"
+        "Use \"blocked\" when you can't proceed without external input "
+        "(missing credentials, ambiguous spec, broken dependency)."
+    )
+    prompt_template = "\n".join(parts)
+
+    # Create the Run row first; dispatch_trigger will flip it to RUNNING.
+    run = create_run(
+        agent_id=agent_id,
+        task_id=task_id,
+        project_id=project_id,
+        trigger_event="task.scheduled",
+        model_used=agent.model or "",
+    )
+    run_id = run["id"]
+
+    # Substitute the real run_id into the finish_run instructions now that
+    # the run row exists.
+    prompt = prompt_template.replace("{run_id}", run_id)
+
+    # Build the MCP config (auto servers + agent's picks; memory scoped per
+    # (agent, project)). Serialize to JSON so it rides on the WS frame as a
+    # single string — the daemon writes it to a tmpfile for --mcp-config.
+    # Pull the agent's own api_key so build_mcp_config can bake it into
+    # the agentira MCP entry — tool calls authenticate as this agent.
+    from backend.models import Profile as _Profile
+    with _session() as db2:
+        prof = db2.get(_Profile, agent.profile_id) if agent.profile_id else None
+        agent_api_key = prof.api_key if prof else None
+        agent_mcp_strict = bool(prof.mcp_strict) if prof else False
+        agent_mcp_override = prof.mcp_config_override if prof else None
+        agent_mcp_disabled = (
+            _json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None
+        )
+    mcp_config = build_mcp_config(
+        agent_mcp_servers=agent_mcp_servers,
+        agent_id=agent_id,
+        project_id=project_id,
+        agent_api_key=agent_api_key,
+        mcp_config_override=agent_mcp_override,
+        disabled_servers=agent_mcp_disabled,
+    )
+    mcp_config_json = _json.dumps(mcp_config)
+
+    # Per-run token — used by finish_run (Phase E) to scope the agent's
+    # outcome to this specific run. Generated here, rides on the frame as
+    # AGENTIRA_RUN_TOKEN. Not persisted yet; tighten with a proper token
+    # store when per-run scoping moves out of "trust the agent" mode.
+    run_token = uuid.uuid4().hex
+
+    env_extra = {
+        "AGENTIRA_RUN_ID": run_id,
+        "AGENTIRA_TASK_ID": task_id,
+        "AGENTIRA_PROJECT_ID": project_id or "",
+        "AGENTIRA_AGENT_ID": agent_id,
+        "AGENTIRA_RUN_TOKEN": run_token,
+    }
+
+    # Conversation continuity (task-run scope). Resume if runtime supports it.
+    scope = conversation_scope_key(run_id=run_id, project_id=project_id)
+    rt_for_caps = agent.runtime
+    caps = (_json.loads(rt_for_caps.capabilities) if (rt_for_caps and rt_for_caps.capabilities) else [])
+    resume_id = ""
+    if "resume" in caps:
+        resume_id = get_runtime_session(agent_id=agent_id, scope_key=scope)
+    # No history-rebuild for run_step — task prompts are self-contained and
+    # a run that resumes mid-stream is the resume path.
+
+    result = dispatch_trigger(
+        agent_id, prompt,
+        run_id=run_id, kind="run_step",
+        repo_path=repo_path,
+        conventions_md=conventions_md,
+        mcp_config_json=mcp_config_json,
+        mcp_strict=agent_mcp_strict,
+        env_extra=env_extra,
+        run_token=run_token,
+        resume_session_id=resume_id,
+        scope_key=scope,
+    )
+    return {**result, "run_id": run_id, "task_id": task_id}
+
+
+def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None") -> dict:
+    """Shared body for pause/resume — both fire a WS frame to the daemon
+    and optionally flip the Run state. Cancel uses a different path
+    because it's terminal and races the daemon's complete event."""
+    import asyncio
+    from backend.forge.ws_dispatch import hub
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        if run.status not in (RunStatus.RUNNING, RunStatus.PAUSED, RunStatus.PENDING):
+            return {"error": f"Run is {run.status.value}; cannot {frame_type}"}
+        agent = db.get(Agent, run.agent_id)
+        runtime_id = agent.runtime_id if agent else None
+        last_msg = (db.query(AgentMessage)
+                    .filter(AgentMessage.run_id == run_id)
+                    .order_by(AgentMessage.created_at.desc())
+                    .first())
+        trace_id = last_msg.trace_id if last_msg else ""
+        if target_status is not None:
+            run.status = target_status
+            db.commit()
+            db.refresh(run)
+        run_dict = _run_to_dict(run)
+
+    if runtime_id:
+        try:
+            asyncio.ensure_future(hub.dispatch_signal(
+                runtime_id=runtime_id,
+                signal=frame_type,
+                trace_id=trace_id,
+                run_id=run_id,
+            ))
+        except Exception:
+            pass
+    return {"ok": True, "run": run_dict}
+
+
+def pause_run(run_id: str) -> dict:
+    """Pause a running CLI subprocess (SIGSTOP). Best-effort: openclaw
+    HTTP runs aren't pausable (the request completes naturally). Long
+    pauses can break the LLM API timeout — use cancel + resume-by-session
+    for anything beyond a few minutes."""
+    return _signal_run(run_id, "pause", RunStatus.PAUSED)
+
+
+def resume_run(run_id: str) -> dict:
+    """Resume a paused CLI subprocess (SIGCONT)."""
+    return _signal_run(run_id, "resume", RunStatus.RUNNING)
+
+
+def cancel_run(run_id: str) -> dict:
+    """Cancel a pending or running Run.
+
+    Resolves the agent's runtime, fires a cancel WS frame so the daemon
+    kills the in-flight subprocess (if any), and immediately marks the
+    Run as cancelled in the DB. The daemon will also post a complete
+    when it sees the kill, but we don't wait for that — the user
+    pressing cancel needs immediate feedback.
+    """
+    import asyncio
+    from backend.forge.ws_dispatch import hub
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+            return {"error": f"Run already {run.status.value}"}
+        agent = db.get(Agent, run.agent_id)
+        runtime_id = agent.runtime_id if agent else None
+
+        # Look up the latest trace_id for this run so the daemon can match.
+        last_msg = (db.query(AgentMessage)
+                    .filter(AgentMessage.run_id == run_id)
+                    .order_by(AgentMessage.created_at.desc())
+                    .first())
+        trace_id = last_msg.trace_id if last_msg else ""
+
+        # Mark run cancelled now — don't make the user wait for the daemon's
+        # complete-event round-trip. complete_trigger from the daemon will
+        # see the run already cancelled and skip the state flip.
+        now = datetime.now(timezone.utc)
+        run.status = RunStatus.CANCELLED
+        run.finished_at = now
+        run.error = "Cancelled by user."
+        if run.started_at:
+            run.duration_ms = int((now - _utc(run.started_at)).total_seconds() * 1000)
+        if run.agent and run.agent.status == AgentStatus.BUSY:
+            run.agent.status = AgentStatus.ONLINE
+        db.commit()
+        db.refresh(run)
+        run_dict = _run_to_dict(run)
+
+    # Best-effort cancel signal to the daemon
+    if runtime_id:
+        try:
+            asyncio.ensure_future(hub.dispatch_cancel(
+                runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
+            ))
+        except Exception as exc:
+            # WS dispatch is best-effort — the run is already marked cancelled.
+            pass
+
+    return {"ok": True, "run": run_dict}
+
+
+def finish_run(run_id: str, *, outcome: str, summary: str = "",
+               run_token: str = "") -> dict:
+    """Agent-declared semantic completion (called from finish_run MCP tool).
+
+    Sets Run.outcome (the semantic verdict — succeeded / blocked / needs_input
+    / failed) and Run.summary (one-paragraph human-readable result).
+
+    `outcome` validation rejects unknown values so a typo doesn't silently
+    leave the field unset. The MCP tool surfaces the error to the agent.
+
+    `run_token` is plumbed through for future per-run scoping; today we
+    trust the run_id arg (Phase G hardening). When implemented it will
+    cross-check run_token against the dispatch frame's AGENTIRA_RUN_TOKEN.
+
+    Idempotent: re-calling with the same outcome is a no-op. Calling
+    after a run has been cancelled/failed terminally still updates
+    outcome/summary so the agent's last-word verdict is preserved.
+    """
+    try:
+        outcome_enum = RunOutcome(outcome)
+    except ValueError:
+        valid = [o.value for o in RunOutcome]
+        return {"ok": False, "error": f"Invalid outcome '{outcome}'. Must be one of: {valid}"}
+
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"ok": False, "error": "Run not found"}
+        r.outcome = outcome_enum
+        if summary:
+            r.summary = summary
+        db.commit()
+        db.refresh(r)
+        return {"ok": True, "run": _run_to_dict(r)}
+
+
+def list_runs_for_task(task_id: str) -> list[dict]:
+    """Return all runs scheduled against a task, newest first."""
+    with _session() as db:
+        runs = (db.query(Run)
+                .filter(Run.task_id == task_id)
+                .order_by(Run.created_at.desc())
+                .all())
+        return [_run_to_dict(r) for r in runs]
 
 
 def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
@@ -1117,7 +2125,18 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
     with `trace_id` so the UI can group a turn, and with `run_id` when present
     so run-detail views still query by run.
     """
+    # Pick up the scope_key stashed at dispatch time so assistant/tool
+    # messages land in the same conversation as the user prompt that
+    # triggered them. Falls back to the trace's first message scope if
+    # the in-memory map evaporated (backend restart mid-stream).
+    scope = _TRACE_SCOPE.get(trace_id) or ""
     with _session() as db:
+        if not scope:
+            existing = (db.query(AgentMessage)
+                          .filter(AgentMessage.trace_id == trace_id,
+                                  AgentMessage.scope_key.isnot(None))
+                          .first())
+            scope = (existing.scope_key if existing else "") or ""
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"ok": False, "error": "Agent not found"}
@@ -1143,6 +2162,7 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                 agent_id=agent_id,
                 run_id=run_id,
                 trace_id=trace_id,
+                scope_key=scope or None,
                 role=role,
                 content=content,
                 tool_name=tool_name,
@@ -1156,9 +2176,13 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
 
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
-                     error: str | None = None) -> dict:
-    """Finalize a trigger. Updates the Run if `run_id` is set; chat triggers
-    have no persistent state to update beyond the messages already stored."""
+                     error: str | None = None,
+                     diff_stat: str = "", diff: str = "",
+                     session_id: str = "") -> dict:
+    """Finalize a trigger. Updates the Run if `run_id` is set; for chat
+    triggers we still surface the failure as a system-role message on
+    the agent so the chat UI shows what actually went wrong instead of
+    sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
     if run_id:
@@ -1168,6 +2192,46 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             output_tokens=output_tokens,
             error=error if not success else None,
         )
+        # Default outcome + persist diff. We do these together so we only
+        # round-trip to the DB once; the agent's explicit outcome (if any)
+        # is set first by finish_run and we don't clobber it here.
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r:
+                if r.outcome is None:
+                    r.outcome = RunOutcome.SUCCEEDED if success else RunOutcome.FAILED
+                if diff_stat:
+                    r.diff_stat = diff_stat
+                if diff:
+                    r.diff = diff
+                db.commit()
+
+    # Persist conversation continuity. Look up the scope this trace was
+    # dispatched under; upsert the runtime session handle. Always bumps
+    # last_used_at even when session_id is empty (proves the conversation
+    # existed). Empty session_id won't clobber a previously-stored good one.
+    scope = _TRACE_SCOPE.pop(trace_id, "")
+    if scope:
+        upsert_conversation(
+            agent_id=agent_id, scope_key=scope,
+            runtime_session_id=session_id or "",
+        )
+
+    # Failure surfacing — the daemon already logs server-side, but the
+    # human in the UI only sees what's in the chat thread. Drop a
+    # system-role message tagged with this trace so the existing chat
+    # poll picks it up.
+    if not success and error:
+        with _session() as db:
+            db.add(AgentMessage(
+                agent_id=agent_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                role=MessageRole.SYSTEM,
+                content=f"⚠ Agent execution failed: {error[:600]}",
+            ))
+            db.commit()
+
     return {"ok": True, "trace_id": trace_id, "logged": logger_msg}
 
 
@@ -1192,15 +2256,87 @@ def get_run_events(run_id: str) -> list[dict]:
         return [_message_to_dict(m) for m in msgs]
 
 
-def send_runtime_message(agent_id: str, *, content: str, run_id: str | None = None) -> dict:
-    """Send a message to the agent via runtime adapter, log both sides."""
+def send_runtime_message(
+    agent_id: str,
+    *,
+    content: str,
+    run_id: str | None = None,
+    user_context: dict | None = None,
+) -> dict:
+    """Send a message to the agent via runtime adapter, log both sides.
+
+    `user_context` (AP-76): per-call hint about where the user is. If it
+    carries a `project_id`, we resolve the project's repo_path / conventions
+    / mcp_config and forward them on the dispatch frame so the daemon can
+    spawn the runtime in the right cwd. The whole dict is also forwarded
+    so the daemon can render a synthetic system message ("you are helping
+    the user who is currently viewing …").
+    """
     from backend.forge import runtime_client
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"error": "Agent not found"}
         if a.runtime_id:
-            return dispatch_trigger(agent_id, content, run_id=run_id, kind="chat")
+            # AP-86/87: auto-injected MCP servers (agentira, memory) ride on
+            # every dispatch regardless of project. Project-bound chats also
+            # resolve repo_path + conventions; free-form chats just get the
+            # default toolset and screen context.
+            from backend.forge.mcp_registry import build_mcp_config
+            from backend.models import Project, Profile
+            repo_path = ""
+            conventions_md = ""
+            ctx = user_context if isinstance(user_context, dict) else {}
+            project_id = ctx.get("project_id")
+            if project_id:
+                proj = db.get(Project, project_id)
+                if proj:
+                    repo_path = proj.repo_path or ""
+                    conventions_md = proj.conventions_md or ""
+            # Bake the AGENT's own api_key into the agentira MCP entry so
+            # tool calls authenticate as the agent (visible in audit).
+            agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
+            cfg = build_mcp_config(
+                agent_mcp_servers=json.loads(a.mcp_servers) if a.mcp_servers else None,
+                agent_id=a.id,
+                project_id=project_id,
+                agent_api_key=(agent_prof.api_key if agent_prof else None),
+                mcp_config_override=(agent_prof.mcp_config_override if agent_prof else None),
+                disabled_servers=(json.loads(agent_prof.mcp_disabled) if (agent_prof and agent_prof.mcp_disabled) else None),
+            )
+            mcp_config_json = json.dumps(cfg) if cfg else ""
+            mcp_strict = bool(agent_prof.mcp_strict) if agent_prof else False
+
+            # Conversation continuity: scope-key tells us WHICH conversation
+            # this chat belongs to (per-project, default, etc.). For runtimes
+            # that support resume (claude), pass the session handle on the
+            # frame. For gateway runtimes (openclaw/ollama, no resume), the
+            # daemon will see no session_id and the gateway path rebuilds
+            # history from forge_messages on its own.
+            scope = conversation_scope_key(run_id=run_id, project_id=project_id)
+            rt = a.runtime
+            caps = (json.loads(rt.capabilities) if (rt and rt.capabilities) else [])
+            resume_id = ""
+            prompt_with_history = content
+            if "resume" in caps:
+                resume_id = get_runtime_session(agent_id=a.id, scope_key=scope)
+            else:
+                # Gateway runtime — prepend recent history so the agent has
+                # context. Cap at ~20 messages to keep prompts bounded.
+                prompt_with_history = _prepend_history_for_prompt(
+                    agent_id=a.id, scope_key=scope, current=content,
+                )
+
+            return dispatch_trigger(
+                agent_id, prompt_with_history, run_id=run_id, kind="chat",
+                repo_path=repo_path,
+                conventions_md=conventions_md,
+                mcp_config_json=mcp_config_json,
+                mcp_strict=mcp_strict,
+                user_context=user_context,
+                resume_session_id=resume_id,
+                scope_key=scope,
+            )
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"

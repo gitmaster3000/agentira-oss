@@ -6,6 +6,7 @@ from .codex import CodexRuntime
 from .gemini import GeminiRuntime
 from .opencode import OpenCodeRuntime
 from .openclaw import OpenClawRuntime
+from .ollama import OllamaRuntime
 
 SUPPORTED: list[type[Runtime]] = [
     ClaudeRuntime,
@@ -13,6 +14,7 @@ SUPPORTED: list[type[Runtime]] = [
     GeminiRuntime,
     OpenCodeRuntime,
     OpenClawRuntime,
+    OllamaRuntime,
 ]
 
 

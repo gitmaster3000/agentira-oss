@@ -52,6 +52,8 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    repo_path: Optional[str] = None
+    conventions_md: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -290,7 +292,7 @@ svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"],
 
 @svc_accounts.get("")
 def api_list_service_accounts():
-    return services.list_profiles(role="bot")
+    return services.list_service_accounts()
 
 @svc_accounts.post("")
 def api_create_service_account(body: dict):
@@ -304,6 +306,9 @@ def api_get_service_account(profile_id: str):
     result = services.get_service_account(profile_id)
     if not result:
         raise HTTPException(404, "Service account not found")
+    # Block leakage of managed agents (bot + runtime_id) through this endpoint.
+    if result.get("runtime_id"):
+        raise HTTPException(404, "Not a service account")
     return result
 
 @svc_accounts.delete("/{profile_id}")
@@ -336,7 +341,13 @@ def api_get_project(project_id: str):
 @projects.patch("/{project_id}")
 def api_update_project(project_id: str, body: ProjectUpdate):
     try:
-        return services.update_project(project_id, name=body.name, description=body.description)
+        return services.update_project(
+            project_id,
+            name=body.name,
+            description=body.description,
+            repo_path=body.repo_path,
+            conventions_md=body.conventions_md,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -564,6 +575,19 @@ def api_delete_attachment(attachment_id: str):
 
 epics_router = APIRouter(prefix="/api/epics", tags=["epics"],
                          dependencies=[Depends(get_current_user)])
+
+@epics_router.get("/{epic_id}")
+def api_get_epic(epic_id: str):
+    epic = services.get_epic(epic_id)
+    if not epic:
+        raise HTTPException(404, "Epic not found")
+    return epic
+
+
+@epics_router.get("/{epic_id}/tasks")
+def api_list_epic_tasks(epic_id: str):
+    return services.list_epic_tasks(epic_id)
+
 
 @epics_router.patch("/{epic_id}")
 def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_current_user)):

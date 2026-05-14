@@ -38,9 +38,23 @@ class MessageRole(str, enum.Enum):
 class RunStatus(str, enum.Enum):
     PENDING   = "pending"
     RUNNING   = "running"
+    PAUSED    = "paused"
     COMPLETED = "completed"
     FAILED    = "failed"
     CANCELLED = "cancelled"
+
+
+class RunOutcome(str, enum.Enum):
+    """Semantic verdict of a run, set by the agent via the finish_run MCP
+    tool. Distinct from RunStatus, which tracks process lifecycle.
+
+    A run can be status=COMPLETED + outcome=BLOCKED (process exited cleanly,
+    but the agent says it can't proceed without external help). Both are
+    meaningful and the UI shows outcome as the primary badge."""
+    SUCCEEDED   = "succeeded"
+    BLOCKED     = "blocked"
+    NEEDS_INPUT = "needs_input"
+    FAILED      = "failed"
 
 
 # ── Runtime ──────────────────────────────────────────────────────────────
@@ -66,6 +80,11 @@ class ForgeRuntime(Base):
     status: Mapped[RuntimeStatus] = mapped_column(SAEnum(RuntimeStatus), default=RuntimeStatus.UNKNOWN)
     capabilities: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     models: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list — supported model ids
+    # Host-side discovered tools the runtime brings on its own. JSON shape:
+    # {"builtins": ["Read","Edit",...], "host_mcp_servers": [{"name":"slack","transport":"stdio"}, ...], "host_md_files": ["~/.claude/CLAUDE.md", ...]}
+    # Daemon fills this at registration time so the UI can show Layer 1 + 2
+    # alongside Agentira's Layer 3 picks. Best-effort; nullable.
+    host_tools: Mapped[str | None] = mapped_column(Text, nullable=True)
     gateway_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     gateway_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -105,6 +124,15 @@ class Agent(Base):
     schedule_enabled: Mapped[bool] = mapped_column(default=False)
     schedule_cron: Mapped[str | None] = mapped_column(String(60), nullable=True)
     runtime_id: Mapped[str | None] = mapped_column(ForeignKey("forge_runtimes.id"), nullable=True)
+    # Default project this agent works in. UX-only: when set, chat surfaces
+    # use it as the default project_id in user_context so the user doesn't
+    # have to pick every time. Per-call user_context still wins — AP-76's
+    # plumbing isn't replaced. This is a default, not a constraint.
+    default_project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    # JSON list of MCP server names from backend.forge.mcp_registry.REGISTRY.
+    # Excludes auto-injected servers (agentira, memory) — those are added
+    # at dispatch by build_mcp_config regardless of this list.
+    mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     profile = relationship("Profile")
@@ -138,6 +166,16 @@ class Run(Base):
     error: Mapped[str | None]   = mapped_column(Text, nullable=True)
     session_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     workdir: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # outcome: agent-declared semantic result (set by finish_run MCP tool).
+    # summary: one-paragraph human-readable result (also from finish_run).
+    outcome: Mapped[RunOutcome | None] = mapped_column(SAEnum(RunOutcome), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Captured by the daemon when the run's workdir is a git repo. diff_stat
+    # is the human-readable `git diff --stat` summary; diff is the full patch
+    # capped at ~50KB to keep DB rows reasonable. Both null when not a repo
+    # or when nothing changed.
+    diff_stat: Mapped[str | None] = mapped_column(Text, nullable=True)
+    diff: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -159,6 +197,11 @@ class AgentMessage(Base):
     # Persisted as a Trigger row in a future increment; today it's just a
     # correlation handle for grepping logs and grouping messages per turn.
     trace_id: Mapped[str | None] = mapped_column(String(12), nullable=True, index=True)
+    # scope_key: which conversation this message belongs to. See
+    # services.conversation_scope_key for the scheme (run:<id>,
+    # chat:project:<pid>, chat:default). Used by gateway runtimes that
+    # rebuild history per-call to filter out cross-conversation leak.
+    scope_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     kind: Mapped[str | None]    = mapped_column(String(20), nullable=True)  # chat | run_step | …
     role: Mapped[MessageRole]   = mapped_column(SAEnum(MessageRole), nullable=False)
     content: Mapped[str]        = mapped_column(Text, default="")
@@ -175,6 +218,32 @@ class AgentMessage(Base):
 
 
 # ── WebhookLog ──────────────────────────────────────────────────────────
+
+class Conversation(Base):
+    """Continuity handle for a multi-turn exchange between an agent and a
+    runtime that supports resume.
+
+    `scope_key` identifies WHICH conversation this is (see
+    services.conversation_scope_key for the scheme: run:<id>,
+    chat:project:<pid>, chat:default, future thread:<id> etc.). The
+    (agent_id, scope_key) pair is unique — at most one active session
+    handle per conversation. `runtime_session_id` is the runtime-native
+    handle (claude session_id); empty/null for gateway runtimes that
+    rebuild history per call.
+
+    Chat dispatches do NOT create Runs. Conversation continuity lives
+    here so chat triggers stay lightweight while still being resumable.
+    """
+    __tablename__ = "forge_conversations"
+    __table_args__ = (UniqueConstraint("agent_id", "scope_key"),)
+
+    id: Mapped[str]                = mapped_column(String(12), primary_key=True, default=_new_id)
+    agent_id: Mapped[str]          = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    scope_key: Mapped[str]         = mapped_column(String(120), nullable=False)
+    runtime_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime]   = mapped_column(DateTime(timezone=True), default=_utcnow)
+
 
 class WebhookLog(Base):
     """Log entry for inbound/outbound webhook calls."""

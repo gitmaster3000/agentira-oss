@@ -1,16 +1,19 @@
 # QA / staging override.
-# Run: `docker compose -f docker-compose.yml -f docker-compose.qa.yml --env-file .env.qa up -d`
+# Run alongside dev (project-scoped):
+#   docker compose -p agentira-qa \
+#     -f docker-compose.yml -f docker-compose.qa.yml \
+#     --env-file .env.qa up -d
 #
 # Differences from dev:
 # - Postgres instead of SQLite
 # - JWT_SECRET REQUIRED (no insecure default)
 # - No volume-mounted source (image is the truth — same shape as prod)
-# - Ports still exposed so E2E test runners can hit the backend directly
+# - Ports +1 from dev so all three stacks can coexist on the same host
 
 services:
   backend:
     ports:
-      - "8111:8111"
+      - "8112:8111"
     environment:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for QA — see .env.qa.example}
       - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
@@ -20,7 +23,7 @@ services:
 
   mcp:
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for QA}
       - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
@@ -29,7 +32,7 @@ services:
 
   frontend:
     ports:
-      - "3111:80"
+      - "3112:80"
     volumes:
       - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
 

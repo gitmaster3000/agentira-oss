@@ -301,11 +301,12 @@ async def update_task(
     branch: str = None,
     pr_url: str = None,
     dod_items: list[dict] = None,
+    epic_id: str = None,
     ctx: Context = None,
 ) -> dict:
-    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning."""
+    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning. Use epic_id to attach to an epic (or empty string to detach)."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, actor=actor)
+    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, actor=actor)
 
 @mcp.tool()
 async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:
@@ -405,6 +406,86 @@ async def list_roles() -> list[dict]:
 async def list_permissions() -> list[dict]:
     """List all available permissions."""
     return services.list_permissions()
+
+
+# ── Forge run lifecycle ───────────────────────────────────────────────────────
+
+@mcp.tool()
+async def finish_run(
+    run_id: str,
+    outcome: str,
+    summary: str = "",
+    ctx: Context = None,
+) -> dict:
+    """Declare the semantic verdict of a Forge run you're working.
+
+    Call this when you've finished (or stopped) work on a task that was
+    dispatched to you. The Run.outcome field is what humans see in the
+    UI as the primary "did this get done?" signal.
+
+    Arguments:
+      run_id:  the AGENTIRA_RUN_ID env var value passed to your process
+               (also surfaced in your task prompt).
+      outcome: one of:
+        - "succeeded"   — the deliverable is in place
+        - "blocked"     — couldn't proceed; needs human/external input
+        - "needs_input" — paused with a specific question for the human
+        - "failed"      — something is wrong; not recoverable mid-run
+      summary: one paragraph describing what changed or what's blocking
+               you. This is the line humans read first — be specific.
+
+    The run's process status (running/completed/failed/cancelled) is
+    tracked separately by the daemon. A run can be status=completed +
+    outcome=blocked: the process exited cleanly but the agent declared
+    it can't proceed.
+    """
+    from backend.forge import services as forge_services
+    try:
+        logger.info(f"Tool finish_run called: run={run_id} outcome={outcome}")
+        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary)
+        if not res.get("ok"):
+            logger.warning(f"Tool finish_run rejected: {res.get('error')}")
+        return res
+    except Exception as e:
+        logger.error(f"Tool finish_run failed: {e}\n{traceback.format_exc()}")
+        raise
+
+@mcp.tool()
+async def get_my_involvement(ctx: Context = None) -> dict:
+    """Summarize what THIS agent has been involved in across projects.
+
+    Scoped to the calling agent — uses the AGENTIRA_AGENT_ID env var the
+    daemon injects on every dispatch (so the answer is always "you", never
+    another agent's data).
+
+    Returns a project-level summary:
+      {
+        agent_id: "<id>",
+        total_runs: N,
+        total_input_tokens: N,
+        total_output_tokens: N,
+        total_cost_usd: float,
+        projects: [{
+          project_id, project_name,
+          run_count, last_active,
+          tasks_touched: [{task_id, task_title, last_run_at}]
+        }],
+      }
+
+    Returns {error: "..."} if AGENTIRA_AGENT_ID isn't set (e.g. invoked
+    outside a dispatched run).
+    """
+    import os
+    agent_id = os.environ.get("AGENTIRA_AGENT_ID", "")
+    if not agent_id:
+        return {"error": "AGENTIRA_AGENT_ID env var not set; cannot scope involvement query."}
+    from backend.forge import services as forge_services
+    try:
+        return forge_services.get_agent_involvement(agent_id)
+    except Exception as e:
+        logger.error(f"Tool get_my_involvement failed: {e}\n{traceback.format_exc()}")
+        raise
+
 
 # ── Transport: Streamable HTTP ─────────────────────────────────────────────────
 # json_response=True → plain JSON body on POST (simpler, Bruno-compatible).

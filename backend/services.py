@@ -84,6 +84,7 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "status": t.status.name,
         "priority": t.priority.value,
         "assignee": t.assignee,
+        "creator": t.creator,
         "tags": [tag.strip() for tag in t.tags.split(",") if tag.strip()] if t.tags else [],
         "start_date": t.start_date.isoformat() if t.start_date else None,
         "due_date": t.due_date.isoformat() if t.due_date else None,
@@ -123,6 +124,8 @@ def _project_to_dict(p: Project) -> dict:
         "key_prefix": p.key_prefix or "PROJ",
         "name": p.name,
         "description": p.description,
+        "repo_path": p.repo_path or "",
+        "conventions_md": p.conventions_md or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -150,16 +153,27 @@ def _activity_to_dict(a: Activity) -> dict:
 
 def _profile_to_dict(p: Profile) -> dict:
     extra = [pp.permission.codename for pp in p.extra_permissions]
+    role_name = p.role.name
+    # Derived identity kind. Three values:
+    #   user            — role=user
+    #   managed_agent   — role=bot AND runtime_id IS NOT NULL
+    #   service_account — role=bot AND runtime_id IS NULL
+    if role_name == "bot":
+        kind = "managed_agent" if p.runtime_id else "service_account"
+    else:
+        kind = "user"
     return {
         "id": p.id,
         "name": p.name,
         "display_name": p.display_name or p.name,
-        "role": p.role.name,
+        "role": role_name,
+        "kind": kind,
         "email": p.email,
         "avatar_url": p.avatar_url,
         "webhook_url": p.webhook_url,
         "extra_permissions": extra,
         "projects": [pm.project_id for pm in p.project_memberships],
+        "runtime_id": p.runtime_id,
         "created_at": p.created_at.isoformat(),
     }
 
@@ -337,7 +351,8 @@ def get_project(project_id: str) -> dict | None:
         return _project_to_dict(p) if p else None
 
 
-def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None) -> dict:
+def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
+                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -346,6 +361,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.name = name
         if description is not None:
             p.description = description
+        if repo_path is not None:
+            p.repo_path = repo_path
+        if conventions_md is not None:
+            p.conventions_md = conventions_md
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -438,6 +457,7 @@ def _epic_to_dict(e: Epic) -> dict:
         "description": e.description,
         "status": e.status,
         "assignee": e.assignee,
+        "creator": e.creator,
         "color": e.color,
         "task_count": len(e.tasks),
         "created_at": e.created_at.isoformat(),
@@ -453,6 +473,7 @@ def create_epic(project_id: str, title: str, description: str = "", color: str =
             title=title,
             description=description,
             color=color,
+            creator=actor,
         )
         db.add(epic)
         db.flush()
@@ -480,6 +501,26 @@ def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[
 
         epics = q.order_by(Epic.created_at.desc()).all()
         return [_epic_to_dict(e) for e in epics]
+
+def get_epic(epic_id: str) -> dict | None:
+    """Single-epic fetch — returns the dict or None if not found."""
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        return _epic_to_dict(epic) if epic else None
+
+
+def list_epic_tasks(epic_id: str) -> list[dict]:
+    """All tasks linked to this epic, newest first."""
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        if not epic:
+            return []
+        tasks = (db.query(Task)
+                 .filter(Task.epic_id == epic_id)
+                 .order_by(Task.updated_at.desc())
+                 .all())
+        return [_task_to_dict(t) for t in tasks]
+
 
 def update_epic(epic_id: str, title: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None, actor: str = "system") -> dict:
     with _session() as db:
@@ -574,6 +615,7 @@ def create_task(
             status_id=status_id,
             priority=TaskPriority(priority),
             assignee=assignee,
+            creator=actor,
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
@@ -974,8 +1016,10 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
 
         STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
 
-        # Group by epic or tag
+        # Group by epic or tag. For epic grouping we also remember the
+        # epic id + color per group so the UI can link to the epic page.
         groups: dict[str, list] = {}
+        group_meta: dict[str, dict] = {}
         milestones = []
         all_dates = []
 
@@ -985,6 +1029,8 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 group_key = tags[0] if tags else "Ungrouped"
             else:
                 group_key = t.epic.title if t.epic else "Ungrouped"
+                if t.epic and group_key not in group_meta:
+                    group_meta[group_key] = {"id": t.epic.id, "color": t.epic.color}
 
             start = t.start_date.isoformat() if t.start_date else t.created_at.isoformat()
             end = t.due_date.isoformat() if t.due_date else None
@@ -1023,8 +1069,11 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
             total = len(tasks_in_group)
             done = sum(1 for t in tasks_in_group if t["progress"] == 100)
             in_flight = sum(1 for t in tasks_in_group if 0 < t["progress"] < 100)
+            meta = group_meta.get(name, {})
             group_list.append({
+                "id": meta.get("id"),
                 "name": name,
+                "color": meta.get("color"),
                 "tasks": tasks_in_group,
                 "total": total,
                 "done": done,
@@ -1394,6 +1443,24 @@ def list_profiles(role: Optional[str] = None) -> list[dict]:
         q = db.query(Profile)
         if role:
             q = q.join(Role).filter(Role.name == role)
+        return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
+
+
+def list_service_accounts() -> list[dict]:
+    """Service accounts: bot-role profiles WITHOUT a runtime binding.
+
+    These are API-key-only identities used by external systems (CI, plugins,
+    external MCP/Claude sessions). They're project-membership-capable but
+    NOT dispatched by Forge — Forge agents live in `forge_agents` with a
+    non-null `runtime_id` and are surfaced by `forge.services.list_agents`.
+    """
+    from sqlalchemy import or_
+    with _session() as db:
+        q = (db.query(Profile)
+               .join(Role).filter(Role.name == "bot")
+               # Defensive: data may have empty-string runtime_id from older
+               # rows; treat either NULL or "" as "no runtime".
+               .filter(or_(Profile.runtime_id.is_(None), Profile.runtime_id == "")))
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
 
 

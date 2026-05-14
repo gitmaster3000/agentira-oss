@@ -21,16 +21,19 @@ daemon_router = APIRouter(prefix="/api/forge", tags=["forge-daemon"])
 
 class AgentCreate(BaseModel):
     name: str
+    # runtime_id REQUIRED — Forge agents are dispatchable identities. For
+    # API-key-only identities use Settings → Service Accounts instead.
+    runtime_id: str
     profile_id: Optional[str] = None
     executor_type: str = "http"
     model: str = ""
     webhook_url: str = ""
     config_json: Optional[str] = None
-    runtime_id: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
+    profile_id: Optional[str] = None
     executor_type: Optional[str] = None
     model: Optional[str] = None
     status: Optional[str] = None
@@ -44,7 +47,12 @@ class AgentUpdate(BaseModel):
     runtime_hooks_token: Optional[str] = None
     runtime_agent_name: Optional[str] = None
     runtime_id: Optional[str] = None
+    default_project_id: Optional[str] = None
     schedule_cron: Optional[str] = None
+    mcp_servers: Optional[list[str]] = None
+    mcp_disabled: Optional[list[str]] = None
+    mcp_strict: Optional[bool] = None
+    mcp_config_override: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -81,6 +89,14 @@ class DaemonTriggerComplete(BaseModel):
     input_tokens: int = 0
     output_tokens: int = 0
     error: str = ""
+    # Captured by daemon when workdir is a git repo. Both empty for non-repo
+    # runs or when nothing changed; backend just persists what's sent.
+    diff_stat: str = ""
+    diff: str = ""
+    # Runtime-native session handle captured during dispatch (e.g. claude
+    # session_id). Backend stores it on the agent profile so the next
+    # dispatch can pass --resume <id> for conversation continuity.
+    session_id: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -113,6 +129,14 @@ class CostEstimateRequest(BaseModel):
 class RuntimeChatRequest(BaseModel):
     content: str
     run_id: Optional[str] = None
+    # AP-76: per-call user-context bundle. Carries the surface, route,
+    # and resolved project/task ids so the agent knows what the user is
+    # looking at. Shape is intentionally loose — frontend evolves it
+    # without backend schema changes. Backend uses project_id (if any)
+    # to populate repo_path + MCP config on the dispatch frame, and
+    # forwards the whole dict so the daemon can render it as a
+    # synthetic system message.
+    user_context: Optional[dict] = None
 
 
 
@@ -126,6 +150,8 @@ class RuntimeEntry(BaseModel):
     models: list[str] = Field(default_factory=list)
     gateway_url: Optional[str] = None
     gateway_token: Optional[str] = None
+    # Host-side discovered tools — opaque dict shape (see ForgeRuntime.host_tools).
+    host_tools: Optional[dict] = None
 
 
 class RuntimeRegisterRequest(BaseModel):
@@ -172,6 +198,9 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         error=body.error if not body.success else None,
+        diff_stat=body.diff_stat,
+        diff=body.diff,
+        session_id=body.session_id,
     )
 
 
@@ -186,6 +215,16 @@ def get_runtime(runtime_id: str):
     if not result:
         raise HTTPException(404, "Runtime not found")
     return result
+
+
+# ── MCP server registry ──────────────────────────────────────────────────
+
+@router.get("/mcp-servers")
+def list_mcp_servers(include_auto: bool = False):
+    """Available MCP servers for the agent toolkit picker. By default
+    hides auto-injected servers (agentira, memory) — those ride on every
+    run regardless of the agent's selection."""
+    return services.list_mcp_servers(include_auto=include_auto)
 
 
 # ── Agent endpoints ──────────────────────────────────────────────────────
@@ -216,9 +255,40 @@ def get_agent(agent_id: str):
     return result
 
 
+@router.get("/agents/{agent_id}/projects")
+def list_agent_projects(agent_id: str):
+    """Projects this agent is a member of (resolved via the 1:1 profile)."""
+    return services.list_agent_projects(agent_id)
+
+
+@router.get("/agents/{agent_id}/conversation")
+def get_conversation(agent_id: str, project_id: Optional[str] = None,
+                     task_id: Optional[str] = None):
+    """Conversation state for a given (agent, scope): scope_key, whether a
+    runtime session has been captured (and thus next dispatch will resume),
+    and how many messages live in this scope."""
+    return services.get_conversation_info(
+        agent_id=agent_id, project_id=project_id, task_id=task_id,
+    )
+
+
+@router.get("/agents/{agent_id}/dispatch-preview")
+def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
+    """Dry-run what a chat dispatch would send to the daemon for this agent.
+
+    Returns the resolved repo_path, conventions snippet, MCP server list,
+    env vars, and system-prompt addenda. UI uses this for the /context
+    inspector so users can see what's being sent without firing a run.
+    """
+    return services.dispatch_preview(agent_id, project_id=project_id)
+
+
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, body: AgentUpdate):
-    result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
+    try:
+        result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if not result:
         raise HTTPException(404, "Agent not found")
     return result
@@ -259,6 +329,33 @@ def create_run(body: RunCreate):
     )
 
 
+class ScheduleTaskRunRequest(BaseModel):
+    agent_id: str
+
+
+@router.post("/tasks/{task_id}/run", status_code=201)
+async def schedule_task_run(task_id: str, body: ScheduleTaskRunRequest):
+    """Schedule a Run against a task with the chosen agent.
+
+    Builds the prompt from task content (title + description + DoD),
+    creates a Run row, and dispatches the trigger that the daemon picks up.
+
+    `async def` is mandatory: the service calls `asyncio.ensure_future`
+    on the WS hub dispatch coroutine, which requires a running loop in
+    the current thread. Sync handlers run in a worker thread with no
+    loop, so the dispatch silently no-ops.
+    """
+    result = services.schedule_task_run(task_id=task_id, agent_id=body.agent_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/tasks/{task_id}/runs")
+def list_task_runs(task_id: str):
+    return services.list_runs_for_task(task_id)
+
+
 @router.get("/runs/{run_id}")
 def get_run(run_id: str):
     result = services.get_run(run_id)
@@ -277,6 +374,35 @@ def get_trigger_events(trace_id: str):
 def get_run_events(run_id: str):
     """Messages tagged with this run_id (across all of its triggers)."""
     return services.get_run_events(run_id)
+
+
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    """Cancel a pending/running Run. Marks it cancelled immediately and
+    fires a cancel signal to the daemon to kill any in-flight subprocess."""
+    result = services.cancel_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/runs/{run_id}/pause")
+async def pause_run(run_id: str):
+    """Pause a running CLI subprocess (SIGSTOP). Async required so the
+    WS dispatch coroutine has a loop to schedule on."""
+    result = services.pause_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str):
+    """Resume a paused CLI subprocess (SIGCONT)."""
+    result = services.resume_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
 
 
 @router.post("/runs/{run_id}/start")
@@ -312,8 +438,17 @@ def get_stats():
 
 @router.get("/agents/{agent_id}/messages")
 def list_messages(agent_id: str, run_id: Optional[str] = None,
+                  scope_key: Optional[str] = None,
                   limit: int = 100, offset: int = 0):
-    return services.list_messages(agent_id, run_id=run_id, limit=limit, offset=offset)
+    return services.list_messages(
+        agent_id, run_id=run_id, scope_key=scope_key,
+        limit=limit, offset=offset,
+    )
+
+
+@router.get("/agents/{agent_id}/conversations")
+def list_conversations(agent_id: str):
+    return services.list_conversations(agent_id)
 
 
 @router.post("/agents/{agent_id}/messages", status_code=201)
@@ -373,7 +508,12 @@ def runtime_status(agent_id: str):
 
 @router.post("/agents/{agent_id}/runtime/chat")
 async def runtime_chat(agent_id: str, body: RuntimeChatRequest):
-    return services.send_runtime_message(agent_id, content=body.content, run_id=body.run_id)
+    return services.send_runtime_message(
+        agent_id,
+        content=body.content,
+        run_id=body.run_id,
+        user_context=body.user_context,
+    )
 
 
 @router.get("/openclaw/overview")

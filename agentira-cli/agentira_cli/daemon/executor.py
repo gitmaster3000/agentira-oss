@@ -12,6 +12,7 @@ import logging
 import os
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from typing import Optional
 
@@ -47,10 +48,12 @@ async def run_cli_stream(
     max_turns: int = 20,
     system_prompt: str = "",
     mcp_config_json: Optional[str] = None,
+    mcp_strict: bool = False,
     resume_session_id: str = "",
     workdir: Optional[str] = None,
     env_extra: Optional[dict] = None,
     on_event=None,        # async callable(event_list) for batching to backend
+    on_proc=None,         # called with the spawned proc (and again with None on exit) so callers can kill() externally
 ) -> StreamResult:
     """Spawn a CLI runtime with stream-json I/O; drain stdout line-by-line; return StreamResult."""
     result = StreamResult()
@@ -59,6 +62,20 @@ async def run_cli_stream(
     try:
         if mcp_config_json:
             mcp_config_path = _write_mcp_config(mcp_config_json)
+            # Preflight HTTP MCP servers. If a URL is unreachable from the
+            # daemon host (common deploy bug: backend baked an internal
+            # docker hostname into the config), claude-code silently
+            # drops the server and the agent says "those tools aren't
+            # available." Surface that loudly here so the user sees what
+            # broke instead of debugging blind.
+            warnings = _preflight_mcp_http(mcp_config_json)
+            if warnings and on_event:
+                try:
+                    await on_event([TextEvent(text=w) for w in warnings])
+                except Exception as exc:  # noqa: BLE001 — best-effort
+                    logger.debug("preflight emit failed: %s", exc)
+            for w in warnings:
+                logger.warning("%s", w)
 
         args = runtime_cls.build_args(
             prompt,
@@ -66,21 +83,54 @@ async def run_cli_stream(
             max_turns=max_turns,
             system_prompt=system_prompt,
             mcp_config_path=mcp_config_path,
+            mcp_strict=mcp_strict,
             resume_session_id=resume_session_id,
         )
 
         env = _build_env(env_extra or {})
 
+        # Stream-json lines from claude can exceed asyncio's default 64KB
+        # readline limit (single tool_result with a big diff, e.g.). Bump
+        # to 10MB to match multica's bufio scanner.
         proc = await asyncio.create_subprocess_exec(
             binary_path, *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workdir,
             env=env,
+            limit=10 * 1024 * 1024,
         )
+        # Hand the proc up so the caller can kill() us on cancel.
+        if on_proc:
+            try:
+                on_proc(proc)
+            except Exception:
+                pass
 
         batch: list = []
         last_flush = time.monotonic()
+        # Track whether the runtime ever emitted a final ResultEvent. If
+        # not, the subprocess died without telling us what happened —
+        # treat that as failure regardless of returncode (claude-code
+        # has been observed to exit 0 after rejecting an unentitled
+        # model string, which would otherwise look like silent success).
+        saw_result_event = False
+        # Drain stderr concurrently. If we only read it on failure we
+        # risk a PIPE-buffer deadlock on chatty runtimes, AND we miss
+        # the human-readable error message on the no-ResultEvent path.
+        stderr_chunks: list[bytes] = []
+
+        async def _drain_stderr():
+            try:
+                while True:
+                    chunk = await proc.stderr.read(8192)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                logger.debug("stderr drain error: %s", exc)
+
+        stderr_task = asyncio.create_task(_drain_stderr())
 
         async def flush():
             nonlocal batch, last_flush
@@ -103,6 +153,7 @@ async def run_cli_stream(
                 logger.debug("Session ID: %s", result.session_id)
 
             elif isinstance(event, ResultEvent):
+                saw_result_event = True
                 result.success = event.success
                 result.text = event.text
                 result.error = event.error
@@ -124,13 +175,52 @@ async def run_cli_stream(
 
         await flush()
         await proc.wait()
+        # Make sure the stderr drain has finished before we read its
+        # accumulator. proc.wait() returning means stdout closed; stderr
+        # should follow quickly. Bound the wait so a stuck pipe doesn't
+        # hang us forever.
+        try:
+            await asyncio.wait_for(stderr_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            stderr_task.cancel()
 
-        if proc.returncode != 0 and not result.text:
-            stderr = await proc.stderr.read()
-            result.error = stderr.decode(errors="replace").strip()
+        stderr_text = b"".join(stderr_chunks).decode(errors="replace").strip()
+        # Tail the stderr so a crash dump doesn't blow up the run row.
+        # 4KB is enough to read a stack trace + the actionable line.
+        if len(stderr_text) > 4000:
+            stderr_text = "…" + stderr_text[-4000:]
+
+        # Decide success/error. Three failure modes:
+        #   1. proc.returncode != 0 — clear-cut crash/rejection.
+        #   2. proc.returncode == 0 but no ResultEvent ever arrived —
+        #      runtime exited cleanly without telling us anything.
+        #      claude-code does this on model-string rejection.
+        #   3. ResultEvent itself reported failure (already in result.success).
+        if proc.returncode != 0:
             result.success = False
+            if not result.error:
+                result.error = (
+                    stderr_text
+                    or f"subprocess exited with code {proc.returncode}"
+                )
+            elif stderr_text and stderr_text not in result.error:
+                # Append stderr context so we don't lose the actionable
+                # human-readable message when ResultEvent gave us a
+                # generic error.
+                result.error = f"{result.error}\n\n{stderr_text}"
+        elif not saw_result_event:
+            result.success = False
+            result.error = (
+                stderr_text
+                or "subprocess exited cleanly without emitting a result frame"
+            )
 
     finally:
+        if on_proc:
+            try:
+                on_proc(None)
+            except Exception:
+                pass
         if mcp_config_path:
             try:
                 os.unlink(mcp_config_path)
@@ -155,12 +245,16 @@ async def run_gateway(
     model: str = "",
     system_prompt: str = "",
     on_event=None,
+    provider: str = "openclaw",
 ) -> StreamResult:
-    """POST prompt to an OpenAI-compatible HTTP gateway (e.g. openclaw).
+    """POST prompt to an OpenAI-compatible HTTP gateway.
 
-    Mirrors backend/forge/runtime_client.py:OpenClawAdapter.chat — must stay
-    in sync with that adapter so chat works identically from either side.
-    Non-streaming: full request → single text event with the reply.
+    Supports two shapes:
+    - **openclaw**: routes through the generic `agentira-runner` agent so
+      OpenClaw's tools/workspace apply; persona comes from system_prompt.
+    - **ollama** (and other bare gateways): sends the model directly with
+      no agent-routing prefix, no auth header (Ollama has no auth by
+      default).
     """
     result = StreamResult()
     url = gateway_url.rstrip("/") + "/v1/chat/completions"
@@ -168,15 +262,25 @@ async def run_gateway(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
+
+    # Pick the model string the gateway expects.
+    if provider == "openclaw":
+        body_model = "openclaw:agentira-runner"
+    elif provider == "ollama":
+        # Strip the `ollama/` prefix Agentira surfaces internally so Ollama's
+        # OpenAI-compatible endpoint sees the bare model id.
+        body_model = (model or "").split("ollama/", 1)[-1] if model else ""
+    else:
+        body_model = model or agent_name
+
     body = json.dumps({
-        "model": f"openclaw:{agent_name}",
+        "model": body_model,
         "messages": messages,
         "stream": False,
     }).encode()
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {gateway_token}",
-    }
+    headers = {"Content-Type": "application/json"}
+    if gateway_token:
+        headers["Authorization"] = f"Bearer {gateway_token}"
     try:
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=120) as resp:
@@ -199,6 +303,52 @@ async def run_gateway(
         result.success = False
         logger.warning("Gateway request failed: %s", exc)
     return result
+
+
+def _preflight_mcp_http(config_json: str) -> list[str]:
+    """Probe every HTTP MCP server in the config from the daemon host.
+
+    Returns a list of human-readable warning strings — one per server
+    that failed to respond. Connection errors (DNS, refused, timeout)
+    are the real signal: these mean the URL baked into the config isn't
+    reachable from where claude-code will dial it. 4xx/5xx are NOT
+    flagged — auth failures (401) and method-not-allowed (405) just
+    confirm the server is up. We only care about transport-level
+    failures here.
+    """
+    out: list[str] = []
+    try:
+        cfg = json.loads(config_json) if config_json else {}
+    except Exception as exc:  # noqa: BLE001
+        return [f"⚠ MCP preflight: config JSON parse failed — {exc}"]
+    for name, entry in (cfg.get("mcpServers") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("type") != "http":
+            continue  # stdio servers spawn locally; nothing to probe
+        url = entry.get("url") or ""
+        if not url:
+            continue
+        try:
+            req = urllib.request.Request(url, method="GET")
+            # Carry the auth header so servers that gate everything still
+            # answer (won't matter for transport-failure detection but
+            # avoids confusing logs).
+            for hk, hv in (entry.get("headers") or {}).items():
+                req.add_header(hk, hv)
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                _ = resp.status  # any HTTP response = reachable
+        except urllib.error.HTTPError:
+            # Server answered with an error code — that's fine, it's UP.
+            pass
+        except Exception as exc:  # noqa: BLE001 — DNS, refused, timeout, etc.
+            out.append(
+                f"⚠ MCP server '{name}' unreachable at {url} ({type(exc).__name__}: {exc}). "
+                "The agent will run WITHOUT this server's tools. "
+                "If the URL is an internal hostname (e.g. http://mcp:8000), "
+                "set AGENTIRA_MCP_URL on the backend to a host-reachable URL."
+            )
+    return out
 
 
 def _write_mcp_config(config_json: str) -> str:

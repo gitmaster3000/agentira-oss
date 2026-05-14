@@ -105,6 +105,40 @@ class Profile(Base):
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
+    # ── Runtime config (agents only; humans leave these null) ────────────
+    # AP-86: bot ↔ agent merge. Bot profiles ARE agents. These columns used
+    # to live on forge_agents — folded onto Profile so there's one identity
+    # row per AI worker. forge_agents stays as a transitional FK target
+    # until callers migrate; new writes go here.
+    model: Mapped[str] = mapped_column(String(120), default="")
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    personality: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    runtime_id: Mapped[str | None] = mapped_column(
+        ForeignKey("forge_runtimes.id"), nullable=True, default=None
+    )
+    default_project_id: Mapped[str | None] = mapped_column(
+        ForeignKey("projects.id"), nullable=True, default=None
+    )
+    mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Names of built-in servers (agentira, memory) the user has explicitly
+    # disabled for this agent. JSON list of strings. Applied AFTER the
+    # registry merge so it can strip auto-injected servers too.
+    mcp_disabled: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Strict MCP mode: when true, daemon passes --strict-mcp-config (claude)
+    # so the agent ONLY sees Agentira-managed servers — user's host MCP
+    # (~/.claude.json) is ignored. Default false = merge host + ours.
+    mcp_strict: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Free-form MCP config override. Stores a raw JSON object of shape
+    # {"mcpServers": {name: {...definition...}}}. Whatever's here is
+    # merged INTO the resolved config from the registry, AFTER auto +
+    # opt-in servers. Last-write-wins on name collisions, so a key here
+    # named "agentira" or "memory" replaces the auto-injected one.
+    # Lets users add custom servers without modifying mcp_registry.py.
+    mcp_config_override: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # User-provided secrets injected into the dispatched runtime's env
+    # (GH_TOKEN, OPENAI_API_KEY, etc.). JSON object {KEY: VALUE}.
+    env_vars: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     project_memberships: Mapped[list["ProjectMember"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
@@ -162,6 +196,11 @@ class Project(Base):
     key_prefix: Mapped[str] = mapped_column(String(10), nullable=False, default="PROJ")
     next_task_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Run context — used when an agent is dispatched against a task in this project.
+    # repo_path: filesystem path the daemon symlinks into the workdir.
+    # conventions_md: runtime-agnostic markdown materialized to .agentira/CONVENTIONS.md.
+    repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    conventions_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -179,6 +218,7 @@ class Epic(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="backlog")  # backlog | in_progress | done
     assignee: Mapped[str] = mapped_column(String(120), default="")
+    creator: Mapped[str] = mapped_column(String(120), default="")
     color: Mapped[str] = mapped_column(String(7), default="#7c4dff")  # hex color
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
@@ -198,6 +238,7 @@ class Task(Base):
     status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False)
     priority: Mapped[TaskPriority] = mapped_column(SAEnum(TaskPriority), default=TaskPriority.MEDIUM)
     assignee: Mapped[str] = mapped_column(String(120), default="")
+    creator: Mapped[str] = mapped_column(String(120), default="")
     tags: Mapped[str] = mapped_column(String(500), default="")
     dod_items: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: [{"text": "...", "checked": false}]
     branch: Mapped[str] = mapped_column(String(255), default="")
