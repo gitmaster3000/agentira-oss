@@ -17,6 +17,7 @@ import {
     Pencil,
     Cpu,
     Zap,
+    Trash2,
 } from 'lucide-react';
 
 const PRODUCTS = {
@@ -116,6 +117,40 @@ export function Navbar({ onNewProject }) {
         navigate(ROUTES.LOGIN);
     };
 
+    const reloadProjects = async () => {
+        try {
+            const data = await api.getProjects();
+            setProjects(data);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleRenameProject = async (e, p) => {
+        e.stopPropagation();
+        const next = window.prompt(`Rename project "${p.name}" to:`, p.name);
+        if (!next || next.trim() === '' || next === p.name) return;
+        try {
+            await api.updateProject(p.id, { name: next.trim() });
+            await reloadProjects();
+        } catch (err) {
+            alert('Rename failed: ' + (err.message || err));
+        }
+    };
+
+    const handleDeleteProject = async (e, p) => {
+        e.stopPropagation();
+        if (!window.confirm(`Delete project "${p.name}"? This cannot be undone.`)) return;
+        try {
+            await api.deleteProject(p.id);
+            await reloadProjects();
+            // If we just deleted the active project, drop the user back to the studio root.
+            if (p.id === projectId) navigate('/');
+        } catch (err) {
+            alert('Delete failed: ' + (err.message || err));
+        }
+    };
+
     return (
         <header className="h-16 border-b bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
             <div className="flex items-center gap-5">
@@ -148,20 +183,38 @@ export function Navbar({ onNewProject }) {
                             <div className="px-3 py-2 text-label-sm text-text-tertiary uppercase tracking-wider">Recent Projects</div>
                             <div className="max-h-64 overflow-y-auto">
                                 {projects.map(p => (
-                                    <button
+                                    <div
                                         key={p.id}
+                                        className={`group flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-bg-hover cursor-pointer ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                                         onClick={() => {
                                             navigate(ROUTES.STUDIO_BOARD(p.id));
                                             setIsProjectOpen(false);
                                         }}
-                                        className={`dropdown-item px-3 ${p.id === projectId ? 'text-text-primary font-medium' : 'text-text-secondary'}`}
                                     >
-                                        <div className="w-7 h-7 rounded-md border bg-bg-panel flex items-center justify-center text-label-sm font-bold text-text-secondary">
+                                        <div className="w-7 h-7 rounded-md border bg-bg-panel flex items-center justify-center text-label-sm font-bold text-text-secondary flex-shrink-0">
                                             {p.name[0].toUpperCase()}
                                         </div>
-                                        <span className="truncate flex-1">{p.name}</span>
-                                        {p.id === projectId && <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent-primary)' }} />}
-                                    </button>
+                                        <span className="truncate flex-1 text-sm">{p.name}</span>
+                                        {p.id === projectId && (
+                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--accent-primary)' }} />
+                                        )}
+                                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                                            <button
+                                                onClick={(e) => handleRenameProject(e, p)}
+                                                className="p-1 rounded hover:bg-bg-app text-text-tertiary hover:text-text-primary"
+                                                title="Rename project"
+                                            >
+                                                <Pencil className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => handleDeleteProject(e, p)}
+                                                className="p-1 rounded hover:bg-bg-app text-text-tertiary hover:text-red-500"
+                                                title="Delete project"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
                                 ))}
                             </div>
                             <div className="border-t mt-1 pt-1">

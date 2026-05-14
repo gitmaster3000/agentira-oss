@@ -151,6 +151,12 @@ function FilterDropdown({ label, value, options, onChange }) {
 /* ─── Board ─────────────────────────────────────────────────────────── */
 export function Board() {
     const { projectId } = useParams();
+    // Persist last-visited project so the Studio dashboard's "Resume" works.
+    useEffect(() => {
+        if (projectId) {
+            try { localStorage.setItem('agentira:studio:lastProjectId', projectId); } catch {}
+        }
+    }, [projectId]);
     const [board, setBoard] = useState(null);
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);

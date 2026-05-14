@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight } from 'lucide-react';
+import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, Pencil } from 'lucide-react';
 
 export function Settings() {
     const { user } = useAuth();
@@ -112,8 +112,8 @@ export function Settings() {
     // ... handleCreateBot, handleCopyKey, handleCopyConfig, handleDeleteBot, handleDeleteProfile unchanged ...
     async function handleCreateBot() {
         setPromptState({
-            title: "Create New Bot",
-            description: "Enter a name for your new service account:",
+            title: "Create New Agent",
+            description: "Enter a name for your new agent (service account):",
             value: "",
             onConfirm: async (name) => {
                 if (!name) return;
@@ -168,8 +168,8 @@ export function Settings() {
 
     async function handleDeleteBot(id, name) {
         setConfirmState({
-            title: "Delete Bot",
-            description: `Are you sure you want to delete bot "${name}"? This cannot be undone.`,
+            title: "Delete Agent",
+            description: `Are you sure you want to delete agent "${name}"? This cannot be undone.`,
             onConfirm: async () => {
                 try {
                     await api.deleteServiceAccount(id);
@@ -182,6 +182,37 @@ export function Settings() {
             },
             onCancel: () => setConfirmState(null)
         });
+    }
+
+    // AP-87 follow-up: inline rename. Click the display_name → becomes
+    // an <input> → Enter or blur saves. Matches the editing pattern used
+    // elsewhere (TaskDetailPanel branch/pr_url).
+    const [editingBotId, setEditingBotId] = useState(null);
+    const [editingBotValue, setEditingBotValue] = useState("");
+
+    async function commitBotRename(id) {
+        const trimmed = (editingBotValue || "").trim();
+        setEditingBotId(null);
+        if (!trimmed) return;
+        try {
+            await api.updateProfile(id, { display_name: trimmed });
+            await loadGeneralData();
+        } catch (err) {
+            alert(err.message);
+        }
+    }
+
+    // AP-87 follow-up: copy the service account's raw API key to clipboard.
+    async function handleCopyApiKey(botId) {
+        try {
+            const data = await api.getServiceAccount(botId);
+            if (!data?.api_key) { alert("No API key found for this service account."); return; }
+            await navigator.clipboard.writeText(data.api_key);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            alert("Failed to copy key: " + err.message);
+        }
     }
 
     async function handleDeleteProfile(id, name) {
@@ -318,45 +349,86 @@ export function Settings() {
                             </section>
                         )}
 
-                        {/* ── Service Accounts / Bots ─────────────────────────────────── */}
+                        {/* ── Service Accounts (AP-87) — API keys for external systems ────── */}
                         <section className="grid gap-3">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-                                    <Bot className="w-4 h-4" /> Service Accounts (Bots)
-                                </h3>
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
+                                        <Bot className="w-4 h-4" /> Service Accounts
+                                    </h3>
+                                    <p className="text-xs mt-1 max-w-xl" style={{ color: 'var(--text-tertiary)' }}>
+                                        API keys for external systems — CI, plugins, external MCP/Claude sessions. Not dispatched by Forge. Add to a project's members to grant access.
+                                    </p>
+                                </div>
                                 <button
                                     onClick={handleCreateBot}
-                                    className="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-white font-medium transition-colors flex items-center gap-1.5"
+                                    className="btn btn-primary shrink-0"
                                 >
-                                    <Plus className="w-3 h-3" /> Create Bot
+                                    <Plus className="w-4 h-4" /> New Service Account
                                 </button>
                             </div>
 
                             <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
                                 <div className="space-y-3">
-                                    {bots.length === 0 && (
+                                    {bots.filter(b => !b.runtime_id).length === 0 && (
                                         <div className="text-center py-8 text-xs italic flex flex-col items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
                                             <Bot className="w-8 h-8 opacity-20" />
                                             No service accounts yet.
                                         </div>
                                     )}
-                                    {bots.map(bot => (
+                                    {bots.filter(b => !b.runtime_id).map(bot => {
+                                        const isEditing = editingBotId === bot.id;
+                                        return (
                                         <div key={bot.id} className="flex items-center justify-between p-3 rounded border transition-colors hover:bg-white/5" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'var(--border-subtle)' }}>
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                <div className="w-8 h-8 rounded bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
                                                     <Bot className="w-5 h-5" />
                                                 </div>
-                                                <div>
-                                                    <div className="font-medium text-sm">{bot.display_name}</div>
+                                                <div className="min-w-0 flex-1">
+                                                    {isEditing ? (
+                                                        <input
+                                                            autoFocus
+                                                            value={editingBotValue}
+                                                            onChange={(e) => setEditingBotValue(e.target.value)}
+                                                            onBlur={() => commitBotRename(bot.id)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') { e.preventDefault(); commitBotRename(bot.id); }
+                                                                if (e.key === 'Escape') { setEditingBotId(null); }
+                                                            }}
+                                                            className="font-medium text-sm bg-transparent border-b focus:outline-none w-full max-w-[280px] py-0.5 text-text-primary"
+                                                            style={{ borderColor: 'var(--accent-primary)' }}
+                                                        />
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 group">
+                                                            <span className="font-medium text-sm text-text-primary truncate max-w-[260px]">
+                                                                {bot.display_name}
+                                                            </span>
+                                                            <button
+                                                                onClick={() => { setEditingBotId(bot.id); setEditingBotValue(bot.display_name || ''); }}
+                                                                className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100"
+                                                                title="Rename"
+                                                            >
+                                                                <Pencil className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    )}
                                                     <div className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>@{bot.name}</div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => handleCopyConfig(bot.id)} className="text-[10px] px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1"><Copy className="w-3 h-3" /> Config</button>
-                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="text-xs text-red-400 hover:text-red-300 p-2 rounded hover:bg-red-500/10 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                <button onClick={() => handleCopyApiKey(bot.id)} className="p-1.5 rounded text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors" title="Copy API key">
+                                                    <Key className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleCopyConfig(bot.id)} className="p-1.5 rounded text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors" title="Copy MCP server config">
+                                                    <Copy className="w-4 h-4" />
+                                                </button>
+                                                <button onClick={() => handleDeleteBot(bot.id, bot.display_name)} className="p-1.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors" title="Delete">
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         </section>

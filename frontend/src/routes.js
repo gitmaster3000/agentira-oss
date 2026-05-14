@@ -13,6 +13,7 @@ export const ROUTES = {
     STUDIO_BOARD: (projectId) => `/studio/board/${projectId}`,
     STUDIO_SETTINGS: '/studio/settings',
     STUDIO_TASK: (taskId) => `/studio/tasks/${taskId}`,
+    STUDIO_EPIC: (epicId) => `/studio/epics/${epicId}`,
 
     // Forge
     FORGE: '/forge',

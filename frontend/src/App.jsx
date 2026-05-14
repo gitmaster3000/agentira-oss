@@ -8,7 +8,9 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { Settings } from './pages/Settings';
+import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
+import { EpicPage } from './pages/EpicPage';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
 import { AgentsDashboard } from './pages/forge/AgentsDashboard';
@@ -18,16 +20,7 @@ import { RunsDashboard } from './pages/forge/RunsDashboard';
 import { RunDetail } from './pages/forge/RunDetail';
 import { ROUTES } from './routes';
 
-function Welcome() {
-    return (
-        <div className="flex-1 flex flex-col items-center justify-center text-secondary">
-            <div className="text-center">
-                <h2 className="text-2xl font-bold text-primary mb-2">Welcome to AgentIRA</h2>
-                <p>Select a project from the sidebar to get started.</p>
-            </div>
-        </div>
-    );
-}
+// Old "Welcome" stub replaced by StudioDashboard — see pages/StudioDashboard.jsx
 
 function RequireAuth({ children }) {
     const { user, loading } = useAuth();
@@ -69,10 +62,11 @@ export default function App() {
                     <Route path={ROUTES.STUDIO} element={
                         <RequireAuth><Layout /></RequireAuth>
                     }>
-                        <Route index element={<Welcome />} />
+                        <Route index element={<StudioDashboard />} />
                         <Route path="board/:projectId" element={<Board />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
+                        <Route path="epics/:epicId" element={<EpicPage />} />
                     </Route>
 
                     {/* Root redirect */}
