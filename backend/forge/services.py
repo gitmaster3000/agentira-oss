@@ -1916,6 +1916,13 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         agent_mcp_disabled = (
             _json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None
         )
+        # Pull runtime capabilities inside the same session — `agent` was
+        # fetched in a different (now-closed) session and lazy-loading
+        # `agent.runtime` would raise DetachedInstanceError.
+        rt_for_caps = (
+            db2.get(ForgeRuntime, agent.runtime_id) if agent.runtime_id else None
+        )
+        rt_caps_json = rt_for_caps.capabilities if rt_for_caps else None
     mcp_config = build_mcp_config(
         agent_mcp_servers=agent_mcp_servers,
         agent_id=agent_id,
@@ -1942,8 +1949,7 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
 
     # Conversation continuity (task-run scope). Resume if runtime supports it.
     scope = conversation_scope_key(run_id=run_id, project_id=project_id)
-    rt_for_caps = agent.runtime
-    caps = (_json.loads(rt_for_caps.capabilities) if (rt_for_caps and rt_for_caps.capabilities) else [])
+    caps = (_json.loads(rt_caps_json) if rt_caps_json else [])
     resume_id = ""
     if "resume" in caps:
         resume_id = get_runtime_session(agent_id=agent_id, scope_key=scope)
