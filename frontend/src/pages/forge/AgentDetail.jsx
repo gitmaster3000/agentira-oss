@@ -652,6 +652,11 @@ function ChatTab({ agentId, agent }) {
             await api.forge.sendRuntimeChat(agentId, {
                 content: trimmed,
                 user_context: buildUserContext(),
+                // AP-105: pin the conversation. Without this, sending a
+                // message while viewing a run:<id> or chat:user:<id> scope
+                // would default-route to chat:project/chat:default and
+                // diverge from what the picker shows.
+                scope_key: activeScope || null,
             });
             setInput('');
             await loadMessages();
