@@ -49,91 +49,58 @@ def source_repo(tmp_path):
 
 
 def test_resolve_agent_home_default(isolated_home):
+    """Backend returns the TEMPLATE path (with `~` unexpanded). Daemon
+    expands against the host's HOME at dispatch time. Critical for the
+    docker-backend / host-daemon split — see services.resolve_agent_home."""
     from backend.forge.services import resolve_agent_home
 
     agent = SimpleNamespace(id="abc123", profile=None)
     home = resolve_agent_home(agent)
-    assert home == str(isolated_home / ".agentira/agents/abc123/home")
+    assert home == "~/.agentira/agents/abc123/home"
+    assert home.startswith("~"), "home must remain a template"
 
 
 def test_resolve_agent_home_custom(isolated_home):
-    """Explicit home_path on profile wins over the default."""
+    """Explicit home_path on profile wins over the default. Template
+    semantics preserved."""
     from backend.forge.services import resolve_agent_home
 
     prof = SimpleNamespace(home_path="~/code/agents/best")
     agent = SimpleNamespace(id="abc123", profile=prof, profile_id="abc123")
-    assert resolve_agent_home(agent) == str(isolated_home / "code/agents/best")
+    assert resolve_agent_home(agent) == "~/code/agents/best"
 
 
-def test_ensure_agent_home_creates_subdirs(isolated_home):
+def test_ensure_agent_home_is_template_not_real_path(isolated_home):
+    """ensure_agent_home_dir no longer mkdirs (daemon does that on the
+    host); it just returns the template. Backend can't safely touch the
+    host filesystem from a docker container."""
     from backend.forge.services import ensure_agent_home_dir
 
     agent = SimpleNamespace(id="xyz789", profile=None)
     home = ensure_agent_home_dir(agent)
-    assert os.path.isdir(home)
-    for sub in ("repos", "memory", "notes", ".agentira"):
-        assert os.path.isdir(os.path.join(home, sub)), f"missing {sub}"
+    assert home == "~/.agentira/agents/xyz789/home"
+    # Backend MUST NOT create the dir — daemon's job
+    assert not os.path.isdir(home), "backend created a dir it shouldn't have"
 
 
 def test_ensure_agent_home_idempotent(isolated_home):
+    """Calling twice returns the same template."""
     from backend.forge.services import ensure_agent_home_dir
 
     agent = SimpleNamespace(id="xyz789", profile=None)
-    ensure_agent_home_dir(agent)
-    # Drop a sentinel into a subdir and re-run — it shouldn't be wiped
-    sentinel = os.path.join(
-        isolated_home, ".agentira/agents/xyz789/home/notes/keep.txt",
-    )
-    open(sentinel, "w").write("preserved")
-    ensure_agent_home_dir(agent)
-    assert open(sentinel).read() == "preserved"
-
-
-# ── ensure_worktree_base ─────────────────────────────────────────────────
-
-
-def test_ensure_worktree_base_uses_local_path(source_repo):
-    from backend.forge.services import ensure_worktree_base
-
-    project = SimpleNamespace(
-        id="proj-1", repo_path=str(source_repo), repo_url=None,
-    )
-    base = ensure_worktree_base(project)
-    assert base == str(source_repo)
-
-
-def test_ensure_worktree_base_raises_when_no_source(tmp_path, isolated_home):
-    from backend.forge.services import ensure_worktree_base
-
-    project = SimpleNamespace(
-        id="proj-empty",
-        repo_path=str(tmp_path / "does-not-exist"),
-        repo_url=None,
-    )
-    with pytest.raises(ValueError, match="no usable git source"):
-        ensure_worktree_base(project)
-
-
-def test_ensure_worktree_base_clones_from_repo_url(source_repo, isolated_home):
-    """Local path missing but repo_url set → clone into cache."""
-    from backend.forge.services import ensure_worktree_base
-
-    project = SimpleNamespace(
-        id="proj-cloud",
-        repo_path="/path/that/does/not/exist",
-        repo_url=str(source_repo),  # any URL git can clone — local path works
-    )
-    base = ensure_worktree_base(project)
-    assert os.path.isdir(os.path.join(base, ".git"))
-    # Second call is idempotent (no re-clone)
-    base2 = ensure_worktree_base(project)
-    assert base == base2
+    a = ensure_agent_home_dir(agent)
+    b = ensure_agent_home_dir(agent)
+    assert a == b
+    assert a.startswith("~")
 
 
 # ── ensure_agent_worktree ────────────────────────────────────────────────
 
 
-def test_ensure_agent_worktree_creates_worktree(source_repo, isolated_home):
+def test_ensure_agent_worktree_returns_template_path(source_repo, isolated_home):
+    """Backend returns the TEMPLATE worktree path; daemon does the real
+    `git worktree add` on the host. Backend MUST NOT shell out to git
+    because the user's repo lives on the host, not in docker."""
     from backend.forge.services import ensure_agent_worktree
 
     agent = SimpleNamespace(id="a-1", profile=None)
@@ -141,10 +108,12 @@ def test_ensure_agent_worktree_creates_worktree(source_repo, isolated_home):
         id="proj-1", repo_path=str(source_repo), repo_url=None,
     )
     worktree = ensure_agent_worktree(agent, project)
-    assert os.path.isdir(worktree)
-    # Worktree marker (file or dir at .git)
-    git_marker = os.path.join(worktree, ".git")
-    assert os.path.exists(git_marker)
+    # Path is templated and lives under the agent's home + repos/<slug>
+    assert worktree.startswith("~")
+    assert "/repos/" in worktree
+    # Daemon's job to actually create it; backend should NOT
+    assert not os.path.isdir(os.path.expanduser(worktree)), \
+        "backend created the worktree dir — should be daemon-only"
 
 
 def test_ensure_agent_worktree_idempotent(source_repo, isolated_home):
@@ -157,16 +126,10 @@ def test_ensure_agent_worktree_idempotent(source_repo, isolated_home):
     w1 = ensure_agent_worktree(agent, project)
     w2 = ensure_agent_worktree(agent, project)
     assert w1 == w2
-    # On-disk it should still be a single working tree
-    output = subprocess.run(
-        ["git", "-C", str(source_repo), "worktree", "list"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    assert w1 in output
 
 
 def test_two_agents_get_separate_worktrees(source_repo, isolated_home):
-    """Different agents, same project → different worktrees, both work."""
+    """Different agents, same project → different templated paths."""
     from backend.forge.services import ensure_agent_worktree
 
     a = SimpleNamespace(id="agent-A", profile=None)
@@ -177,4 +140,4 @@ def test_two_agents_get_separate_worktrees(source_repo, isolated_home):
     wa = ensure_agent_worktree(a, project)
     wb = ensure_agent_worktree(b, project)
     assert wa != wb
-    assert os.path.isdir(wa) and os.path.isdir(wb)
+    assert "agent-A" in wa and "agent-B" in wb

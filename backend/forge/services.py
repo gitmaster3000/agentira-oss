@@ -26,35 +26,34 @@ from backend.forge.models import (
 # diff capture a stable anchor.
 
 def resolve_agent_home(agent) -> str:
-    """Return the absolute home path for this agent.
+    """Return the agent's home path as a TEMPLATE (with `~` unexpanded).
 
-    `agent` may be a forge.Agent or a backend.models.Profile (both expose
-    the relevant fields after the AP-86 merge). Honors an explicit
-    profile.home_path if set; otherwise derives from agent id.
-    Idempotent: just resolves the path string, doesn't mkdir.
+    Backend MUST NOT expanduser here — backend runs inside docker as
+    `root` and `~` resolves to `/root`, but the daemon runs on the host
+    where `~` is the real user. Sending `/root/...` to the daemon makes
+    the path non-existent on the host and dispatch falls back to a
+    different cwd, breaking claude --resume.
+
+    Always return the template (e.g. `~/.agentira/agents/abc/home`);
+    the daemon expands it.
     """
-    import os
     explicit = None
-    # Prefer profile.home_path (post-AP-86 source of truth)
     prof = getattr(agent, "profile", None)
     if prof is not None:
         explicit = getattr(prof, "home_path", None)
     if not explicit:
         explicit = getattr(agent, "home_path", None)
     if explicit:
-        return os.path.expanduser(explicit)
+        return explicit  # raw — daemon expands
     agent_id = getattr(agent, "id", None) or getattr(agent, "profile_id", None) or "unknown"
-    return os.path.expanduser(f"~/.agentira/agents/{agent_id}/home")
+    return f"~/.agentira/agents/{agent_id}/home"
 
 
 def ensure_agent_home_dir(agent) -> str:
-    """Resolve home path AND mkdir + scaffold subdirs idempotently."""
-    import os
-    home = resolve_agent_home(agent)
-    os.makedirs(home, exist_ok=True)
-    for sub in ("repos", "memory", "notes", ".agentira"):
-        os.makedirs(os.path.join(home, sub), exist_ok=True)
-    return home
+    """Return the template path. Filesystem provisioning now happens on
+    the daemon side (it owns the host filesystem). Kept for callers
+    that still expect a path; semantics: just a resolver, no mkdir."""
+    return resolve_agent_home(agent)
 
 
 def _slugify_project(project) -> str:
@@ -107,31 +106,20 @@ def ensure_worktree_base(project, *, cache_root: str = "~/.agentira/cache/projec
 
 
 def ensure_agent_worktree(agent, project) -> str:
-    """Ensure a git worktree for `agent` exists inside its home, for
-    `project`. Idempotent — creates only when absent.
+    """Return the TEMPLATE path of the agent's worktree for this project.
 
-    Returns the absolute path to the worktree (= the cwd the daemon
-    should run the agent's subprocess in).
+    Backend doesn't perform `git worktree add` anymore — that has to
+    happen on the daemon side because the user's repo (project.repo_path)
+    lives on the daemon's host filesystem, not in the backend container.
+
+    Returns a path template like `~/.agentira/agents/<id>/home/repos/<slug>`.
+    The daemon expands `~`, runs `git worktree add` off the user's repo,
+    and uses the result as cwd.
     """
     import os
-    import subprocess
-    home = ensure_agent_home_dir(agent)
-    target = os.path.join(home, "repos", _slugify_project(project))
-    # Already a worktree? Just return.
-    if os.path.isdir(os.path.join(target, ".git")) or os.path.isfile(
-        os.path.join(target, ".git")
-    ):
-        return target
-    base = ensure_worktree_base(project)
-    branch = f"agent/{getattr(agent, 'id', 'unknown')}/work"
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    # `-B` so re-creating after a worktree prune doesn't trip on the
-    # branch already existing.
-    subprocess.run(
-        ["git", "-C", base, "worktree", "add", "-B", branch, target],
-        check=True, timeout=60,
-    )
-    return target
+    home_template = resolve_agent_home(agent)
+    slug = _slugify_project(project)
+    return os.path.join(home_template, "repos", slug)
 
 
 def conversation_scope_key(*, run_id: str | None, project_id: str | None) -> str:
@@ -1779,7 +1767,12 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      user_context: dict | None = None,
                      mcp_strict: bool = False,
                      resume_session_id: str = "",
-                     scope_key: str = "") -> dict:
+                     scope_key: str = "",
+                     # Worktree source info. Daemon uses these to git
+                     # worktree the user's repo into the agent's cwd.
+                     worktree_source_path: str = "",
+                     worktree_source_url: str = "",
+                     worktree_branch: str = "") -> dict:
     """Single rail for invoking an agent.
 
     Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
@@ -1919,6 +1912,9 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         gateway_url=gateway_url,
         gateway_token=gateway_token,
         repo_path=repo_path,
+        worktree_source_path=worktree_source_path,
+        worktree_source_url=worktree_source_url,
+        worktree_branch=worktree_branch,
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=mcp_strict,
@@ -1972,19 +1968,23 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
             except Exception:
                 pass
 
-        # Resolve cwd to the agent's worktree (project task) or home
-        # (project-less task). Either way the agent runs in ITS own
-        # directory, not the user's working tree.
+        # cwd is a path TEMPLATE (with `~` unexpanded) — backend can't
+        # expand it because backend lives in docker (`~` = `/root`) but
+        # the daemon runs on the host. Daemon receives the template,
+        # expands against its host HOME, ensures the dir, and (when a
+        # worktree source is set) creates the git worktree there.
         project = db.get(Project, project_id) if project_id else None
         conventions_md = (project.conventions_md or "") if project else ""
-        repo_path = ""
-        try:
-            if project:
-                repo_path = ensure_agent_worktree(agent, project)
-            else:
-                repo_path = ensure_agent_home_dir(agent)
-        except Exception as exc:  # noqa: BLE001 — log + fall back
-            print(f"[schedule_task_run] cwd resolution failed: {exc}")
+        if project:
+            repo_path = ensure_agent_worktree(agent, project)   # template
+            worktree_source_path = project.repo_path or ""
+            worktree_source_url = (getattr(project, "repo_url", None) or "")
+            worktree_branch = f"agent/{agent.id}/work"
+        else:
+            repo_path = ensure_agent_home_dir(agent)            # template
+            worktree_source_path = ""
+            worktree_source_url = ""
+            worktree_branch = ""
 
         # Agent toolkit — list of opt-in MCP server names.
         agent_mcp_servers: list[str] = []
@@ -2089,6 +2089,9 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         agent_id, prompt,
         run_id=run_id, kind="run_step",
         repo_path=repo_path,
+        worktree_source_path=worktree_source_path,
+        worktree_source_url=worktree_source_url,
+        worktree_branch=worktree_branch,
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=agent_mcp_strict,
@@ -2514,17 +2517,18 @@ def send_runtime_message(
                 conventions_md = proj.conventions_md or ""
 
             agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
-            # Resolve cwd to the agent's worktree (project chat) or home
-            # (general chat). Failure here shouldn't break dispatch — fall
-            # back to empty repo_path and the daemon will use its own cwd.
-            repo_path = ""
-            try:
-                if proj:
-                    repo_path = ensure_agent_worktree(a, proj)
-                else:
-                    repo_path = ensure_agent_home_dir(a)
-            except Exception as exc:  # noqa: BLE001 — log + fall back
-                print(f"[send_runtime_message] cwd resolution failed: {exc}")
+            # cwd is a template (`~/...`); daemon expands and ensures the
+            # dir + git worktree. Backend can't touch the host filesystem.
+            if proj:
+                repo_path = ensure_agent_worktree(a, proj)
+                worktree_source_path = proj.repo_path or ""
+                worktree_source_url = getattr(proj, "repo_url", None) or ""
+                worktree_branch = f"agent/{a.id}/work"
+            else:
+                repo_path = ensure_agent_home_dir(a)
+                worktree_source_path = ""
+                worktree_source_url = ""
+                worktree_branch = ""
 
             # Bake the AGENT's own api_key into the agentira MCP entry so
             # tool calls authenticate as the agent (visible in audit).
@@ -2573,6 +2577,9 @@ def send_runtime_message(
             return dispatch_trigger(
                 agent_id, prompt_with_history, run_id=run_id, kind="chat",
                 repo_path=repo_path,
+                worktree_source_path=worktree_source_path,
+                worktree_source_url=worktree_source_url,
+                worktree_branch=worktree_branch,
                 conventions_md=conventions_md,
                 mcp_config_json=mcp_config_json,
                 mcp_strict=mcp_strict,
