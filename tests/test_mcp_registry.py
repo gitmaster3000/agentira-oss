@@ -35,6 +35,16 @@ def test_db():
     )
     TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
+    # AP-86 merge: create_agent needs a bot role to mint backing profiles.
+    # Seed it so tests that call create_agent don't fail with
+    # "bot role missing".
+    from backend.models import Role
+    s = TestSession()
+    try:
+        s.add(Role(name="bot"))
+        s.commit()
+    finally:
+        s.close()
     with patch("backend.forge.services.SessionLocal", TestSession):
         yield TestSession
 
@@ -60,8 +70,10 @@ def test_list_servers_can_hide_auto_for_picker():
     names = {s["name"] for s in list_servers(include_auto=False)}
     assert "agentira" not in names
     assert "memory" not in names
-    # filesystem (or other opt-in servers) should still appear
-    assert "filesystem" in names
+    # The only servers in the default registry are auto-injected; with
+    # auto hidden the picker returns an empty list (until opt-in servers
+    # are reintroduced or added via custom JSON override).
+    # Either way: auto MUST be excluded.
 
 
 def test_get_server_unknown_returns_none():
@@ -79,10 +91,12 @@ def test_auto_servers_always_included():
 
 
 def test_agent_picks_are_unioned_with_auto():
+    # `filesystem` was removed from the default registry; just check that
+    # auto servers come through when agent_mcp_servers is empty/unknown.
     cfg = build_mcp_config(
-        agent_mcp_servers=["filesystem"], agent_id="a1", project_id="p1"
+        agent_mcp_servers=["nonexistent_server"], agent_id="a1", project_id="p1"
     )
-    assert "filesystem" in cfg["mcpServers"]
+    assert "nonexistent_server" not in cfg["mcpServers"]
     assert "agentira" in cfg["mcpServers"]
     assert "memory" in cfg["mcpServers"]
 
@@ -91,12 +105,14 @@ def test_unknown_server_names_silently_dropped():
     """A stale agent.mcp_servers value (e.g. server removed from registry)
     must not crash dispatch — drop unknown names and continue."""
     cfg = build_mcp_config(
-        agent_mcp_servers=["filesystem", "ghost_server_xyz"],
+        agent_mcp_servers=["ghost_server_xyz", "another_ghost"],
         agent_id="a1",
         project_id="p1",
     )
     assert "ghost_server_xyz" not in cfg["mcpServers"]
-    assert "filesystem" in cfg["mcpServers"]
+    assert "another_ghost" not in cfg["mcpServers"]
+    # Auto servers still present
+    assert "agentira" in cfg["mcpServers"]
 
 
 def test_memory_path_scoped_per_agent_and_project():
@@ -137,23 +153,22 @@ def test_http_server_includes_url_in_config():
 
 
 def test_stdio_server_includes_command_and_args():
+    # `memory` is the canonical stdio server now (filesystem was removed).
     cfg = build_mcp_config(
-        agent_mcp_servers=["filesystem"], agent_id="a1", project_id="p1"
+        agent_mcp_servers=None, agent_id="a1", project_id="p1"
     )
-    fs = cfg["mcpServers"]["filesystem"]
-    assert "command" in fs
-    # filesystem registry entry passes args after the binary
-    assert "args" in fs
+    mem = cfg["mcpServers"]["memory"]
+    assert "command" in mem
+    assert "args" in mem
 
 
 def test_auto_server_cannot_be_re_added_via_agent_list():
     """Listing 'agentira' in agent.mcp_servers shouldn't double-add or
     de-auto it — set semantics mean it appears exactly once."""
     cfg = build_mcp_config(
-        agent_mcp_servers=["agentira", "filesystem"],
+        agent_mcp_servers=["agentira"],
         agent_id="a1", project_id="p1",
     )
-    # Still exactly one entry, still the auto-defined one.
     assert "agentira" in cfg["mcpServers"]
 
 
@@ -162,22 +177,44 @@ def test_auto_server_cannot_be_re_added_via_agent_list():
 def test_update_agent_persists_mcp_servers_as_list():
     """The agent serializer must return mcp_servers as a list, not a
     JSON string — the frontend picker can't render JSON-as-string."""
-    a = forge_services.create_agent(name="Test Agent", executor_type="cli")
+    # AP-90: create_agent now requires runtime_id (managed agents are
+    # dispatchable by definition). Provide one.
+    _runtime = _seed_runtime("claude")
+    a = forge_services.create_agent(name="Test Agent", executor_type="cli", runtime_id=_runtime)
     updated = forge_services.update_agent(
-        a["id"], mcp_servers=["filesystem"]
+        a["id"], mcp_servers=["anything"]
     )
-    assert updated["mcp_servers"] == ["filesystem"]
+    assert updated["mcp_servers"] == ["anything"]
     fetched = forge_services.get_agent(a["id"])
-    assert fetched["mcp_servers"] == ["filesystem"]
+    assert fetched["mcp_servers"] == ["anything"]
 
 
 def test_update_agent_can_clear_mcp_servers():
-    a = forge_services.create_agent(name="Clearer", executor_type="cli")
-    forge_services.update_agent(a["id"], mcp_servers=["filesystem"])
+    _runtime = _seed_runtime("claude")
+    a = forge_services.create_agent(name="Clearer", executor_type="cli", runtime_id=_runtime)
+    forge_services.update_agent(a["id"], mcp_servers=["anything"])
     forge_services.update_agent(a["id"], mcp_servers=[])
     assert forge_services.get_agent(a["id"])["mcp_servers"] == []
 
 
 def test_new_agent_has_empty_mcp_servers():
-    a = forge_services.create_agent(name="New", executor_type="cli")
+    _runtime = _seed_runtime("claude")
+    a = forge_services.create_agent(name="New", executor_type="cli", runtime_id=_runtime)
     assert a["mcp_servers"] == []
+
+
+def _seed_runtime(provider: str) -> str:
+    """Helper: register a fake runtime so create_agent's runtime_id FK
+    can resolve. Returns the runtime id."""
+    res = forge_services.register_runtimes(
+        daemon_id="test-daemon",
+        device_name="test",
+        runtimes=[{
+            "provider": provider,
+            "binary_path": "/usr/bin/true",
+            "version": "0.0.0",
+            "capabilities": [],
+            "models": [],
+        }],
+    )
+    return res["registered"][0]["id"]

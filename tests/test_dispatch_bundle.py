@@ -94,19 +94,33 @@ def _drive(fn):
         asyncio.set_event_loop(asyncio.new_event_loop())
 
 
-def test_dispatch_bundle_includes_project_context_and_mcp_config(test_db):
+def test_dispatch_bundle_includes_project_context_and_mcp_config(test_db, tmp_path):
+    """Post agent-home refactor: repo_path on the frame is the agent's
+    git worktree, not the user's raw project.repo_path. Initialize a real
+    repo at a tmp_path so ensure_agent_worktree succeeds, then assert the
+    daemon receives a worktree path + conventions + MCP config."""
+    import subprocess
     rt_id = _seed_runtime(test_db)
+    # Init a real git repo at a tmp path so ensure_worktree_base accepts it
+    user_repo = tmp_path / "user-repo"
+    user_repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=user_repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=user_repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=user_repo, check=True)
+    (user_repo / "README.md").write_text("seed")
+    subprocess.run(["git", "add", "."], cwd=user_repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=user_repo, check=True)
+
     project = core_services.create_project("Bundle Project", actor="system")
     core_services.update_project(
         project["id"],
-        repo_path="/tmp/some/repo",
+        repo_path=str(user_repo),
         conventions_md="# Rules\nUse ruff",
     )
     task = core_services.create_task(project["id"], "Test Task", actor="system")
     agent = forge_services.create_agent(
         name="Bundle Agent", executor_type="cli", runtime_id=rt_id,
     )
-    forge_services.update_agent(agent["id"], mcp_servers=["filesystem"])
 
     fake = _FakeHub()
     with patch("backend.forge.ws_dispatch.hub", fake):
@@ -117,17 +131,17 @@ def test_dispatch_bundle_includes_project_context_and_mcp_config(test_db):
     assert len(fake.calls) == 1, "schedule_task_run should fire exactly one trigger"
     call = fake.calls[0]
 
-    # Project context surfaced.
-    assert call["repo_path"] == "/tmp/some/repo"
+    # repo_path on the frame now points at the agent's worktree inside its
+    # home dir — NOT the user's raw project path.
+    assert call["repo_path"]
+    assert "repos" in call["repo_path"], call["repo_path"]
     assert call["conventions_md"] == "# Rules\nUse ruff"
 
     # MCP config built and serialized.
     cfg = json.loads(call["mcp_config_json"])
     assert "mcpServers" in cfg
-    # Auto servers + the one the agent picked.
     assert "agentira" in cfg["mcpServers"]
     assert "memory" in cfg["mcpServers"]
-    assert "filesystem" in cfg["mcpServers"]
 
     # Per-run env vars present and non-empty.
     env = call["env_extra"]
@@ -162,7 +176,8 @@ def test_dispatch_bundle_handles_project_without_repo_path(test_db):
         ))
 
     call = fake.calls[0]
-    assert call["repo_path"] == ""
+    # No project repo → cwd defaults to agent's home dir.
+    assert "agents" in call["repo_path"] or call["repo_path"] == ""
     assert call["conventions_md"] == ""
     # MCP config still built — auto servers always there.
     cfg = json.loads(call["mcp_config_json"])

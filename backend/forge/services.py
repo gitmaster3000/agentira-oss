@@ -13,6 +13,7 @@ from backend.forge.models import (
     Agent, Run, AgentMessage, WebhookLog, Conversation,
     AgentStatus, RunStatus, RunOutcome, MessageRole,
     ForgeRuntime, RuntimeStatus,
+    _new_id,
 )
 
 

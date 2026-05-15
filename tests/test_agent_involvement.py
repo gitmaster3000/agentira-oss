@@ -28,7 +28,9 @@ def test_db():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
-    TestSession = sessionmaker(bind=engine)
+    # expire_on_commit=False so tests that read attrs after commit/close
+    # don't trip DetachedInstanceError. Production session uses default.
+    TestSession = sessionmaker(bind=engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
     with patch("backend.services.SessionLocal", TestSession), \
          patch("backend.forge.services.SessionLocal", TestSession):
@@ -54,8 +56,12 @@ def _mk_project(session, name="P", repo_path=""):
 
 
 def _mk_task(session, project_id, title="t"):
+    # Status moved from string column to status_id FK at some point;
+    # look up the seeded "backlog" status.
+    from backend.models import Status
+    backlog = session.query(Status).filter(Status.name == "backlog").first()
     t = Task(id=(project_id + title)[:12].ljust(12, "0"),
-             title=title, project_id=project_id, status="backlog")
+             title=title, project_id=project_id, status_id=backlog.id)
     session.add(t)
     session.flush()
     return t
@@ -81,11 +87,13 @@ def _mk_run(session, agent_id, *, project_id=None, task_id=None,
 def test_no_runs_returns_empty_shape(test_db):
     db = test_db()
     a = _mk_agent(db)
+    agent_id = a.id  # capture before commit/close (post-close attr access
+                     # raises DetachedInstanceError as columns expire)
     db.commit()
     db.close()
 
-    result = forge_services.get_agent_involvement(a.id)
-    assert result["agent_id"] == a.id
+    result = forge_services.get_agent_involvement(agent_id)
+    assert result["agent_id"] == agent_id
     assert result["total_runs"] == 0
     assert result["projects"] == []
     assert result["total_cost_usd"] == 0.0
