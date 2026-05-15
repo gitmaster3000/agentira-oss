@@ -1304,6 +1304,7 @@ function ConfigTab({ agent, onSaved }) {
         mcp_disabled: Array.isArray(agent.mcp_disabled) ? agent.mcp_disabled : [],
         mcp_strict: !!agent.mcp_strict,
         mcp_config_override: agent.mcp_config_override || '',
+        home_path: agent.home_path || '',
     });
     const [runtimes, setRuntimes] = useState([]);
     const [projects, setProjects] = useState([]);
@@ -1484,6 +1485,23 @@ function ConfigTab({ agent, onSaved }) {
                         )}
                     </>
                 )}
+            </section>
+
+            {/* Home — the agent's persistent directory on disk */}
+            <section className="card space-y-3">
+                <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-text-primary">Home</h3>
+                    <InfoTip text="The agent's home directory on disk. Its repo copies, memory, and scratch files live here. Default is ~/.agentira/agents/<id>/home/. Stable per agent — the daemon always runs the agent here." />
+                </div>
+                <input
+                    className="input font-mono text-xs"
+                    value={form.home_path}
+                    placeholder={agent.home_path || "~/.agentira/agents/<id>/home/"}
+                    onChange={(e) => setForm({ ...form, home_path: e.target.value })}
+                />
+                <p className="text-[11px] text-text-tertiary">
+                    Leave blank for the default. Changing this after the agent has run will leave the old directory orphaned — copy or migrate manually if you care about the old state.
+                </p>
             </section>
 
             {/* Toolset — three layers, what comes from where */}
