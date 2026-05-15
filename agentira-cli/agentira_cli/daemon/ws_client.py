@@ -72,7 +72,16 @@ class DaemonWsClient:
         url = self._ws_url()
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
-        with _ws.connect(url, additional_headers=headers) as ws:
+        # Open with library-side ping/pong so the underlying socket is
+        # actively probed every 20s. Without this, a half-closed TCP
+        # connection looks alive to recv() forever and the daemon
+        # silently stops receiving triggers (observed: 13h dead zone).
+        with _ws.connect(
+            url,
+            additional_headers=headers,
+            ping_interval=20,
+            ping_timeout=10,
+        ) as ws:
             # Send identity frame
             ws.send(json.dumps({
                 "daemon_id": self._daemon_id,
@@ -84,7 +93,9 @@ class DaemonWsClient:
                 try:
                     raw = ws.recv(timeout=30)
                 except TimeoutError:
-                    ws.send("ping")  # keep-alive
+                    # Lib-managed ping handles keepalive. recv-timeout is
+                    # just a wake to check self._stop — don't spam the
+                    # server with extra frames.
                     continue
                 try:
                     msg = json.loads(raw)
