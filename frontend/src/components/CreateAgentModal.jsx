@@ -8,6 +8,7 @@ export function CreateAgentModal({ onClose, onSuccess }) {
     const [profileId, setProfileId] = useState('');
     const [model, setModel] = useState('');
     const [customModel, setCustomModel] = useState('');
+    const [homePath, setHomePath] = useState('');
     const [runtimes, setRuntimes] = useState([]);
     const [botProfiles, setBotProfiles] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -46,13 +47,22 @@ export function CreateAgentModal({ onClose, onSuccess }) {
         setLoading(true);
         setError('');
         try {
-            await api.forge.createAgent({
+            const created = await api.forge.createAgent({
                 name: name.trim(),
                 runtime_id: runtimeId,
                 model: effectiveModel,
                 executor_type: 'cli',
                 profile_id: profileId || null,
             });
+            // home_path isn't part of the create endpoint yet — set it
+            // immediately via update if user customized.
+            if (homePath.trim() && created?.id) {
+                try {
+                    await api.forge.updateAgent(created.id, { home_path: homePath.trim() });
+                } catch (err) {
+                    console.warn('home_path set failed:', err);
+                }
+            }
             onSuccess?.();
             onClose();
         } catch (err) {
@@ -120,6 +130,22 @@ export function CreateAgentModal({ onClose, onSuccess }) {
                             placeholder="e.g. claude-coder"
                             autoFocus
                             required
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>
+                            Home folder <span className="font-normal lowercase">(optional)</span>
+                        </label>
+                        <p className="text-[11px] mb-2" style={{ color: 'var(--text-tertiary)' }}>
+                            Where this agent lives on disk — its repo copies, memory, and scratch files. Leave empty to use the default.
+                        </p>
+                        <input
+                            type="text"
+                            value={homePath}
+                            onChange={(e) => setHomePath(e.target.value)}
+                            className="input"
+                            placeholder="~/.agentira/agents/<auto>/home/"
                         />
                     </div>
 
