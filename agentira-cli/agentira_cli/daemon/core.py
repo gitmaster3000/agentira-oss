@@ -23,6 +23,33 @@ from agentira_cli.transport.rest import AgentiraClient
 logger = logging.getLogger("agentira.daemon")
 
 
+def _ensure_worktree(*, source: str, target: str, branch: str) -> None:
+    """Create a git worktree at `target` off `source` on branch `branch`.
+
+    Idempotent: if `target/.git` already exists, no-op.
+    Runs on the daemon host where both paths are real. Backend can't do
+    this because the user's repo (`source`) lives outside the docker
+    container.
+
+    Quiet about failure modes — log warnings, never crash the dispatch.
+    """
+    import os
+    import subprocess
+    if not source or not target:
+        return
+    if not os.path.isdir(source):
+        return
+    if os.path.exists(os.path.join(target, ".git")):
+        return
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    # `-B` so re-creating after a worktree prune doesn't trip on the
+    # branch already existing.
+    subprocess.run(
+        ["git", "-C", source, "worktree", "add", "-B", branch, target],
+        check=True, timeout=60,
+    )
+
+
 def _load_or_create_daemon_id() -> str:
     ensure_home()
     if DAEMON_ID_FILE.exists():
@@ -223,11 +250,51 @@ class AgentiraDaemon:
         kind = frame.get("kind", "chat")
 
         # Run-context bundle (Phase C dispatched these; empty for free-floating chat).
-        repo_path = frame.get("repo_path", "") or ""
+        # repo_path is a path TEMPLATE from backend (may contain `~`).
+        # Daemon expands against the host's HOME — backend can't because
+        # it runs as root inside docker.
+        import os as _os
+        repo_path = _os.path.expanduser(frame.get("repo_path", "") or "")
+        # Worktree provisioning info: agent's cwd (repo_path above) is
+        # where claude will run, but the WORK has to come from somewhere.
+        # `worktree_source_path` is the user's local git repo on the
+        # host. If present, we `git worktree add` from it into repo_path
+        # so the agent has a real working tree to edit + commit in.
+        worktree_source_path = _os.path.expanduser(
+            frame.get("worktree_source_path", "") or ""
+        )
+        worktree_source_url = frame.get("worktree_source_url", "") or ""
+        worktree_branch = frame.get("worktree_branch", "") or ""
         conventions_md = frame.get("conventions_md", "") or ""
         mcp_config_json = frame.get("mcp_config_json", "") or ""
         mcp_strict = bool(frame.get("mcp_strict", False))
         resume_session_id = frame.get("resume_session_id", "") or ""
+
+        # Daemon owns filesystem provisioning. Ensure the agent's home
+        # exists (with subdirs); if a worktree source is provided, ensure
+        # the worktree at repo_path is created off the source.
+        if repo_path:
+            try:
+                _os.makedirs(repo_path, exist_ok=True)
+                for sub in ("repos", "memory", "notes", ".agentira"):
+                    sub_path = _os.path.join(
+                        # If repo_path is a worktree subdir, its parent's parent
+                        # is the home; we ensure home subdirs there. Otherwise
+                        # repo_path IS the home — same operation.
+                        repo_path if "/repos/" not in repo_path
+                        else _os.path.dirname(_os.path.dirname(repo_path)),
+                        sub,
+                    )
+                    _os.makedirs(sub_path, exist_ok=True)
+                if worktree_source_path and worktree_branch:
+                    await asyncio.to_thread(
+                        _ensure_worktree,
+                        source=worktree_source_path,
+                        target=repo_path,
+                        branch=worktree_branch,
+                    )
+            except Exception as exc:  # noqa: BLE001 — log + continue
+                logger.warning("worktree provisioning failed trace=%s: %s", trace_id, exc)
         env_extra = frame.get("env_extra", {}) or {}
         if not isinstance(env_extra, dict):
             env_extra = {}
