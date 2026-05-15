@@ -2470,6 +2470,7 @@ def send_runtime_message(
     content: str,
     run_id: str | None = None,
     user_context: dict | None = None,
+    scope_key: str | None = None,
 ) -> dict:
     """Send a message to the agent via runtime adapter, log both sides.
 
@@ -2496,6 +2497,17 @@ def send_runtime_message(
             conventions_md = ""
             ctx = user_context if isinstance(user_context, dict) else {}
             project_id = ctx.get("project_id")
+            # AP-105: when continuing a run-scoped conversation, the project
+            # comes from the Run row (the agent worked there), NOT from the
+            # user's current screen — user might be elsewhere now but still
+            # chatting in the run scope. Without this, cwd would resolve to
+            # the wrong worktree (or general home) and claude's session
+            # handle would fail to resume.
+            if scope_key and scope_key.startswith("run:"):
+                _run_id = scope_key.split(":", 1)[1]
+                _run = db.query(Run).filter(Run.id == _run_id).first()
+                if _run and _run.project_id:
+                    project_id = _run.project_id
             proj = db.get(Project, project_id) if project_id else None
             if proj:
                 conventions_md = proj.conventions_md or ""
@@ -2537,7 +2549,13 @@ def send_runtime_message(
             # frame. For gateway runtimes (openclaw/ollama, no resume), the
             # daemon will see no session_id and the gateway path rebuilds
             # history from forge_messages on its own.
-            scope = conversation_scope_key(run_id=run_id, project_id=project_id)
+            # AP-105: scope_key from caller wins (user explicitly continuing
+            # a specific conversation, e.g. a run-scoped chat after the run
+            # completed). Otherwise derive from project_id.
+            if scope_key:
+                scope = scope_key
+            else:
+                scope = conversation_scope_key(run_id=run_id, project_id=project_id)
             rt = a.runtime
             caps = (json.loads(rt.capabilities) if (rt and rt.capabilities) else [])
             resume_id = ""
