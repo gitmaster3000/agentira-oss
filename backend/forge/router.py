@@ -141,6 +141,12 @@ class RuntimeChatRequest(BaseModel):
     # forwards the whole dict so the daemon can render it as a
     # synthetic system message.
     user_context: Optional[dict] = None
+    # AP-105: when the user is continuing a conversation in a specific
+    # scope (e.g. a finished task run's chat), pass scope_key explicitly
+    # so backend picks the right session_id for resume. Without this,
+    # scope would be computed from project_id and the run-scoped
+    # conversation would diverge.
+    scope_key: Optional[str] = None
 
 
 
@@ -518,6 +524,7 @@ async def runtime_chat(agent_id: str, body: RuntimeChatRequest):
         content=body.content,
         run_id=body.run_id,
         user_context=body.user_context,
+        scope_key=body.scope_key,
     )
 
 
