@@ -53,6 +53,7 @@ class AgentUpdate(BaseModel):
     mcp_disabled: Optional[list[str]] = None
     mcp_strict: Optional[bool] = None
     mcp_config_override: Optional[str] = None
+    home_path: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):

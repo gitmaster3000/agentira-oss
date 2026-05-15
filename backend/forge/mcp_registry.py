@@ -72,6 +72,7 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
                      agent_api_key: str | None = None,
                      mcp_config_override: str | dict | None = None,
                      disabled_servers: list[str] | None = None,
+                     agent_home_path: str | None = None,
                      memory_root: str = "~/.agentira/memory") -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
@@ -122,16 +123,22 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
             # Future transports (sse, ws) — caller adds them when needed.
             continue
 
-        # Per-server env wiring. Memory gets a scoped path so per-(agent,
-        # project) memory falls out of the env var without an overlay
-        # table.
+        # Per-server env wiring. Memory's per-(agent, project) scope falls
+        # out of the path: under the agent's home dir if available, else
+        # the legacy ~/.agentira/memory/ root for backward compat.
         env: dict[str, str] = {}
         if name == "memory" and agent_id:
             scope_proj = project_id or "_no_project"
-            path = (
-                os.path.expanduser(memory_root)
-                + f"/{agent_id}/{scope_proj}/memory.json"
-            )
+            if agent_home_path:
+                path = os.path.join(
+                    os.path.expanduser(agent_home_path),
+                    "memory", scope_proj, "memory.json",
+                )
+            else:
+                path = (
+                    os.path.expanduser(memory_root)
+                    + f"/{agent_id}/{scope_proj}/memory.json"
+                )
             env["MEMORY_FILE_PATH"] = path
         if env:
             entry["env"] = env

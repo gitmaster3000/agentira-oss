@@ -246,6 +246,7 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "mcp_strict", "BOOLEAN DEFAULT 0 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_config_override", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "home_path", "VARCHAR(500)")
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked
@@ -265,6 +266,7 @@ def run_migrations():
             added = False
             added |= _ensure_column(conn, "projects", "webhook_config", "TEXT")
             added |= _ensure_column(conn, "projects", "repo_path", "VARCHAR(500)")
+            added |= _ensure_column(conn, "projects", "repo_url", "VARCHAR(500)")
             added |= _ensure_column(conn, "projects", "conventions_md", "TEXT")
             if added:
                 conn.commit()

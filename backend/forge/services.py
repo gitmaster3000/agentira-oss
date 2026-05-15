@@ -16,6 +16,123 @@ from backend.forge.models import (
 )
 
 
+# ── Agent home + worktree primitives ─────────────────────────────────────
+#
+# Every agent has a persistent home directory on the daemon's host.
+# Default: ~/.agentira/agents/<id>/home/. Inside lives the agent's repo
+# worktrees, memory MCP store, scratch notes. This is the agent's
+# physical address — what gives session resume, sandbox boundaries, and
+# diff capture a stable anchor.
+
+def resolve_agent_home(agent) -> str:
+    """Return the absolute home path for this agent.
+
+    `agent` may be a forge.Agent or a backend.models.Profile (both expose
+    the relevant fields after the AP-86 merge). Honors an explicit
+    profile.home_path if set; otherwise derives from agent id.
+    Idempotent: just resolves the path string, doesn't mkdir.
+    """
+    import os
+    explicit = None
+    # Prefer profile.home_path (post-AP-86 source of truth)
+    prof = getattr(agent, "profile", None)
+    if prof is not None:
+        explicit = getattr(prof, "home_path", None)
+    if not explicit:
+        explicit = getattr(agent, "home_path", None)
+    if explicit:
+        return os.path.expanduser(explicit)
+    agent_id = getattr(agent, "id", None) or getattr(agent, "profile_id", None) or "unknown"
+    return os.path.expanduser(f"~/.agentira/agents/{agent_id}/home")
+
+
+def ensure_agent_home_dir(agent) -> str:
+    """Resolve home path AND mkdir + scaffold subdirs idempotently."""
+    import os
+    home = resolve_agent_home(agent)
+    os.makedirs(home, exist_ok=True)
+    for sub in ("repos", "memory", "notes", ".agentira"):
+        os.makedirs(os.path.join(home, sub), exist_ok=True)
+    return home
+
+
+def _slugify_project(project) -> str:
+    """A filesystem-safe short id for a project's directory name inside
+    `<home>/repos/`. Use the id, not the name — names can collide and
+    change. Truncated to keep paths tidy."""
+    return (getattr(project, "id", None) or "unknown")[:12]
+
+
+def ensure_worktree_base(project, *, cache_root: str = "~/.agentira/cache/projects") -> str:
+    """Return a usable git base for `git worktree add`.
+
+    Same-machine: returns `project.repo_path` if it exists on disk and
+    looks like a git repo.
+
+    Cross-machine fallback: if local path missing and `project.repo_url`
+    is set, clones into a per-project cache dir and returns that.
+
+    Raises ValueError if neither path is usable.
+    """
+    import os
+    import subprocess
+    local = getattr(project, "repo_path", None) or ""
+    local = os.path.expanduser(local)
+    if local and os.path.isdir(os.path.join(local, ".git")):
+        return local
+    if local and os.path.isfile(os.path.join(local, "HEAD")):
+        # Looks like a bare repo. Worktree add works against bare repos.
+        return local
+    repo_url = getattr(project, "repo_url", None) or ""
+    if not repo_url:
+        raise ValueError(
+            f"Project {getattr(project, 'id', '?')} has no usable git source "
+            f"(repo_path missing, repo_url empty)."
+        )
+    cache = os.path.join(
+        os.path.expanduser(cache_root),
+        _slugify_project(project),
+        "repo",
+    )
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    if not os.path.isdir(os.path.join(cache, ".git")) and not os.path.isfile(
+        os.path.join(cache, "HEAD")
+    ):
+        subprocess.run(
+            ["git", "clone", "--quiet", repo_url, cache],
+            check=True, timeout=120,
+        )
+    return cache
+
+
+def ensure_agent_worktree(agent, project) -> str:
+    """Ensure a git worktree for `agent` exists inside its home, for
+    `project`. Idempotent — creates only when absent.
+
+    Returns the absolute path to the worktree (= the cwd the daemon
+    should run the agent's subprocess in).
+    """
+    import os
+    import subprocess
+    home = ensure_agent_home_dir(agent)
+    target = os.path.join(home, "repos", _slugify_project(project))
+    # Already a worktree? Just return.
+    if os.path.isdir(os.path.join(target, ".git")) or os.path.isfile(
+        os.path.join(target, ".git")
+    ):
+        return target
+    base = ensure_worktree_base(project)
+    branch = f"agent/{getattr(agent, 'id', 'unknown')}/work"
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    # `-B` so re-creating after a worktree prune doesn't trip on the
+    # branch already existing.
+    subprocess.run(
+        ["git", "-C", base, "worktree", "add", "-B", branch, target],
+        check=True, timeout=60,
+    )
+    return target
+
+
 def conversation_scope_key(*, run_id: str | None, project_id: str | None) -> str:
     """Decide which conversation a dispatch belongs to.
 
@@ -250,6 +367,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         ),
         "mcp_strict": bool(a.profile.mcp_strict) if a.profile else False,
         "mcp_config_override": (a.profile.mcp_config_override if a.profile else "") or "",
+        "home_path": (a.profile.home_path if a.profile else None) or resolve_agent_home(a),
         "created_at": _iso(a.created_at),
     }
 
@@ -616,7 +734,7 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
 _AGENT_TO_PROFILE_MIRROR = {
     "name", "model", "system_prompt", "personality", "runtime_id",
     "default_project_id", "mcp_servers", "webhook_url", "mcp_strict",
-    "mcp_config_override", "mcp_disabled",
+    "mcp_config_override", "mcp_disabled", "home_path",
 }
 
 
@@ -716,6 +834,7 @@ def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
             agent_api_key=(prof.api_key if prof else None),
             mcp_config_override=(prof.mcp_config_override if prof else None),
             disabled_servers=(json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None),
+            agent_home_path=resolve_agent_home(a),
         )
 
         # Env vars the daemon will inject when spawning the runtime. Mirrors
@@ -1852,11 +1971,19 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
             except Exception:
                 pass
 
-        # Project run-context — empty strings if unset; daemon falls back
-        # to its existing cwd-and-no-conventions behavior in that case.
+        # Resolve cwd to the agent's worktree (project task) or home
+        # (project-less task). Either way the agent runs in ITS own
+        # directory, not the user's working tree.
         project = db.get(Project, project_id) if project_id else None
-        repo_path = (project.repo_path or "") if project else ""
         conventions_md = (project.conventions_md or "") if project else ""
+        repo_path = ""
+        try:
+            if project:
+                repo_path = ensure_agent_worktree(agent, project)
+            else:
+                repo_path = ensure_agent_home_dir(agent)
+        except Exception as exc:  # noqa: BLE001 — log + fall back
+            print(f"[schedule_task_run] cwd resolution failed: {exc}")
 
         # Agent toolkit — list of opt-in MCP server names.
         agent_mcp_servers: list[str] = []
@@ -1930,6 +2057,7 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         agent_api_key=agent_api_key,
         mcp_config_override=agent_mcp_override,
         disabled_servers=agent_mcp_disabled,
+        agent_home_path=resolve_agent_home(agent),
     )
     mcp_config_json = _json.dumps(mcp_config)
 
@@ -2368,14 +2496,29 @@ def send_runtime_message(
             conventions_md = ""
             ctx = user_context if isinstance(user_context, dict) else {}
             project_id = ctx.get("project_id")
-            if project_id:
-                proj = db.get(Project, project_id)
+            proj = db.get(Project, project_id) if project_id else None
+            if proj:
+                conventions_md = proj.conventions_md or ""
+
+            agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
+            # Resolve cwd to the agent's worktree (project chat) or home
+            # (general chat). Failure here shouldn't break dispatch — fall
+            # back to empty repo_path and the daemon will use its own cwd.
+            repo_path = ""
+            try:
                 if proj:
-                    repo_path = proj.repo_path or ""
-                    conventions_md = proj.conventions_md or ""
+                    repo_path = ensure_agent_worktree(a, proj)
+                else:
+                    repo_path = ensure_agent_home_dir(a)
+            except Exception as exc:  # noqa: BLE001 — log + fall back
+                print(f"[send_runtime_message] cwd resolution failed: {exc}")
+
             # Bake the AGENT's own api_key into the agentira MCP entry so
             # tool calls authenticate as the agent (visible in audit).
-            agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
+            home_path_for_memory = (
+                (agent_prof.home_path if agent_prof else None)
+                or resolve_agent_home(a)
+            )
             cfg = build_mcp_config(
                 agent_mcp_servers=json.loads(a.mcp_servers) if a.mcp_servers else None,
                 agent_id=a.id,
@@ -2383,6 +2526,7 @@ def send_runtime_message(
                 agent_api_key=(agent_prof.api_key if agent_prof else None),
                 mcp_config_override=(agent_prof.mcp_config_override if agent_prof else None),
                 disabled_servers=(json.loads(agent_prof.mcp_disabled) if (agent_prof and agent_prof.mcp_disabled) else None),
+                agent_home_path=home_path_for_memory,
             )
             mcp_config_json = json.dumps(cfg) if cfg else ""
             mcp_strict = bool(agent_prof.mcp_strict) if agent_prof else False

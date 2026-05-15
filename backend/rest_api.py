@@ -53,6 +53,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     repo_path: Optional[str] = None
+    repo_url: Optional[str] = None
     conventions_md: Optional[str] = None
 
 class TaskCreate(BaseModel):
