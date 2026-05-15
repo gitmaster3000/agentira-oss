@@ -39,8 +39,35 @@ def capture(workdir: str | Path | None) -> tuple[str, str]:
     if rev is None or rev.strip() != "true":
         return "", ""
 
-    diff_stat = _run(["git", "diff", "--stat"], cwd) or ""
-    diff_body = _run(["git", "diff"], cwd) or ""
+    # Strategy: try diff-against-upstream first (captures committed work
+    # on the agent's branch), fall back to diff-against-HEAD (uncommitted),
+    # fall back to diff-against-empty-tree (covers fresh `git init`
+    # scenarios where the agent committed everything). This makes diff
+    # capture work for the three real cases:
+    #  - agent worked on uncommitted changes → diff vs HEAD
+    #  - agent committed on a branch with upstream → diff vs upstream
+    #  - agent ran `git init` + committed everything in workdir → diff vs empty tree
+    diff_stat = ""
+    diff_body = ""
+
+    # 1. Upstream-based (only works when the branch has an upstream ref)
+    upstream = _run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
+    if upstream:
+        diff_stat = _run(["git", "diff", "--stat", "@{upstream}..HEAD"], cwd) or ""
+        diff_body = _run(["git", "diff", "@{upstream}..HEAD"], cwd) or ""
+
+    # 2. Uncommitted (vs HEAD)
+    if not diff_body:
+        diff_stat = _run(["git", "diff", "--stat"], cwd) or ""
+        diff_body = _run(["git", "diff"], cwd) or ""
+
+    # 3. Empty-tree fallback (everything-vs-nothing)
+    if not diff_body:
+        empty_tree = _run(["git", "hash-object", "-t", "tree", "/dev/null"], cwd)
+        if empty_tree:
+            empty_tree = empty_tree.strip()
+            diff_stat = _run(["git", "diff", "--stat", empty_tree, "HEAD"], cwd) or ""
+            diff_body = _run(["git", "diff", empty_tree, "HEAD"], cwd) or ""
 
     if len(diff_body.encode("utf-8")) > MAX_DIFF_BYTES:
         diff_body = diff_body.encode("utf-8")[:MAX_DIFF_BYTES].decode(

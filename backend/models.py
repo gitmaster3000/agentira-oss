@@ -119,6 +119,11 @@ class Profile(Base):
     default_project_id: Mapped[str | None] = mapped_column(
         ForeignKey("projects.id"), nullable=True, default=None
     )
+    # Filesystem path of the agent's home directory. The agent's repos,
+    # memory, and scratch live here. Daemon defaults cwd to this path
+    # (general chats) or to <home>/repos/<project>/ (project chats).
+    # NULL → derive default `~/.agentira/agents/<id>/home/` at dispatch.
+    home_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     mcp_servers: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Names of built-in servers (agentira, memory) the user has explicitly
     # disabled for this agent. JSON list of strings. Applied AFTER the
@@ -197,9 +202,12 @@ class Project(Base):
     next_task_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     webhook_config: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # Run context — used when an agent is dispatched against a task in this project.
-    # repo_path: filesystem path the daemon symlinks into the workdir.
+    # repo_path: local filesystem path the daemon worktrees off (same-machine default).
+    # repo_url: optional git remote URL — daemon clones from here when repo_path
+    #   isn't accessible (cloud / different machine).
     # conventions_md: runtime-agnostic markdown materialized to .agentira/CONVENTIONS.md.
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     conventions_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
