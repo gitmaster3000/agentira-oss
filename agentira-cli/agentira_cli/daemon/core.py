@@ -172,6 +172,24 @@ class AgentiraDaemon:
             logger.warning("Runtime registration failed: %s", exc)
             return []
 
+    async def _post_setup_failure(self, *, trace_id: str, run_id: str,
+                                  agent_id: str, reason: str) -> None:
+        """Report a pre-spawn failure back to the backend so the user sees
+        what broke instead of the trigger silently disappearing."""
+        try:
+            self.client.post_trigger_complete(
+                agent_id,
+                daemon_id=self._daemon_id,
+                trace_id=trace_id,
+                run_id=run_id or "",
+                success=False,
+                input_tokens=0,
+                output_tokens=0,
+                error=f"Setup failed before runtime spawn: {reason}",
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning("post_trigger_complete (setup failure) failed: %s", exc)
+
     def _dispatch_task(self, frame: dict) -> None:
         """Spawn a daemon thread to execute the task described by frame."""
         if not self._active.acquire(blocking=False):
@@ -243,46 +261,85 @@ class AgentiraDaemon:
             except Exception as exc:
                 logger.debug("invalid user_context: %s", exc)
 
+        logger.info(
+            "execute trigger trace=%s kind=%s agent=%s run=%s provider=%s",
+            trace_id, kind, agent_id, run_id or "-", provider,
+        )
+
         # Materialize the run env when we have somewhere to put it:
         # - Task runs (run_id + task_id) → per-task workdir under ~/.agentira/.
         # - Chat with a project (repo_path resolved from user_context) → write
         #   CONVENTIONS.md + courtesy symlinks straight into the repo.
         # - Free-form chat with no project → skip; runtime stays in daemon cwd.
+        #
+        # Each filesystem step runs through asyncio.to_thread with a hard
+        # timeout so a stuck FS call (NFS, hung git, slow disk) fails the
+        # trigger with an actionable error instead of vanishing into a
+        # silent never-returning subprocess spawn.
         cwd_path = None
-        if run_id and task_id:
-            cwd_path, _ = materialize(
-                workspace_id=agent_id,
-                task_id=task_id,
-                repo_path=repo_path,
-                conventions_md=conventions_md,
+        try:
+            if run_id and task_id:
+                logger.info("step=materialize trace=%s (task run)", trace_id)
+                cwd_path, _ = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        materialize,
+                        workspace_id=agent_id,
+                        task_id=task_id,
+                        repo_path=repo_path,
+                        conventions_md=conventions_md,
+                    ),
+                    timeout=30.0,
+                )
+            elif repo_path:
+                logger.info("step=materialize trace=%s (chat in project)", trace_id)
+                # Chat in a project: don't allocate a workdir, just resolve
+                # the repo path so the runtime cwd is right. Materialize
+                # conventions there too — repo-local, idempotent, safe.
+                cwd_path, _ = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        materialize,
+                        workspace_id=agent_id,
+                        task_id="chat",
+                        repo_path=repo_path,
+                        conventions_md=conventions_md,
+                    ),
+                    timeout=30.0,
+                )
+            logger.info("step=ensure_memory_dirs trace=%s", trace_id)
+            await asyncio.wait_for(
+                asyncio.to_thread(ensure_memory_dirs, mcp_config_json),
+                timeout=10.0,
             )
-        elif repo_path:
-            # Chat in a project: don't allocate a workdir, just resolve the
-            # repo path so the runtime cwd is right. Materialize conventions
-            # there too — repo-local, idempotent, safe.
-            cwd_path, _ = materialize(
-                workspace_id=agent_id,
-                task_id="chat",
-                repo_path=repo_path,
-                conventions_md=conventions_md,
+        except asyncio.TimeoutError:
+            logger.exception("setup timed out trace=%s", trace_id)
+            await self._post_setup_failure(
+                trace_id=trace_id, run_id=run_id, agent_id=agent_id,
+                reason="filesystem setup timed out (materialize/memory dirs > 30s)",
             )
+            return
+        except Exception as exc:
+            logger.exception("setup crashed trace=%s: %s", trace_id, exc)
+            await self._post_setup_failure(
+                trace_id=trace_id, run_id=run_id, agent_id=agent_id,
+                reason=f"setup error: {exc!r}",
+            )
+            return
 
-        # Pre-create per-(agent, project) memory dir so the memory MCP
-        # server can write on first call. Cheap and safe to always run.
-        ensure_memory_dirs(mcp_config_json)
         have_memory = "memory" in (mcp_config_json or "")  # cheap probe
 
         # Compose the system prompt: user-context preamble + conventions +
         # memory addenda + persona, in that order.
+        logger.info("step=compose_system_prompt trace=%s", trace_id)
         system_prompt = compose_system_prompt(
             agent_system_prompt,
             have_conventions=bool(cwd_path and conventions_md),
             have_memory=have_memory,
             user_context=user_context or None,
         )
-
-        logger.info("recv trigger trace=%s kind=%s agent=%s run=%s provider=%s",
-                    trace_id, kind, agent_id, run_id or "-", provider)
+        logger.info(
+            "step=spawning trace=%s cwd=%s mcp_strict=%s resume=%s",
+            trace_id, cwd_path or "-", mcp_strict, bool(resume_session_id),
+        )
 
         # Register in-flight bookkeeping so a cancel frame can find us.
         with self._inflight_lock:
