@@ -44,6 +44,16 @@ REGISTRY: dict[str, dict[str, Any]] = {
         # set by build_mcp_config — kept out of the user-facing picker.
         "auto": True,
     },
+    "agentira-project": {
+        "transport": "stdio",
+        "command": ["python3", "-m", "agentira_cli.mcp.agentira_project"],
+        "auth_env_var": None,
+        "description": "Read project files, search code, read conventions — pull context on demand.",
+        # Auto-injected ONLY when the agent is bound to a project (has
+        # AGENTIRA_REPO_PATH). build_mcp_config conditionally includes it.
+        "auto": False,
+        "auto_when_project": True,
+    },
 }
 
 
@@ -73,6 +83,7 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
                      mcp_config_override: str | dict | None = None,
                      disabled_servers: list[str] | None = None,
                      agent_home_path: str | None = None,
+                     repo_path: str | None = None,
                      memory_root: str = "~/.agentira/memory") -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
@@ -97,6 +108,9 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
     # auto servers always
     for name, defn in REGISTRY.items():
         if defn.get("auto"):
+            selected.add(name)
+        # Conditionally auto-include when agent has a project binding.
+        if defn.get("auto_when_project") and project_id:
             selected.add(name)
     # agent's choices, filtered against the registry
     for name in (agent_mcp_servers or []):
@@ -123,10 +137,10 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
             # Future transports (sse, ws) — caller adds them when needed.
             continue
 
-        # Per-server env wiring. Memory's per-(agent, project) scope falls
-        # out of the path: under the agent's home dir if available, else
-        # the legacy ~/.agentira/memory/ root for backward compat.
+        # Per-server env wiring.
         env: dict[str, str] = {}
+        if name == "agentira-project" and repo_path:
+            env["AGENTIRA_REPO_PATH"] = repo_path
         if name == "memory" and agent_id:
             scope_proj = project_id or "_no_project"
             if agent_home_path:

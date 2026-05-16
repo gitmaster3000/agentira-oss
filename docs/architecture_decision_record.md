@@ -1,3 +1,138 @@
+# ADR 008: Conversation Scopes — Task-Based Memory, Universal `/clear`, Pause-on-Stop
+
+## Status
+
+Accepted (AP-93)
+
+## Context
+
+An "agent conversation" is the agent's working memory for a given context. Each
+conversation has a `scope_key` and is identified per-agent (`forge_conversations`
+keyed by `(agent_id, scope_key)`).
+
+Before this ADR, three scope shapes existed:
+
+- `chat:default` — one general chat per agent
+- `chat:project:<pid>` — one chat per (agent, project)
+- `run:<run_id>` — one conversation per individual task-run execution
+
+The `run:<run_id>` shape created a serious UX failure: every time a user re-ran
+the same task, the agent started a fresh conversation. It had no memory of what
+worked or failed in earlier attempts. Users couldn't say "I tried that, it
+didn't work — try X instead" because the agent had no record of the prior
+attempt.
+
+Separately, there was no way to:
+
+- Clear an agent's memory in a scope when it had gone down a bad path.
+- Stop an in-flight chat dispatch (different from canceling a run).
+- Pause and resume a long-running task naturally.
+
+## Decisions
+
+### 1. Task-scoped conversations (`task:<task_id>`)
+
+Replace `run:<run_id>` with `task:<task_id>` as the scope key for any
+dispatch tied to a task. All runs of the same task by the same agent share
+**one** conversation. Each Run row still exists as a distinct execution
+(diff, tokens, outcome, status, branch) — only the agent's working memory
+is now cumulative.
+
+`conversation_scope_key()` precedence:
+
+```
+if task_id:      → "task:<task_id>"
+elif project_id: → "chat:project:<project_id>"
+else:            → "chat:default"
+```
+
+`run_id` no longer drives scope.
+
+### 2. `/clear` is the universal "wipe this conversation" verb
+
+A slash command in the chat input. Works for every scope (`chat:default`,
+`chat:project:*`, `task:*`). Effects:
+
+- Drops `forge_conversations.runtime_session_id` for the current scope.
+- Drops `forge_messages` rows for that scope.
+- Confirmation prompt before execution (destructive).
+- Does NOT touch Run rows, diffs, summaries, or task comments.
+
+### 3. Stop button in chat = cancel + pause when run-bound
+
+When the agent is mid-dispatch in a chat:
+
+- **Cancel** the in-flight subprocess (graceful).
+- If the active scope is `task:<id>` AND there's a `Run` in `RUNNING`
+  status for that task → also mark `Run.status = PAUSED`.
+- Session id is preserved (resumable via `claude --resume <id>`).
+
+### 4. Sending a message into a paused-run scope auto-resumes
+
+When user sends a new message in a scope whose task has `Run.status =
+PAUSED`:
+
+- Mark `Run.status = RUNNING` again.
+- Fresh dispatch with `claude --resume <session_id>` so claude has full
+  prior context.
+- New message is the next user turn from claude's POV.
+- UI surfaces a "resumed paused run" badge so the user knows.
+
+### 5. Dedicated Pause / Resume on Run detail
+
+Same primitives, surfaced as explicit buttons on the Run detail page for
+direct control without going through the chat input. Resume button
+dispatches with a `Continue your work.` preamble (no new user content
+needed).
+
+### 6. Migration: backfill `best-coder` only
+
+A one-shot script retags `run:<run_id>` → `task:<task_id>` for `best-coder`'s
+existing conversations and messages. Other agents' historical
+conversations stay as `run:<run_id>` and remain readable but discontinuous
+from new task-scoped chats. Scoped to one agent because (a) avoids risk on
+production data and (b) `best-coder` is where the user actually wants
+historical continuity.
+
+## Out of scope (intentional)
+
+- **Multiple chat threads per (agent, project)**. Future addition if users
+  ask. Scheme reserved: `chat:project:<pid>:thread:<tid>`.
+- **Cross-project unified chat**. Stays per-project; cross-project context
+  goes via the `+` attach-as-reference button.
+- **@mention dispatch wiring**. Tracked as AP-96. Will use the same
+  `task:<task_id>` scope when it lands.
+- **Cross-machine resume**. Tracked as AP-94.
+
+## Consequences
+
+Positive:
+
+- Agent has continuous memory across re-runs of the same task.
+- Universal `/clear` gives users a predictable escape hatch.
+- Pause/resume becomes natural (just send a message).
+- Each agent retains independent memory for the same task — no cross-agent
+  leakage.
+
+Negative:
+
+- One-time discontinuity for non-`best-coder` agents on existing runs:
+  their old `run:<run_id>` conversations stop accumulating; new runs
+  start fresh task-scoped. Acceptable trade-off given low data volume
+  in those scopes.
+- Run row's `status` field becomes more nuanced (PAUSED added as a real
+  user-driven state, distinct from PENDING/RUNNING/COMPLETED/FAILED/
+  CANCELLED). UI must surface PAUSED clearly.
+
+## See also
+
+- AP-93 (this ADR)
+- AP-95 (`/clear` slash command — folded into AP-93's scope)
+- AP-96 (@mention dispatch — uses this scope scheme)
+- `docs/conversations.md` (user-facing guide)
+
+---
+
 # ADR 007: Push-Based Agent Notification via Webhook Receiver + Notification Poll Fallback
 
 ## Status
