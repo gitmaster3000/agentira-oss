@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useOutletContext } from 'react-router-dom';
+import { useSearchParams, useOutletContext, Link } from 'react-router-dom';
+import { ROUTES } from '../routes';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
@@ -260,9 +261,21 @@ export function Backlog({ projectId }) {
                                                         
                                                         {/* Epic/Tag pills inside row */}
                                                         {task.epic_name && (
-                                                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm flex-shrink-0" style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}>
-                                                                {task.epic_name}
-                                                            </span>
+                                                            task.epic_id ? (
+                                                                <Link
+                                                                    to={ROUTES.STUDIO_EPIC(task.epic_id)}
+                                                                    onClick={(e) => e.stopPropagation()}
+                                                                    className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm flex-shrink-0 hover:underline"
+                                                                    style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                                                    title={`Open epic: ${task.epic_name}`}
+                                                                >
+                                                                    {task.epic_name}
+                                                                </Link>
+                                                            ) : (
+                                                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm flex-shrink-0" style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}>
+                                                                    {task.epic_name}
+                                                                </span>
+                                                            )
                                                         )}
                                                         {task.tags && task.tags.slice(0, 2).map(t => (
                                                             <span key={t} className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm flex-shrink-0 border border-border-subtle text-text-tertiary bg-bg-app">
