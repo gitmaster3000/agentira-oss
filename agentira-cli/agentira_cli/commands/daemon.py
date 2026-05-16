@@ -142,6 +142,25 @@ def restart(
     _restart_impl(dry_run=dry_run, api_key=api_key)
 
 
+def _probe_ws_connected(api_url: str, daemon_id: str) -> bool | None:
+    """Ask the backend whether this daemon's WS is currently connected.
+
+    Returns True/False, or None if the backend is unreachable.
+    """
+    import urllib.request
+    import urllib.error
+    url = f"{api_url.rstrip('/')}/api/forge/runtimes"
+    try:
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            runtimes = json.loads(resp.read())
+        return any(
+            rt.get("daemon_id") == daemon_id and rt.get("status") == "online"
+            for rt in runtimes
+        )
+    except Exception:
+        return None
+
+
 @app.command("status")
 def status(output: str = typer.Option("text", "--output", "-o", help="text | json")) -> None:
     """Show daemon status — actual process state, not just the pid file."""
@@ -156,12 +175,19 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
     # If pid file is stale (points at a dead pid), say so explicitly.
     stale_pid_file = bool(pid and not running)
 
+    # Probe the backend for WS connection state.
+    ws_connected: bool | None = None
+    if running and daemon_id:
+        config = DaemonConfig()
+        ws_connected = _probe_ws_connected(config.api_url, daemon_id)
+
     data = {
         "running": running,
         "pid": pid if running else None,
         "stale_pid_file": stale_pid_file,
         "daemon_id": daemon_id,
         "dry_run_env": dry_run_env,
+        "ws_connected": ws_connected,
         "log": str(DAEMON_LOG_FILE),
     }
 
@@ -174,6 +200,12 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
         typer.echo(f"Status:    {state}")
         if daemon_id:
             typer.echo(f"Daemon ID: {daemon_id}")
+        if running and ws_connected is True:
+            typer.echo("WebSocket: connected")
+        elif running and ws_connected is False:
+            typer.echo("WebSocket: DISCONNECTED (daemon running but backend has no active WS)")
+        elif running and ws_connected is None:
+            typer.echo("WebSocket: unknown (backend unreachable)")
         if dry_run_env:
             typer.echo("Mode:      DRY-RUN (env var set — triggers won't spawn subprocesses)")
         typer.echo(f"Log:       {DAEMON_LOG_FILE}")
@@ -195,6 +227,78 @@ def logs(
     else:
         import subprocess
         subprocess.run(["tail", f"-n{lines}", str(DAEMON_LOG_FILE)])
+
+
+_LAUNCHD_LABEL = "com.agentira.daemon"
+_LAUNCHD_PLIST_DIR = os.path.expanduser("~/Library/LaunchAgents")
+
+
+@app.command("install-launchd")
+def install_launchd() -> None:
+    """Install a macOS launchd plist so the daemon auto-restarts on crash/login."""
+    if sys.platform != "darwin":
+        typer.echo("Error: install-launchd is macOS-only. Use systemd on Linux.", err=True)
+        raise typer.Exit(1)
+
+    import shutil
+    agentira_bin = shutil.which("agentira")
+    if not agentira_bin:
+        typer.echo("Error: 'agentira' not found in PATH.", err=True)
+        raise typer.Exit(1)
+
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{_LAUNCHD_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{agentira_bin}</string>
+        <string>daemon</string>
+        <string>start</string>
+        <string>--foreground</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/agentira-daemon.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/agentira-daemon.stderr.log</string>
+</dict>
+</plist>
+"""
+    os.makedirs(_LAUNCHD_PLIST_DIR, exist_ok=True)
+    plist_path = os.path.join(_LAUNCHD_PLIST_DIR, f"{_LAUNCHD_LABEL}.plist")
+    with open(plist_path, "w") as f:
+        f.write(plist_content)
+
+    import subprocess
+    subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+    subprocess.run(["launchctl", "load", plist_path], check=True)
+    typer.echo(f"Installed and loaded: {plist_path}")
+    typer.echo("The daemon will now auto-restart on crash and start on login.")
+    typer.echo(f"To uninstall: launchctl unload {plist_path} && rm {plist_path}")
+
+
+@app.command("uninstall-launchd")
+def uninstall_launchd() -> None:
+    """Remove the launchd plist (stops auto-restart)."""
+    if sys.platform != "darwin":
+        typer.echo("Error: macOS only.", err=True)
+        raise typer.Exit(1)
+
+    plist_path = os.path.join(_LAUNCHD_PLIST_DIR, f"{_LAUNCHD_LABEL}.plist")
+    if not os.path.exists(plist_path):
+        typer.echo("No plist installed.")
+        raise typer.Exit(0)
+
+    import subprocess
+    subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+    os.remove(plist_path)
+    typer.echo(f"Removed: {plist_path}")
 
 
 def _run_daemon(config: DaemonConfig) -> None:
