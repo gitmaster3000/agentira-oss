@@ -301,6 +301,58 @@ def uninstall_launchd() -> None:
     typer.echo(f"Removed: {plist_path}")
 
 
+@app.command("install-openclaw-mcps")
+def install_openclaw_mcps(
+    api_key: str = typer.Option(..., "--api-key", help="Agentira bot API key (Profile → Copy bot key)"),
+    repo_path: str = typer.Option("", "--repo-path", help="Project repo root for the agentira-project MCP server"),
+    mcp_url: str = typer.Option("http://localhost:8000/mcp", "--mcp-url", help="Agentira MCP HTTP URL"),
+    openclaw_bin: str = typer.Option("openclaw", "--openclaw-bin", help="Path to the openclaw binary"),
+) -> None:
+    """AP-103: seed Agentira's MCP servers into OpenClaw's config.
+
+    OpenClaw's chat-completions endpoint can't take per-call MCP config, so
+    MCP must live in OpenClaw's own config. This registers `agentira`,
+    `memory`, and `agentira-project` so OpenClaw-hosted agents (Qwen, Kimi)
+    get the same tools as Claude agents.
+
+    This command is a one-time SEED / verification step. At runtime the
+    daemon overwrites these entries per-dispatch with the dispatched
+    agent's own token + memory path, so identity stays per-agent — you
+    don't need to re-run this per agent.
+    """
+    from agentira_cli.runtimes.openclaw import register_agentira_mcps
+
+    servers: dict = {
+        "agentira": {
+            "type": "http",
+            "url": mcp_url,
+            "headers": {"Authorization": f"Bearer {api_key}"},
+        },
+        "memory": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-memory"],
+        },
+    }
+    if repo_path:
+        servers["agentira-project"] = {
+            "command": "python3",
+            "args": ["-m", "agentira_cli.mcp.agentira_project"],
+            "env": {"AGENTIRA_REPO_PATH": repo_path},
+        }
+
+    result = register_agentira_mcps({"mcpServers": servers}, binary_path=openclaw_bin)
+    for name in result["registered"]:
+        typer.echo(f"  ✓ {name}")
+    for f in result["failed"]:
+        typer.echo(f"  ✗ {f['name']}: {f['error']}", err=True)
+    if result["failed"]:
+        raise typer.Exit(1)
+    typer.echo(
+        f"Registered {len(result['registered'])} MCP server(s) into OpenClaw. "
+        "Restart OpenClaw for the runner agent to pick them up."
+    )
+
+
 def _run_daemon(config: DaemonConfig) -> None:
     """Run daemon in foreground (blocking)."""
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
