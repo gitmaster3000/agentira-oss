@@ -852,6 +852,7 @@ def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
             mcp_config_override=(prof.mcp_config_override if prof else None),
             disabled_servers=(json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None),
             agent_home_path=resolve_agent_home(a),
+            repo_path=repo_path or None,
         )
 
         # Env vars the daemon will inject when spawning the runtime. Mirrors
@@ -2092,6 +2093,7 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         mcp_config_override=agent_mcp_override,
         disabled_servers=agent_mcp_disabled,
         agent_home_path=resolve_agent_home(agent),
+        repo_path=repo_path or None,
     )
     mcp_config_json = _json.dumps(mcp_config)
 
@@ -2656,6 +2658,7 @@ def send_runtime_message(
                 mcp_config_override=(agent_prof.mcp_config_override if agent_prof else None),
                 disabled_servers=(json.loads(agent_prof.mcp_disabled) if (agent_prof and agent_prof.mcp_disabled) else None),
                 agent_home_path=home_path_for_memory,
+                repo_path=repo_path if proj else None,
             )
             mcp_config_json = json.dumps(cfg) if cfg else ""
             mcp_strict = bool(agent_prof.mcp_strict) if agent_prof else False
