@@ -288,6 +288,17 @@ export const api = {
             `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
         ),
         listConversations: (agentId) => request(`/forge/agents/${agentId}/conversations`),
+        // ADR 008 / AP-93: wipe agent memory for one scope.
+        clearConversation: (agentId, scope_key) => request(
+            `/forge/agents/${agentId}/conversations/clear`,
+            { method: 'POST', body: JSON.stringify({ scope_key }) },
+        ),
+        // ADR 008 / AP-93: cancel in-flight dispatch; pauses an active run
+        // when the scope is a task scope.
+        stopChat: (agentId, scope_key) => request(
+            `/forge/agents/${agentId}/chat/stop`,
+            { method: 'POST', body: JSON.stringify({ scope_key }) },
+        ),
         getConversation: (agentId, projectId, taskId) => {
             const params = new URLSearchParams();
             if (projectId) params.set('project_id', projectId);

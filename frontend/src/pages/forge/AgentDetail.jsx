@@ -5,7 +5,7 @@ import {
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
     ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
     Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder, FolderPlus, Check,
-    MessageSquarePlus, ClipboardList,
+    MessageSquarePlus, ClipboardList, Square,
     Info as InfoIcon,
 } from 'lucide-react';
 import { api } from '../../api';
@@ -456,6 +456,7 @@ function _localScopeLabel(scopeKey, projects) {
         const p = (projects || []).find((x) => x.id === pid);
         return p ? `About ${p.name}` : `About project ${pid.slice(0, 8)}`;
     }
+    if (scopeKey.startsWith('task:')) return `Task ${scopeKey.slice(5, 13)}`;
     if (scopeKey.startsWith('run:')) return `Task run ${scopeKey.slice(4, 12)}`;
     return scopeKey;
 }
@@ -478,6 +479,9 @@ function ChatTab({ agentId, agent }) {
     const [inputFocused, setInputFocused] = useState(false);
     const [conversation, setConversation] = useState(null);
     const [conversations, setConversations] = useState([]);
+    // ADR 008 / AP-93: when a send wakes a paused run, server returns
+    // resumed_run_id — surface as an ephemeral badge above the input.
+    const [resumedNotice, setResumedNotice] = useState(null);
     const [selectedScope, setSelectedScope] = useState(null); // null = follow attached/screen
     const [chatPickerOpen, setChatPickerOpen] = useState(false);
     const [newChatFlyoutOpen, setNewChatFlyoutOpen] = useState(false);
@@ -610,6 +614,32 @@ function ChatTab({ agentId, agent }) {
         if (!input.trim() || sending) return;
         const trimmed = input.trim();
 
+        // ADR 008 / AP-93: `/clear` — wipe agent memory for THIS scope.
+        // Drops the runtime session handle + visible messages. Run rows,
+        // diffs, and task comments are untouched.
+        if (trimmed === '/clear') {
+            setInput('');
+            if (!window.confirm(`Clear ${_localScopeLabel(activeScope, agentProjects)}? This wipes the agent's memory of this chat. Run history and diffs are kept.`)) {
+                inputRef.current?.focus();
+                return;
+            }
+            try {
+                await api.forge.clearConversation(agentId, activeScope);
+                setMessages([]);
+                await loadConversations();
+                await loadConversation();
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    id: `local-clear-${Date.now()}`,
+                    role: 'system',
+                    content: `Clear failed: ${err.message || err}`,
+                    created_at: new Date().toISOString(),
+                }]);
+            }
+            inputRef.current?.focus();
+            return;
+        }
+
         // `/context` slash command — show what would be sent, don't dispatch.
         if (trimmed === '/context' || trimmed.startsWith('/context ')) {
             const ctx = buildUserContext();
@@ -649,7 +679,7 @@ function ChatTab({ agentId, agent }) {
 
         setSending(true);
         try {
-            await api.forge.sendRuntimeChat(agentId, {
+            const res = await api.forge.sendRuntimeChat(agentId, {
                 content: trimmed,
                 user_context: buildUserContext(),
                 // AP-105: pin the conversation. Without this, sending a
@@ -658,6 +688,13 @@ function ChatTab({ agentId, agent }) {
                 // diverge from what the picker shows.
                 scope_key: activeScope || null,
             });
+            // ADR 008 / AP-93: if this send woke a paused run, surface it
+            // so the user sees that their message resumed the work.
+            if (res && res.resumed_run_id) {
+                setResumedNotice({ runId: res.resumed_run_id, at: Date.now() });
+                setTimeout(() => setResumedNotice((n) =>
+                    n && n.at === res.resumed_run_id ? null : n), 6000);
+            }
             setInput('');
             await loadMessages();
         } catch (err) {
@@ -968,6 +1005,14 @@ function ChatTab({ agentId, agent }) {
                         inputRef.current?.focus();
                     }} />
                 )}
+                {/* ADR 008 / AP-93: ephemeral badge that this message resumed
+                    a paused run. Auto-hides after a few seconds. */}
+                {resumedNotice && (
+                    <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/20 text-green-400 text-xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        Resumed paused run {String(resumedNotice.runId).slice(0, 8)}
+                    </div>
+                )}
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => setContextOpen(!contextOpen)}
@@ -1006,9 +1051,31 @@ function ChatTab({ agentId, agent }) {
                             disabled={sending}
                         />
                     </div>
-                    <button onClick={handleSend} disabled={sending || !input.trim()} className="btn btn-primary py-2.5">
-                        {sending ? <Loader className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </button>
+                    {sending ? (
+                        // ADR 008 / AP-93: Stop button while a dispatch is in
+                        // flight. For task scopes this pauses the active Run
+                        // (status → PAUSED, agent memory preserved). For other
+                        // scopes it cancels the in-flight subprocess.
+                        <button
+                            onClick={async () => {
+                                try {
+                                    await api.forge.stopChat(agentId, activeScope);
+                                } catch (err) {
+                                    console.error('Stop failed:', err);
+                                } finally {
+                                    setSending(false);
+                                }
+                            }}
+                            className="btn btn-ghost py-2.5 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            title="Stop — pauses the run if this is a task scope"
+                        >
+                            <Square className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <button onClick={handleSend} disabled={!input.trim()} className="btn btn-primary py-2.5">
+                            <Send className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
@@ -1020,6 +1087,7 @@ function ChatTab({ agentId, agent }) {
 
 const SLASH_COMMANDS = [
     { name: '/context', desc: 'Show what context (project, MCP, env, prompts) will be sent on the next message' },
+    { name: '/clear', desc: "Wipe the agent's memory for this chat (run history and diffs are kept)" },
 ];
 
 function SlashCommandSuggest({ input, onPick }) {
