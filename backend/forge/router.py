@@ -445,6 +445,20 @@ def get_stats():
     return services.get_stats()
 
 
+@router.get("/projects/{project_id}/digest")
+def get_project_digest(project_id: str, since: str = "24h"):
+    """AP-84: aggregated run summary for a project over a recent window.
+
+    `since` accepts `Nh` (hours), `Nd` (days), or an ISO timestamp.
+    Powers the dashboard digest panel.
+    """
+    from backend.forge.digest import generate_digest
+    result = generate_digest(project_id=project_id, since=since)
+    if isinstance(result, dict) and result.get("error") == "project_not_found":
+        raise HTTPException(404, "Project not found")
+    return result
+
+
 # ── Message endpoints ───────────────────────────────────────────────────
 
 @router.get("/agents/{agent_id}/messages")
