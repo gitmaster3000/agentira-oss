@@ -122,19 +122,25 @@ def ensure_agent_worktree(agent, project) -> str:
     return os.path.join(home_template, "repos", slug)
 
 
-def conversation_scope_key(*, run_id: str | None, project_id: str | None) -> str:
-    """Decide which conversation a dispatch belongs to.
+def conversation_scope_key(*, task_id: str | None = None,
+                           project_id: str | None = None,
+                           run_id: str | None = None) -> str:
+    """Decide which conversation a dispatch belongs to (ADR 008).
 
-    Three conversation buckets today:
-      - task run            → "run:<run_id>"           (sticky for the run)
-      - chat in a project   → "chat:project:<pid>"     (one per project)
-      - chat with no project → "chat:default"
+    Precedence (first non-empty wins):
+      - task_id      → "task:<task_id>"         (all runs of this task share)
+      - project_id   → "chat:project:<pid>"     (one chat per project)
+      - (default)    → "chat:default"
 
-    Future buckets (per-thread, per-topic, etc.) extend the scheme without
-    touching call sites — change only this resolver.
+    `run_id` is accepted for backward-compat but does NOT drive scope
+    after AP-93. Old `run:<id>` rows in the DB stay readable but are no
+    longer generated for new dispatches.
+
+    Single point of truth — future scopes (threads, comment-threads, etc.)
+    extend here without touching call sites.
     """
-    if run_id:
-        return f"run:{run_id}"
+    if task_id:
+        return f"task:{task_id}"
     if project_id:
         return f"chat:project:{project_id}"
     return "chat:default"
@@ -248,10 +254,7 @@ def get_conversation_info(*, agent_id: str, project_id: str | None = None,
                           task_id: str | None = None) -> dict:
     """Returns the conversation state for a given (agent, scope) so the UI
     can show whether this is a fresh chat or a resumed one."""
-    run_id_arg = None  # task-scoped only matters for run dispatches
-    if task_id:
-        run_id_arg = None  # task scope keys aren't run-based; reserve later
-    scope = conversation_scope_key(run_id=run_id_arg, project_id=project_id)
+    scope = conversation_scope_key(task_id=task_id, project_id=project_id)
     with _session() as db:
         conv = (db.query(Conversation)
                   .filter_by(agent_id=agent_id, scope_key=scope)
@@ -303,6 +306,29 @@ def upsert_conversation(*, agent_id: str, scope_key: str,
                 last_used_at=now,
             ))
         db.commit()
+
+
+def clear_conversation(*, agent_id: str, scope_key: str) -> dict:
+    """ADR 008: wipe the agent's working memory for one scope.
+
+    Drops the Conversation row (runtime session handle) and all
+    AgentMessage rows in that scope. Does NOT touch Run rows, task
+    comments, or diffs — those are durable artifacts. Next dispatch
+    in this scope starts fresh (no claude --resume).
+    """
+    if not agent_id or not scope_key:
+        return {"error": "agent_id and scope_key required"}
+    with _session() as db:
+        msg_count = (db.query(AgentMessage)
+                       .filter(AgentMessage.agent_id == agent_id,
+                               AgentMessage.scope_key == scope_key)
+                       .delete(synchronize_session=False))
+        conv_count = (db.query(Conversation)
+                        .filter_by(agent_id=agent_id, scope_key=scope_key)
+                        .delete(synchronize_session=False))
+        db.commit()
+    return {"ok": True, "messages_deleted": int(msg_count),
+            "conversation_deleted": int(conv_count)}
 
 
 # trace_id → scope_key, populated at dispatch and drained on complete so
@@ -1306,6 +1332,11 @@ def _scope_label(db, scope_key: str) -> str:
         return "General"
     if scope_key.startswith("chat:user:"):
         return f"General ({scope_key[10:14]})"
+    if scope_key.startswith("task:"):
+        from backend.models import Task as _Task
+        tid = scope_key.split(":", 1)[1]
+        t = db.get(_Task, tid)
+        return f"Task {t.title}" if (t and t.title) else f"Task {tid[:8]}"
     if scope_key.startswith("run:"):
         return f"Task run {scope_key.split(':',1)[1][:8]}"
     return scope_key
@@ -2148,8 +2179,9 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
         "AGENTIRA_RUN_TOKEN": run_token,
     }
 
-    # Conversation continuity (task-run scope). Resume if runtime supports it.
-    scope = conversation_scope_key(run_id=run_id, project_id=project_id)
+    # ADR 008: task-scope (not run-scope) so multiple runs of the same task
+    # share one conversation. Agent picks up where it left off across re-runs.
+    scope = conversation_scope_key(task_id=task_id, project_id=project_id)
     caps = (_json.loads(rt_caps_json) if rt_caps_json else [])
     resume_id = ""
     if "resume" in caps:
@@ -2224,6 +2256,59 @@ def pause_run(run_id: str) -> dict:
 def resume_run(run_id: str) -> dict:
     """Resume a paused CLI subprocess (SIGCONT)."""
     return _signal_run(run_id, "resume", RunStatus.RUNNING)
+
+
+def stop_chat(*, agent_id: str, scope_key: str) -> dict:
+    """ADR 008: Stop button in chat.
+
+    Cancels the in-flight dispatch for this (agent, scope). If the scope
+    is a task scope AND there's an active Run for that task, also pauses
+    the run (so the agent's working memory is preserved and a follow-up
+    message resumes it via claude --resume).
+    """
+    import asyncio
+    from backend.forge.ws_dispatch import hub
+    if not agent_id or not scope_key:
+        return {"error": "agent_id and scope_key required"}
+
+    # Find the latest active trace_id for this (agent, scope) from the
+    # in-memory map. Empty string is fine — daemon's cancel-by-runtime
+    # path still kills the latest subprocess for that agent.
+    trace_id = ""
+    for tid, sc in list(_TRACE_SCOPE.items()):
+        if sc == scope_key:
+            trace_id = tid  # last one wins (insertion order)
+
+    with _session() as db:
+        a = db.query(Agent).filter(Agent.id == agent_id).first()
+        runtime_id = a.runtime_id if a else None
+
+    paused_run_id = None
+    if scope_key.startswith("task:"):
+        task_id = scope_key.split(":", 1)[1]
+        with _session() as db:
+            active = (db.query(Run)
+                        .filter(Run.task_id == task_id,
+                                Run.agent_id == agent_id,
+                                Run.status.in_([RunStatus.RUNNING, RunStatus.PENDING]))
+                        .order_by(Run.created_at.desc())
+                        .first())
+            if active:
+                paused_run_id = active.id
+
+    if paused_run_id:
+        # pause_run also fires the WS pause frame and flips status.
+        pause_run(paused_run_id)
+    elif runtime_id:
+        try:
+            asyncio.ensure_future(hub.dispatch_cancel(
+                runtime_id=runtime_id, trace_id=trace_id,
+            ))
+        except Exception:
+            pass
+
+    return {"ok": True, "paused_run_id": paused_run_id,
+            "cancelled_trace_id": trace_id or None}
 
 
 def cancel_run(run_id: str) -> dict:
@@ -2558,6 +2643,25 @@ def send_runtime_message(
     the user who is currently viewing …").
     """
     from backend.forge import runtime_client
+    # ADR 008: sending a message into a task scope whose Run is PAUSED
+    # auto-resumes the run. The agent picks up via claude --resume and
+    # treats this message as the next user turn. A flag is returned so
+    # the UI can show a "Resumed paused run" badge.
+    resumed_run_id = None
+    if scope_key and scope_key.startswith("task:"):
+        task_id = scope_key.split(":", 1)[1]
+        with _session() as db:
+            paused = (db.query(Run)
+                        .filter(Run.task_id == task_id,
+                                Run.agent_id == agent_id,
+                                Run.status == RunStatus.PAUSED)
+                        .order_by(Run.created_at.desc())
+                        .first())
+            if paused:
+                resumed_run_id = paused.id
+        if resumed_run_id:
+            resume_run(resumed_run_id)
+
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
@@ -2573,13 +2677,19 @@ def send_runtime_message(
             conventions_md = ""
             ctx = user_context if isinstance(user_context, dict) else {}
             project_id = ctx.get("project_id")
-            # AP-105: when continuing a run-scoped conversation, the project
-            # comes from the Run row (the agent worked there), NOT from the
-            # user's current screen — user might be elsewhere now but still
-            # chatting in the run scope. Without this, cwd would resolve to
-            # the wrong worktree (or general home) and claude's session
-            # handle would fail to resume.
-            if scope_key and scope_key.startswith("run:"):
+            # AP-105 / ADR 008: when continuing a task- or run-scoped
+            # conversation, the project comes from the Task/Run row (the
+            # agent worked there), NOT from the user's current screen —
+            # user might be elsewhere now but still chatting in that scope.
+            # Without this, cwd would resolve to the wrong worktree and
+            # claude's session handle would fail to resume.
+            if scope_key and scope_key.startswith("task:"):
+                from backend.models import Task
+                _task_id = scope_key.split(":", 1)[1]
+                _task = db.query(Task).filter(Task.id == _task_id).first()
+                if _task and _task.project_id:
+                    project_id = _task.project_id
+            elif scope_key and scope_key.startswith("run:"):
                 _run_id = scope_key.split(":", 1)[1]
                 _run = db.query(Run).filter(Run.id == _run_id).first()
                 if _run and _run.project_id:
@@ -2631,8 +2741,14 @@ def send_runtime_message(
             # completed). Otherwise derive from project_id.
             if scope_key:
                 scope = scope_key
+            elif run_id:
+                # ADR 008: if dispatching against a run, the scope is the
+                # parent task so re-runs share memory. Resolve task from run.
+                _run = db.query(Run).filter(Run.id == run_id).first()
+                _task_id = _run.task_id if _run else None
+                scope = conversation_scope_key(task_id=_task_id, project_id=project_id)
             else:
-                scope = conversation_scope_key(run_id=run_id, project_id=project_id)
+                scope = conversation_scope_key(project_id=project_id)
             rt = a.runtime
             caps = (json.loads(rt.capabilities) if (rt and rt.capabilities) else [])
             resume_id = ""
@@ -2646,7 +2762,7 @@ def send_runtime_message(
                     agent_id=a.id, scope_key=scope, current=content,
                 )
 
-            return dispatch_trigger(
+            result = dispatch_trigger(
                 agent_id, prompt_with_history, run_id=run_id, kind="chat",
                 repo_path=repo_path,
                 worktree_source_path=worktree_source_path,
@@ -2659,6 +2775,9 @@ def send_runtime_message(
                 resume_session_id=resume_id,
                 scope_key=scope,
             )
+            if resumed_run_id and isinstance(result, dict):
+                result["resumed_run_id"] = resumed_run_id
+            return result
 
         url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"
