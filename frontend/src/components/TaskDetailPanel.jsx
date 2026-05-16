@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
@@ -443,12 +443,23 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     ) : (
                                         <div className="flex items-center gap-2">
                                             {task.epic_name ? (
-                                                <span 
-                                                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
-                                                    style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                                                >
-                                                    {task.epic_name}
-                                                </span>
+                                                task.epic_id ? (
+                                                    <Link
+                                                        to={ROUTES.STUDIO_EPIC(task.epic_id)}
+                                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider hover:underline"
+                                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                                        title={`Open epic: ${task.epic_name}`}
+                                                    >
+                                                        {task.epic_name}
+                                                    </Link>
+                                                ) : (
+                                                    <span
+                                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
+                                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                                    >
+                                                        {task.epic_name}
+                                                    </span>
+                                                )
                                             ) : (
                                                 <span className="text-xs text-text-tertiary italic">None</span>
                                             )}

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Trash2, Paperclip } from 'lucide-react';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 import { ConfirmModal } from './ConfirmModal';
 
 export function TaskCard({ task, onUpdate, onDelete }) {
@@ -81,13 +83,25 @@ export function TaskCard({ task, onUpdate, onDelete }) {
             <div className="flex justify-between items-center mt-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
                     {task.epic_name && (
-                        <span 
-                            className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
-                            style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                            title={`Epic: ${task.epic_name}`}
-                        >
-                            {task.epic_name}
-                        </span>
+                        task.epic_id ? (
+                            <Link
+                                to={ROUTES.STUDIO_EPIC(task.epic_id)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider hover:underline"
+                                style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                title={`Open epic: ${task.epic_name}`}
+                            >
+                                {task.epic_name}
+                            </Link>
+                        ) : (
+                            <span
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
+                                style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                title={`Epic: ${task.epic_name}`}
+                            >
+                                {task.epic_name}
+                            </span>
+                        )
                     )}
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-sm capitalize ${
                         task.priority === 'critical' ? 'bg-red-500/20 text-red-400' : 'bg-bg-panel text-text-secondary'
