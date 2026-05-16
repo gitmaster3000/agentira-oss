@@ -143,6 +143,11 @@ class Profile(Base):
     # User-provided secrets injected into the dispatched runtime's env
     # (GH_TOKEN, OPENAI_API_KEY, etc.). JSON object {KEY: VALUE}.
     env_vars: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # AP-80 Conductor: opt-in autonomous task pickup. When true, the
+    # Conductor loop dispatches the next eligible todo task to this agent
+    # whenever the agent is idle. Default OFF — surprise autonomy is bad.
+    conductor_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    max_concurrent_runs: Mapped[int] = mapped_column(default=1, nullable=False)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")

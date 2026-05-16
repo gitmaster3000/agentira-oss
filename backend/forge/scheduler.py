@@ -13,8 +13,10 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db import SessionLocal
+from backend.forge import conductor as _conductor
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus
 
 logger = logging.getLogger("agentira.forge.scheduler")
@@ -32,7 +34,18 @@ class ForgeScheduler:
     def start(self) -> None:
         self._scheduler.start()
         self._load_jobs()
-        logger.info("Forge scheduler started.")
+        # AP-80: Conductor tick — runs every TICK_INTERVAL_S to pick up
+        # todo tasks for conductor-enabled agents.
+        self._scheduler.add_job(
+            _conductor.run_tick,
+            trigger=IntervalTrigger(seconds=_conductor.TICK_INTERVAL_S),
+            id="conductor_tick",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Forge scheduler started (conductor tick: %ss).",
+                    _conductor.TICK_INTERVAL_S)
 
     def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
