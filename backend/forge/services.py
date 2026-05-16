@@ -140,35 +140,105 @@ def conversation_scope_key(*, run_id: str | None, project_id: str | None) -> str
     return "chat:default"
 
 
+_TOOL_ENTRY_TRUNCATE = 2048   # ~2KB per tool entry
+_TASK_PREAMBLE_BYTE_CAP = 40 * 1024  # ~40KB total for task-scoped preambles
+
+
+def _render_history_row(m: "AgentMessage") -> str | None:
+    """Format a single AgentMessage row for the rebuilt history transcript.
+
+    Includes TOOL events alongside USER/ASSISTANT so the agent has
+    visibility into prior tool_use/tool_result steps when native session
+    resume is unavailable.
+    """
+    if m.role == MessageRole.USER:
+        return f"User: {m.content}"
+    if m.role == MessageRole.ASSISTANT:
+        return f"Assistant: {m.content}"
+    if m.role == MessageRole.TOOL:
+        if m.tool_name:
+            inp = (m.tool_input or "").strip()
+            if len(inp) > _TOOL_ENTRY_TRUNCATE:
+                inp = inp[:_TOOL_ENTRY_TRUNCATE] + "…"
+            return f"Tool: Used {m.tool_name}({inp})"
+        out = (m.tool_output if m.tool_output is not None else m.content) or ""
+        out = out.strip()
+        if len(out) > _TOOL_ENTRY_TRUNCATE:
+            out = out[:_TOOL_ENTRY_TRUNCATE] + "…"
+        return f"Tool: → {out}"
+    return None
+
+
 def _prepend_history_for_prompt(*, agent_id: str, scope_key: str,
                                 current: str, limit: int = 20) -> str:
     """For gateway runtimes that don't keep server-side conversation state,
     rebuild a short history transcript and stitch it onto the prompt.
 
-    Pulls the last `limit` user+assistant messages for this agent (we don't
-    yet tag messages with scope_key — once we do, filter on it). Keeps the
-    current prompt verbatim at the bottom so the agent's instruction-following
-    isn't disrupted by the transcript framing.
+    For task-scoped conversations (`task:<id>`), include TOOL events and
+    the latest Run.summary for the task, capped by total byte size. This
+    is the fallback path for runtimes without native --resume (e.g.
+    OpenClaw HTTP gateway) and for Claude when its session_id is lost.
+    Chat scopes keep the original ~20-message entry cap.
     """
+    is_task_scope = bool(scope_key) and scope_key.startswith("task:")
+    roles = [MessageRole.USER, MessageRole.ASSISTANT]
+    if is_task_scope:
+        roles.append(MessageRole.TOOL)
+
     with _session() as db:
         q = (db.query(AgentMessage)
                .filter(AgentMessage.agent_id == agent_id,
-                       AgentMessage.role.in_([MessageRole.USER, MessageRole.ASSISTANT])))
+                       AgentMessage.role.in_(roles)))
         # Scope filter: only pull messages from this conversation. If
         # scope_key is empty (legacy rows from before this column), they
         # don't match and stay out, which is the safe default.
         if scope_key:
             q = q.filter(AgentMessage.scope_key == scope_key)
-        rows = (q.order_by(AgentMessage.created_at.desc())
-                  .limit(limit)
-                  .all())
-        rows.reverse()
-    if not rows:
+
+        if is_task_scope:
+            # Byte-capped: walk newest→oldest, accumulate until threshold,
+            # then reverse to chronological order.
+            newest_first = (q.order_by(AgentMessage.created_at.desc()).all())
+            rendered_rev: list[str] = []
+            size = 0
+            for m in newest_first:
+                line = _render_history_row(m)
+                if line is None:
+                    continue
+                size += len(line) + 1
+                if size > _TASK_PREAMBLE_BYTE_CAP and rendered_rev:
+                    break
+                rendered_rev.append(line)
+            rendered = list(reversed(rendered_rev))
+        else:
+            rows = (q.order_by(AgentMessage.created_at.desc())
+                      .limit(limit)
+                      .all())
+            rows.reverse()
+            rendered = [s for s in (_render_history_row(m) for m in rows)
+                        if s is not None]
+
+        run_summary: str | None = None
+        if is_task_scope:
+            # A task can have many runs across re-runs. Use the most
+            # recent finished run's summary as the carry-over context.
+            task_id = scope_key[len("task:"):]
+            latest_run = (db.query(Run)
+                          .filter(Run.agent_id == agent_id,
+                                  Run.task_id == task_id,
+                                  Run.summary.isnot(None))
+                          .order_by(Run.finished_at.desc().nullslast(),
+                                    Run.created_at.desc())
+                          .first())
+            if latest_run and latest_run.summary:
+                run_summary = latest_run.summary.strip() or None
+
+    if not rendered and not run_summary:
         return current
     parts = ["<conversation history>"]
-    for m in rows:
-        who = "User" if m.role == MessageRole.USER else "Assistant"
-        parts.append(f"{who}: {m.content}")
+    parts.extend(rendered)
+    if run_summary:
+        parts.append(f"Run summary: {run_summary}")
     parts.append("</conversation history>\n")
     parts.append(current)
     return "\n".join(parts)
