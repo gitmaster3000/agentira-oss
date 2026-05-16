@@ -724,6 +724,8 @@ _AGENT_TO_PROFILE_MIRROR = {
     "name", "model", "system_prompt", "personality", "runtime_id",
     "default_project_id", "mcp_servers", "webhook_url", "mcp_strict",
     "mcp_config_override", "mcp_disabled", "home_path",
+    # AP-80 Conductor — these live on Profile (not Agent).
+    "conductor_enabled", "max_concurrent_runs",
 }
 
 
