@@ -247,6 +247,9 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "mcp_config_override", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "home_path", "VARCHAR(500)")
+            # AP-80 Conductor: opt-in autonomous task pickup
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "max_concurrent_runs", "INTEGER DEFAULT 1 NOT NULL")
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked

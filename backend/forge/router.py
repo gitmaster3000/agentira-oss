@@ -54,6 +54,9 @@ class AgentUpdate(BaseModel):
     mcp_strict: Optional[bool] = None
     mcp_config_override: Optional[str] = None
     home_path: Optional[str] = None
+    # AP-80 Conductor opt-in
+    conductor_enabled: Optional[bool] = None
+    max_concurrent_runs: Optional[int] = None
 
 
 class HeartbeatRequest(BaseModel):
