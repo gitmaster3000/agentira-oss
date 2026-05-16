@@ -462,6 +462,24 @@ def list_conversations(agent_id: str):
     return services.list_conversations(agent_id)
 
 
+# ── ADR 008: chat controls (clear + stop) ──────────────────────────────
+
+@router.post("/agents/{agent_id}/conversations/clear")
+def clear_conversation(agent_id: str, body: dict):
+    scope_key = (body or {}).get("scope_key", "")
+    if not scope_key:
+        raise HTTPException(400, "scope_key required")
+    return services.clear_conversation(agent_id=agent_id, scope_key=scope_key)
+
+
+@router.post("/agents/{agent_id}/chat/stop")
+def stop_chat(agent_id: str, body: dict):
+    scope_key = (body or {}).get("scope_key", "")
+    if not scope_key:
+        raise HTTPException(400, "scope_key required")
+    return services.stop_chat(agent_id=agent_id, scope_key=scope_key)
+
+
 @router.post("/agents/{agent_id}/messages", status_code=201)
 def create_message(agent_id: str, body: MessageCreate):
     return services.create_message(
