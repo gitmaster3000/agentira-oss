@@ -28,17 +28,26 @@ Conductor will NOT keep re-dispatching it. This is what stops the
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from backend.db import SessionLocal
 from backend.models import Profile, Task, Status, Role
-from backend.forge.models import Agent, Run, RunStatus, ForgeRuntime
+from backend.forge.models import Agent, Run, RunStatus, AgentMessage, ForgeRuntime
 
 logger = logging.getLogger("agentira.forge.conductor")
 
 # Tick cadence (seconds) — each tick is one Conductor action.
 TICK_INTERVAL_S = 60
+
+# AP-119: a RUNNING/PENDING run that has shown no activity for this
+# long is a zombie — its daemon-side process died without a
+# trigger-complete (daemon crash, WS drop, OOM). A healthy run streams
+# events continuously, so prolonged silence is a reliable staleness
+# signal. The reconciler marks such runs FAILED so they stop showing
+# as "running" forever and can't be stopped.
+STALE_RUN_SILENCE_MINUTES = 20
 
 # Identity of the Conductor agent.
 CONDUCTOR_NAME = "Conductor"
@@ -230,17 +239,67 @@ def survey_workspace() -> dict:
     return {"agents": agents_view}
 
 
+def reconcile_stale_runs() -> list[dict]:
+    """AP-119: fail runs stuck RUNNING/PENDING with no recent activity.
+
+    A run whose daemon-side process died without posting a
+    trigger-complete (daemon crash, WS drop, OOM) stays RUNNING forever
+    — it shows as "running" and the user can't stop it. We detect these
+    by silence: a healthy run streams events continuously, so a run
+    with no message newer than STALE_RUN_SILENCE_MINUTES is a zombie.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=STALE_RUN_SILENCE_MINUTES)
+    reconciled: list[dict] = []
+    with SessionLocal() as db:
+        live = (db.query(Run)
+                  .filter(Run.status.in_([RunStatus.RUNNING,
+                                          RunStatus.PENDING]))
+                  .all())
+        for run in live:
+            last_msg = (db.query(AgentMessage.created_at)
+                          .filter(AgentMessage.run_id == run.id)
+                          .order_by(AgentMessage.created_at.desc())
+                          .first())
+            last_activity = (last_msg[0] if last_msg
+                             else (run.started_at or run.created_at))
+            if last_activity is None:
+                continue
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+            if last_activity < cutoff:
+                run.status = RunStatus.FAILED
+                run.error = (f"Stale — no activity for over "
+                             f"{STALE_RUN_SILENCE_MINUTES} min; the daemon "
+                             f"likely lost this run.")
+                run.finished_at = datetime.now(timezone.utc)
+                reconciled.append({"run": run.id, "agent": run.agent_id})
+        if reconciled:
+            db.commit()
+            logger.warning("Reconciled %d stale run(s): %s",
+                           len(reconciled), [r["run"] for r in reconciled])
+    return reconciled
+
+
 def run_tick() -> dict:
     """One Conductor action — workspace-wide.
 
-    For each conductor-enabled worker agent that is below its concurrency
-    cap, pick its next FRESH todo task, dispatch it, and move the task to
-    in_progress so it is claimed exactly once. Per-agent failures are
-    logged and skipped — one bad row must not stall the fleet.
+    First reconciles zombie runs (AP-119), then for each conductor-
+    enabled worker agent below its concurrency cap, picks its next FRESH
+    todo task, dispatches it, and moves the task to in_progress so it is
+    claimed exactly once. Per-agent failures are logged and skipped —
+    one bad row must not stall the fleet.
     """
     global _LAST_TICK
     dispatched: list[dict] = []
     skipped: list[dict] = []
+
+    # Run monitoring: clear zombies before dispatching new work.
+    try:
+        stale = reconcile_stale_runs()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("reconcile_stale_runs failed: %s", exc)
+        stale = []
 
     with SessionLocal() as db:
         in_progress_id = _in_progress_status_id(db)
@@ -291,5 +350,6 @@ def run_tick() -> dict:
                 logger.exception("Conductor tick failed for agent=%s: %s", agent.id, exc)
                 skipped.append({"agent": agent.id, "reason": "exception", "error": str(exc)})
 
-    _LAST_TICK = {"dispatched": dispatched, "skipped": skipped}
+    _LAST_TICK = {"dispatched": dispatched, "skipped": skipped,
+                  "reconciled": stale}
     return _LAST_TICK

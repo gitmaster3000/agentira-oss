@@ -2090,8 +2090,12 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
 
-def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
+def schedule_task_run(*, task_id: str, agent_id: str,
+                      extra_context: str = "") -> dict:
     """Kick off a Run for a task with the chosen agent.
+
+    `extra_context` — optional free text appended to the run prompt
+    (AP-120 uses it to carry a user's follow-up message into a retry run).
 
     Builds the prompt from the task's title + description + DoD items
     (the work-defining content the human authored), then dispatches a
@@ -2168,6 +2172,8 @@ def schedule_task_run(*, task_id: str, agent_id: str) -> dict:
     if dod_text:
         parts.append("\n## Definition of Done\n" + dod_text)
     parts.append("\nWork on this task.")
+    if extra_context:
+        parts.append("\n## Follow-up from the user\n" + extra_context)
     # Stash run_id placeholder; we substitute the real one once it's created
     # (the prompt is composed before create_run runs). The literal {run_id}
     # is replaced below.
@@ -2334,13 +2340,26 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     if not agent_id or not scope_key:
         return {"error": "agent_id and scope_key required"}
 
-    # Find the latest active trace_id for this (agent, scope) from the
-    # in-memory map. Empty string is fine — daemon's cancel-by-runtime
-    # path still kills the latest subprocess for that agent.
+    # Find the latest active trace_id for THIS scope (this chat thread).
+    # First the in-memory map; if it was lost (backend restart) recover
+    # the trace from persisted messages tagged with this scope_key. This
+    # keeps the cancel targeted at the specific chat the user is in —
+    # not everything the agent is doing.
     trace_id = ""
     for tid, sc in list(_TRACE_SCOPE.items()):
         if sc == scope_key:
             trace_id = tid  # last one wins (insertion order)
+    if not trace_id:
+        with _session() as db:
+            m = (db.query(AgentMessage)
+                   .filter(AgentMessage.scope_key == scope_key,
+                           AgentMessage.agent_id == agent_id,
+                           AgentMessage.trace_id.isnot(None),
+                           AgentMessage.trace_id != "")
+                   .order_by(AgentMessage.created_at.desc())
+                   .first())
+            if m:
+                trace_id = m.trace_id
 
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
@@ -2724,6 +2743,48 @@ def send_runtime_message(
                 resumed_run_id = paused.id
         if resumed_run_id:
             resume_run(resumed_run_id)
+
+    # AP-120: chatting into a task whose latest run FAILED schedules a
+    # fresh run (a retry) carrying this message as a follow-up, instead
+    # of a bare chat turn. The user is told via a SYSTEM message. This
+    # is a deliberate user action, so it's allowed even though the task
+    # already has runs (the Conductor's no-rerun guard doesn't apply).
+    if scope_key and scope_key.startswith("task:") and not resumed_run_id:
+        task_id = scope_key.split(":", 1)[1]
+        with _session() as db:
+            in_flight = (db.query(Run)
+                           .filter(Run.task_id == task_id,
+                                   Run.agent_id == agent_id,
+                                   Run.status.in_([RunStatus.PENDING,
+                                                   RunStatus.RUNNING,
+                                                   RunStatus.PAUSED]))
+                           .count())
+            latest = (db.query(Run)
+                        .filter(Run.task_id == task_id,
+                                Run.agent_id == agent_id)
+                        .order_by(Run.created_at.desc())
+                        .first())
+            retry = (in_flight == 0 and latest is not None
+                     and (latest.status == RunStatus.FAILED
+                          or latest.outcome == RunOutcome.FAILED))
+        if retry:
+            result = schedule_task_run(task_id=task_id, agent_id=agent_id,
+                                       extra_context=content)
+            new_run_id = (result.get("run_id")
+                          if isinstance(result, dict) else None)
+            with _session() as db:
+                db.add(AgentMessage(
+                    agent_id=agent_id, run_id=new_run_id, scope_key=scope_key,
+                    role=MessageRole.USER, content=content,
+                ))
+                db.add(AgentMessage(
+                    agent_id=agent_id, run_id=new_run_id, scope_key=scope_key,
+                    role=MessageRole.SYSTEM,
+                    content="Started a new run — the previous run failed.",
+                ))
+                db.commit()
+            return {"ok": True, "retried_run_id": new_run_id,
+                    "note": "previous run failed — started a new run"}
 
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
