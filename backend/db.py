@@ -250,6 +250,11 @@ def run_migrations():
             # AP-80 Conductor: opt-in autonomous task pickup
             runtime_added |= _ensure_column(conn, "profiles", "conductor_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "max_concurrent_runs", "INTEGER DEFAULT 1 NOT NULL")
+            # System agents (Conductor, Concierge) + Conductor cadence config
+            runtime_added |= _ensure_column(conn, "profiles", "is_system", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_tick_seconds", "INTEGER DEFAULT 60 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_report_time", "VARCHAR(5) DEFAULT '09:00' NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT 1 NOT NULL")
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked

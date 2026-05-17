@@ -17,6 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.db import SessionLocal
 from backend.forge import conductor as _conductor
+from backend.forge import concierge as _concierge
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus
 
 logger = logging.getLogger("agentira.forge.scheduler")
@@ -41,26 +42,47 @@ class ForgeScheduler:
             _conductor.get_or_create_conductor()
         except Exception as exc:
             logger.warning("Conductor seed failed: %s", exc)
+        # Concierge — the system guide agent behind the floating chat.
+        try:
+            _concierge.get_or_create_concierge()
+        except Exception as exc:
+            logger.warning("Concierge seed failed: %s", exc)
+        self._reschedule_conductor()
+        logger.info("Forge scheduler started.")
+
+    def _reschedule_conductor(self) -> int:
+        """(Re)install the Conductor queue-tick job at its configured
+        interval. Called on start and after the Conductor's config
+        changes so a new tick cadence takes effect without a restart.
+        Returns the interval applied (seconds)."""
+        try:
+            tick = _conductor.get_conductor_config()["tick_seconds"]
+        except Exception as exc:
+            logger.warning("Conductor config read failed: %s", exc)
+            tick = _conductor.TICK_INTERVAL_S
         self._scheduler.add_job(
             _conductor.run_tick,
-            trigger=IntervalTrigger(seconds=_conductor.TICK_INTERVAL_S),
+            trigger=IntervalTrigger(seconds=tick),
             id="conductor_tick",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
         )
-        logger.info("Forge scheduler started (conductor tick: %ss).",
-                    _conductor.TICK_INTERVAL_S)
+        logger.info("Conductor queue-tick scheduled every %ss.", tick)
+        return tick
 
     def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
         logger.info("Forge scheduler stopped.")
 
     def refresh(self) -> dict:
-        """Re-read all agent schedules and rebuild jobs. Call after agent update."""
+        """Re-read all agent schedules and rebuild jobs. Call after agent
+        update. Also re-installs the Conductor tick (remove_all_jobs would
+        otherwise drop it) — picking up any new cadence config."""
         self._scheduler.remove_all_jobs()
         count = self._load_jobs()
-        return {"scheduled": count}
+        tick = self._reschedule_conductor()
+        return {"scheduled": count, "conductor_tick_seconds": tick}
 
     # ── Internal ─────────────────────────────────────────────────────────
 

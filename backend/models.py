@@ -148,6 +148,16 @@ class Profile(Base):
     # whenever the agent is idle. Default OFF — surprise autonomy is bad.
     conductor_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
     max_concurrent_runs: Mapped[int] = mapped_column(default=1, nullable=False)
+    # System-provided agents (the Conductor, the Concierge) — seeded by
+    # Agentira, not user-created. Protected from deletion. Default False.
+    is_system: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Conductor cadence config — only meaningful on the Conductor's own
+    # profile. conductor_tick_seconds: queue-tick interval; report_time:
+    # daily-report time "HH:MM" (UTC). conductor_report_enabled gates the
+    # daily report independently of the queue tick.
+    conductor_tick_seconds: Mapped[int] = mapped_column(default=60, nullable=False)
+    conductor_report_time: Mapped[str] = mapped_column(String(5), default="09:00", nullable=False)
+    conductor_report_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")

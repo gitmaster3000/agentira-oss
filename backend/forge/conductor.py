@@ -131,6 +131,7 @@ def get_or_create_conductor() -> dict:
             prof.model = CONDUCTOR_DEFAULT_MODEL
         if rt_id and not prof.runtime_id:
             prof.runtime_id = rt_id
+        prof.is_system = True
 
         agent = db.query(Agent).filter(Agent.id == prof.id).first()
         if agent is None:
@@ -146,6 +147,25 @@ def get_or_create_conductor() -> dict:
                     prof.id, prof.model, "set" if rt_id else "none")
         return {"id": prof.id, "name": prof.name,
                 "model": prof.model, "runtime_bound": bool(rt_id)}
+
+
+def get_conductor_config() -> dict:
+    """Cadence config read off the Conductor's own profile.
+
+    `tick_seconds` drives the queue-tick interval; `report_time` /
+    `report_enabled` drive the daily report. Falls back to module
+    defaults if the Conductor profile isn't seeded yet.
+    """
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        if not prof:
+            return {"tick_seconds": TICK_INTERVAL_S,
+                    "report_time": "09:00", "report_enabled": True}
+        # Clamp the tick to a sane floor — a sub-10s tick would hammer the DB.
+        tick = max(10, int(prof.conductor_tick_seconds or TICK_INTERVAL_S))
+        return {"tick_seconds": tick,
+                "report_time": prof.conductor_report_time or "09:00",
+                "report_enabled": bool(prof.conductor_report_enabled)}
 
 
 # ── Picker ───────────────────────────────────────────────────────────────
