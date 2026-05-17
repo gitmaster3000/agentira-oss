@@ -191,6 +191,8 @@ export const api = {
         getStats: () => request('/forge/stats'),
         listAgents: (status) => request(`/forge/agents${status ? `?status=${status}` : ''}`),
         getAgent: (id) => request(`/forge/agents/${id}`),
+        // System Concierge agent — powers the floating chat.
+        getConcierge: () => request('/forge/concierge'),
         createAgent: (data) => request('/forge/agents', { method: 'POST', body: JSON.stringify(data) }),
         updateAgent: (id, data) => request(`/forge/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
         deleteAgent: (id) => request(`/forge/agents/${id}`, { method: 'DELETE' }),

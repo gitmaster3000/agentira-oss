@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Navbar } from '../../components/Navbar';
 import { ForgeSidebar } from '../../components/ForgeSidebar';
+import { FloatingChat } from '../../components/FloatingChat';
 
 export function ForgeLayout() {
     return (
@@ -15,6 +16,8 @@ export function ForgeLayout() {
                     <Outlet />
                 </main>
             </div>
+
+            <FloatingChat />
         </div>
     );
 }
