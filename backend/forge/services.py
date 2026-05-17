@@ -572,6 +572,8 @@ def _run_to_dict(r: Run) -> dict:
         "cost_usd": r.cost_usd,
         "error": r.error,
         "created_at": _iso(r.created_at),
+        # AP-112: editable prompt persisted at prepare time.
+        "initial_prompt": r.initial_prompt or "",
     }
 
 
@@ -2090,28 +2092,58 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
 
-def schedule_task_run(*, task_id: str, agent_id: str,
-                      extra_context: str = "") -> dict:
-    """Kick off a Run for a task with the chosen agent.
+def _build_task_prompt(task, extra_context: str = "") -> str:
+    """Compose the agent prompt from a task's title + description + DoD.
 
-    `extra_context` — optional free text appended to the run prompt
-    (AP-120 uses it to carry a user's follow-up message into a retry run).
-
-    Builds the prompt from the task's title + description + DoD items
-    (the work-defining content the human authored), then dispatches a
-    trigger of kind=run_step with the new run_id. The agent's
-    system_prompt rides on the trigger frame so the runtime sees it.
-
-    Assembles the run-context bundle (project repo_path + conventions_md,
-    agent's MCP toolkit, per-run token + env vars) and ships it on the
-    dispatch frame. Phase D wires the daemon to consume it; until then
-    the daemon ignores the extra fields and chat continues to work.
+    Pure function — takes a Task ORM object (loaded in an active session)
+    and returns the prompt with a `{run_id}` placeholder. The caller
+    substitutes the real run_id once the Run row exists.
     """
-    import json as _json
-    import uuid
-    from backend.models import Task, Project
-    from backend.forge.mcp_registry import build_mcp_config
+    task_title = task.title or ""
+    task_description = task.description or ""
+    dod_text = ""
+    if task.dod_items:
+        try:
+            items = json.loads(task.dod_items)
+            if isinstance(items, list) and items:
+                dod_text = "\n".join(
+                    f"- [{'x' if it.get('checked') else ' '}] {it.get('text','')}"
+                    for it in items if isinstance(it, dict)
+                )
+        except Exception:
+            pass
 
+    parts = [f"# Task: {task_title}"]
+    if task_description:
+        parts.append("\n## Description\n" + task_description)
+    if dod_text:
+        parts.append("\n## Definition of Done\n" + dod_text)
+    parts.append("\nWork on this task.")
+    if extra_context:
+        parts.append("\n## Follow-up from the user\n" + extra_context)
+    parts.append(
+        "\nWhen you finish, call mcp__agentira__finish_run with:\n"
+        "  - run_id: \"{run_id}\"\n"
+        "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
+        "  - summary: one paragraph describing what changed (or what's blocking).\n"
+        "Use \"blocked\" when you can't proceed without external input "
+        "(missing credentials, ambiguous spec, broken dependency)."
+    )
+    return "\n".join(parts)
+
+
+def prepare_task_run(*, task_id: str, agent_id: str,
+                     extra_context: str = "") -> dict:
+    """AP-112: build the prompt and create a READY Run — do NOT dispatch.
+
+    The run state machine: prepare → READY (prompt persisted, agent
+    assigned, waiting on the user) → dispatch → RUNNING. The user lands
+    on the run page, edits the prompt if they want, and clicks Start.
+
+    `extra_context` — optional free text folded into the prompt (AP-120
+    uses it to carry a user's follow-up message into a retry run).
+    """
+    from backend.models import Task
     with _session() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -2121,27 +2153,86 @@ def schedule_task_run(*, task_id: str, agent_id: str,
             return {"error": "Agent not found"}
         if not agent.runtime_id:
             return {"error": "Agent has no bound runtime"}
-
-        task_title = task.title or ""
-        task_description = task.description or ""
+        prompt_template = _build_task_prompt(task, extra_context)
         project_id = task.project_id
-        dod_text = ""
-        if task.dod_items:
-            try:
-                items = json.loads(task.dod_items)
-                if isinstance(items, list) and items:
-                    dod_text = "\n".join(
-                        f"- [{'x' if it.get('checked') else ' '}] {it.get('text','')}"
-                        for it in items if isinstance(it, dict)
-                    )
-            except Exception:
-                pass
+        model = agent.model or ""
+
+    run = create_run(
+        agent_id=agent_id,
+        task_id=task_id,
+        project_id=project_id,
+        trigger_event="task.scheduled",
+        model_used=model,
+    )
+    run_id = run["id"]
+    # Substitute the real run_id, persist the prompt for editing, and flip
+    # PENDING (the create_run default) → READY so the UI knows this run is
+    # waiting on the user, not on the system.
+    prompt = prompt_template.replace("{run_id}", run_id)
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if r:
+            r.initial_prompt = prompt
+            r.status = RunStatus.READY
+            db.commit()
+            db.refresh(r)
+            return _run_to_dict(r)
+    return run
+
+
+def dispatch_pending_run(*, run_id: str,
+                         prompt_override: str | None = None) -> dict:
+    """AP-112: dispatch a READY/PENDING run, optionally with an edited prompt.
+
+    Loads the Run, resolves the run-context bundle (repo, MCP, env, scope)
+    and dispatches a trigger of kind=run_step. The dispatched prompt is the
+    override if given, else the prompt stored on the Run at prepare time.
+    `dispatch_trigger` flips the run READY → RUNNING via `start_run`.
+    """
+    import json as _json
+    import uuid
+    from backend.models import Task, Project, Profile as _Profile
+    from backend.forge.mcp_registry import build_mcp_config
+
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        if run.status not in (RunStatus.READY, RunStatus.PENDING):
+            return {"error": f"Run is {run.status.value}; "
+                              "only READY/PENDING runs can be dispatched"}
+        agent = db.query(Agent).filter(Agent.id == run.agent_id).first()
+        if not agent:
+            return {"error": "Agent not found"}
+        if not agent.runtime_id:
+            return {"error": "Agent has no bound runtime"}
+
+        # Capture FKs as plain values — the ORM `run`/`agent` objects become
+        # detached after the session closes; later attribute access would
+        # raise DetachedInstanceError and surface as a 500.
+        task_id = run.task_id
+        project_id = run.project_id
+        agent_id = agent.id
+        task = db.get(Task, task_id) if task_id else None
+
+        # Persist the (possibly edited) prompt and pick what we dispatch.
+        if prompt_override is not None:
+            run.initial_prompt = prompt_override
+            db.commit()
+        prompt = run.initial_prompt
+        if not prompt:
+            # Defensive: prepare always sets it, but a run created by a
+            # legacy path may not have one.
+            if task:
+                prompt = _build_task_prompt(task).replace("{run_id}", run_id)
+                run.initial_prompt = prompt
+                db.commit()
+            else:
+                return {"error": "Run has no prompt and no task to derive one"}
 
         # cwd is a path TEMPLATE (with `~` unexpanded) — backend can't
         # expand it because backend lives in docker (`~` = `/root`) but
-        # the daemon runs on the host. Daemon receives the template,
-        # expands against its host HOME, ensures the dir, and (when a
-        # worktree source is set) creates the git worktree there.
+        # the daemon runs on the host.
         project = db.get(Project, project_id) if project_id else None
         conventions_md = (project.conventions_md or "") if project else ""
         if project:
@@ -2165,63 +2256,19 @@ def schedule_task_run(*, task_id: str, agent_id: str,
             except Exception:
                 pass
 
-    # Compose the prompt outside the session — clean, deterministic.
-    parts = [f"# Task: {task_title}"]
-    if task_description:
-        parts.append("\n## Description\n" + task_description)
-    if dod_text:
-        parts.append("\n## Definition of Done\n" + dod_text)
-    parts.append("\nWork on this task.")
-    if extra_context:
-        parts.append("\n## Follow-up from the user\n" + extra_context)
-    # Stash run_id placeholder; we substitute the real one once it's created
-    # (the prompt is composed before create_run runs). The literal {run_id}
-    # is replaced below.
-    parts.append(
-        "\nWhen you finish, call mcp__agentira__finish_run with:\n"
-        "  - run_id: \"{run_id}\"\n"
-        "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
-        "  - summary: one paragraph describing what changed (or what's blocking).\n"
-        "Use \"blocked\" when you can't proceed without external input "
-        "(missing credentials, ambiguous spec, broken dependency)."
-    )
-    prompt_template = "\n".join(parts)
-
-    # Create the Run row first; dispatch_trigger will flip it to RUNNING.
-    run = create_run(
-        agent_id=agent_id,
-        task_id=task_id,
-        project_id=project_id,
-        trigger_event="task.scheduled",
-        model_used=agent.model or "",
-    )
-    run_id = run["id"]
-
-    # Substitute the real run_id into the finish_run instructions now that
-    # the run row exists.
-    prompt = prompt_template.replace("{run_id}", run_id)
-
-    # Build the MCP config (auto servers + agent's picks; memory scoped per
-    # (agent, project)). Serialize to JSON so it rides on the WS frame as a
-    # single string — the daemon writes it to a tmpfile for --mcp-config.
-    # Pull the agent's own api_key so build_mcp_config can bake it into
-    # the agentira MCP entry — tool calls authenticate as this agent.
-    from backend.models import Profile as _Profile
-    with _session() as db2:
-        prof = db2.get(_Profile, agent.profile_id) if agent.profile_id else None
+        prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
         agent_api_key = prof.api_key if prof else None
         agent_mcp_strict = bool(prof.mcp_strict) if prof else False
         agent_mcp_override = prof.mcp_config_override if prof else None
         agent_mcp_disabled = (
             _json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None
         )
-        # Pull runtime capabilities inside the same session — `agent` was
-        # fetched in a different (now-closed) session and lazy-loading
-        # `agent.runtime` would raise DetachedInstanceError.
         rt_for_caps = (
-            db2.get(ForgeRuntime, agent.runtime_id) if agent.runtime_id else None
+            db.get(ForgeRuntime, agent.runtime_id) if agent.runtime_id else None
         )
         rt_caps_json = rt_for_caps.capabilities if rt_for_caps else None
+        agent_home = resolve_agent_home(agent)
+
     mcp_config = build_mcp_config(
         agent_mcp_servers=agent_mcp_servers,
         agent_id=agent_id,
@@ -2229,20 +2276,17 @@ def schedule_task_run(*, task_id: str, agent_id: str,
         agent_api_key=agent_api_key,
         mcp_config_override=agent_mcp_override,
         disabled_servers=agent_mcp_disabled,
-        agent_home_path=resolve_agent_home(agent),
+        agent_home_path=agent_home,
         repo_path=repo_path or None,
     )
     mcp_config_json = _json.dumps(mcp_config)
 
-    # Per-run token — used by finish_run (Phase E) to scope the agent's
-    # outcome to this specific run. Generated here, rides on the frame as
-    # AGENTIRA_RUN_TOKEN. Not persisted yet; tighten with a proper token
-    # store when per-run scoping moves out of "trust the agent" mode.
+    # Per-run token — used by finish_run to scope the agent's outcome to
+    # this specific run. Rides on the frame as AGENTIRA_RUN_TOKEN.
     run_token = uuid.uuid4().hex
-
     env_extra = {
         "AGENTIRA_RUN_ID": run_id,
-        "AGENTIRA_TASK_ID": task_id,
+        "AGENTIRA_TASK_ID": task_id or "",
         "AGENTIRA_PROJECT_ID": project_id or "",
         "AGENTIRA_AGENT_ID": agent_id,
         "AGENTIRA_RUN_TOKEN": run_token,
@@ -2255,8 +2299,6 @@ def schedule_task_run(*, task_id: str, agent_id: str,
     resume_id = ""
     if "resume" in caps:
         resume_id = get_runtime_session(agent_id=agent_id, scope_key=scope)
-    # No history-rebuild for run_step — task prompts are self-contained and
-    # a run that resumes mid-stream is the resume path.
 
     result = dispatch_trigger(
         agent_id, prompt,
@@ -2274,6 +2316,39 @@ def schedule_task_run(*, task_id: str, agent_id: str,
         scope_key=scope,
     )
     return {**result, "run_id": run_id, "task_id": task_id}
+
+
+def discard_pending_run(*, run_id: str) -> dict:
+    """AP-112: delete a never-dispatched READY run.
+
+    User clicked Run → landed on the prompt-edit screen → decided not to
+    start. Only READY/PENDING runs are discardable — RUNNING+ needs cancel.
+    """
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "Run not found"}
+        if r.status not in (RunStatus.READY, RunStatus.PENDING):
+            return {"error": f"Run is {r.status.value}; cannot discard"}
+        db.delete(r)
+        db.commit()
+    return {"ok": True}
+
+
+def schedule_task_run(*, task_id: str, agent_id: str,
+                      extra_context: str = "") -> dict:
+    """Prepare + immediately dispatch a Run — the auto-start path.
+
+    AP-112 split run start into prepare (build prompt, READY) + dispatch
+    (start) so the user can review the prompt first. This wrapper keeps
+    the no-edit auto-start behaviour for non-interactive callers: the
+    Conductor, webhooks, and the AP-120 failed-run retry.
+    """
+    prepared = prepare_task_run(task_id=task_id, agent_id=agent_id,
+                                extra_context=extra_context)
+    if prepared.get("error"):
+        return prepared
+    return dispatch_pending_run(run_id=prepared["id"])
 
 
 def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None") -> dict:

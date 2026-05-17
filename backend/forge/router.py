@@ -365,6 +365,47 @@ async def schedule_task_run(task_id: str, body: ScheduleTaskRunRequest):
     return result
 
 
+@router.post("/tasks/{task_id}/prepare-run", status_code=201)
+def prepare_task_run(task_id: str, body: ScheduleTaskRunRequest):
+    """AP-112: build the prompt, create a READY Run, do NOT dispatch.
+
+    The client navigates to /forge/runs/<id>, lets the user edit the
+    prompt, then calls POST /runs/<id>/dispatch to start.
+    """
+    result = services.prepare_task_run(task_id=task_id, agent_id=body.agent_id)
+    # NB: `_run_to_dict` always includes "error": None for clean runs, so
+    # check the value (truthy = real error string), not key membership.
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+class DispatchRunRequest(BaseModel):
+    prompt: Optional[str] = None
+
+
+@router.post("/runs/{run_id}/dispatch")
+async def dispatch_pending_run(run_id: str, body: Optional[DispatchRunRequest] = None):
+    """AP-112: start a READY/PENDING run, optionally with an edited prompt.
+
+    `async def` is mandatory — the service schedules the WS dispatch
+    coroutine, which needs a running loop in the current thread."""
+    override = body.prompt if body else None
+    result = services.dispatch_pending_run(run_id=run_id, prompt_override=override)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/runs/{run_id}/discard")
+def discard_pending_run(run_id: str):
+    """AP-112: delete a never-dispatched READY run."""
+    result = services.discard_pending_run(run_id=run_id)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
 @router.get("/tasks/{task_id}/runs")
 def list_task_runs(task_id: str):
     return services.list_runs_for_task(task_id)
