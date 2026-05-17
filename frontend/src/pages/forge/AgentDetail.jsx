@@ -1490,7 +1490,12 @@ function ConfigTab({ agent, onSaved }) {
         mcp_strict: !!agent.mcp_strict,
         mcp_config_override: agent.mcp_config_override || '',
         home_path: agent.home_path || '',
+        // Conductor cadence config (only rendered for the Conductor).
+        conductor_tick_seconds: agent.conductor_tick_seconds ?? 60,
+        conductor_report_time: agent.conductor_report_time || '09:00',
+        conductor_report_enabled: agent.conductor_report_enabled ?? true,
     });
+    const isConductor = agent.is_system && agent.name === 'Conductor';
     const [runtimes, setRuntimes] = useState([]);
     const [projects, setProjects] = useState([]);
     const [mcpServers, setMcpServers] = useState([]); // full registry incl. auto
@@ -1913,6 +1918,48 @@ function ConfigTab({ agent, onSaved }) {
                     />
                 </div>
             </section>
+
+            {/* Conductor cadence — only for the Conductor system agent */}
+            {isConductor && (
+                <section className="card space-y-4">
+                    <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Conductor Cadence
+                        </h3>
+                        <InfoTip text="How often the Conductor surveys the workspace and dispatches todo work (queue tick), and when it compiles the daily digest/report. Changes apply without a backend restart." />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Queue-tick interval (seconds)</label>
+                            <input
+                                type="number" min="10" className="input"
+                                value={form.conductor_tick_seconds}
+                                onChange={(e) => setForm({ ...form, conductor_tick_seconds: Number(e.target.value) })}
+                            />
+                            <p className="text-xs text-text-tertiary mt-1">
+                                Minimum 10s. How often todo work is auto-dispatched to idle agents.
+                            </p>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Daily report time (UTC, HH:MM)</label>
+                            <input
+                                type="time" className="input"
+                                value={form.conductor_report_time}
+                                onChange={(e) => setForm({ ...form, conductor_report_time: e.target.value })}
+                            />
+                        </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={form.conductor_report_enabled}
+                            onChange={(e) => setForm({ ...form, conductor_report_enabled: e.target.checked })}
+                        />
+                        Compile a daily digest / report
+                    </label>
+                </section>
+            )}
 
             {/* Schedule — placeholder */}
             <section className="card space-y-2 opacity-60">
