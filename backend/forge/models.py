@@ -36,6 +36,11 @@ class MessageRole(str, enum.Enum):
 
 
 class RunStatus(str, enum.Enum):
+    # AP-112: READY = the Run is prepared (prompt persisted, agent assigned)
+    # but the user hasn't pressed Start yet. Distinct from PENDING (queued
+    # by the system, about to dispatch automatically) so the UI can show a
+    # prompt-editor card without overloading PENDING's meaning.
+    READY     = "ready"
     PENDING   = "pending"
     RUNNING   = "running"
     PAUSED    = "paused"
@@ -176,6 +181,10 @@ class Run(Base):
     # or when nothing changed.
     diff_stat: Mapped[str | None] = mapped_column(Text, nullable=True)
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AP-112: prompt persisted at prepare time so the user can edit it on
+    # the RunDetail page before clicking Start. Auto-dispatched runs also
+    # store it so the prompt is grep-able after the fact.
+    initial_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

@@ -332,6 +332,7 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_runs", "summary", "TEXT")
             added |= _ensure_column(conn, "forge_runs", "diff_stat", "TEXT")
             added |= _ensure_column(conn, "forge_runs", "diff", "TEXT")
+            added |= _ensure_column(conn, "forge_runs", "initial_prompt", "TEXT")
             if added:
                 conn.commit()
 
