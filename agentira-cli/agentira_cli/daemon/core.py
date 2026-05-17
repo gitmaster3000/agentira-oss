@@ -489,6 +489,15 @@ class AgentiraDaemon:
             success = False
             error = "Cancelled by user."
 
+        # If the run was PAUSED, the backend already set status=PAUSED and
+        # will re-dispatch on resume (fresh process, claude --resume). Do
+        # NOT post a completion — that would flip the run to FAILED and
+        # lose the pause. The paused subprocess was terminated cleanly.
+        if entry and entry.get("paused"):
+            logger.info("paused trace=%s — skipping trigger-complete "
+                        "(run stays PAUSED, resumable via --resume)", trace_id)
+            return
+
         # Capture git diff of the workdir if it's a repo — best-effort,
         # never fails the run on its own.
         diff_stat, diff_body = "", ""
@@ -515,10 +524,22 @@ class AgentiraDaemon:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
 
     def _signal_proc(self, frame: dict, signal_kind: str) -> None:
-        """Send SIGSTOP (pause) or SIGCONT (resume) to the in-flight
-        subprocess. CLI runtimes only — http_gateway has no proc to
-        signal. Best-effort; long pauses can hit LLM API timeouts."""
-        import signal as _signal
+        """Pause/resume an in-flight CLI run.
+
+        Pause does NOT freeze the process. SIGSTOP on a claude-code
+        subprocess corrupts its in-flight LLM + MCP streaming sockets —
+        the remote side drops the idle connection and, on resume, the
+        run dies with 'subprocess exited with code 1'. That was the
+        recurring run-failure bug.
+
+        Instead, pause terminates the subprocess cleanly (SIGTERM). The
+        claude session_id is captured during the run, so the backend
+        resumes by re-dispatching a fresh process with `claude --resume`.
+        Resume here is therefore a no-op — there is no stopped process
+        to continue; a new dispatch arrives on the WS instead.
+
+        CLI runtimes only — http_gateway has no proc to signal.
+        """
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "")
         with self._inflight_lock:
@@ -526,17 +547,24 @@ class AgentiraDaemon:
                 trace_id = self._run_to_trace.get(run_id, "")
             entry = self._inflight.get(trace_id)
             proc = entry.get("proc") if entry else None
-        if proc is None:
-            logger.info("%s for trace=%s run=%s — no live proc to signal",
-                        signal_kind, trace_id or "-", run_id or "-")
+            if signal_kind == "pause" and entry is not None:
+                entry["paused"] = True
+
+        if signal_kind == "resume":
+            logger.info("resume trace=%s — run re-dispatched with --resume",
+                        trace_id or "-")
             return
-        sig = _signal.SIGSTOP if signal_kind == "pause" else _signal.SIGCONT
+
+        if proc is None:
+            logger.info("pause for trace=%s run=%s — no live proc",
+                        trace_id or "-", run_id or "-")
+            return
         try:
-            proc.send_signal(sig)
-            logger.info("%s trace=%s — sent %s to pid %s",
-                        signal_kind, trace_id, sig.name, proc.pid)
+            proc.terminate()  # SIGTERM — graceful stop, NOT SIGSTOP
+            logger.info("pause trace=%s — terminated pid %s "
+                        "(resumable via --resume)", trace_id, proc.pid)
         except (ProcessLookupError, AttributeError, Exception) as exc:
-            logger.warning("%s failed for trace=%s: %s", signal_kind, trace_id, exc)
+            logger.warning("pause failed for trace=%s: %s", trace_id, exc)
 
     def _cancel(self, frame: dict) -> None:
         """Handle a cancel frame from the WS hub.
