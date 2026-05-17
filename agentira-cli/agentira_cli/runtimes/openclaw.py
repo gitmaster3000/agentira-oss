@@ -182,3 +182,61 @@ def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") 
         logger.debug("post-add configuration of runner failed (non-fatal): %s", exc)
 
     return True
+
+
+# Names of the MCP servers Agentira registers into OpenClaw. Kept here so
+# `unset` / re-register operations target exactly Agentira's entries and
+# leave the user's own MCP servers alone.
+_AGENTIRA_MCP_NAMES = ("agentira", "memory", "agentira-project")
+
+
+def register_agentira_mcps(mcp_config: dict, *, binary_path: str = "openclaw") -> dict:
+    """Register Agentira's MCP servers into OpenClaw's config (AP-103).
+
+    OpenClaw can't take per-call MCP config on the OpenAI-compatible
+    `/v1/chat/completions` endpoint, so MCP must be registered into
+    OpenClaw's own config. `openclaw mcp set <name> <json>` is the
+    supported mutation path (it rewrites openclaw.json with a backup).
+
+    `mcp_config` is the `{"mcpServers": {name: {...}}}` dict produced by
+    `backend.forge.mcp_registry.build_mcp_config` — it is built
+    PER-AGENT (the `agentira` server's Bearer token is that agent's own
+    api_key, `memory`'s MEMORY_FILE_PATH is that agent's per-project
+    path). Each entry is written verbatim — OpenClaw accepts both stdio
+    (`command`/`args`/`env`) and http (`type`/`url`/`headers`) shapes.
+
+    Per-agent identity is preserved because the daemon calls this
+    immediately before every OpenClaw dispatch (see
+    `core.py::_execute` gateway branch): the global MCP slot is
+    overwritten with THIS agent's config each time, so the runner picks
+    up the right token + memory path for the dispatch it's about to
+    serve. Agentira owns the agent layer; the single `agentira-runner`
+    is just the engine placeholder.
+
+    Returns {"registered": [...], "failed": [...]}.
+    """
+    import subprocess
+
+    servers = (mcp_config or {}).get("mcpServers") or {}
+    registered: list[str] = []
+    failed: list[dict] = []
+
+    for name, entry in servers.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            result = subprocess.run(
+                [binary_path, "mcp", "set", name, json.dumps(entry)],
+                capture_output=True, text=True, timeout=15,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            failed.append({"name": name, "error": str(exc)})
+            continue
+        if result.returncode == 0:
+            registered.append(name)
+            logger.info("Registered MCP server '%s' into OpenClaw config", name)
+        else:
+            failed.append({"name": name, "error": result.stderr.strip()})
+            logger.warning("openclaw mcp set %s failed: %s", name, result.stderr.strip())
+
+    return {"registered": registered, "failed": failed}
