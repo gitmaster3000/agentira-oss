@@ -583,6 +583,33 @@ def get_project_digest(project_id: str, since: str = "24h"):
     return result
 
 
+@router.get("/projects/{project_id}/activity")
+def get_project_activity(project_id: str, since: str = "24h"):
+    """AP-74: live activity summary for a project — the run digest plus
+    the Conductor's view of this project (its conductor-enabled agents,
+    their in-flight load, and each one's next task). Polled by the
+    project summary panel for dynamic, current state."""
+    from backend.forge.digest import generate_digest
+    from backend.forge import conductor as _conductor
+    digest = generate_digest(project_id=project_id, since=since)
+    if isinstance(digest, dict) and digest.get("error") == "project_not_found":
+        raise HTTPException(404, "Project not found")
+    survey = _conductor.survey_workspace()
+    agents = [a for a in survey.get("agents", [])
+              if a.get("project_id") == project_id]
+    try:
+        cfg = _conductor.get_conductor_config()
+    except Exception:
+        cfg = {}
+    return {
+        "digest": digest,
+        "conductor": {
+            "agents": agents,
+            "tick_seconds": cfg.get("tick_seconds"),
+        },
+    }
+
+
 # ── Message endpoints ───────────────────────────────────────────────────
 
 @router.get("/agents/{agent_id}/messages")
