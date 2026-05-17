@@ -530,13 +530,16 @@ def get_stats():
 
 @router.get("/conductor")
 def conductor_status():
-    """Conductor state for the management UI: identity, last tick result,
-    and a live survey of conductor-enabled agents + their next task."""
+    """Conductor state for the management UI: identity, cadence config,
+    last tick + last report results, and a live survey of conductor-
+    enabled agents + their next task."""
     from backend.forge import conductor as _conductor
     return {
         "conductor": _conductor.get_or_create_conductor(),
         "tick_interval_s": _conductor.TICK_INTERVAL_S,
+        "config": _conductor.get_conductor_config(),
         "last_tick": _conductor.get_last_tick(),
+        "last_report": _conductor.get_last_report(),
         "survey": _conductor.survey_workspace(),
     }
 
@@ -546,6 +549,14 @@ def conductor_tick_now():
     """Run one Conductor tick immediately (manual nudge from the UI)."""
     from backend.forge import conductor as _conductor
     return _conductor.run_tick()
+
+
+@router.post("/conductor/report")
+def conductor_report_now():
+    """Compile + post the Conductor's daily report immediately (manual
+    nudge from the UI). Dispatches one LLM turn to the Conductor agent."""
+    from backend.forge import conductor as _conductor
+    return _conductor.run_daily_report()
 
 
 @router.get("/projects/{project_id}/digest")

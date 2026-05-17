@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
 from backend.db import SessionLocal
-from backend.models import Profile, Task, Status, Role
+from backend.models import Profile, Project, Task, Status, Role
 from backend.forge.models import Agent, Run, RunStatus, AgentMessage, ForgeRuntime
 
 logger = logging.getLogger("agentira.forge.conductor")
@@ -373,3 +373,124 @@ def run_tick() -> dict:
     _LAST_TICK = {"dispatched": dispatched, "skipped": skipped,
                   "reconciled": stale}
     return _LAST_TICK
+
+
+# ── Daily report — the Conductor's one scheduled LLM turn ────────────────
+#
+# The queue tick (above) is deterministic and token-free — that's by
+# design. The judgment work — reviewing progress, naming blockers,
+# recommending priorities — is where an LLM earns its tokens. So the
+# Conductor takes exactly one LLM turn a day: facts are gathered by
+# scripts (free), then handed to the Conductor agent to write the report.
+
+# Most recent daily-report result — observability for the status endpoint.
+_LAST_REPORT: dict | None = None
+
+
+def get_last_report() -> dict | None:
+    return _LAST_REPORT
+
+
+def gather_report_facts() -> dict:
+    """Deterministic, token-free workspace snapshot for the daily report:
+    a per-project 24h digest plus the agent survey. No LLM, no mutation."""
+    from backend.forge.digest import generate_digest
+    with SessionLocal() as db:
+        projects = [(p.id, p.name) for p in db.query(Project).all()]
+
+    project_facts: list[dict] = []
+    for pid, pname in projects:
+        d = generate_digest(project_id=pid, since="24h")
+        if d.get("error"):
+            continue
+        c = d.get("counts", {})
+        # Skip silent projects — keeps the report focused on real activity.
+        if not any(c.values()):
+            continue
+        project_facts.append({
+            "project": pname,
+            "counts": c,
+            "stats": d.get("stats", {}),
+        })
+    return {"projects": project_facts, "survey": survey_workspace()}
+
+
+def _compose_report_prompt(facts: dict) -> str:
+    """Render the gathered facts into the Conductor's report prompt."""
+    import json as _json
+    lines = ["DAILY REPORT.", ""]
+    projects = facts.get("projects") or []
+    if projects:
+        lines.append("## Per-project activity (last 24h)")
+        for p in projects:
+            c = p["counts"]
+            lines.append(
+                f"- {p['project']}: {c.get('done', 0)} done, "
+                f"{c.get('blocked', 0)} blocked, "
+                f"{c.get('needs_input', 0)} needs-input, "
+                f"{c.get('failed', 0)} failed, "
+                f"{c.get('in_flight', 0)} in-flight "
+                f"(${p['stats'].get('cost_usd', 0)})"
+            )
+    else:
+        lines.append("## Per-project activity (last 24h)\n- No run activity.")
+    agents = (facts.get("survey") or {}).get("agents") or []
+    lines.append("")
+    lines.append("## Worker agents")
+    if agents:
+        for a in agents:
+            nxt = a.get("next_task")
+            lines.append(
+                f"- {a['name']}: {a['in_flight']}/{a['capacity']} in-flight; "
+                f"next: {nxt['title'] if nxt else 'nothing queued'}"
+            )
+    else:
+        lines.append("- No conductor-enabled worker agents.")
+    lines.append("")
+    lines.append(
+        "Write the daily report for the workspace owner. Be concise:\n"
+        "1. What got done overnight (the wins).\n"
+        "2. What's blocked or needs input — and what's needed to unblock.\n"
+        "3. Anything failing or stuck that needs attention.\n"
+        "4. 2-3 recommended priorities for today.\n"
+        "Lead with the most important thing. No preamble."
+    )
+    return "\n".join(lines)
+
+
+def run_daily_report() -> dict:
+    """Compile + post the Conductor's daily report.
+
+    Facts are gathered token-free, then handed to the Conductor agent as
+    a single LLM turn. The report lands in the Conductor's chat thread.
+    Skips cleanly when the Conductor has no runtime or the report is
+    disabled in config.
+    """
+    global _LAST_REPORT
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        if not prof:
+            _LAST_REPORT = {"skipped": "no_conductor"}
+            return _LAST_REPORT
+        if not prof.conductor_report_enabled:
+            _LAST_REPORT = {"skipped": "report_disabled"}
+            return _LAST_REPORT
+        if not prof.runtime_id:
+            _LAST_REPORT = {"skipped": "no_runtime"}
+            logger.info("Daily report skipped — Conductor has no runtime.")
+            return _LAST_REPORT
+        conductor_id = prof.id
+
+    facts = gather_report_facts()
+    prompt = _compose_report_prompt(facts)
+    try:
+        from backend.forge import services
+        services.send_runtime_message(
+            conductor_id, content=prompt, scope_key="chat:default")
+        _LAST_REPORT = {"ok": True, "at": datetime.now(timezone.utc).isoformat(),
+                        "projects": len(facts.get("projects") or [])}
+        logger.info("Conductor daily report dispatched.")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Daily report dispatch failed: %s", exc)
+        _LAST_REPORT = {"error": str(exc)}
+    return _LAST_REPORT
