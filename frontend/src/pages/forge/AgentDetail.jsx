@@ -778,7 +778,17 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     const _lastMsg = (messages || [])[messages.length - 1];
     const _lastIsUser = _lastMsg && _lastMsg.role === 'user';
     const _runRunning = scopeActiveRun && scopeActiveRun.status === 'running';
-    const agentThinking = _lastIsUser || _runRunning;
+    // A user message with no reply means "thinking" — but only for a
+    // bounded window. A dispatch that died without ever reporting back
+    // (daemon crash, backend restart losing the in-flight trace) would
+    // otherwise leave the spinner up indefinitely. After 10 min with no
+    // reply and no RUNNING run, the turn is dead — stop pretending.
+    const _STALE_THINKING_MS = 10 * 60 * 1000;
+    const _userTurnAgeMs = _lastIsUser && _lastMsg?.created_at
+        ? nowTick - new Date(_lastMsg.created_at).getTime()
+        : 0;
+    const _userTurnLive = _lastIsUser && _userTurnAgeMs < _STALE_THINKING_MS;
+    const agentThinking = _userTurnLive || _runRunning;
     // Elapsed seconds since "thinking" started. Start time is the last
     // user message's created_at (chat) or the run's started_at (task).
     const _thinkStartMs = (() => {
