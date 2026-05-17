@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, X, Send, Loader, GripVertical } from 'lucide-react';
+import { Sparkles, X, Send, Loader, GripVertical, Ban } from 'lucide-react';
 import { api } from '../api';
 
 // Each agent's floating-chat thread is its own workspace-wide conversation.
@@ -7,15 +7,17 @@ const CHAT_SCOPE = 'chat:default';
 const POLL_MS = 3000;
 const PANEL_W = 380;
 const PANEL_H = 520;
+const BTN = 52;                  // collapsed-button diameter, px
 const POS_KEY = 'agentira.floatingChat.pos';
+const BTN_POS_KEY = 'agentira.floatingChat.btnPos';
 
 /**
  * FloatingChat — a movable, multi-agent chat dock.
  *
- * A floating button opens a chat panel. The panel is draggable (by its
- * header) and remembers where you put it. An agent picker lets you talk
- * to the Agentira Guide (default), the Conductor, or any other agent in
- * the workspace. Mounted on both Studio and Forge layouts.
+ * Collapsed, it's a small draggable icon button (so it never has to sit
+ * on top of page content — drag it anywhere). Open, it's a chat panel,
+ * also draggable, with an agent picker (Agentira Guide / Conductor /
+ * any workspace agent) and a Stop control. Both remember their position.
  */
 export function FloatingChat() {
     const [open, setOpen] = useState(false);
@@ -26,51 +28,58 @@ export function FloatingChat() {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
-    const [pos, setPos] = useState(null);   // {x, y} top-left, px
+    const [pos, setPos] = useState(null);      // panel top-left, px
+    const [btnPos, setBtnPos] = useState(null); // collapsed-button top-left, px
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
-    const dragRef = useRef(null);            // {dx, dy} while dragging
+    const dragRef = useRef(null);
+    const btnDragRef = useRef(null);
 
-    // ── position: load saved / default to bottom-right ──────────────────
+    // ── load saved positions / default to bottom-right ──────────────────
     useEffect(() => {
-        const clamp = (p) => ({
-            x: Math.min(Math.max(8, p.x), window.innerWidth - PANEL_W - 8),
-            y: Math.min(Math.max(8, p.y), window.innerHeight - PANEL_H - 8),
-        });
-        try {
-            const saved = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
-            if (saved && typeof saved.x === 'number') {
-                setPos(clamp(saved));
-                return;
-            }
-        } catch { /* ignore */ }
-        setPos(clamp({
-            x: window.innerWidth - PANEL_W - 20,
-            y: window.innerHeight - PANEL_H - 20,
-        }));
+        const load = (key, w, h, margin) => {
+            const clamp = (p) => ({
+                x: Math.min(Math.max(8, p.x), window.innerWidth - w - 8),
+                y: Math.min(Math.max(8, p.y), window.innerHeight - h - 8),
+            });
+            try {
+                const saved = JSON.parse(localStorage.getItem(key) || 'null');
+                if (saved && typeof saved.x === 'number') return clamp(saved);
+            } catch { /* ignore */ }
+            return clamp({ x: window.innerWidth - w - margin,
+                           y: window.innerHeight - h - margin });
+        };
+        setPos(load(POS_KEY, PANEL_W, PANEL_H, 20));
+        setBtnPos(load(BTN_POS_KEY, BTN, BTN, 20));
     }, []);
 
-    const onDragStart = (e) => {
-        if (!pos) return;
-        dragRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+    // Shared drag wiring. `onClick` (when given) fires only on a no-move
+    // mouseup — so the collapsed button can be both draggable AND clickable.
+    const startDrag = (e, cur, setter, w, h, key, onClick) => {
+        if (!cur) return;
+        const origin = { x: e.clientX, y: e.clientY };
+        const off = { dx: e.clientX - cur.x, dy: e.clientY - cur.y, moved: false };
         const onMove = (ev) => {
-            const d = dragRef.current;
-            if (!d) return;
-            setPos({
-                x: Math.min(Math.max(8, ev.clientX - d.dx),
-                            window.innerWidth - PANEL_W - 8),
-                y: Math.min(Math.max(8, ev.clientY - d.dy),
-                            window.innerHeight - PANEL_H - 8),
+            if (Math.abs(ev.clientX - origin.x)
+                + Math.abs(ev.clientY - origin.y) > 4) off.moved = true;
+            setter({
+                x: Math.min(Math.max(8, ev.clientX - off.dx),
+                            window.innerWidth - w - 8),
+                y: Math.min(Math.max(8, ev.clientY - off.dy),
+                            window.innerHeight - h - 8),
             });
         };
         const onUp = () => {
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
-            dragRef.current = null;
-            setPos((p) => {
-                if (p) localStorage.setItem(POS_KEY, JSON.stringify(p));
-                return p;
-            });
+            if (off.moved) {
+                setter((p) => {
+                    if (p) localStorage.setItem(key, JSON.stringify(p));
+                    return p;
+                });
+            } else if (onClick) {
+                onClick();
+            }
         };
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
@@ -154,25 +163,37 @@ export function FloatingChat() {
         }
     };
 
+    const stop = () => {
+        if (!selectedId) return;
+        // Optimistic terminal message so the indicator clears immediately;
+        // the backend cancel races the in-flight dispatch.
+        setMessages((prev) => [...prev, {
+            id: `local-stop-${Date.now()}`, role: 'system',
+            content: '⏹ Stopped.', created_at: new Date().toISOString(),
+        }]);
+        api.forge.stopChat(selectedId, CHAT_SCOPE)
+            .catch((err) => console.error('Stop failed:', err));
+    };
+
     // "Thinking" = the last message is the user's, with no reply yet —
-    // but capped at 10 min. A dispatch that died without ever reporting
-    // back (daemon offline, backend restart) would otherwise spin the
-    // indicator forever. Re-evaluated each 3s poll, so it self-clears.
+    // capped at 10 min so a dead dispatch can't spin the indicator forever.
     const _last = messages[messages.length - 1];
     const lastIsUser = !!_last && _last.role === 'user'
         && _last.created_at
         && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
     const selectedAgent = agents.find((a) => a.id === selectedId);
 
+    // ── collapsed: a small, draggable icon button ───────────────────────
     if (!open) {
         return (
             <button
-                onClick={() => setOpen(true)}
-                className="fixed bottom-5 right-5 z-50 flex items-center gap-2 px-4 py-3 rounded-full bg-accent-primary text-white shadow-lg hover:brightness-110 transition-all"
-                title="Open agent chat"
+                onMouseDown={(e) => startDrag(e, btnPos, setBtnPos, BTN, BTN,
+                                              BTN_POS_KEY, () => setOpen(true))}
+                className="fixed z-50 flex items-center justify-center rounded-full bg-accent-primary text-white shadow-lg hover:brightness-110 cursor-pointer"
+                style={{ left: btnPos?.x, top: btnPos?.y, width: BTN, height: BTN }}
+                title="Ask Agentira — click to open, drag to move"
             >
                 <Sparkles className="w-5 h-5" />
-                <span className="text-sm font-medium">Ask Agentira</span>
             </button>
         );
     }
@@ -189,7 +210,7 @@ export function FloatingChat() {
         >
             {/* Header — drag handle */}
             <div
-                onMouseDown={onDragStart}
+                onMouseDown={(e) => startDrag(e, pos, setPos, PANEL_W, PANEL_H, POS_KEY)}
                 className="flex items-center gap-2 px-3 py-2.5 border-b border-border-subtle cursor-move select-none"
             >
                 <GripVertical className="w-4 h-4 text-text-tertiary flex-shrink-0" />
@@ -263,14 +284,25 @@ export function FloatingChat() {
                         disabled={unavailable || !selectedId}
                         className="flex-1 resize-none bg-bg-hover border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-primary disabled:opacity-50 max-h-28"
                     />
-                    <button
-                        onClick={send}
-                        disabled={!input.trim() || sending || unavailable || !selectedId}
-                        className="p-2 rounded-lg bg-accent-primary text-white disabled:opacity-40 hover:brightness-110"
-                        title="Send"
-                    >
-                        <Send className="w-4 h-4" />
-                    </button>
+                    {/* Stop while the agent is working, Send otherwise. */}
+                    {lastIsUser ? (
+                        <button
+                            onClick={stop}
+                            className="p-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25"
+                            title="Stop"
+                        >
+                            <Ban className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <button
+                            onClick={send}
+                            disabled={!input.trim() || sending || unavailable || !selectedId}
+                            className="p-2 rounded-lg bg-accent-primary text-white disabled:opacity-40 hover:brightness-110"
+                            title="Send"
+                        >
+                            <Send className="w-4 h-4" />
+                        </button>
+                    )}
                 </div>
             </div>
         </div>
