@@ -270,6 +270,46 @@ def test_complete_trigger_does_not_clobber_agent_set_outcome(test_db):
     assert forge_services.get_run(rid)["summary"] == "missing creds"
 
 
+# ── AP-108: agent verdict outranks process exit code ───────────────────
+
+def test_nonzero_exit_after_finish_run_does_not_fail_the_run(test_db):
+    """The agent called finish_run(succeeded), then the subprocess exited
+    non-zero (e.g. SIGTERM from a pause). The run must stay COMPLETED —
+    the agent's verdict is authoritative — not flip to FAILED."""
+    rid = _make_run(test_db)
+    forge_services.finish_run(rid, outcome="succeeded",
+                               summary="Implemented the service.")
+    forge_services.complete_trigger(
+        agent_id="any", trace_id="t", run_id=rid,
+        success=False, error="subprocess exited with code 1",
+    )
+    run = forge_services.get_run(rid)
+    assert run["status"] == "completed", run["status"]
+    assert run["outcome"] == "succeeded"
+    assert run["summary"] == "Implemented the service."
+    # The misleading "execution failed" message must NOT be posted.
+    db = test_db()
+    sysmsgs = (db.query(AgentMessage)
+               .filter(AgentMessage.run_id == rid,
+                       AgentMessage.role == MessageRole.SYSTEM)
+               .all())
+    db.close()
+    assert not any("execution failed" in m.content for m in sysmsgs)
+
+
+def test_nonzero_exit_with_no_agent_outcome_still_fails(test_db):
+    """No finish_run call → the process exit is the only signal we have,
+    so a non-zero exit is a genuine failure."""
+    rid = _make_run(test_db)
+    forge_services.complete_trigger(
+        agent_id="any", trace_id="t", run_id=rid,
+        success=False, error="subprocess exited with code 1",
+    )
+    run = forge_services.get_run(rid)
+    assert run["status"] == "failed"
+    assert run["outcome"] == "failed"
+
+
 # ── Prompt template ──────────────────────────────────────────────────
 
 class _FakeHub:

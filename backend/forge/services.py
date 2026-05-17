@@ -2709,12 +2709,29 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+
+    # AP-108: the agent's explicit finish_run verdict outranks the process
+    # exit code. If the agent already declared an outcome, its work is done
+    # — a non-zero subprocess exit afterward (a SIGTERM from a pause, or
+    # claude's own session-teardown noise) must NOT flip the run to FAILED.
+    # `status` only tracks process lifecycle; `outcome` carries the verdict.
+    agent_declared_outcome = None
+    if run_id:
+        with _session() as db:
+            _r = db.query(Run).filter(Run.id == run_id).first()
+            agent_declared_outcome = _r.outcome if _r else None
+    effective_success = success or (agent_declared_outcome is not None)
+    if effective_success and not success:
+        logger_msg += (f" [process exited non-zero but agent declared "
+                       f"outcome={agent_declared_outcome.value}; "
+                       f"treating run as completed]")
+
     if run_id:
         complete_run(
             run_id,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            error=error if not success else None,
+            error=error if not effective_success else None,
         )
         # Default outcome + persist diff. We do these together so we only
         # round-trip to the DB once; the agent's explicit outcome (if any)
@@ -2754,7 +2771,10 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     # the thread, so the spinner spins forever. `scope` may be empty if
     # the backend restarted and lost _TRACE_SCOPE — recover it from the
     # messages already persisted under this trace.
-    if not success and error:
+    #
+    # AP-108: suppressed when the agent declared an outcome — a non-zero
+    # exit after a clean finish_run is not a failure the user needs to see.
+    if not effective_success and error:
         fail_scope = scope
         if not fail_scope:
             with _session() as db:
