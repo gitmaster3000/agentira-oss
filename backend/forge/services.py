@@ -2378,6 +2378,149 @@ def discard_pending_run(*, run_id: str) -> dict:
     return {"ok": True}
 
 
+def ready_checks(run_id: str) -> dict:
+    """AP-113: pre-run validation for a READY run.
+
+    Returns a checklist the UI shows before the user clicks Start —
+    runtime, API key, MCP, environment/keys, repo, task context. Checks
+    are advisory: only a missing runtime is fatal (and dispatch enforces
+    that anyway). `ready` is False when any check is a hard fail.
+    """
+    import json as _json
+    from backend.models import Task, Project, Profile as _Profile
+
+    checks: list[dict] = []
+
+    def add(key: str, label: str, status: str, detail: str) -> None:
+        checks.append({"key": key, "label": label,
+                       "status": status, "detail": detail})
+
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run:
+            return {"error": "Run not found"}
+        agent = db.query(Agent).filter(Agent.id == run.agent_id).first()
+        if not agent:
+            return {"error": "Agent not found"}
+        prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
+        task = db.get(Task, run.task_id) if run.task_id else None
+        project = db.get(Project, run.project_id) if run.project_id else None
+        runtime = (db.get(ForgeRuntime, agent.runtime_id)
+                   if agent.runtime_id else None)
+
+        # Runtime bound — the only fatal check.
+        if runtime:
+            add("runtime", "Runtime bound", "ok",
+                f"{runtime.provider} ({runtime.binary_path})")
+        else:
+            add("runtime", "Runtime bound", "fail",
+                "Agent has no runtime — it cannot run. Bind one in Config.")
+
+        # Runtime online.
+        if runtime:
+            if _is_runtime_online(runtime):
+                add("runtime_online", "Runtime online", "ok",
+                    "Daemon is connected.")
+            else:
+                add("runtime_online", "Runtime online", "warn",
+                    "Daemon offline — the run queues until it reconnects.")
+
+        # API key — needed for the agentira MCP (finish_run et al).
+        if prof and prof.api_key:
+            add("api_key", "Agent API key", "ok",
+                "Agentira MCP tools are authenticated.")
+        else:
+            add("api_key", "Agent API key", "warn",
+                "No API key — the agent can't call finish_run or other "
+                "agentira MCP tools.")
+
+        # MCP toolkit — built-ins are always injected; opt-ins are listed.
+        opt_ins: list[str] = []
+        if agent.mcp_servers:
+            try:
+                parsed = _json.loads(agent.mcp_servers)
+                if isinstance(parsed, list):
+                    opt_ins = [str(s) for s in parsed]
+            except Exception:
+                pass
+        add("mcp", "MCP toolkit", "ok",
+            "Built-ins (agentira, memory) auto-included"
+            + (f"; opt-ins: {', '.join(opt_ins)}" if opt_ins else "."))
+
+        # Environment keys.
+        env: dict = {}
+        if prof and prof.env_vars:
+            try:
+                env = _json.loads(prof.env_vars) or {}
+            except Exception:
+                env = {}
+        env_names = sorted(env.keys())
+        add("env", "Environment keys", "ok",
+            ("Configured: " + ", ".join(env_names)) if env_names
+            else "No custom environment keys configured.")
+
+        # Repo / workdir.
+        if project:
+            if project.repo_path:
+                add("repo", "Project repository", "ok", project.repo_path)
+            else:
+                add("repo", "Project repository", "warn",
+                    "Project has no repo_path — the agent runs in a bare "
+                    "home dir, not your code.")
+        else:
+            add("repo", "Project repository", "ok",
+                "No project bound — generic run.")
+
+        # Git credentials — only relevant when there's a repo to push to.
+        if project and project.repo_path:
+            has_gh = any(k.upper() in ("GH_TOKEN", "GITHUB_TOKEN")
+                         for k in env_names)
+            if has_gh:
+                add("git_token", "Git credentials", "ok",
+                    "A GitHub token is configured.")
+            else:
+                add("git_token", "Git credentials", "warn",
+                    "No GH_TOKEN/GITHUB_TOKEN env var — pushing branches or "
+                    "opening PRs may fail.")
+
+        # Task context — a thin task makes a thin prompt.
+        if task:
+            has_desc = bool((task.description or "").strip())
+            has_dod = False
+            if task.dod_items:
+                try:
+                    has_dod = bool(_json.loads(task.dod_items))
+                except Exception:
+                    pass
+            if has_desc or has_dod:
+                bits = []
+                if has_desc:
+                    bits.append("a description")
+                if has_dod:
+                    bits.append("a definition of done")
+                add("context", "Task context", "ok",
+                    "Task has " + " and ".join(bits) + ".")
+            else:
+                add("context", "Task context", "warn",
+                    "Task has no description or definition of done — the "
+                    "agent gets a thin prompt.")
+        else:
+            add("context", "Task context", "ok",
+                "No task — the run carries its own prompt.")
+
+    fatal = any(c["status"] == "fail" for c in checks)
+    return {
+        "run_id": run_id,
+        "ready": not fatal,
+        "checks": checks,
+        "summary": {
+            "ok": sum(1 for c in checks if c["status"] == "ok"),
+            "warn": sum(1 for c in checks if c["status"] == "warn"),
+            "fail": sum(1 for c in checks if c["status"] == "fail"),
+        },
+    }
+
+
 def schedule_task_run(*, task_id: str, agent_id: str,
                       extra_context: str = "") -> dict:
     """Prepare + immediately dispatch a Run — the auto-start path.

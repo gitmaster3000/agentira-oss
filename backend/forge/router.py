@@ -443,6 +443,16 @@ def discard_pending_run(run_id: str):
     return result
 
 
+@router.get("/runs/{run_id}/ready-checks")
+def run_ready_checks(run_id: str):
+    """AP-113: pre-run validation checklist for a READY run — runtime,
+    API key, MCP, environment/keys, repo, task context."""
+    result = services.ready_checks(run_id)
+    if result.get("error"):
+        raise HTTPException(404, result["error"])
+    return result
+
+
 @router.get("/tasks/{task_id}/runs")
 def list_task_runs(task_id: str):
     return services.list_runs_for_task(task_id)
