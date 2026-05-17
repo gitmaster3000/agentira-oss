@@ -38,13 +38,19 @@ def set_main_loop(loop) -> None:
 def _dispatch_coro(coro) -> None:
     """Schedule a hub dispatch coroutine from any thread.
 
-    In an async request context: attach to the running loop.
-    In a background thread (Conductor / APScheduler): marshal onto the
-    backend's main loop via run_coroutine_threadsafe — the hub's WS
-    sockets live there. Without this the coroutine is never awaited and
-    the trigger silently vanishes.
+    Three cases, in order:
+      1. Async request context — a loop is running in this thread:
+         attach the coroutine to it.
+      2. Background thread (Conductor / APScheduler tick) — no loop here,
+         but the backend's main loop was captured at startup: marshal
+         onto it via run_coroutine_threadsafe (the hub's WS sockets live
+         there).
+      3. No app loop at all (unit tests, or pre-startup) — schedule on
+         this thread's event loop if one is set; the caller pumps it.
+         Only if there is genuinely no loop do we drop + log.
     """
     global _MAIN_LOOP
+    # 1. Running loop in this thread.
     try:
         loop = _asyncio.get_running_loop()
         _MAIN_LOOP = loop
@@ -52,9 +58,14 @@ def _dispatch_coro(coro) -> None:
         return
     except RuntimeError:
         pass  # no running loop in this thread
+    # 2. Background thread → marshal onto the captured main loop.
     if _MAIN_LOOP is not None and _MAIN_LOOP.is_running():
         _asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
-    else:
+        return
+    # 3. No app loop — schedule on this thread's set event loop (tests).
+    try:
+        _asyncio.ensure_future(coro)
+    except RuntimeError:
         coro.close()
         _dispatch_logger.error(
             "dispatch dropped — no event loop available (main loop not captured)"
