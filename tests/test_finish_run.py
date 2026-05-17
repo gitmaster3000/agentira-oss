@@ -255,6 +255,48 @@ def test_failure_message_recovers_scope_from_db_after_restart(test_db):
     assert msg.scope_key == "task:abc123"
 
 
+def test_dispatch_dropped_message_carries_scope_from_trace_map(test_db):
+    """A 'no daemon online' drop must surface in the chat scope — else the
+    floating chat's thinking spinner spins forever."""
+    forge_services._TRACE_SCOPE["tdrop"] = "chat:default"
+    try:
+        forge_services.mark_dispatch_dropped(
+            agent_id="agentX", trace_id="tdrop", run_id=None)
+    finally:
+        forge_services._TRACE_SCOPE.pop("tdrop", None)
+    db = test_db()
+    msg = (db.query(AgentMessage)
+             .filter(AgentMessage.trace_id == "tdrop",
+                     AgentMessage.role == MessageRole.SYSTEM)
+             .first())
+    db.close()
+    assert msg is not None
+    assert msg.scope_key == "chat:default"
+    assert "No daemon online" in msg.content
+
+
+def test_dispatch_dropped_recovers_scope_from_db(test_db):
+    """_TRACE_SCOPE empty (backend restart) — scope is recovered from the
+    user prompt persisted under this trace."""
+    db = test_db()
+    db.add(AgentMessage(
+        agent_id="agentX", trace_id="tdrop2", scope_key="chat:default",
+        role=MessageRole.USER, content="test"))
+    db.commit()
+    db.close()
+    assert "tdrop2" not in forge_services._TRACE_SCOPE
+    forge_services.mark_dispatch_dropped(
+        agent_id="agentX", trace_id="tdrop2", run_id=None)
+    db = test_db()
+    msg = (db.query(AgentMessage)
+             .filter(AgentMessage.trace_id == "tdrop2",
+                     AgentMessage.role == MessageRole.SYSTEM)
+             .first())
+    db.close()
+    assert msg is not None
+    assert msg.scope_key == "chat:default"
+
+
 def test_complete_trigger_does_not_clobber_agent_set_outcome(test_db):
     """If finish_run already set outcome=blocked, complete_trigger must
     NOT downgrade it to succeeded just because the process exited 0."""
