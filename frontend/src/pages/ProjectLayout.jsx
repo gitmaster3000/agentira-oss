@@ -7,6 +7,7 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { UserPlus, X, Search, ChevronDown } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
+import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
 import { ROUTES } from '../routes';
 
 // Portal Dropdown
@@ -339,6 +340,8 @@ export function ProjectLayout() {
                         </div>
                     </div>
                 </header>
+
+                <ProjectActivityPanel projectId={board.project.id} />
 
                 <div className="flex-1 overflow-hidden relative">
                     <Outlet context={filters} />
