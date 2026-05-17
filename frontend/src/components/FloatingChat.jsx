@@ -154,8 +154,14 @@ export function FloatingChat() {
         }
     };
 
-    const lastIsUser = messages.length > 0
-        && messages[messages.length - 1].role === 'user';
+    // "Thinking" = the last message is the user's, with no reply yet —
+    // but capped at 10 min. A dispatch that died without ever reporting
+    // back (daemon offline, backend restart) would otherwise spin the
+    // indicator forever. Re-evaluated each 3s poll, so it self-clears.
+    const _last = messages[messages.length - 1];
+    const lastIsUser = !!_last && _last.role === 'user'
+        && _last.created_at
+        && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
     const selectedAgent = agents.find((a) => a.id === selectedId);
 
     if (!open) {
