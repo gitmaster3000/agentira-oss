@@ -2747,12 +2747,31 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     # human in the UI only sees what's in the chat thread. Drop a
     # system-role message tagged with this trace so the existing chat
     # poll picks it up.
+    #
+    # It MUST carry the scope_key: the chat UI filters messages by scope
+    # and shows a "thinking…" spinner while the last message in the scope
+    # is the user's. A failure message with scope_key=None never lands in
+    # the thread, so the spinner spins forever. `scope` may be empty if
+    # the backend restarted and lost _TRACE_SCOPE — recover it from the
+    # messages already persisted under this trace.
     if not success and error:
+        fail_scope = scope
+        if not fail_scope:
+            with _session() as db:
+                m = (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.scope_key.isnot(None),
+                               AgentMessage.scope_key != "")
+                       .order_by(AgentMessage.created_at.desc())
+                       .first())
+                if m:
+                    fail_scope = m.scope_key
         with _session() as db:
             db.add(AgentMessage(
                 agent_id=agent_id,
                 run_id=run_id,
                 trace_id=trace_id,
+                scope_key=fail_scope or None,
                 role=MessageRole.SYSTEM,
                 content=f"⚠ Agent execution failed: {error[:600]}",
             ))
