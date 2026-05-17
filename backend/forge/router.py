@@ -448,6 +448,28 @@ def get_stats():
     return services.get_stats()
 
 
+# ── Conductor ────────────────────────────────────────────────────────────
+
+@router.get("/conductor")
+def conductor_status():
+    """Conductor state for the management UI: identity, last tick result,
+    and a live survey of conductor-enabled agents + their next task."""
+    from backend.forge import conductor as _conductor
+    return {
+        "conductor": _conductor.get_or_create_conductor(),
+        "tick_interval_s": _conductor.TICK_INTERVAL_S,
+        "last_tick": _conductor.get_last_tick(),
+        "survey": _conductor.survey_workspace(),
+    }
+
+
+@router.post("/conductor/tick")
+def conductor_tick_now():
+    """Run one Conductor tick immediately (manual nudge from the UI)."""
+    from backend.forge import conductor as _conductor
+    return _conductor.run_tick()
+
+
 @router.get("/projects/{project_id}/digest")
 def get_project_digest(project_id: str, since: str = "24h"):
     """AP-84: aggregated run summary for a project over a recent window.
