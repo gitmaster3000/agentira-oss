@@ -338,6 +338,20 @@ def delete_agent(agent_id: str):
     return {"ok": True}
 
 
+@router.get("/concierge")
+def get_concierge():
+    """The system Concierge agent — seeded on demand. Powers the floating
+    chat on both Studio and Forge; the frontend resolves the agent id here."""
+    from backend.forge import concierge as _concierge
+    info = _concierge.get_or_create_concierge()
+    if info.get("error"):
+        raise HTTPException(503, info["error"])
+    agent = services.get_agent(info["id"])
+    if not agent:
+        raise HTTPException(404, "Concierge not available")
+    return agent
+
+
 @router.post("/agents/{agent_id}/heartbeat")
 def agent_heartbeat(agent_id: str, body: HeartbeatRequest):
     result = services.heartbeat(agent_id, status=body.status)
