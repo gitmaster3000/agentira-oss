@@ -9,15 +9,22 @@ const PANEL_W = 380;
 const PANEL_H = 520;
 const BTN = 52;                  // collapsed-button diameter, px
 const POS_KEY = 'agentira.floatingChat.pos';
-const BTN_POS_KEY = 'agentira.floatingChat.btnPos';
+
+// Clamp a top-left point so a w×h element stays fully on-screen.
+function clampPos(p, w, h) {
+    return {
+        x: Math.min(Math.max(8, p.x), window.innerWidth - w - 8),
+        y: Math.min(Math.max(8, p.y), window.innerHeight - h - 8),
+    };
+}
 
 /**
  * FloatingChat — a movable, multi-agent chat dock.
  *
- * Collapsed, it's a small draggable icon button (so it never has to sit
- * on top of page content — drag it anywhere). Open, it's a chat panel,
- * also draggable, with an agent picker (Agentira Guide / Conductor /
- * any workspace agent) and a Stop control. Both remember their position.
+ * The collapsed icon button and the open chat panel share ONE position
+ * anchor — drag either and the other follows; it's remembered across
+ * sessions. The panel has an agent picker (Agentira Guide / Conductor /
+ * any workspace agent) and a Stop control. Mounted on Studio + Forge.
  */
 export function FloatingChat() {
     const [open, setOpen] = useState(false);
@@ -28,53 +35,43 @@ export function FloatingChat() {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
-    const [pos, setPos] = useState(null);      // panel top-left, px
-    const [btnPos, setBtnPos] = useState(null); // collapsed-button top-left, px
+    // One shared anchor (top-left) for both the button and the panel.
+    const [pos, setPos] = useState(null);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
-    const dragRef = useRef(null);
-    const btnDragRef = useRef(null);
 
-    // ── load saved positions / default to bottom-right ──────────────────
+    // ── load the saved anchor / default to the bottom-right corner ──────
     useEffect(() => {
-        const load = (key, w, h, margin) => {
-            const clamp = (p) => ({
-                x: Math.min(Math.max(8, p.x), window.innerWidth - w - 8),
-                y: Math.min(Math.max(8, p.y), window.innerHeight - h - 8),
-            });
-            try {
-                const saved = JSON.parse(localStorage.getItem(key) || 'null');
-                if (saved && typeof saved.x === 'number') return clamp(saved);
-            } catch { /* ignore */ }
-            return clamp({ x: window.innerWidth - w - margin,
-                           y: window.innerHeight - h - margin });
-        };
-        setPos(load(POS_KEY, PANEL_W, PANEL_H, 20));
-        setBtnPos(load(BTN_POS_KEY, BTN, BTN, 20));
+        let initial = null;
+        try {
+            const saved = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+            if (saved && typeof saved.x === 'number') initial = saved;
+        } catch { /* ignore */ }
+        if (!initial) {
+            initial = { x: window.innerWidth - BTN - 20,
+                        y: window.innerHeight - BTN - 20 };
+        }
+        setPos(clampPos(initial, BTN, BTN));
     }, []);
 
-    // Shared drag wiring. `onClick` (when given) fires only on a no-move
-    // mouseup — so the collapsed button can be both draggable AND clickable.
-    const startDrag = (e, cur, setter, w, h, key, onClick) => {
+    // Shared drag wiring — used by both the button and the panel header,
+    // writing the SAME `pos`. `onClick` (when given) fires only on a
+    // no-move mouseup, so the button is both draggable and clickable.
+    const startDrag = (e, cur, w, h, onClick) => {
         if (!cur) return;
         const origin = { x: e.clientX, y: e.clientY };
         const off = { dx: e.clientX - cur.x, dy: e.clientY - cur.y, moved: false };
         const onMove = (ev) => {
             if (Math.abs(ev.clientX - origin.x)
                 + Math.abs(ev.clientY - origin.y) > 4) off.moved = true;
-            setter({
-                x: Math.min(Math.max(8, ev.clientX - off.dx),
-                            window.innerWidth - w - 8),
-                y: Math.min(Math.max(8, ev.clientY - off.dy),
-                            window.innerHeight - h - 8),
-            });
+            setPos(clampPos({ x: ev.clientX - off.dx, y: ev.clientY - off.dy }, w, h));
         };
         const onUp = () => {
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
             if (off.moved) {
-                setter((p) => {
-                    if (p) localStorage.setItem(key, JSON.stringify(p));
+                setPos((p) => {
+                    if (p) localStorage.setItem(POS_KEY, JSON.stringify(p));
                     return p;
                 });
             } else if (onClick) {
@@ -183,14 +180,17 @@ export function FloatingChat() {
         && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
     const selectedAgent = agents.find((a) => a.id === selectedId);
 
+    // Both elements derive their on-screen position from the one anchor.
+    const btnXY = pos ? clampPos(pos, BTN, BTN) : null;
+    const panelXY = pos ? clampPos(pos, PANEL_W, PANEL_H) : null;
+
     // ── collapsed: a small, draggable icon button ───────────────────────
     if (!open) {
         return (
             <button
-                onMouseDown={(e) => startDrag(e, btnPos, setBtnPos, BTN, BTN,
-                                              BTN_POS_KEY, () => setOpen(true))}
+                onMouseDown={(e) => startDrag(e, btnXY, BTN, BTN, () => setOpen(true))}
                 className="fixed z-50 flex items-center justify-center rounded-full bg-accent-primary text-white shadow-lg hover:brightness-110 cursor-pointer"
-                style={{ left: btnPos?.x, top: btnPos?.y, width: BTN, height: BTN }}
+                style={{ left: btnXY?.x, top: btnXY?.y, width: BTN, height: BTN }}
                 title="Ask Agentira — click to open, drag to move"
             >
                 <Sparkles className="w-5 h-5" />
@@ -202,15 +202,15 @@ export function FloatingChat() {
         <div
             className="fixed z-50 flex flex-col rounded-xl bg-bg-app border border-border-subtle shadow-2xl"
             style={{
-                left: pos ? pos.x : undefined,
-                top: pos ? pos.y : undefined,
+                left: panelXY ? panelXY.x : undefined,
+                top: panelXY ? panelXY.y : undefined,
                 width: PANEL_W, height: PANEL_H,
                 maxWidth: 'calc(100vw - 1rem)', maxHeight: 'calc(100vh - 1rem)',
             }}
         >
             {/* Header — drag handle */}
             <div
-                onMouseDown={(e) => startDrag(e, pos, setPos, PANEL_W, PANEL_H, POS_KEY)}
+                onMouseDown={(e) => startDrag(e, panelXY, PANEL_W, PANEL_H)}
                 className="flex items-center gap-2 px-3 py-2.5 border-b border-border-subtle cursor-move select-none"
             >
                 <GripVertical className="w-4 h-4 text-text-tertiary flex-shrink-0" />
