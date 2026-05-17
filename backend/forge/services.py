@@ -508,6 +508,15 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "mcp_strict": bool(a.profile.mcp_strict) if a.profile else False,
         "mcp_config_override": (a.profile.mcp_config_override if a.profile else "") or "",
         "home_path": (a.profile.home_path if a.profile else None) or resolve_agent_home(a),
+        # System agent (Conductor/Concierge) — UI hides delete + offers
+        # the special config panel. Conductor cadence config rides along
+        # so that panel can read/write it.
+        "is_system": bool(a.profile.is_system) if a.profile else False,
+        "conductor_enabled": bool(a.profile.conductor_enabled) if a.profile else False,
+        "max_concurrent_runs": (a.profile.max_concurrent_runs if a.profile else 1),
+        "conductor_tick_seconds": (a.profile.conductor_tick_seconds if a.profile else 60),
+        "conductor_report_time": (a.profile.conductor_report_time if a.profile else "09:00"),
+        "conductor_report_enabled": bool(a.profile.conductor_report_enabled) if a.profile else True,
         "created_at": _iso(a.created_at),
     }
 
@@ -885,6 +894,9 @@ _AGENT_TO_PROFILE_MIRROR = {
     "mcp_config_override", "mcp_disabled", "home_path",
     # AP-80 Conductor — these live on Profile (not Agent).
     "conductor_enabled", "max_concurrent_runs",
+    # Conductor cadence config (only meaningful on the Conductor profile).
+    "conductor_tick_seconds", "conductor_report_time",
+    "conductor_report_enabled",
 }
 
 
@@ -1086,10 +1098,17 @@ def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
 
 
 def delete_agent(agent_id: str) -> bool:
+    """Delete an agent. System agents (Conductor, Concierge) are protected
+    — they're seeded by Agentira and the workspace depends on them."""
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return False
+        prof = db.get(Profile, a.profile_id) if a.profile_id else None
+        if prof and prof.is_system:
+            raise ValueError(
+                f"{a.name} is a system agent and cannot be deleted."
+            )
         db.delete(a)
         db.commit()
         return True

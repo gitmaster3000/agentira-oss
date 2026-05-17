@@ -57,6 +57,10 @@ class AgentUpdate(BaseModel):
     # AP-80 Conductor opt-in
     conductor_enabled: Optional[bool] = None
     max_concurrent_runs: Optional[int] = None
+    # Conductor cadence config (Conductor agent only).
+    conductor_tick_seconds: Optional[int] = None
+    conductor_report_time: Optional[str] = None
+    conductor_report_enabled: Optional[bool] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -304,18 +308,32 @@ def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
 
 @router.patch("/agents/{agent_id}")
 def update_agent(agent_id: str, body: AgentUpdate):
+    fields = body.model_dump(exclude_none=True)
     try:
-        result = services.update_agent(agent_id, **body.model_dump(exclude_none=True))
+        result = services.update_agent(agent_id, **fields)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     if not result:
         raise HTTPException(404, "Agent not found")
+    # If the Conductor's tick cadence changed, re-install the scheduler
+    # job so the new interval takes effect without a backend restart.
+    if "conductor_tick_seconds" in fields:
+        try:
+            from backend.forge.scheduler import scheduler
+            scheduler.refresh()
+        except Exception:
+            pass
     return result
 
 
 @router.delete("/agents/{agent_id}")
 def delete_agent(agent_id: str):
-    if not services.delete_agent(agent_id):
+    try:
+        deleted = services.delete_agent(agent_id)
+    except ValueError as exc:
+        # System agents (Conductor, Concierge) are protected.
+        raise HTTPException(403, str(exc))
+    if not deleted:
         raise HTTPException(404, "Agent not found")
     return {"ok": True}
 
