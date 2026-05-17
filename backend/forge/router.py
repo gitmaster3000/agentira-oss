@@ -104,6 +104,10 @@ class DaemonTriggerComplete(BaseModel):
     # Daemon-side filesystem path where the runtime ran. Surfaces in UI
     # so the user can navigate to the workdir.
     workdir: str = ""
+    # paused=True: the run was parked mid-flight (SIGTERM), not finished.
+    # Backend keeps the run PAUSED and only persists the session_id so a
+    # later resume can relaunch with `claude --resume`.
+    paused: bool = False
 
 
 class MessageCreate(BaseModel):
@@ -215,6 +219,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         diff=body.diff,
         session_id=body.session_id,
         workdir=body.workdir,
+        paused=body.paused,
     )
 
 

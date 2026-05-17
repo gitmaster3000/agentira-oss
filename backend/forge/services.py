@@ -2180,14 +2180,29 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     return run
 
 
+# Sent as the prompt when a PAUSED run is resumed. claude --resume reloads
+# the full conversation, so this is just a nudge to continue — NOT the task
+# prompt (re-sending that would make the agent restart from scratch).
+_RESUME_CONTINUATION_PROMPT = (
+    "Continue this task from where you paused. Your prior progress is in "
+    "the conversation above — pick up where you left off and finish, then "
+    "call mcp__agentira__finish_run as instructed earlier."
+)
+
+
 def dispatch_pending_run(*, run_id: str,
-                         prompt_override: str | None = None) -> dict:
+                         prompt_override: str | None = None,
+                         resume: bool = False) -> dict:
     """AP-112: dispatch a READY/PENDING run, optionally with an edited prompt.
 
     Loads the Run, resolves the run-context bundle (repo, MCP, env, scope)
     and dispatches a trigger of kind=run_step. The dispatched prompt is the
     override if given, else the prompt stored on the Run at prepare time.
     `dispatch_trigger` flips the run READY → RUNNING via `start_run`.
+
+    `resume=True` relaunches a PAUSED run: the run must be PAUSED, a short
+    continuation nudge is sent instead of the task prompt (claude --resume
+    reloads the conversation), and `initial_prompt` is left untouched.
     """
     import json as _json
     import uuid
@@ -2198,7 +2213,11 @@ def dispatch_pending_run(*, run_id: str,
         run = db.query(Run).filter(Run.id == run_id).first()
         if not run:
             return {"error": "Run not found"}
-        if run.status not in (RunStatus.READY, RunStatus.PENDING):
+        if resume:
+            if run.status != RunStatus.PAUSED:
+                return {"error": f"Run is {run.status.value}; "
+                                  "only PAUSED runs can be resumed"}
+        elif run.status not in (RunStatus.READY, RunStatus.PENDING):
             return {"error": f"Run is {run.status.value}; "
                               "only READY/PENDING runs can be dispatched"}
         agent = db.query(Agent).filter(Agent.id == run.agent_id).first()
@@ -2215,20 +2234,25 @@ def dispatch_pending_run(*, run_id: str,
         agent_id = agent.id
         task = db.get(Task, task_id) if task_id else None
 
-        # Persist the (possibly edited) prompt and pick what we dispatch.
-        if prompt_override is not None:
-            run.initial_prompt = prompt_override
-            db.commit()
-        prompt = run.initial_prompt
-        if not prompt:
-            # Defensive: prepare always sets it, but a run created by a
-            # legacy path may not have one.
-            if task:
-                prompt = _build_task_prompt(task).replace("{run_id}", run_id)
-                run.initial_prompt = prompt
+        if resume:
+            # Resume: send a continuation nudge, keep initial_prompt as the
+            # original task prompt. The session is reloaded via --resume.
+            prompt = _RESUME_CONTINUATION_PROMPT
+        else:
+            # Persist the (possibly edited) prompt and pick what we dispatch.
+            if prompt_override is not None:
+                run.initial_prompt = prompt_override
                 db.commit()
-            else:
-                return {"error": "Run has no prompt and no task to derive one"}
+            prompt = run.initial_prompt
+            if not prompt:
+                # Defensive: prepare always sets it, but a run created by a
+                # legacy path may not have one.
+                if task:
+                    prompt = _build_task_prompt(task).replace("{run_id}", run_id)
+                    run.initial_prompt = prompt
+                    db.commit()
+                else:
+                    return {"error": "Run has no prompt and no task to derive one"}
 
         # cwd is a path TEMPLATE (with `~` unexpanded) — backend can't
         # expand it because backend lives in docker (`~` = `/root`) but
@@ -2390,16 +2414,24 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
 
 
 def pause_run(run_id: str) -> dict:
-    """Pause a running CLI subprocess (SIGSTOP). Best-effort: openclaw
-    HTTP runs aren't pausable (the request completes naturally). Long
-    pauses can break the LLM API timeout — use cancel + resume-by-session
-    for anything beyond a few minutes."""
+    """Pause a run. The daemon terminates the CLI subprocess (SIGTERM) —
+    a live claude process can't be safely frozen, SIGSTOP corrupts its
+    streaming sockets. The run is parked at status=PAUSED with its
+    session_id persisted; `resume_run` relaunches it via `claude --resume`.
+    Best-effort: openclaw HTTP runs aren't pausable (the request completes
+    naturally)."""
     return _signal_run(run_id, "pause", RunStatus.PAUSED)
 
 
 def resume_run(run_id: str) -> dict:
-    """Resume a paused CLI subprocess (SIGCONT)."""
-    return _signal_run(run_id, "resume", RunStatus.RUNNING)
+    """Resume a PAUSED run by relaunching it.
+
+    Pausing terminated the subprocess, so there is nothing to un-freeze.
+    Resume re-dispatches a fresh process that reloads the conversation
+    from the captured session via `claude --resume` and continues. The
+    run_id is reused — the run is one continuous record across the pause.
+    """
+    return dispatch_pending_run(run_id=run_id, resume=True)
 
 
 def stop_chat(*, agent_id: str, scope_key: str) -> dict:
@@ -2702,13 +2734,43 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
                      diff_stat: str = "", diff: str = "",
-                     session_id: str = "", workdir: str = "") -> dict:
+                     session_id: str = "", workdir: str = "",
+                     paused: bool = False) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
     sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+
+    # Pause path: the daemon parked the run (SIGTERM'd the subprocess) and
+    # posts back ONLY to hand us the session_id. The run stays PAUSED —
+    # no completion, no failure, no chat message. Persist the session so
+    # resume_run can relaunch with `claude --resume`.
+    if paused:
+        scope = _TRACE_SCOPE.pop(trace_id, "")
+        if not scope:
+            with _session() as db:
+                m = (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.scope_key.isnot(None),
+                               AgentMessage.scope_key != "")
+                       .order_by(AgentMessage.created_at.desc())
+                       .first())
+                if m:
+                    scope = m.scope_key
+        if session_id:
+            if scope:
+                upsert_conversation(agent_id=agent_id, scope_key=scope,
+                                    runtime_session_id=session_id)
+            if run_id:
+                with _session() as db:
+                    r = db.query(Run).filter(Run.id == run_id).first()
+                    if r:
+                        r.session_id = session_id
+                        db.commit()
+        return {"ok": True, "trace_id": trace_id, "paused": True,
+                "logged": logger_msg + " [paused — session persisted]"}
 
     # AP-108: the agent's explicit finish_run verdict outranks the process
     # exit code. If the agent already declared an outcome, its work is done
@@ -2840,9 +2902,12 @@ def send_runtime_message(
     """
     from backend.forge import runtime_client
     # ADR 008: sending a message into a task scope whose Run is PAUSED
-    # auto-resumes the run. The agent picks up via claude --resume and
-    # treats this message as the next user turn. A flag is returned so
-    # the UI can show a "Resumed paused run" badge.
+    # auto-resumes the run. The user's message IS the continuation turn —
+    # it's dispatched below carrying the scope's resume session, so the
+    # agent picks up via claude --resume. We only need to flip the run
+    # PAUSED → RUNNING here; we must NOT call resume_run(), which would
+    # dispatch its own continuation nudge and double-run. A flag is
+    # returned so the UI can show a "Resumed paused run" badge.
     resumed_run_id = None
     if scope_key and scope_key.startswith("task:"):
         task_id = scope_key.split(":", 1)[1]
@@ -2855,8 +2920,8 @@ def send_runtime_message(
                         .first())
             if paused:
                 resumed_run_id = paused.id
-        if resumed_run_id:
-            resume_run(resumed_run_id)
+                paused.status = RunStatus.RUNNING
+                db.commit()
 
     # AP-120: chatting into a task whose latest run FAILED schedules a
     # fresh run (a retry) carrying this message as a follow-up, instead

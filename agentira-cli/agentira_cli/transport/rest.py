@@ -64,7 +64,7 @@ class AgentiraClient:
                               output_tokens: int = 0, error: str = "",
                               diff_stat: str = "", diff: str = "",
                               session_id: str = "",
-                              workdir: str = "") -> dict:
+                              workdir: str = "", paused: bool = False) -> dict:
         return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
             "trace_id": trace_id,
@@ -77,6 +77,9 @@ class AgentiraClient:
             "diff": diff,
             "session_id": session_id,
             "workdir": workdir,
+            # paused=True: the run was parked, not finished. Backend keeps
+            # it PAUSED and just stores the session_id for resume.
+            "paused": paused,
         })
 
     def get_agent(self, agent_id: str) -> dict:
