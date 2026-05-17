@@ -2881,11 +2881,27 @@ def mark_dispatch_dropped(*, agent_id: str, trace_id: str,
                 r.error = "Daemon offline at dispatch — silent drop avoided"
                 r.finished_at = datetime.now(timezone.utc)
         # Drop a SYSTEM message tagged with this trace so the chat UI
-        # picks it up via the existing poll.
+        # picks it up via the existing poll. It MUST carry the scope_key:
+        # the chat filters by scope and shows a "thinking…" spinner while
+        # the last in-scope message is the user's — a scopeless failure
+        # message never lands in the thread and the spinner spins forever.
+        # Recover the scope from the in-memory trace map (set at dispatch),
+        # falling back to the persisted user message under this trace.
+        scope = _TRACE_SCOPE.pop(trace_id, "")
+        if not scope:
+            m = (db.query(AgentMessage)
+                   .filter(AgentMessage.trace_id == trace_id,
+                           AgentMessage.scope_key.isnot(None),
+                           AgentMessage.scope_key != "")
+                   .order_by(AgentMessage.created_at.desc())
+                   .first())
+            if m:
+                scope = m.scope_key
         db.add(AgentMessage(
             agent_id=agent_id,
             run_id=run_id,
             trace_id=trace_id,
+            scope_key=scope or None,
             role=MessageRole.SYSTEM,
             content=msg,
         ))
