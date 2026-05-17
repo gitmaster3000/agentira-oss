@@ -215,6 +215,21 @@ export const api = {
         getTriggerEvent: (runId) => request(`/forge/runs/${runId}/trigger-event`),
 
         // Task ↔ Forge bridge
+        // AP-112: prepare = create PENDING run with editable prompt, no dispatch.
+        prepareTaskRun: (taskId, agentId) =>
+            request(`/forge/tasks/${taskId}/prepare-run`, {
+                method: 'POST',
+                body: JSON.stringify({ agent_id: agentId }),
+            }),
+        // AP-112: dispatch the PENDING run, optionally with edited prompt.
+        dispatchRun: (runId, prompt) =>
+            request(`/forge/runs/${runId}/dispatch`, {
+                method: 'POST',
+                body: JSON.stringify(prompt != null ? { prompt } : {}),
+            }),
+        // AP-112: discard a never-dispatched PENDING run.
+        discardRun: (runId) =>
+            request(`/forge/runs/${runId}/discard`, { method: 'POST' }),
         scheduleTaskRun: (taskId, agentId) =>
             request(`/forge/tasks/${taskId}/run`, {
                 method: 'POST',

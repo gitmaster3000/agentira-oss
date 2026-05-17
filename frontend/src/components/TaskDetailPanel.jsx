@@ -128,13 +128,16 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const handleScheduleRun = async (agentId) => {
         setScheduling(true);
         try {
-            const result = await api.forge.scheduleTaskRun(task.id, agentId);
+            // AP-112: prepare (no dispatch) → land on run page so user can
+            // edit the prompt before clicking Start.
+            const result = await api.forge.prepareTaskRun(task.id, agentId);
             setPickingAgent(false);
             await loadTaskRuns();
-            if (result.run_id) navigate(`/forge/runs/${result.run_id}`);
+            const runId = result.id || result.run_id;
+            if (runId) navigate(`/forge/runs/${runId}`);
         } catch (err) {
-            console.error('Schedule run failed:', err);
-            alert('Failed to schedule run: ' + (err.message || err));
+            console.error('Prepare run failed:', err);
+            alert('Failed to prepare run: ' + (err.message || err));
         } finally {
             setScheduling(false);
         }

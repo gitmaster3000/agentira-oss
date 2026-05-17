@@ -109,9 +109,12 @@ export function Signup() {
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="text-label-md text-text-secondary mb-1 block">Username</label>
+                            <label htmlFor="signup-username" className="text-label-md text-text-secondary mb-1 block">Username</label>
                             <input
+                                id="signup-username"
+                                name="username"
                                 type="text"
+                                autoComplete="username"
                                 required
                                 value={formData.name}
                                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -121,9 +124,12 @@ export function Signup() {
                             />
                         </div>
                         <div>
-                            <label className="text-label-md text-text-secondary mb-1 block">Display Name</label>
+                            <label htmlFor="signup-display-name" className="text-label-md text-text-secondary mb-1 block">Display Name</label>
                             <input
+                                id="signup-display-name"
+                                name="display_name"
                                 type="text"
+                                autoComplete="name"
                                 value={formData.display_name}
                                 onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
                                 className="input"
@@ -131,9 +137,12 @@ export function Signup() {
                             />
                         </div>
                         <div>
-                            <label className="text-label-md text-text-secondary mb-1 block">Password</label>
+                            <label htmlFor="signup-password" className="text-label-md text-text-secondary mb-1 block">Password</label>
                             <input
+                                id="signup-password"
+                                name="password"
                                 type="password"
+                                autoComplete="new-password"
                                 required
                                 value={formData.password}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}

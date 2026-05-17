@@ -1,13 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle,
     XCircle, Pause, Play, Ban, RefreshCw, User, Wrench, MessageSquare,
+    ClipboardList, Folder,
 } from 'lucide-react';
 import { api } from '../../api';
+import { Breadcrumbs } from '../../components/Breadcrumbs';
 
 const STATUS_CONFIG = {
     queued:        { bg: '#5f6368', label: 'Queued',   icon: Clock },
+    // AP-112: READY = prepared, waiting for the user to review/edit the
+    // prompt and press Start. Visually distinct from PENDING so users see
+    // "this is waiting on me", not "this is queued".
+    ready:         { bg: '#3b82f6', label: 'Ready',    icon: Play },
     pending:       { bg: '#5f6368', label: 'Pending',  icon: Clock },
     running:       { bg: '#f1c40f', label: 'Running',  icon: RefreshCw },
     waiting_human: { bg: '#ff9800', label: 'Waiting',  icon: Pause },
@@ -19,10 +25,21 @@ const STATUS_CONFIG = {
 
 export function RunDetail() {
     const { runId } = useParams();
+    const [searchParams] = useSearchParams();
+    // AP-109: entry-point hint. `?from=runs` means user clicked in from a
+    // cross-agent list (global Runs page, Forge overview); breadcrumb falls
+    // back to `Forge › Runs › Run X` instead of the agent path. Absence of
+    // the param (e.g. agent-runs-tab click, shared link) uses agent path.
+    const from = searchParams.get('from');
+    const navigate = useNavigate();
     const [run, setRun] = useState(null);
     const [events, setEvents] = useState([]);
     const [triggerEvent, setTriggerEvent] = useState(null);
     const [loading, setLoading] = useState(true);
+    // AP-112: prompt editor state for PENDING runs. Seeded from
+    // run.initial_prompt on first load; user edits in-place.
+    const [editedPrompt, setEditedPrompt] = useState(null);
+    const [starting, setStarting] = useState(false);
 
     const load = async () => {
         try {
@@ -32,6 +49,10 @@ export function RunDetail() {
             ]);
             setRun(r);
             setEvents(evts);
+            // AP-112: seed the editor once with the server-stored prompt.
+            // Don't overwrite on subsequent polls (would clobber the user's
+            // typing). The editor only matters while status === 'pending'.
+            setEditedPrompt((prev) => prev == null ? (r.initial_prompt || '') : prev);
             api.forge.getTriggerEvent(runId).then(setTriggerEvent).catch(() => {});
         } catch (err) {
             console.error('Failed to load run:', err);
@@ -58,14 +79,16 @@ export function RunDetail() {
     const StatusIcon = s.icon;
     const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0) + (run.total_tokens || 0);
     const isActive = ['queued', 'pending', 'running', 'waiting_human', 'blocked'].includes(run.status);
+    // AP-112: READY = the prompt-editor screen. Hide the top
+    // pause/resume/stop controls there — they're meaningless before
+    // dispatch, and the editor card has its own Start/Discard buttons.
+    const isReady = run.status === 'ready';
 
     return (
         <div className="flex-1 p-6 space-y-6 max-w-5xl">
-            {/* Back + Header */}
+            <Breadcrumbs entity="run" data={run} opts={{ from }} />
+            {/* Header */}
             <div className="flex items-center gap-3">
-                <Link to="/forge/runs" className="text-text-tertiary hover:text-text-primary transition-colors">
-                    <ArrowLeft className="w-5 h-5" />
-                </Link>
                 <div className="flex-1">
                     <div className="flex items-center gap-3">
                         <h1 className="text-2xl font-bold text-text-primary">Run {run.id}</h1>
@@ -83,16 +106,48 @@ export function RunDetail() {
                             </span>
                         )}
                     </div>
-                    <p className="text-sm text-text-secondary mt-1">
-                        {run.agent_name && <>Agent: <Link to={`/forge/agents/${run.agent_id}`} className="text-accent-primary hover:underline">{run.agent_name}</Link></>}
-                        {run.task_title && <> &middot; Task: {run.task_title}</>}
-                        {run.project_name && <> &middot; Project: {run.project_name}</>}
-                    </p>
+                    {/* AP-109: meaningful quick-links instead of bare IDs.
+                        Explicit "<Type>: <Name>" labels so a glance tells
+                        you what each pill is. Chat opens the agent chat
+                        pinned to this task's scope (Stop in chat = Pause). */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {run.agent_name && (
+                            <Link
+                                to={`/forge/agents/${run.agent_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                            >
+                                <Bot className="w-3 h-3" />
+                                <span className="text-text-tertiary">Agent:</span>
+                                <span>{run.agent_name}</span>
+                            </Link>
+                        )}
+                        {run.task_id && (
+                            <Link
+                                to={`/studio/tasks/${run.task_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                                title={run.task_title || run.task_id}
+                            >
+                                <ClipboardList className="w-3 h-3" />
+                                <span className="text-text-tertiary">Task:</span>
+                                <span>{run.task_key || run.task_title || run.task_id.slice(0, 8)}</span>
+                            </Link>
+                        )}
+                        {run.project_id && (
+                            <Link
+                                to={`/studio/project/${run.project_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                            >
+                                <Folder className="w-3 h-3" />
+                                <span className="text-text-tertiary">Project:</span>
+                                <span>{run.project_name || run.project_id.slice(0, 8)}</span>
+                            </Link>
+                        )}
+                    </div>
                 </div>
                 {/* Run controls — pause / resume / stop. Pause is best-effort
                     for CLI runtimes (SIGSTOP); openclaw HTTP runs ignore
                     pause. Stop is terminal. */}
-                {run.status === 'running' && (
+                {!isReady && run.status === 'running' && (
                     <button
                         onClick={async () => {
                             try {
@@ -108,7 +163,7 @@ export function RunDetail() {
                         <Pause className="w-4 h-4" /> Pause
                     </button>
                 )}
-                {run.status === 'paused' && (
+                {!isReady && run.status === 'paused' && (
                     <button
                         onClick={async () => {
                             try {
@@ -124,7 +179,7 @@ export function RunDetail() {
                         <Play className="w-4 h-4" /> Resume
                     </button>
                 )}
-                {isActive && (
+                {!isReady && isActive && (
                     <button
                         onClick={async () => {
                             if (!window.confirm('Stop this run? The agent will be killed; this cannot be undone.')) return;
@@ -141,10 +196,88 @@ export function RunDetail() {
                         <Ban className="w-4 h-4" /> Stop
                     </button>
                 )}
-                <button onClick={load} className="btn btn-ghost" title="Refresh">
-                    <RefreshCw className="w-4 h-4" />
-                </button>
+                {!isReady && (
+                    <button onClick={load} className="btn btn-ghost" title="Refresh">
+                        <RefreshCw className="w-4 h-4" />
+                    </button>
+                )}
             </div>
+
+            {/* AP-112: editable prompt for PENDING runs.
+                The user landed here from clicking Run on a task. The prompt
+                was built server-side from task title/description/DoD and
+                persisted on the Run row. Edit, Start to dispatch, Discard
+                to throw away. Once dispatched, this card disappears (status
+                flips to running and the rest of the page takes over). */}
+            {isReady && (
+                <div className="card border border-accent-primary/30">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                            <Play className="w-5 h-5" /> Review prompt before starting
+                        </h2>
+                        <span className="text-xs text-text-tertiary">
+                            Sent verbatim to the agent on Start
+                        </span>
+                    </div>
+                    <textarea
+                        value={editedPrompt || ''}
+                        onChange={(e) => setEditedPrompt(e.target.value)}
+                        className="w-full min-h-[280px] bg-bg-app border border-border-subtle rounded-md p-3 text-sm font-mono text-text-primary focus:outline-none focus:border-accent-primary resize-y"
+                        placeholder="The prompt the agent will receive…"
+                        disabled={starting}
+                    />
+                    <div className="flex items-center gap-2 mt-3">
+                        <button
+                            disabled={starting || !editedPrompt?.trim()}
+                            onClick={async () => {
+                                setStarting(true);
+                                try {
+                                    await api.forge.dispatchRun(runId, editedPrompt);
+                                    await load();
+                                } catch (err) {
+                                    alert('Start failed: ' + (err.message || err));
+                                } finally {
+                                    setStarting(false);
+                                }
+                            }}
+                            className="btn btn-primary"
+                        >
+                            <Play className="w-4 h-4" />
+                            {starting ? 'Starting…' : 'Start run'}
+                        </button>
+                        <button
+                            disabled={starting}
+                            onClick={() => {
+                                if (editedPrompt !== (run.initial_prompt || '')) {
+                                    if (!window.confirm('Reset the prompt to the original?')) return;
+                                }
+                                setEditedPrompt(run.initial_prompt || '');
+                            }}
+                            className="btn btn-ghost"
+                            title="Reset to the server-built prompt"
+                        >
+                            <RefreshCw className="w-4 h-4" /> Reset
+                        </button>
+                        <div className="flex-1" />
+                        <button
+                            disabled={starting}
+                            onClick={async () => {
+                                if (!window.confirm('Discard this run? The PENDING row will be deleted.')) return;
+                                try {
+                                    await api.forge.discardRun(runId);
+                                    navigate(-1);
+                                } catch (err) {
+                                    alert('Discard failed: ' + (err.message || err));
+                                }
+                            }}
+                            className="btn btn-ghost text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            title="Delete this pending run"
+                        >
+                            <Ban className="w-4 h-4" /> Discard
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Summary */}
             {run.summary && (
@@ -219,23 +352,47 @@ export function RunDetail() {
 
             {/* Conversation — messages tagged with this run_id (one row per
                 user prompt + every assistant text/tool event the daemon
-                streamed back). Polls every 5s along with run state. */}
-            <div className="card">
-                <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5" /> Conversation
-                </h2>
-                {events.length === 0 ? (
-                    <p className="text-sm text-text-tertiary">
-                        {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
-                    </p>
-                ) : (
-                    <div className="space-y-3">
-                        {events.map((m) => (
-                            <MessageRow key={m.id} m={m} />
-                        ))}
-                    </div>
-                )}
-            </div>
+                streamed back). Polls every 5s along with run state.
+                AP-109: when there's a task, the whole card is a link to
+                the live agent chat scoped to this task, so the read-only
+                thread here becomes send-able with one click. */}
+            {(() => {
+                const inner = (
+                    <>
+                        <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                            <MessageSquare className="w-5 h-5" /> Conversation
+                            {run.task_id && run.agent_id && (
+                                <span className="ml-auto text-xs text-accent-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                    Open in chat →
+                                </span>
+                            )}
+                        </h2>
+                        {events.length === 0 ? (
+                            <p className="text-sm text-text-tertiary">
+                                {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
+                            </p>
+                        ) : (
+                            <div className="space-y-3">
+                                {events.map((m) => (
+                                    <MessageRow key={m.id} m={m} />
+                                ))}
+                            </div>
+                        )}
+                    </>
+                );
+                if (run.task_id && run.agent_id) {
+                    return (
+                        <Link
+                            to={`/forge/agents/${run.agent_id}?tab=chat&scope=${encodeURIComponent(`task:${run.task_id}`)}`}
+                            className="card block group hover:border-accent-primary/40 transition-colors"
+                            title="Open in agent chat — Stop in chat pauses this run"
+                        >
+                            {inner}
+                        </Link>
+                    );
+                }
+                return <div className="card">{inner}</div>;
+            })()}
 
             {/* Trace ids — each turn shares one. Useful for grepping logs. */}
             {(() => {
@@ -249,17 +406,60 @@ export function RunDetail() {
                 );
             })()}
 
-            {/* Metadata */}
+            {/* Metadata — AP-109: meaningful links, not bare IDs. Each row
+                shows the human label as the primary link and tucks the raw
+                id underneath in small monospace for grep-ability. */}
             <div className="card">
                 <h2 className="text-lg font-semibold text-text-primary mb-4">Details</h2>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                    <div><span className="text-text-tertiary">Run ID:</span> <span className="text-text-primary font-mono">{run.id}</span></div>
-                    <div><span className="text-text-tertiary">Agent ID:</span> <span className="text-text-primary font-mono">{run.agent_id}</span></div>
-                    {run.task_id && <div><span className="text-text-tertiary">Task ID:</span> <span className="text-text-primary font-mono">{run.task_id}</span></div>}
-                    {run.project_id && <div><span className="text-text-tertiary">Project ID:</span> <span className="text-text-primary font-mono">{run.project_id}</span></div>}
-                    {run.workspace_id && <div><span className="text-text-tertiary">Workspace:</span> <span className="text-text-primary font-mono">{run.workspace_id}</span></div>}
-                    {run.trigger_event && <div><span className="text-text-tertiary">Trigger:</span> <span className="text-text-primary">{run.trigger_event}</span></div>}
-                    {run.updated_at && <div><span className="text-text-tertiary">Last updated:</span> <span className="text-text-primary">{new Date(run.updated_at).toLocaleString()}</span></div>}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                    <DetailLink
+                        label="Agent"
+                        to={`/forge/agents/${run.agent_id}`}
+                        primary={run.agent_name || `agent ${run.agent_id.slice(0, 8)}`}
+                        id={run.agent_id}
+                        icon={Bot}
+                    />
+                    {run.task_id && (
+                        <DetailLink
+                            label="Task"
+                            to={`/studio/tasks/${run.task_id}`}
+                            primary={run.task_title || run.task_key || `task ${run.task_id.slice(0, 8)}`}
+                            sub={run.task_key && run.task_title ? run.task_key : null}
+                            id={run.task_id}
+                            icon={ClipboardList}
+                        />
+                    )}
+                    {run.project_id && (
+                        <DetailLink
+                            label="Project"
+                            to={`/studio/project/${run.project_id}`}
+                            primary={run.project_name || `project ${run.project_id.slice(0, 8)}`}
+                            id={run.project_id}
+                            icon={Folder}
+                        />
+                    )}
+                    <div>
+                        <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Run</div>
+                        <div className="text-text-primary font-mono text-xs">{run.id}</div>
+                    </div>
+                    {run.workspace_id && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Workspace</div>
+                            <div className="text-text-primary font-mono text-xs">{run.workspace_id}</div>
+                        </div>
+                    )}
+                    {run.trigger_event && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Trigger</div>
+                            <div className="text-text-primary">{run.trigger_event}</div>
+                        </div>
+                    )}
+                    {run.updated_at && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Last updated</div>
+                            <div className="text-text-primary">{new Date(run.updated_at).toLocaleString()}</div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -311,6 +511,20 @@ const ROLE_CONFIG = {
     tool:      { icon: Wrench,        label: 'Tool',      color: '#f97316' },
     system:    { icon: MessageSquare, label: 'System',    color: '#a855f7' },
 };
+
+function DetailLink({ label, to, primary, sub, id, icon: Icon }) {
+    return (
+        <Link to={to} className="block group">
+            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">{label}</div>
+            <div className="flex items-center gap-1.5 text-accent-primary group-hover:underline">
+                {Icon && <Icon className="w-3.5 h-3.5" />}
+                <span className="truncate">{primary}</span>
+            </div>
+            {sub && <div className="text-text-secondary text-xs mt-0.5 truncate">{sub}</div>}
+            {id && <div className="text-text-tertiary text-[10px] font-mono mt-0.5 truncate">{id}</div>}
+        </Link>
+    );
+}
 
 function MetricCard({ icon: Icon, label, value, sub, color }) {
     return (
