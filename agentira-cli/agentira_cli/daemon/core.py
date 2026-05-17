@@ -438,6 +438,21 @@ class AgentiraDaemon:
         output_tokens = 0
         try:
             if "http_gateway" in capabilities:
+                # AP-103: OpenClaw's chat-completions endpoint takes no
+                # per-call MCP config, so register this agent's MCP
+                # servers into OpenClaw's config immediately before the
+                # dispatch. The runner picks up THIS agent's token +
+                # memory path for the turn it's about to serve.
+                if provider == "openclaw" and mcp_config_json:
+                    try:
+                        import json as _json
+                        from agentira_cli.runtimes.openclaw import register_agentira_mcps
+                        reg = register_agentira_mcps(_json.loads(mcp_config_json))
+                        if reg["failed"]:
+                            logger.warning("MCP register (openclaw) partial: %s", reg["failed"])
+                    except Exception as exc:
+                        logger.warning("MCP register (openclaw) failed trace=%s: %s",
+                                       trace_id, exc)
                 result = await run_gateway(
                     gateway_url, gateway_token, agent_name, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
