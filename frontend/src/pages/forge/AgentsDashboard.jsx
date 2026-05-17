@@ -146,7 +146,14 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                         <Bot className="w-5 h-5 text-text-secondary" />
                     </div>
                     <div>
-                        <div className="text-sm font-semibold text-text-primary">{agent.name}</div>
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-semibold text-text-primary">{agent.name}</span>
+                            {agent.is_system && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-accent-subtle text-accent-primary uppercase tracking-wide">
+                                    System
+                                </span>
+                            )}
+                        </div>
                         <div className="text-xs text-text-tertiary">{agent.profile_name}</div>
                     </div>
                 </div>
@@ -175,13 +182,17 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                             <RefreshCw className="w-3.5 h-3.5" />
                         </button>
                     )}
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all"
-                        title="Delete agent"
-                    >
-                        <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* System agents (Conductor, Concierge) are seeded by
+                        Agentira and can't be deleted — hide the control. */}
+                    {!agent.is_system && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all"
+                            title="Delete agent"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
             </div>
 
