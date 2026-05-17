@@ -18,6 +18,7 @@ from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
     Run, RunStatus, RunOutcome, ForgeRuntime, RuntimeStatus,
+    AgentMessage, MessageRole,
 )
 
 
@@ -198,6 +199,60 @@ def test_complete_trigger_empty_diff_does_not_overwrite(test_db):
     run = forge_services.get_run(rid)
     assert run["diff_stat"] == "stat-1"
     assert run["diff"] == "diff-1"
+
+
+# ── failure message must land in the chat scope ────────────────────────
+# A failure system-message with scope_key=None never reaches the
+# scope-filtered chat thread, so the "thinking…" spinner spins forever.
+
+def test_failure_message_carries_scope_from_trace_map(test_db):
+    """When the in-flight trace is still in _TRACE_SCOPE, the failure
+    message inherits that scope."""
+    forge_services._TRACE_SCOPE["tscope"] = "chat:default"
+    try:
+        forge_services.complete_trigger(
+            agent_id="agentX", trace_id="tscope", run_id=None,
+            success=False, error="boom",
+        )
+    finally:
+        forge_services._TRACE_SCOPE.pop("tscope", None)
+    db = test_db()
+    msg = (db.query(AgentMessage)
+             .filter(AgentMessage.trace_id == "tscope",
+                     AgentMessage.role == MessageRole.SYSTEM)
+             .first())
+    db.close()
+    assert msg is not None
+    assert msg.scope_key == "chat:default"
+
+
+def test_failure_message_recovers_scope_from_db_after_restart(test_db):
+    """_TRACE_SCOPE is in-memory and empty after a backend restart. The
+    failure message must still land in the right thread by recovering the
+    scope from the user prompt already persisted under this trace."""
+    db = test_db()
+    db.add(AgentMessage(
+        agent_id="agentX", trace_id="trec", scope_key="task:abc123",
+        role=MessageRole.USER, content="do the thing",
+    ))
+    db.commit()
+    db.close()
+
+    # _TRACE_SCOPE deliberately has no entry for this trace.
+    assert "trec" not in forge_services._TRACE_SCOPE
+    forge_services.complete_trigger(
+        agent_id="agentX", trace_id="trec", run_id=None,
+        success=False, error="subprocess exited with code 1",
+    )
+
+    db = test_db()
+    msg = (db.query(AgentMessage)
+             .filter(AgentMessage.trace_id == "trec",
+                     AgentMessage.role == MessageRole.SYSTEM)
+             .first())
+    db.close()
+    assert msg is not None
+    assert msg.scope_key == "task:abc123"
 
 
 def test_complete_trigger_does_not_clobber_agent_set_outcome(test_db):
