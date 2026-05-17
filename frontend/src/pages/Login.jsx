@@ -111,13 +111,15 @@ export function Login() {
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
-                            <label className="text-label-md text-text-secondary mb-1 block">Username</label>
-                            <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
+                            <label htmlFor="login-username" className="text-label-md text-text-secondary mb-1 block">Username</label>
+                            <input id="login-username" name="username" type="text" autoComplete="username"
+                                value={username} onChange={(e) => setUsername(e.target.value)}
                                 className="input" placeholder="e.g. admin" autoFocus />
                         </div>
                         <div>
-                            <label className="text-label-md text-text-secondary mb-1 block">Password</label>
-                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                            <label htmlFor="login-password" className="text-label-md text-text-secondary mb-1 block">Password</label>
+                            <input id="login-password" name="password" type="password" autoComplete="current-password"
+                                value={password} onChange={(e) => setPassword(e.target.value)}
                                 className="input" placeholder="••••••••" />
                         </div>
                         <button type="submit" className="btn btn-primary w-full justify-center text-body-md">

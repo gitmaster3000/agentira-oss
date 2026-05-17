@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink } from 'lucide-react';
 import { api } from '../../api';
 import { ROUTES } from '../../routes';
@@ -291,7 +291,9 @@ function TimelineStrip({ epics }) {
     );
 }
 
-export function RoadmapView({ projectId }) {
+export function RoadmapView({ projectId: projectIdProp }) {
+    const { projectId: projectIdParam } = useParams();
+    const projectId = projectIdProp || projectIdParam;
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);

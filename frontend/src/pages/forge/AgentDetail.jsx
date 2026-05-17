@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
     MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
@@ -9,6 +9,7 @@ import {
     Info as InfoIcon,
 } from 'lucide-react';
 import { api } from '../../api';
+import { Breadcrumbs } from '../../components/Breadcrumbs';
 
 const STATUS_STYLES = {
     online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
@@ -28,8 +29,13 @@ const TABS = [
 
 export function AgentDetail() {
     const { agentId } = useParams();
+    const [searchParams] = useSearchParams();
+    // AP-109: deep links from RunDetail open the chat panel pinned to the
+    // run's task scope. `?tab=chat&scope=task:<id>` is the contract.
+    const initialTab = searchParams.get('tab') || 'overview';
+    const initialScope = searchParams.get('scope') || null;
     const [agent, setAgent] = useState(null);
-    const [tab, setTab] = useState('overview');
+    const [tab, setTab] = useState(initialTab);
     const [loading, setLoading] = useState(true);
 
     const loadAgent = useCallback(async () => {
@@ -63,10 +69,8 @@ export function AgentDetail() {
         <div className="flex-1 flex flex-col overflow-hidden">
             {/* Header */}
             <div className="px-6 pt-5 pb-0 space-y-4">
+                <Breadcrumbs entity="agent" data={agent} />
                 <div className="flex items-center gap-3">
-                    <Link to="/forge/agents" className="p-1.5 rounded-lg hover:bg-bg-hover text-text-tertiary hover:text-text-primary transition-colors">
-                        <ArrowLeft className="w-4 h-4" />
-                    </Link>
                     <div className="w-10 h-10 rounded-lg bg-bg-hover flex items-center justify-center">
                         <Bot className="w-5 h-5 text-text-secondary" />
                     </div>
@@ -137,7 +141,7 @@ export function AgentDetail() {
             {/* Tab Content */}
             <div className="flex-1 overflow-auto">
                 {tab === 'overview' && <OverviewTab agent={agent} onTab={setTab} />}
-                {tab === 'chat' && <ChatTab agentId={agentId} agent={agent} />}
+                {tab === 'chat' && <ChatTab agentId={agentId} agent={agent} initialScope={initialScope} />}
                 {tab === 'runs' && <RunsTab agentId={agentId} />}
                 {tab === 'projects' && <ProjectsTab agentId={agentId} />}
                 {tab === 'config' && <ConfigTab agent={agent} onSaved={loadAgent} />}
@@ -461,7 +465,7 @@ function _localScopeLabel(scopeKey, projects) {
     return scopeKey;
 }
 
-function ChatTab({ agentId, agent }) {
+function ChatTab({ agentId, agent, initialScope = null }) {
     const [messages, setMessages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [autoScroll, setAutoScroll] = useState(true);
@@ -482,7 +486,16 @@ function ChatTab({ agentId, agent }) {
     // ADR 008 / AP-93: when a send wakes a paused run, server returns
     // resumed_run_id — surface as an ephemeral badge above the input.
     const [resumedNotice, setResumedNotice] = useState(null);
-    const [selectedScope, setSelectedScope] = useState(null); // null = follow attached/screen
+    // ADR 008 / AP-93: for task scopes, track whether a run is currently
+    // working so the Stop button stays visible the whole time the agent
+    // is busy — not just during the brief send-API window.
+    const [scopeActiveRun, setScopeActiveRun] = useState(null);
+    // AP-93: 1Hz tick that drives the "thinking… Ns" elapsed counter.
+    // Only running while the indicator is visible — see useEffect below.
+    const [nowTick, setNowTick] = useState(() => Date.now());
+    // AP-109: when opened via `?scope=task:<id>` from a Run detail page,
+    // pin the chat to that scope so Stop = Pause works against the right run.
+    const [selectedScope, setSelectedScope] = useState(initialScope); // null = follow attached/screen
     const [chatPickerOpen, setChatPickerOpen] = useState(false);
     const [newChatFlyoutOpen, setNewChatFlyoutOpen] = useState(false);
     const [projectFlyoutOpen, setProjectFlyoutOpen] = useState(false);
@@ -567,6 +580,44 @@ function ChatTab({ agentId, agent }) {
         const interval = setInterval(() => { loadMessages(); loadConversation(); }, 3000);
         return () => clearInterval(interval);
     }, [loadMessages, loadConversation]);
+
+    // AP-93: 1Hz tick driving the "thinking… Ns" counter. Only runs
+    // while the latest message is the user's (or a task run is going) —
+    // i.e. the indicator is visible. Idle chats don't tick.
+    useEffect(() => {
+        const _last = (messages || [])[messages.length - 1];
+        const _isUserLast = _last && _last.role === 'user';
+        const _hasRun = scopeActiveRun && scopeActiveRun.status === 'running';
+        if (!_isUserLast && !_hasRun) return;
+        const id = setInterval(() => setNowTick(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, [messages, scopeActiveRun]);
+
+    // ADR 008 / AP-93: poll for an active run in this task scope so Stop
+    // stays visible whenever the agent is actually working. Non-task
+    // scopes have no Run to pause, so we skip this entirely.
+    useEffect(() => {
+        if (!activeScope || !activeScope.startsWith('task:')) {
+            setScopeActiveRun(null);
+            return;
+        }
+        const taskId = activeScope.slice(5);
+        const ACTIVE = new Set(['running', 'paused', 'pending']);
+        let alive = true;
+        const tick = async () => {
+            try {
+                const runs = await api.forge.listTaskRuns(taskId);
+                if (!alive) return;
+                const active = (runs || []).find(r => r.agent_id === agentId && ACTIVE.has(r.status));
+                setScopeActiveRun(active || null);
+            } catch {
+                setScopeActiveRun(null);
+            }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
 
     useEffect(() => {
         // Only auto-scroll when new messages arrive, not on every poll
@@ -677,6 +728,17 @@ function ChatTab({ agentId, agent }) {
             return;
         }
 
+        // AP-93: optimistic user message so the Stop button appears
+        // instantly. Tagged so we can drop it once the real persisted
+        // row arrives via the poll (otherwise it shows twice).
+        const localId = `local-user-${Date.now()}`;
+        setMessages(prev => [...prev, {
+            id: localId,
+            role: 'user',
+            content: trimmed,
+            created_at: new Date().toISOString(),
+        }]);
+        setInput('');
         setSending(true);
         try {
             const res = await api.forge.sendRuntimeChat(agentId, {
@@ -695,7 +757,10 @@ function ChatTab({ agentId, agent }) {
                 setTimeout(() => setResumedNotice((n) =>
                     n && n.at === res.resumed_run_id ? null : n), 6000);
             }
-            setInput('');
+            // Drop the optimistic local user message — the persisted one
+            // will arrive in loadMessages and the dedupe below would
+            // otherwise leave both visible.
+            setMessages(prev => prev.filter(m => m.id !== localId));
             await loadMessages();
         } catch (err) {
             console.error('Send failed:', err);
@@ -706,6 +771,24 @@ function ChatTab({ agentId, agent }) {
     };
 
     if (loading) return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading chat...</div>;
+
+    // AP-93: agent-is-thinking signal. Latest message is the user's (no
+    // assistant followup yet) or, for task scopes, a Run is RUNNING.
+    // Drives both the inline "Thinking…" bubble and the Stop button.
+    const _lastMsg = (messages || [])[messages.length - 1];
+    const _lastIsUser = _lastMsg && _lastMsg.role === 'user';
+    const _runRunning = scopeActiveRun && scopeActiveRun.status === 'running';
+    const agentThinking = _lastIsUser || _runRunning;
+    // Elapsed seconds since "thinking" started. Start time is the last
+    // user message's created_at (chat) or the run's started_at (task).
+    const _thinkStartMs = (() => {
+        if (_lastIsUser && _lastMsg?.created_at) return new Date(_lastMsg.created_at).getTime();
+        if (_runRunning && scopeActiveRun?.started_at) return new Date(scopeActiveRun.started_at).getTime();
+        return null;
+    })();
+    const thinkingElapsedSec = _thinkStartMs
+        ? Math.max(0, Math.floor((nowTick - _thinkStartMs) / 1000))
+        : 0;
 
     const ROLE_STYLES = {
         system:    { bg: 'bg-purple-500/10', border: 'border-purple-500/20', icon: Terminal, label: 'System', color: '#a855f7' },
@@ -962,6 +1045,25 @@ function ChatTab({ agentId, agent }) {
                         );
                     })
                 )}
+                {/* AP-93: thinking indicator. Shown while the agent owes
+                    a reply — pulses gently, sits at the end of the
+                    thread, disappears the instant a real message arrives. */}
+                {agentThinking && (
+                    <div className="flex gap-3 px-1 py-2">
+                        <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                            <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                        </div>
+                        <div className="flex items-center gap-1.5 text-text-tertiary text-xs">
+                            <span className="inline-flex gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '150ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '300ms' }} />
+                            </span>
+                            <span>thinking…</span>
+                            <span className="tabular-nums text-text-tertiary/70">{thinkingElapsedSec}s</span>
+                        </div>
+                    </div>
+                )}
                 <div ref={bottomRef} />
             </div>
 
@@ -1051,28 +1153,32 @@ function ChatTab({ agentId, agent }) {
                             disabled={sending}
                         />
                     </div>
-                    {sending ? (
-                        // ADR 008 / AP-93: Stop button while a dispatch is in
-                        // flight. For task scopes this pauses the active Run
-                        // (status → PAUSED, agent memory preserved). For other
-                        // scopes it cancels the in-flight subprocess.
+                    {agentThinking ? (
                         <button
-                            onClick={async () => {
-                                try {
-                                    await api.forge.stopChat(agentId, activeScope);
-                                } catch (err) {
-                                    console.error('Stop failed:', err);
-                                } finally {
-                                    setSending(false);
-                                }
+                            onClick={() => {
+                                // Optimistic: flip the UI NOW. Don't await.
+                                setMessages(prev => [...prev, {
+                                    id: `local-stop-${Date.now()}`,
+                                    role: 'system',
+                                    content: '⏹ Stopped',
+                                    created_at: new Date().toISOString(),
+                                }]);
+                                if (sending) setSending(false);
+                                // Fire-and-forget cancel. Backend / daemon
+                                // do their best; UI doesn't block.
+                                api.forge.stopChat(agentId, activeScope).catch(err => {
+                                    console.error('Stop failed (background):', err);
+                                });
                             }}
                             className="btn btn-ghost py-2.5 text-red-400 hover:text-red-500 hover:bg-red-500/10"
-                            title="Stop — pauses the run if this is a task scope"
+                            title={scopeActiveRun
+                                ? `Stop — pauses run ${String(scopeActiveRun.id).slice(0, 8)}`
+                                : 'Stop'}
                         >
                             <Square className="w-4 h-4" />
                         </button>
                     ) : (
-                        <button onClick={handleSend} disabled={!input.trim()} className="btn btn-primary py-2.5">
+                        <button onClick={handleSend} disabled={!input.trim() || sending} className="btn btn-primary py-2.5">
                             <Send className="w-4 h-4" />
                         </button>
                     )}
@@ -1276,6 +1382,7 @@ function Yes({ v }) {
 // ── Runs Tab ───────────────────────────────────────────────────────────
 
 function RunsTab({ agentId }) {
+    const navigate = useNavigate();
     const [runs, setRuns] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -1332,7 +1439,12 @@ function RunsTab({ agentId }) {
                                 const s = RUN_STATUS[run.status] || RUN_STATUS.pending;
                                 const total = (run.input_tokens || 0) + (run.output_tokens || 0);
                                 return (
-                                    <tr key={run.id} className="border-b border-border-subtle hover:bg-bg-hover transition-colors">
+                                    <tr
+                                        key={run.id}
+                                        onClick={() => navigate(`/forge/runs/${run.id}`)}
+                                        className="border-b border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer"
+                                        title="Open run details"
+                                    >
                                         <td className="px-4 py-3">
                                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white" style={{ backgroundColor: s.bg }}>
                                                 {s.label}

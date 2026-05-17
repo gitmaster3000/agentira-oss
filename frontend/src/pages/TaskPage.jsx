@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { Breadcrumbs } from '../components/Breadcrumbs';
 import {
     ChevronLeft,
     Clock,
@@ -166,13 +167,9 @@ export function TaskPage() {
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
             <div className="max-w-7xl mx-auto p-8">
-                {/* Back Button */}
-                <button
-                    onClick={() => navigate(-1)}
-                    className="flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary mb-6 transition-colors"
-                >
-                    <ChevronLeft className="w-4 h-4" /> Back
-                </button>
+                <div className="mb-6">
+                    <Breadcrumbs entity="task" data={task} />
+                </div>
 
                 <div className="flex flex-col lg:flex-row gap-12">
                     {/* Main Content */}
