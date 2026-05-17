@@ -143,16 +143,23 @@ def test_rebuild_chat_scope_uses_smaller_cap():
     agent_id, _ = _mk_agent_task()
     scope = "chat:default"
 
+    # Explicit strictly-increasing created_at — _utcnow() can return the
+    # same value for rows inserted in a tight loop, making the 20-entry
+    # cap boundary non-deterministic. Pin the timestamps.
+    from datetime import datetime, timedelta, timezone
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     with forge_services._session() as db:
         for i in range(50):
             db.add(AgentMessage(
                 agent_id=agent_id,
                 role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
                 content=f"msg-{i}", scope_key=scope,
+                created_at=base + timedelta(minutes=i),
             ))
         db.add(AgentMessage(agent_id=agent_id, role=MessageRole.TOOL,
                             scope_key=scope,
-                            tool_name="Bash", tool_input="ls"))
+                            tool_name="Bash", tool_input="ls",
+                            created_at=base + timedelta(minutes=50)))
         db.commit()
 
     out = forge_services._prepend_history_for_prompt(
