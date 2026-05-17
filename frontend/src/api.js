@@ -241,6 +241,9 @@ export const api = {
                 body: JSON.stringify({ agent_id: agentId }),
             }),
         listTaskRuns: (taskId) => request(`/forge/tasks/${taskId}/runs`),
+        // AP-74: live project activity summary (digest + Conductor view).
+        getProjectActivity: (projectId) =>
+            request(`/forge/projects/${projectId}/activity`),
 
         // Events
         listEvents: (params = {}) => {
