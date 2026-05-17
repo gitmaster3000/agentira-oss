@@ -34,8 +34,13 @@ class ForgeScheduler:
     def start(self) -> None:
         self._scheduler.start()
         self._load_jobs()
-        # AP-80: Conductor tick — runs every TICK_INTERVAL_S to pick up
-        # todo tasks for conductor-enabled agents.
+        # AP-80: ensure the Conductor agent exists (shows in the agent
+        # list, managed by the normal UI), then run its tick every
+        # TICK_INTERVAL_S. The tick is deterministic — zero LLM tokens.
+        try:
+            _conductor.get_or_create_conductor()
+        except Exception as exc:
+            logger.warning("Conductor seed failed: %s", exc)
         self._scheduler.add_job(
             _conductor.run_tick,
             trigger=IntervalTrigger(seconds=_conductor.TICK_INTERVAL_S),

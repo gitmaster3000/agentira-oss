@@ -16,6 +16,61 @@ from backend.forge.models import (
     _new_id,
 )
 
+import asyncio as _asyncio
+import logging as _logging
+
+_dispatch_logger = _logging.getLogger("agentira.forge.dispatch")
+
+# The backend's main asyncio loop. WS objects in `hub` are bound to it.
+# Captured at app startup (rest_api.startup) and refreshed whenever a
+# dispatch runs inside a request. Background threads (the AP-80 Conductor
+# tick runs in APScheduler's threadpool) have NO event loop of their own,
+# so they must marshal dispatch coroutines onto THIS loop.
+_MAIN_LOOP: "_asyncio.AbstractEventLoop | None" = None
+
+
+def set_main_loop(loop) -> None:
+    """Record the backend's main event loop (called from app startup)."""
+    global _MAIN_LOOP
+    _MAIN_LOOP = loop
+
+
+def _dispatch_coro(coro) -> None:
+    """Schedule a hub dispatch coroutine from any thread.
+
+    Three cases, in order:
+      1. Async request context — a loop is running in this thread:
+         attach the coroutine to it.
+      2. Background thread (Conductor / APScheduler tick) — no loop here,
+         but the backend's main loop was captured at startup: marshal
+         onto it via run_coroutine_threadsafe (the hub's WS sockets live
+         there).
+      3. No app loop at all (unit tests, or pre-startup) — schedule on
+         this thread's event loop if one is set; the caller pumps it.
+         Only if there is genuinely no loop do we drop + log.
+    """
+    global _MAIN_LOOP
+    # 1. Running loop in this thread.
+    try:
+        loop = _asyncio.get_running_loop()
+        _MAIN_LOOP = loop
+        loop.create_task(coro)
+        return
+    except RuntimeError:
+        pass  # no running loop in this thread
+    # 2. Background thread → marshal onto the captured main loop.
+    if _MAIN_LOOP is not None and _MAIN_LOOP.is_running():
+        _asyncio.run_coroutine_threadsafe(coro, _MAIN_LOOP)
+        return
+    # 3. No app loop — schedule on this thread's set event loop (tests).
+    try:
+        _asyncio.ensure_future(coro)
+    except RuntimeError:
+        coro.close()
+        _dispatch_logger.error(
+            "dispatch dropped — no event loop available (main loop not captured)"
+        )
+
 
 # ── Agent home + worktree primitives ─────────────────────────────────────
 #
@@ -783,12 +838,18 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
             if not role_row:
                 return {"error": "bot role missing"}
             new_id = _new_id()
+            # Mint an api_key — managed agents call the `agentira` MCP
+            # server, which authenticates the agent via this key. Without
+            # it the agent gets no agentira tools (can't finish_run,
+            # update_task, add_comment).
+            import secrets as _secrets
             prof = Profile(
                 id=new_id, name=name, display_name=name,
                 password_hash="", avatar_url="", webhook_url="",
                 role_id=role_row.id,
                 model=model,
                 runtime_id=runtime_id,
+                api_key=_secrets.token_hex(32),
             )
             db.add(prof)
             db.flush()
@@ -2002,7 +2063,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     if scope_key:
         _TRACE_SCOPE[trace_id] = scope_key
 
-    asyncio.ensure_future(hub.dispatch_trigger(
+    _dispatch_coro(hub.dispatch_trigger(
         trace_id=trace_id,
         runtime_id=runtime_id,
         agent_id=agent_id,
@@ -2236,7 +2297,7 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
 
     if runtime_id:
         try:
-            asyncio.ensure_future(hub.dispatch_signal(
+            _dispatch_coro(hub.dispatch_signal(
                 runtime_id=runtime_id,
                 signal=frame_type,
                 trace_id=trace_id,
@@ -2303,7 +2364,7 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
         pause_run(paused_run_id)
     elif runtime_id:
         try:
-            asyncio.ensure_future(hub.dispatch_cancel(
+            _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id,
             ))
         except Exception:
@@ -2358,7 +2419,7 @@ def cancel_run(run_id: str) -> dict:
     # Best-effort cancel signal to the daemon
     if runtime_id:
         try:
-            asyncio.ensure_future(hub.dispatch_cancel(
+            _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
             ))
         except Exception as exc:

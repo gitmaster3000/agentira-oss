@@ -149,3 +149,71 @@ def test_run_tick_respects_max_concurrent_runs():
         result = conductor.run_tick()
     assert calls == []
     assert any(s.get("reason") == "at_capacity" for s in result["skipped"])
+
+
+# ── Runaway-guard tests (the "schedules indefinitely" fix) ───────────────
+
+def test_pick_next_excludes_task_that_already_has_a_run():
+    """Core runaway guard: a todo task that already has a Run is never
+    auto-picked again — even if it's still in todo (e.g. its run failed
+    and nothing moved it). Without this the Conductor re-dispatches the
+    same task every tick forever."""
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.FAILED))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is None, "task with an existing run must not be re-picked"
+
+
+def test_run_tick_moves_dispatched_task_to_in_progress():
+    """On dispatch the task is claimed — moved todo -> in_progress — so it
+    leaves the auto-pick pool immediately."""
+    agent_id, _, task_id = _mk_setup()
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: {"run_id": "r1"}):
+        conductor.run_tick()
+    from backend.models import Task, Status
+    with forge_services._session() as db:
+        t = db.get(Task, task_id)
+        ip = db.query(Status).filter(Status.name == "in_progress").first()
+        assert t.status_id == ip.id, "dispatched task must move to in_progress"
+
+
+def test_conductor_does_not_redispatch_across_two_ticks():
+    """End-to-end runaway check: two ticks in a row dispatch the task at
+    most once. Tick 1 dispatches + claims it; tick 2 finds nothing."""
+    agent_id, _, task_id = _mk_setup()
+    calls = []
+
+    def fake_schedule(*, task_id, agent_id):
+        calls.append(task_id)
+        # Mimic schedule_task_run creating the Run row.
+        with forge_services._session() as db:
+            db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                       task_id=task_id, status=RunStatus.RUNNING))
+            db.commit()
+        return {"run_id": "r-" + task_id}
+
+    with patch.object(forge_services, "schedule_task_run", fake_schedule):
+        conductor.run_tick()
+        conductor.run_tick()
+    assert len(calls) == 1, f"task dispatched {len(calls)}x — runaway not fixed"
+
+
+def test_get_or_create_conductor_is_idempotent():
+    a = conductor.get_or_create_conductor()
+    b = conductor.get_or_create_conductor()
+    assert a.get("id") and a["id"] == b["id"]
+    assert a["name"] == conductor.CONDUCTOR_NAME
+
+
+def test_survey_workspace_reports_next_task():
+    agent_id, _, task_id = _mk_setup()
+    snap = conductor.survey_workspace()
+    mine = [a for a in snap["agents"] if a["agent"] == agent_id]
+    assert len(mine) == 1
+    assert mine[0]["next_task"]["id"] == task_id
