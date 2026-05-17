@@ -40,6 +40,8 @@ export function RunDetail() {
     // run.initial_prompt on first load; user edits in-place.
     const [editedPrompt, setEditedPrompt] = useState(null);
     const [starting, setStarting] = useState(false);
+    // AP-113: pre-run checklist, fetched while the run is READY.
+    const [readyChecks, setReadyChecks] = useState(null);
 
     const load = async () => {
         try {
@@ -53,6 +55,10 @@ export function RunDetail() {
             // Don't overwrite on subsequent polls (would clobber the user's
             // typing). The editor only matters while status === 'pending'.
             setEditedPrompt((prev) => prev == null ? (r.initial_prompt || '') : prev);
+            // AP-113: pull the READY checklist while the run waits to start.
+            if (r.status === 'ready') {
+                api.forge.getRunReadyChecks(runId).then(setReadyChecks).catch(() => {});
+            }
             api.forge.getTriggerEvent(runId).then(setTriggerEvent).catch(() => {});
         } catch (err) {
             console.error('Failed to load run:', err);
@@ -209,6 +215,8 @@ export function RunDetail() {
                 persisted on the Run row. Edit, Start to dispatch, Discard
                 to throw away. Once dispatched, this card disappears (status
                 flips to running and the rest of the page takes over). */}
+            {isReady && <ReadyChecksCard data={readyChecks} />}
+
             {isReady && (
                 <div className="card border border-accent-primary/30">
                     <div className="flex items-center justify-between mb-3">
@@ -461,6 +469,51 @@ export function RunDetail() {
                         </div>
                     )}
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// AP-113: pre-run checklist shown on the READY screen.
+const CHECK_STYLE = {
+    ok:   { icon: CheckCircle,   color: '#2ecc71' },
+    warn: { icon: AlertTriangle, color: '#f1c40f' },
+    fail: { icon: XCircle,       color: '#e74c3c' },
+};
+
+function ReadyChecksCard({ data }) {
+    if (!data || !Array.isArray(data.checks)) return null;
+    const { checks, ready, summary } = data;
+    return (
+        <div className={`card border ${ready ? 'border-border-subtle' : 'border-red-500/40'}`}>
+            <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" /> Pre-run checks
+                </h2>
+                <span className="text-xs text-text-tertiary">
+                    {summary.ok} ok · {summary.warn} warning{summary.warn === 1 ? '' : 's'}
+                    {summary.fail ? ` · ${summary.fail} blocking` : ''}
+                </span>
+            </div>
+            {!ready && (
+                <div className="text-sm text-red-400 mb-3">
+                    This run can't start until the blocking checks are resolved.
+                </div>
+            )}
+            <div className="space-y-2">
+                {checks.map((c) => {
+                    const s = CHECK_STYLE[c.status] || CHECK_STYLE.ok;
+                    const Icon = s.icon;
+                    return (
+                        <div key={c.key} className="flex items-start gap-2.5">
+                            <Icon className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: s.color }} />
+                            <div className="min-w-0">
+                                <div className="text-sm text-text-primary">{c.label}</div>
+                                <div className="text-xs text-text-tertiary">{c.detail}</div>
+                            </div>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );

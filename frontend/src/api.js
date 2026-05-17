@@ -232,6 +232,9 @@ export const api = {
         // AP-112: discard a never-dispatched PENDING run.
         discardRun: (runId) =>
             request(`/forge/runs/${runId}/discard`, { method: 'POST' }),
+        // AP-113: pre-run checklist for a READY run.
+        getRunReadyChecks: (runId) =>
+            request(`/forge/runs/${runId}/ready-checks`),
         scheduleTaskRun: (taskId, agentId) =>
             request(`/forge/tasks/${taskId}/run`, {
                 method: 'POST',
