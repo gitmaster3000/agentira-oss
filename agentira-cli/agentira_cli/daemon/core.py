@@ -489,13 +489,31 @@ class AgentiraDaemon:
             success = False
             error = "Cancelled by user."
 
-        # If the run was PAUSED, the backend already set status=PAUSED and
-        # will re-dispatch on resume (fresh process, claude --resume). Do
-        # NOT post a completion — that would flip the run to FAILED and
-        # lose the pause. The paused subprocess was terminated cleanly.
+        # If the run was PAUSED, the backend already set status=PAUSED. The
+        # subprocess was terminated cleanly (SIGTERM) — that exit is NOT a
+        # failure. We still post back, but flagged `paused=True`: the
+        # backend keeps the run PAUSED and just persists the session_id so
+        # a later resume can relaunch with `claude --resume`. Without this
+        # post the session handle is lost and resume starts from scratch.
         if entry and entry.get("paused"):
-            logger.info("paused trace=%s — skipping trigger-complete "
-                        "(run stays PAUSED, resumable via --resume)", trace_id)
+            logger.info("paused trace=%s — reporting session for resume "
+                        "(run stays PAUSED)", trace_id)
+            try:
+                self.client.post_trigger_complete(
+                    agent_id,
+                    daemon_id=self._daemon_id,
+                    trace_id=trace_id,
+                    run_id=run_id,
+                    success=False,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    error="",
+                    session_id=session_id,
+                    paused=True,
+                )
+            except Exception as exc:
+                logger.warning("paused-complete post failed trace=%s: %s",
+                                trace_id, exc)
             return
 
         # Capture git diff of the workdir if it's a repo — best-effort,
