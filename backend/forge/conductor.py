@@ -33,7 +33,7 @@ from sqlalchemy import select
 
 from backend.db import SessionLocal
 from backend.models import Profile, Task, Status, Role
-from backend.forge.models import Agent, Run, RunStatus
+from backend.forge.models import Agent, Run, RunStatus, ForgeRuntime
 
 logger = logging.getLogger("agentira.forge.conductor")
 
@@ -54,11 +54,42 @@ def get_last_tick() -> dict | None:
 
 # ── Identity ─────────────────────────────────────────────────────────────
 
-def get_or_create_conductor() -> dict:
-    """Return the Conductor profile, seeding it once if absent.
+# Default model for the Conductor. It is a normal agent field — change
+# it in the agent config UI like any other agent.
+CONDUCTOR_DEFAULT_MODEL = "claude-sonnet-4-5"
 
-    The Conductor is a bot-role profile. It is special only in name +
-    purpose; it carries no runtime because it never spawns a subprocess.
+# The Conductor's role. code + LLM, split deliberately: the scripts
+# (survey/find_free_agents/next_tasks/dispatch — exposed as MCP tools)
+# gather facts and act for free; the LLM is spent only on judgment.
+CONDUCTOR_SYSTEM_PROMPT = """\
+You are the Conductor — the orchestrator for this Agentira workspace.
+Your job: keep task queues moving and runs healthy across every project.
+
+You run in two modes:
+
+QUEUE TICK (frequent, terse): survey the workspace, dispatch ready todo
+work to free agents, flag stuck runs. If nothing needs doing, say so in
+one line and stop — do not pad.
+
+DAILY REPORT: compile the digest, review sprint progress, rebalance
+assignments, surface blockers.
+
+Rules of economy — you cost tokens, your scripts do not:
+- ALWAYS call your tools (survey_workspace, find_free_agents, next_tasks,
+  generate_report) to get facts. Never re-derive what a script returns.
+- Spend reasoning only on judgment: which task matters most, whether a
+  run is stuck, how to plan the sprint.
+- Be terse. No preamble, no recap."""
+
+
+def get_or_create_conductor() -> dict:
+    """Return the Conductor agent, seeding it once if absent.
+
+    The Conductor is a real LLM Agent — it shows in the agent list and is
+    configured (model, runtime, prompt) like any other agent. Its
+    intelligence is split: deterministic scripts (this module, exposed as
+    MCP tools) gather facts and act token-free; the LLM is spent only on
+    judgment — prioritisation, sprint planning, run monitoring.
     """
     import secrets
     with SessionLocal() as db:
@@ -75,8 +106,37 @@ def get_or_create_conductor() -> dict:
             db.add(prof)
             db.commit()
             db.refresh(prof)
-            logger.info("Seeded Conductor identity profile %s", prof.id)
-        return {"id": prof.id, "name": prof.name}
+            logger.info("Seeded Conductor profile %s", prof.id)
+
+        # Bind a Claude runtime if one is registered, so the Conductor can
+        # actually take an LLM turn. If none yet, leave it null — the
+        # agent still exists and gets a runtime when a daemon registers.
+        claude_rt = (db.query(ForgeRuntime)
+                       .filter(ForgeRuntime.provider == "claude")
+                       .first())
+        rt_id = claude_rt.id if claude_rt else None
+
+        if not prof.system_prompt:
+            prof.system_prompt = CONDUCTOR_SYSTEM_PROMPT
+        if not prof.model:
+            prof.model = CONDUCTOR_DEFAULT_MODEL
+        if rt_id and not prof.runtime_id:
+            prof.runtime_id = rt_id
+
+        agent = db.query(Agent).filter(Agent.id == prof.id).first()
+        if agent is None:
+            agent = Agent(
+                id=prof.id, profile_id=prof.id, name=CONDUCTOR_NAME,
+                executor_type="http", model=prof.model, runtime_id=rt_id,
+            )
+            db.add(agent)
+        elif rt_id and not agent.runtime_id:
+            agent.runtime_id = rt_id
+        db.commit()
+        logger.info("Conductor agent ready: %s (model=%s runtime=%s)",
+                    prof.id, prof.model, "set" if rt_id else "none")
+        return {"id": prof.id, "name": prof.name,
+                "model": prof.model, "runtime_bound": bool(rt_id)}
 
 
 # ── Picker ───────────────────────────────────────────────────────────────
