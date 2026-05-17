@@ -717,9 +717,19 @@ def api_list_all_epics(project_id: Optional[str] = None, actor: str = Depends(ge
     return services.list_epics(project_id=project_id, actor=actor)
 
 @app.on_event("startup")
-def startup():
+async def startup():
     from backend.db import init_db
     init_db()
+    # Capture the main event loop so the Conductor (which ticks in an
+    # APScheduler background thread) can marshal dispatch coroutines
+    # onto it — the WS hub's sockets are bound to this loop.
+    try:
+        import asyncio
+        from backend.forge import services as _forge_services
+        _forge_services.set_main_loop(asyncio.get_running_loop())
+    except Exception as exc:
+        import logging
+        logging.getLogger("agentira").warning("Could not capture main loop: %s", exc)
     try:
         from backend.forge.scheduler import scheduler
         scheduler.start()
