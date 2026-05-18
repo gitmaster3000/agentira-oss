@@ -1504,6 +1504,7 @@ function ConfigTab({ agent, onSaved }) {
         conductor_tick_seconds: agent.conductor_tick_seconds ?? 60,
         conductor_report_time: agent.conductor_report_time || '09:00',
         conductor_report_enabled: agent.conductor_report_enabled ?? true,
+        conductor_plan_interval_minutes: agent.conductor_plan_interval_minutes ?? 10,
         // Whether the Conductor may auto-dispatch work to this worker agent.
         conductor_enabled: agent.conductor_enabled ?? false,
         max_concurrent_runs: agent.max_concurrent_runs ?? 1,
@@ -1961,6 +1962,17 @@ function ConfigTab({ agent, onSaved }) {
                                 value={form.conductor_report_time}
                                 onChange={(e) => setForm({ ...form, conductor_report_time: e.target.value })}
                             />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Planning interval (minutes)</label>
+                            <input
+                                type="number" min="1" className="input"
+                                value={form.conductor_plan_interval_minutes}
+                                onChange={(e) => setForm({ ...form, conductor_plan_interval_minutes: Number(e.target.value) })}
+                            />
+                            <p className="text-xs text-text-tertiary mt-1">
+                                How often the Conductor takes an LLM turn to assign unassigned todo tasks to the best-fit agent.
+                            </p>
                         </div>
                     </div>
                     <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
