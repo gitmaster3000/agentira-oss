@@ -2938,6 +2938,53 @@ def mark_dispatch_dropped(*, agent_id: str, trace_id: str,
         db.commit()
 
 
+# A run whose claude subprocess died abnormally — non-zero exit, no
+# agent verdict — is usually a transient crash (an API blip, a
+# claude-code hiccup at a turn boundary), not a real failure. Auto-retry
+# it a couple of times, resuming the conversation, before giving up.
+# The caps stop a retry storm on a genuinely broken task.
+_AUTO_RETRY_MAX = 2
+_AUTO_RETRY_WINDOW_MIN = 20
+
+
+def _maybe_auto_retry(run_id: str, error: str) -> bool:
+    """If `run_id` failed from a transient subprocess crash, re-dispatch
+    its task (the scope's session is reused, so the agent continues where
+    it left off) up to `_AUTO_RETRY_MAX` times. Returns True if a retry
+    was dispatched."""
+    from datetime import timedelta
+    if "subprocess exited with code" not in (error or ""):
+        return False  # not the transient-crash signature
+    with _session() as db:
+        run = db.query(Run).filter(Run.id == run_id).first()
+        if not run or not run.task_id or not run.agent_id:
+            return False
+        task_id, agent_id = run.task_id, run.agent_id
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            minutes=_AUTO_RETRY_WINDOW_MIN)
+        failed = (db.query(Run)
+                    .filter(Run.task_id == task_id,
+                            Run.agent_id == agent_id,
+                            Run.status == RunStatus.FAILED,
+                            Run.created_at >= cutoff)
+                    .count())
+    # `failed` counts the run that just failed too — so allow retries
+    # while we've failed at most _AUTO_RETRY_MAX times.
+    if failed > _AUTO_RETRY_MAX:
+        _dispatch_logger.warning(
+            "Auto-retry exhausted task=%s agent=%s (%d recent fails)",
+            task_id, agent_id, failed)
+        return False
+    result = schedule_task_run(task_id=task_id, agent_id=agent_id)
+    if result.get("error"):
+        _dispatch_logger.warning("Auto-retry dispatch failed task=%s: %s",
+                                 task_id, result["error"])
+        return False
+    _dispatch_logger.info("Auto-retried crashed run=%s task=%s (attempt %d)",
+                          run_id, task_id, failed + 1)
+    return True
+
+
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
@@ -3044,7 +3091,15 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     #
     # AP-108: suppressed when the agent declared an outcome — a non-zero
     # exit after a clean finish_run is not a failure the user needs to see.
+    retried = False
     if not effective_success and error:
+        # A transient subprocess crash auto-retries (resuming the
+        # session) instead of surfacing a hard failure to the user.
+        if run_id:
+            try:
+                retried = _maybe_auto_retry(run_id, error)
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                _dispatch_logger.warning("auto-retry raised: %s", exc)
         fail_scope = scope
         if not fail_scope:
             with _session() as db:
@@ -3063,11 +3118,15 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                 trace_id=trace_id,
                 scope_key=fail_scope or None,
                 role=MessageRole.SYSTEM,
-                content=f"⚠ Agent execution failed: {error[:600]}",
+                content=("↻ Run crashed mid-step (transient) — auto-retrying; "
+                         "the agent resumes where it left off."
+                         if retried
+                         else f"⚠ Agent execution failed: {error[:600]}"),
             ))
             db.commit()
 
-    return {"ok": True, "trace_id": trace_id, "logged": logger_msg}
+    return {"ok": True, "trace_id": trace_id, "logged": logger_msg,
+            "auto_retried": retried}
 
 
 def get_trigger_events(trace_id: str) -> list[dict]:
