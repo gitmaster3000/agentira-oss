@@ -161,6 +161,9 @@ class Profile(Base):
     # How often (minutes) the Conductor takes an LLM planning turn —
     # assigning unassigned todo tasks to the best-fit agent.
     conductor_plan_interval_minutes: Mapped[int] = mapped_column(default=10, nullable=False)
+    # Master on/off for the Conductor (on its own profile). When False the
+    # queue tick, planning turn, and daily report all no-op.
+    conductor_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")

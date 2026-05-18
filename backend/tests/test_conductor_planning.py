@@ -149,3 +149,42 @@ def test_planning_dispatches_llm_turn_when_work_exists(test_db):
     assert "Build the parser" in calls[0]["content"]
     assert "update_task" in calls[0]["content"]
     assert conductor.get_last_plan().get("ok") is True
+
+
+# ── master on/off ──────────────────────────────────────────────────────
+
+def test_disabled_conductor_skips_planning(test_db):
+    _mk_setup()
+    cond = conductor.get_or_create_conductor()
+    forge_services.update_agent(cond["id"], conductor_active=False)
+    calls = []
+    with patch.object(forge_services, "send_runtime_message",
+                      lambda *a, **k: calls.append(k)):
+        result = conductor.run_planning_turn()
+    assert result.get("skipped") == "conductor_disabled"
+    assert calls == []
+
+
+def test_disabled_conductor_skips_tick(test_db):
+    agent_id, _, task_id = _mk_setup()
+    cond = conductor.get_or_create_conductor()
+    forge_services.update_agent(cond["id"], conductor_active=False)
+    calls = []
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: (calls.append(kw), {"run_id": "x"})[1]):
+        result = conductor.run_tick()
+    assert result.get("skipped") == "conductor_disabled"
+    assert calls == []
+
+
+def test_reenabled_conductor_resumes(test_db):
+    _mk_setup()
+    cond = conductor.get_or_create_conductor()
+    forge_services.update_agent(cond["id"], conductor_active=False)
+    forge_services.update_agent(cond["id"], conductor_active=True)
+    calls = []
+    with patch.object(forge_services, "send_runtime_message",
+                      lambda *a, **k: calls.append(k)):
+        result = conductor.run_planning_turn()
+    assert result.get("ok") is True
+    assert len(calls) == 1
