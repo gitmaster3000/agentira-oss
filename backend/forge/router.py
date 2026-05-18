@@ -62,6 +62,7 @@ class AgentUpdate(BaseModel):
     conductor_report_time: Optional[str] = None
     conductor_report_enabled: Optional[bool] = None
     conductor_plan_interval_minutes: Optional[int] = None
+    conductor_active: Optional[bool] = None
 
 
 class HeartbeatRequest(BaseModel):

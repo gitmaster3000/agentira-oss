@@ -163,16 +163,25 @@ def get_conductor_config() -> dict:
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
         if not prof:
-            return {"tick_seconds": TICK_INTERVAL_S, "report_time": "09:00",
-                    "report_enabled": True, "plan_interval_minutes": 10}
+            return {"active": True, "tick_seconds": TICK_INTERVAL_S,
+                    "report_time": "09:00", "report_enabled": True,
+                    "plan_interval_minutes": 10}
         # Clamp the tick to a sane floor — a sub-10s tick would hammer the DB.
         tick = max(10, int(prof.conductor_tick_seconds or TICK_INTERVAL_S))
         # Planning turn costs tokens — floor it at 1 min.
         plan = max(1, int(prof.conductor_plan_interval_minutes or 10))
-        return {"tick_seconds": tick,
+        return {"active": bool(prof.conductor_active),
+                "tick_seconds": tick,
                 "report_time": prof.conductor_report_time or "09:00",
                 "report_enabled": bool(prof.conductor_report_enabled),
                 "plan_interval_minutes": plan}
+
+
+def _conductor_active() -> bool:
+    """Master on/off, read off the Conductor profile. Default on."""
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        return bool(prof.conductor_active) if prof else True
 
 
 # ── Picker ───────────────────────────────────────────────────────────────
@@ -318,6 +327,10 @@ def run_tick() -> dict:
     one bad row must not stall the fleet.
     """
     global _LAST_TICK
+    if not _conductor_active():
+        _LAST_TICK = {"skipped": "conductor_disabled",
+                      "dispatched": [], "skipped_agents": [], "reconciled": []}
+        return _LAST_TICK
     dispatched: list[dict] = []
     skipped: list[dict] = []
 
@@ -474,6 +487,9 @@ def run_daily_report() -> dict:
     disabled in config.
     """
     global _LAST_REPORT
+    if not _conductor_active():
+        _LAST_REPORT = {"skipped": "conductor_disabled"}
+        return _LAST_REPORT
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
         if not prof:
@@ -596,6 +612,9 @@ def run_planning_turn() -> dict:
     unassigned todo backlog to agents. Skips (token-free) when there is
     nothing to plan or the Conductor has no runtime."""
     global _LAST_PLAN
+    if not _conductor_active():
+        _LAST_PLAN = {"skipped": "conductor_disabled"}
+        return _LAST_PLAN
     facts = gather_planning_facts()
     if not facts["unassigned_tasks"] or not facts["agents"]:
         _LAST_PLAN = {"skipped": "nothing to plan"}
