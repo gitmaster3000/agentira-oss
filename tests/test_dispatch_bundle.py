@@ -207,22 +207,26 @@ def test_dispatch_chat_trigger_sends_empty_bundle(test_db):
 
 
 def test_run_token_is_unique_per_dispatch(test_db):
-    """Two scheduled runs of the same task must get different run tokens —
-    they're per-run, not per-task."""
+    """Each scheduled run gets its own run token + run id — per-run, not
+    per-task. Uses two agents: task runs are serialized per agent (they
+    share a git worktree), so one agent can't have two concurrent runs."""
     rt_id = _seed_runtime(test_db)
     project = core_services.create_project("Tok Project", actor="system")
     task = core_services.create_task(project["id"], "Tok Task", actor="system")
-    agent = forge_services.create_agent(
-        name="Tok Agent", executor_type="cli", runtime_id=rt_id,
+    agent_a = forge_services.create_agent(
+        name="Tok Agent A", executor_type="cli", runtime_id=rt_id,
+    )
+    agent_b = forge_services.create_agent(
+        name="Tok Agent B", executor_type="cli", runtime_id=rt_id,
     )
 
     fake = _FakeHub()
     with patch("backend.forge.ws_dispatch.hub", fake):
         _drive(lambda: forge_services.schedule_task_run(
-            task_id=task["id"], agent_id=agent["id"],
+            task_id=task["id"], agent_id=agent_a["id"],
         ))
         _drive(lambda: forge_services.schedule_task_run(
-            task_id=task["id"], agent_id=agent["id"],
+            task_id=task["id"], agent_id=agent_b["id"],
         ))
 
     assert len(fake.calls) == 2

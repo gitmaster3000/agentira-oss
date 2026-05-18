@@ -2253,6 +2253,27 @@ def dispatch_pending_run(*, run_id: str,
         agent_id = agent.id
         task = db.get(Task, task_id) if task_id else None
 
+        # Serialize task runs per agent. All of an agent's task runs share
+        # ONE git worktree (agent/<id>/work) — running two claude
+        # subprocesses in the same directory corrupts both (clobbered
+        # writes, git index locks) and they die with "subprocess exited
+        # with code 1". So an agent runs at most one task at a time.
+        # (True per-agent concurrency needs a worktree per run — separate
+        # follow-up.) `resume` excludes the run itself.
+        if task_id:
+            busy = (db.query(Run)
+                      .filter(Run.agent_id == agent_id,
+                              Run.status == RunStatus.RUNNING,
+                              Run.task_id.isnot(None),
+                              Run.id != run_id)
+                      .first())
+            if busy:
+                return {"error": (
+                    f"Agent already has a task run in flight "
+                    f"(run {busy.id}). Task runs are serialized per agent "
+                    f"— they share one git worktree. Wait for it to finish "
+                    f"or stop it first.")}
+
         if resume:
             # Resume: send a continuation nudge, keep initial_prompt as the
             # original task prompt. The session is reloaded via --resume.
@@ -2534,7 +2555,13 @@ def schedule_task_run(*, task_id: str, agent_id: str,
                                 extra_context=extra_context)
     if prepared.get("error"):
         return prepared
-    return dispatch_pending_run(run_id=prepared["id"])
+    result = dispatch_pending_run(run_id=prepared["id"])
+    # If dispatch was refused (e.g. the agent is already running a task),
+    # don't leave the prepared READY run orphaned — discard it so the
+    # caller (Conductor / webhook) can cleanly retry on the next tick.
+    if result.get("error"):
+        discard_pending_run(run_id=prepared["id"])
+    return result
 
 
 def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None") -> dict:

@@ -200,3 +200,65 @@ def test_prepare_unknown_task_errors(test_db):
     result = forge_services.prepare_task_run(
         task_id=uuid.uuid4().hex, agent_id=agent_id)
     assert "error" in result
+
+
+# ── task runs are serialized per agent (one git worktree) ──────────────
+
+def test_second_concurrent_task_run_is_refused(test_db):
+    """All of an agent's task runs share one worktree — a second dispatch
+    must be refused while the first is RUNNING."""
+    task_id, agent_id = _mk_task_agent(test_db)
+    a = _drive(lambda: forge_services.prepare_task_run(
+        task_id=task_id, agent_id=agent_id))
+    b = _drive(lambda: forge_services.prepare_task_run(
+        task_id=task_id, agent_id=agent_id))
+
+    fake = _FakeHub()
+    with patch("backend.forge.ws_dispatch.hub", fake):
+        r1 = _drive(lambda: forge_services.dispatch_pending_run(run_id=a["id"]))
+        r2 = _drive(lambda: forge_services.dispatch_pending_run(run_id=b["id"]))
+
+    assert "error" not in r1
+    assert "error" in r2 and "in flight" in r2["error"]
+    assert len(fake.calls) == 1, "the second run must not dispatch"
+
+
+def test_schedule_task_run_refused_and_cleaned_when_agent_busy(test_db):
+    """schedule_task_run (Conductor path): the second call is refused, and
+    its prepared READY run is discarded — no orphan rows left behind."""
+    from backend.forge.models import Run, RunStatus
+    task_id, agent_id = _mk_task_agent(test_db)
+    fake = _FakeHub()
+    with patch("backend.forge.ws_dispatch.hub", fake):
+        r1 = _drive(lambda: forge_services.schedule_task_run(
+            task_id=task_id, agent_id=agent_id))
+        r2 = _drive(lambda: forge_services.schedule_task_run(
+            task_id=task_id, agent_id=agent_id))
+
+    assert "error" not in r1
+    assert "error" in r2
+    with forge_services._session() as db:
+        assert db.query(Run).filter(Run.status == RunStatus.READY).count() == 0
+
+
+def test_different_agents_run_concurrently(test_db):
+    """The guard is per-agent — two different agents can each have a task
+    run in flight at the same time."""
+    rt_id = _seed_runtime(test_db)
+    p1 = core_services.create_project("P1", actor="system")
+    p2 = core_services.create_project("P2", actor="system")
+    t1 = core_services.create_task(p1["id"], "T1", actor="system")
+    t2 = core_services.create_task(p2["id"], "T2", actor="system")
+    a1 = forge_services.create_agent(name="A1", executor_type="cli",
+                                     runtime_id=rt_id)
+    a2 = forge_services.create_agent(name="A2", executor_type="cli",
+                                     runtime_id=rt_id)
+    fake = _FakeHub()
+    with patch("backend.forge.ws_dispatch.hub", fake):
+        r1 = _drive(lambda: forge_services.schedule_task_run(
+            task_id=t1["id"], agent_id=a1["id"]))
+        r2 = _drive(lambda: forge_services.schedule_task_run(
+            task_id=t2["id"], agent_id=a2["id"]))
+
+    assert "error" not in r1 and "error" not in r2
+    assert len(fake.calls) == 2
