@@ -341,15 +341,74 @@ def test_nonzero_exit_after_finish_run_does_not_fail_the_run(test_db):
 
 def test_nonzero_exit_with_no_agent_outcome_still_fails(test_db):
     """No finish_run call → the process exit is the only signal we have,
-    so a non-zero exit is a genuine failure."""
+    so a non-zero exit fails the run. (Auto-retry is stubbed — the
+    crashed run itself still ends FAILED; the retry is a separate run.)"""
     rid = _make_run(test_db)
-    forge_services.complete_trigger(
-        agent_id="any", trace_id="t", run_id=rid,
-        success=False, error="subprocess exited with code 1",
-    )
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: {"ok": True, "run_id": "retry"}):
+        forge_services.complete_trigger(
+            agent_id="any", trace_id="t", run_id=rid,
+            success=False, error="subprocess exited with code 1",
+        )
     run = forge_services.get_run(rid)
     assert run["status"] == "failed"
     assert run["outcome"] == "failed"
+
+
+# ── auto-retry on transient crash ──────────────────────────────────────
+
+def test_transient_crash_auto_retries(test_db):
+    """A bare 'subprocess exited with code 1' (no agent verdict) is a
+    transient crash — complete_trigger re-dispatches the task."""
+    rid = _make_run(test_db)
+    calls = []
+
+    def fake_sched(*, task_id, agent_id, **kw):
+        calls.append((task_id, agent_id))
+        return {"ok": True, "run_id": "retry-run"}
+
+    with patch.object(forge_services, "schedule_task_run", fake_sched):
+        res = forge_services.complete_trigger(
+            agent_id="any", trace_id="t", run_id=rid,
+            success=False, error="subprocess exited with code 1")
+    assert res.get("auto_retried") is True
+    assert len(calls) == 1
+
+
+def test_user_cancel_does_not_auto_retry(test_db):
+    """A user cancel is intentional — never auto-retry it."""
+    rid = _make_run(test_db)
+    calls = []
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: (calls.append(kw), {"ok": True})[1]):
+        res = forge_services.complete_trigger(
+            agent_id="any", trace_id="t", run_id=rid,
+            success=False, error="Cancelled by user.")
+    assert res.get("auto_retried") is False
+    assert calls == []
+
+
+def test_auto_retry_stops_after_cap(test_db):
+    """Once the task has failed too many times in the window, stop
+    retrying — no retry storm on a genuinely broken task."""
+    import uuid as _uuid
+    from backend.forge.models import Run as _Run, RunStatus as _RS
+    rid = _make_run(test_db)
+    run = forge_services.get_run(rid)
+    task_id, agent_id = run["task_id"], run["agent_id"]
+    with forge_services._session() as db:
+        for _ in range(3):
+            db.add(_Run(id=_uuid.uuid4().hex[:12], agent_id=agent_id,
+                        task_id=task_id, status=_RS.FAILED))
+        db.commit()
+    calls = []
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: (calls.append(kw), {"ok": True})[1]):
+        res = forge_services.complete_trigger(
+            agent_id=agent_id, trace_id="t", run_id=rid,
+            success=False, error="subprocess exited with code 1")
+    assert res.get("auto_retried") is False
+    assert calls == []
 
 
 # ── Prompt template ──────────────────────────────────────────────────
