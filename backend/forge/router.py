@@ -61,6 +61,7 @@ class AgentUpdate(BaseModel):
     conductor_tick_seconds: Optional[int] = None
     conductor_report_time: Optional[str] = None
     conductor_report_enabled: Optional[bool] = None
+    conductor_plan_interval_minutes: Optional[int] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -315,9 +316,12 @@ def update_agent(agent_id: str, body: AgentUpdate):
         raise HTTPException(400, str(exc))
     if not result:
         raise HTTPException(404, "Agent not found")
-    # If the Conductor's tick cadence changed, re-install the scheduler
-    # job so the new interval takes effect without a backend restart.
-    if "conductor_tick_seconds" in fields:
+    # If the Conductor's cadence changed, re-install the scheduler jobs
+    # so the new interval takes effect without a backend restart.
+    if "conductor_tick_seconds" in fields \
+            or "conductor_plan_interval_minutes" in fields \
+            or "conductor_report_time" in fields \
+            or "conductor_report_enabled" in fields:
         try:
             from backend.forge.scheduler import scheduler
             scheduler.refresh()
@@ -550,6 +554,7 @@ def conductor_status():
         "config": _conductor.get_conductor_config(),
         "last_tick": _conductor.get_last_tick(),
         "last_report": _conductor.get_last_report(),
+        "last_plan": _conductor.get_last_plan(),
         "survey": _conductor.survey_workspace(),
     }
 
@@ -567,6 +572,14 @@ def conductor_report_now():
     nudge from the UI). Dispatches one LLM turn to the Conductor agent."""
     from backend.forge import conductor as _conductor
     return _conductor.run_daily_report()
+
+
+@router.post("/conductor/plan")
+def conductor_plan_now():
+    """Run the Conductor's LLM planning turn immediately — assigns the
+    unassigned todo backlog to agents. Self-skips if nothing to plan."""
+    from backend.forge import conductor as _conductor
+    return _conductor.run_planning_turn()
 
 
 @router.get("/projects/{project_id}/digest")
