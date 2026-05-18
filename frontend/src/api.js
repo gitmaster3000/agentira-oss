@@ -245,6 +245,12 @@ export const api = {
         getProjectActivity: (projectId) =>
             request(`/forge/projects/${projectId}/activity`),
 
+        // Conductor management.
+        getConductor: () => request('/forge/conductor'),
+        runConductorTick: () => request('/forge/conductor/tick', { method: 'POST' }),
+        runConductorPlan: () => request('/forge/conductor/plan', { method: 'POST' }),
+        runConductorReport: () => request('/forge/conductor/report', { method: 'POST' }),
+
         // Events
         listEvents: (params = {}) => {
             const qs = new URLSearchParams();
