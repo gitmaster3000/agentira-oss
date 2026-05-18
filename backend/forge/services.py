@@ -517,6 +517,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "conductor_tick_seconds": (a.profile.conductor_tick_seconds if a.profile else 60),
         "conductor_report_time": (a.profile.conductor_report_time if a.profile else "09:00"),
         "conductor_report_enabled": bool(a.profile.conductor_report_enabled) if a.profile else True,
+        "conductor_plan_interval_minutes": (a.profile.conductor_plan_interval_minutes if a.profile else 10),
         "created_at": _iso(a.created_at),
     }
 
@@ -896,7 +897,7 @@ _AGENT_TO_PROFILE_MIRROR = {
     "conductor_enabled", "max_concurrent_runs",
     # Conductor cadence config (only meaningful on the Conductor profile).
     "conductor_tick_seconds", "conductor_report_time",
-    "conductor_report_enabled",
+    "conductor_report_enabled", "conductor_plan_interval_minutes",
 }
 
 

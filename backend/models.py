@@ -158,6 +158,9 @@ class Profile(Base):
     conductor_tick_seconds: Mapped[int] = mapped_column(default=60, nullable=False)
     conductor_report_time: Mapped[str] = mapped_column(String(5), default="09:00", nullable=False)
     conductor_report_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # How often (minutes) the Conductor takes an LLM planning turn —
+    # assigning unassigned todo tasks to the best-fit agent.
+    conductor_plan_interval_minutes: Mapped[int] = mapped_column(default=10, nullable=False)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")

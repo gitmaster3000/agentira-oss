@@ -74,20 +74,23 @@ CONDUCTOR_SYSTEM_PROMPT = """\
 You are the Conductor — the orchestrator for this Agentira workspace.
 Your job: keep task queues moving and runs healthy across every project.
 
-You run in two modes:
+A deterministic queue tick dispatches assigned todo work to free agents
+for free (no tokens, not you). You are invoked for the two jobs that
+need judgment:
 
-QUEUE TICK (frequent, terse): survey the workspace, dispatch ready todo
-work to free agents, flag stuck runs. If nothing needs doing, say so in
-one line and stop — do not pad.
+QUEUE PLANNING: you are given the unassigned todo tasks and the
+available agents. Assign each task to the best-fit agent in the same
+project (skill fit + load balance) by calling mcp__agentira__update_task
+with the agent's exact name as `assignee`. Only touch the tasks you're
+given. Be terse — just make the update_task calls.
 
-DAILY REPORT: compile the digest, review sprint progress, rebalance
-assignments, surface blockers.
+DAILY REPORT: compile the digest, review progress, surface blockers and
+stuck runs, recommend priorities.
 
-Rules of economy — you cost tokens, your scripts do not:
-- ALWAYS call your tools (survey_workspace, find_free_agents, next_tasks,
-  generate_report) to get facts. Never re-derive what a script returns.
-- Spend reasoning only on judgment: which task matters most, whether a
-  run is stuck, how to plan the sprint.
+Rules of economy — you cost tokens, the scripts do not:
+- The facts you need are already in the prompt. Don't re-derive them.
+- Spend reasoning only on judgment: best-fit assignment, what matters
+  most, whether a run is stuck.
 - Be terse. No preamble, no recap."""
 
 
@@ -152,20 +155,24 @@ def get_or_create_conductor() -> dict:
 def get_conductor_config() -> dict:
     """Cadence config read off the Conductor's own profile.
 
-    `tick_seconds` drives the queue-tick interval; `report_time` /
-    `report_enabled` drive the daily report. Falls back to module
-    defaults if the Conductor profile isn't seeded yet.
+    `tick_seconds` drives the deterministic queue-tick (dispatch);
+    `report_time` / `report_enabled` drive the daily report;
+    `plan_interval_minutes` drives the LLM planning turn (assignment).
+    Falls back to module defaults if the Conductor isn't seeded yet.
     """
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
         if not prof:
-            return {"tick_seconds": TICK_INTERVAL_S,
-                    "report_time": "09:00", "report_enabled": True}
+            return {"tick_seconds": TICK_INTERVAL_S, "report_time": "09:00",
+                    "report_enabled": True, "plan_interval_minutes": 10}
         # Clamp the tick to a sane floor — a sub-10s tick would hammer the DB.
         tick = max(10, int(prof.conductor_tick_seconds or TICK_INTERVAL_S))
+        # Planning turn costs tokens — floor it at 1 min.
+        plan = max(1, int(prof.conductor_plan_interval_minutes or 10))
         return {"tick_seconds": tick,
                 "report_time": prof.conductor_report_time or "09:00",
-                "report_enabled": bool(prof.conductor_report_enabled)}
+                "report_enabled": bool(prof.conductor_report_enabled),
+                "plan_interval_minutes": plan}
 
 
 # ── Picker ───────────────────────────────────────────────────────────────
@@ -494,3 +501,126 @@ def run_daily_report() -> dict:
         logger.exception("Daily report dispatch failed: %s", exc)
         _LAST_REPORT = {"error": str(exc)}
     return _LAST_REPORT
+
+
+# ── Planning turn — the LLM decides assignments ──────────────────────────
+#
+# The queue tick (deterministic) DISPATCHES assigned/unassigned todo work.
+# The planning turn is where the LLM earns its tokens: it looks at the
+# UNASSIGNED todo backlog + the available agents and sets each task's
+# `assignee` (smart, judgment-based fit + load-balance). The next queue
+# tick then dispatches per those assignments. Facts are gathered by a
+# script (free); the LLM only decides; the actual dispatch stays in the
+# deterministic tick. Runs only when there is unassigned work to plan.
+
+_LAST_PLAN: dict | None = None
+
+
+def get_last_plan() -> dict | None:
+    return _LAST_PLAN
+
+
+def gather_planning_facts() -> dict:
+    """Token-free snapshot for the planning turn: the conductor-enabled
+    agents and the UNASSIGNED, un-run todo tasks in their projects."""
+    with SessionLocal() as db:
+        todo_id = _todo_status_id(db)
+        profiles = (db.query(Profile)
+                      .filter(Profile.conductor_enabled == True)  # noqa: E712
+                      .filter(Profile.default_project_id.isnot(None))
+                      .all())
+        agents: list[dict] = []
+        project_ids: set[str] = set()
+        for prof in profiles:
+            a = db.query(Agent).filter(Agent.profile_id == prof.id).first()
+            if not a:
+                continue
+            agents.append({
+                "name": a.name,
+                "project_id": prof.default_project_id,
+                "in_flight": _agent_in_flight_count(db, a.id),
+                "capacity": max(1, int(prof.max_concurrent_runs or 1)),
+            })
+            project_ids.add(prof.default_project_id)
+
+        tasks: list[dict] = []
+        if todo_id and project_ids:
+            tasks_with_runs = select(Run.task_id).where(Run.task_id.isnot(None))
+            rows = (db.query(Task)
+                      .filter(Task.project_id.in_(project_ids),
+                              Task.status_id == todo_id,
+                              Task.id.notin_(tasks_with_runs),
+                              (Task.assignee == "") | (Task.assignee.is_(None)))
+                      .order_by(Task.created_at.asc())
+                      .all())
+            for t in rows:
+                tasks.append({
+                    "id": t.id, "key": t.key, "title": t.title,
+                    "project_id": t.project_id, "priority": t.priority,
+                })
+    return {"agents": agents, "unassigned_tasks": tasks}
+
+
+def _compose_planning_prompt(facts: dict) -> str:
+    lines = ["QUEUE PLANNING.", ""]
+    lines.append("## Agents available for auto-dispatch")
+    for a in facts["agents"]:
+        lines.append(
+            f"- {a['name']} — project {a['project_id']} — "
+            f"{a['in_flight']}/{a['capacity']} in flight"
+        )
+    lines.append("")
+    lines.append("## Unassigned todo tasks (need an owner)")
+    for t in facts["unassigned_tasks"]:
+        lines.append(
+            f"- task_id={t['id']} [{t.get('key') or '?'}] "
+            f"({t.get('priority') or 'medium'}) — {t['title']} "
+            f"— project {t['project_id']}"
+        )
+    lines.append("")
+    lines.append(
+        "Assign each unassigned task to the best-fit agent IN THE SAME "
+        "PROJECT. Balance load — don't pile everything on one agent; "
+        "weigh in_flight vs capacity. For each task you assign, call "
+        "mcp__agentira__update_task with task_id and assignee set to the "
+        "agent's exact name (optionally also set priority). Only touch the "
+        "tasks listed above — do not reassign anything else. If a task has "
+        "no suitable agent in its project, leave it. Be terse; just make "
+        "the update_task calls."
+    )
+    return "\n".join(lines)
+
+
+def run_planning_turn() -> dict:
+    """Dispatch one LLM planning turn to the Conductor — it assigns the
+    unassigned todo backlog to agents. Skips (token-free) when there is
+    nothing to plan or the Conductor has no runtime."""
+    global _LAST_PLAN
+    facts = gather_planning_facts()
+    if not facts["unassigned_tasks"] or not facts["agents"]:
+        _LAST_PLAN = {"skipped": "nothing to plan"}
+        return _LAST_PLAN
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        if not prof:
+            _LAST_PLAN = {"skipped": "no_conductor"}
+            return _LAST_PLAN
+        if not prof.runtime_id:
+            _LAST_PLAN = {"skipped": "no_runtime"}
+            return _LAST_PLAN
+        conductor_id = prof.id
+
+    prompt = _compose_planning_prompt(facts)
+    try:
+        from backend.forge import services
+        services.send_runtime_message(
+            conductor_id, content=prompt, scope_key="chat:default")
+        _LAST_PLAN = {"ok": True, "at": datetime.now(timezone.utc).isoformat(),
+                      "unassigned": len(facts["unassigned_tasks"]),
+                      "agents": len(facts["agents"])}
+        logger.info("Conductor planning turn dispatched (%d unassigned).",
+                    len(facts["unassigned_tasks"]))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Planning turn dispatch failed: %s", exc)
+        _LAST_PLAN = {"error": str(exc)}
+    return _LAST_PLAN

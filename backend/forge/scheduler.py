@@ -101,6 +101,20 @@ class ForgeScheduler:
             )
             logger.info("Conductor daily report scheduled at %02d:%02d UTC.",
                         hh, mm)
+
+        # Planning turn — the LLM assigns the unassigned todo backlog,
+        # every conductor_plan_interval_minutes. Self-skips (token-free)
+        # when there's nothing unassigned to plan.
+        plan_min = max(1, int(cfg.get("plan_interval_minutes") or 10))
+        self._scheduler.add_job(
+            _conductor.run_planning_turn,
+            trigger=IntervalTrigger(minutes=plan_min),
+            id="conductor_planning",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Conductor planning turn scheduled every %dm.", plan_min)
         return tick
 
     def stop(self) -> None:
