@@ -21,6 +21,7 @@ import { RuntimesDashboard } from './pages/forge/RuntimesDashboard';
 import { AgentDetail } from './pages/forge/AgentDetail';
 import { RunsDashboard } from './pages/forge/RunsDashboard';
 import { RunDetail } from './pages/forge/RunDetail';
+import { ConductorPage } from './pages/forge/ConductorPage';
 import { ROUTES } from './routes';
 
 // Old "Welcome" stub replaced by StudioDashboard — see pages/StudioDashboard.jsx
@@ -91,6 +92,7 @@ export default function App() {
                         <Route index element={<ForgeOverview />} />
                         <Route path="agents" element={<AgentsDashboard />} />
                         <Route path="agents/:agentId" element={<AgentDetail />} />
+                        <Route path="conductor" element={<ConductorPage />} />
                         <Route path="runtimes" element={<RuntimesDashboard />} />
                         <Route path="runs" element={<RunsDashboard />} />
                         <Route path="runs/:runId" element={<RunDetail />} />
