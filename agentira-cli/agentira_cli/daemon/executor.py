@@ -14,6 +14,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from typing import Optional
 
 from agentira_cli.runtimes.claude import (
@@ -27,6 +28,33 @@ from agentira_cli.runtimes.claude import (
 logger = logging.getLogger("agentira.daemon.executor")
 
 _BATCH_INTERVAL = 0.5  # seconds between event flushes
+_CRASH_TAIL_EVENTS = 8  # how many trailing stream events to keep for diagnostics
+
+
+def _crash_tail(recent) -> str:
+    """Render the last few stream events as human-readable crash context.
+
+    When a runtime exits non-zero with no stderr and no result frame, the
+    bare "subprocess exited with code 1" is useless. This appends what the
+    agent was actually doing in its final moments so the failure is
+    diagnosable from the run's error field alone.
+    """
+    if not recent:
+        return "No stream events were received before the exit."
+    lines = []
+    for ev in recent:
+        t = ev.get("type")
+        if t == "text":
+            s = (ev.get("text") or "").strip().replace("\n", " ")
+            if s:
+                lines.append(f"  · assistant: {s[:160]}")
+        elif t == "tool_use":
+            inp = str(ev.get("input") or "").replace("\n", " ")
+            lines.append(f"  · tool {ev.get('tool')}({inp[:160]})")
+        elif t == "tool_result":
+            out = str(ev.get("output") or "").strip().replace("\n", " ")
+            lines.append(f"  · tool {ev.get('tool')} → {out[:200]}")
+    return "Last activity before exit:\n" + "\n".join(lines)
 
 
 class StreamResult:
@@ -108,6 +136,9 @@ async def run_cli_stream(
                 pass
 
         batch: list = []
+        # Rolling tail of the most recent events — kept across flushes so a
+        # silent crash can be diagnosed (see _crash_tail).
+        recent: deque = deque(maxlen=_CRASH_TAIL_EVENTS)
         last_flush = time.monotonic()
         # Track whether the runtime ever emitted a final ResultEvent. If
         # not, the subprocess died without telling us what happened —
@@ -161,13 +192,19 @@ async def run_cli_stream(
                 result.output_tokens += event.output_tokens
 
             elif isinstance(event, TextEvent):
-                batch.append({"type": "text", "text": event.text, "model": event.model})
+                ev = {"type": "text", "text": event.text, "model": event.model}
+                batch.append(ev)
+                recent.append(ev)
 
             elif isinstance(event, ToolUseEvent):
-                batch.append({"type": "tool_use", "tool": event.tool_name, "input": event.tool_input})
+                ev = {"type": "tool_use", "tool": event.tool_name, "input": event.tool_input}
+                batch.append(ev)
+                recent.append(ev)
 
             elif isinstance(event, ToolResultEvent):
-                batch.append({"type": "tool_result", "tool": event.tool_name, "output": event.output})
+                ev = {"type": "tool_result", "tool": event.tool_name, "output": event.output}
+                batch.append(ev)
+                recent.append(ev)
 
             # flush batch every 500ms
             if time.monotonic() - last_flush >= _BATCH_INTERVAL:
@@ -199,10 +236,14 @@ async def run_cli_stream(
         if proc.returncode != 0:
             result.success = False
             if not result.error:
-                result.error = (
-                    stderr_text
-                    or f"subprocess exited with code {proc.returncode}"
-                )
+                # No ResultEvent error and (often) no stderr — a silent
+                # crash. Attach the event tail so the failure is
+                # diagnosable from the run's error field alone.
+                base = stderr_text or f"subprocess exited with code {proc.returncode}"
+                result.error = f"{base}\n\n{_crash_tail(recent)}"
+                logger.warning("Runtime exited code=%s stderr=%s — %s",
+                                proc.returncode, bool(stderr_text),
+                                _crash_tail(recent).replace("\n", " | "))
             elif stderr_text and stderr_text not in result.error:
                 # Append stderr context so we don't lose the actionable
                 # human-readable message when ResultEvent gave us a
@@ -210,10 +251,11 @@ async def run_cli_stream(
                 result.error = f"{result.error}\n\n{stderr_text}"
         elif not saw_result_event:
             result.success = False
-            result.error = (
-                stderr_text
-                or "subprocess exited cleanly without emitting a result frame"
-            )
+            base = (stderr_text
+                    or "subprocess exited cleanly without emitting a result frame")
+            result.error = f"{base}\n\n{_crash_tail(recent)}"
+            logger.warning("Runtime exited with no result frame — %s",
+                            _crash_tail(recent).replace("\n", " | "))
 
     finally:
         if on_proc:
