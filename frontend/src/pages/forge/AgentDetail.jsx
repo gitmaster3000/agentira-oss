@@ -1504,6 +1504,9 @@ function ConfigTab({ agent, onSaved }) {
         conductor_tick_seconds: agent.conductor_tick_seconds ?? 60,
         conductor_report_time: agent.conductor_report_time || '09:00',
         conductor_report_enabled: agent.conductor_report_enabled ?? true,
+        // Whether the Conductor may auto-dispatch work to this worker agent.
+        conductor_enabled: agent.conductor_enabled ?? false,
+        max_concurrent_runs: agent.max_concurrent_runs ?? 1,
     });
     const isConductor = agent.is_system && agent.name === 'Conductor';
     const [runtimes, setRuntimes] = useState([]);
@@ -1968,6 +1971,41 @@ function ConfigTab({ agent, onSaved }) {
                         />
                         Compile a daily digest / report
                     </label>
+                </section>
+            )}
+
+            {/* Conductor management — for worker agents (not system agents) */}
+            {!agent.is_system && (
+                <section className="card space-y-4">
+                    <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Conductor
+                        </h3>
+                        <InfoTip text="When enabled, the Conductor auto-dispatches the next unblocked todo task from this agent's project to it whenever it's idle — no manual Run click needed. Off by default." />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={form.conductor_enabled}
+                            onChange={(e) => setForm({ ...form, conductor_enabled: e.target.checked })}
+                        />
+                        Let the Conductor auto-dispatch work to this agent
+                    </label>
+                    <div className="w-48">
+                        <label className="block text-xs text-text-tertiary mb-1">Max concurrent runs</label>
+                        <input
+                            type="number" min="1" className="input"
+                            value={form.max_concurrent_runs}
+                            onChange={(e) => setForm({ ...form, max_concurrent_runs: Number(e.target.value) })}
+                        />
+                    </div>
+                    {!form.default_project_id && (
+                        <p className="text-xs text-yellow-500">
+                            Assign this agent a project (above) — the Conductor only
+                            picks up work from the agent's project.
+                        </p>
+                    )}
                 </section>
             )}
 
