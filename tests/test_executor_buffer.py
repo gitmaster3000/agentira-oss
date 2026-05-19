@@ -34,7 +34,7 @@ class _FakeRuntime:
 
     @staticmethod
     def build_args(prompt, *, model="", max_turns=20, system_prompt="",
-                   mcp_config_path="", resume_session_id=""):
+                   mcp_config_path="", mcp_strict=False, resume_session_id=""):
         # Emit one ~200KB line, then a tiny line. Generate the big payload
         # inside the spawned process — embedding it in argv blows past the
         # OS argv size limit.

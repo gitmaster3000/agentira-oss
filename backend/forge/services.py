@@ -201,8 +201,12 @@ def conversation_scope_key(*, task_id: str | None = None,
     return "chat:default"
 
 
-_TOOL_ENTRY_TRUNCATE = 2048   # ~2KB per tool entry
-_TASK_PREAMBLE_BYTE_CAP = 40 * 1024  # ~40KB total for task-scoped preambles
+_TOOL_ENTRY_TRUNCATE = 4096   # ~4KB per tool entry
+# Total budget for a rebuilt task-scoped history preamble (gateway
+# runtimes / when a claude session is lost). 40KB (~10K tokens) was too
+# thin for a long task — a rebuilt run lost most of its context. 200KB
+# (~50K tokens) keeps real continuity while staying well inside context.
+_TASK_PREAMBLE_BYTE_CAP = 200 * 1024
 
 
 def _render_history_row(m: "AgentMessage") -> str | None:

@@ -27,19 +27,8 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      # The 5 deselected test ids are tracked in AP-38 (drift from recent
-      # code changes — auth path + default epics in roadmap fixture).
-      # Excluded here so the gate has a green baseline; AP-38 fixes them
-      # and removes the deselects.
       - name: Run pytest
-        run: |
-          python -m pytest tests/ -v --tb=short \
-            --ignore=tests/test_webhook_integration.py \
-            --deselect tests/test_e2e_webhook.py::TestEndToEndWebhook::test_full_webhook_flow \
-            --deselect tests/test_e2e_webhook.py::TestEndToEndWebhook::test_no_webhook_for_poll_only_bot \
-            --deselect tests/test_e2e_webhook.py::TestEndToEndWebhook::test_webhook_payload_structure \
-            --deselect tests/test_e2e_webhook.py::TestEndToEndWebhook::test_webhook_sends_auth_token \
-            --deselect tests/test_services.py::test_get_roadmap
+        run: python -m pytest tests/ -v --tb=short
 
   # ── Docker compose lint ─────────────────────────────────────────────────
   # Validates whatever compose files are present on the branch. After
