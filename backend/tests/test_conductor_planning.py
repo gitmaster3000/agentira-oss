@@ -173,7 +173,8 @@ def test_disabled_conductor_skips_tick(test_db):
     with patch.object(forge_services, "schedule_task_run",
                       lambda **kw: (calls.append(kw), {"run_id": "x"})[1]):
         result = conductor.run_tick()
-    assert result.get("skipped") == "conductor_disabled"
+    assert result.get("disabled") is True
+    assert result.get("skipped") == []
     assert calls == []
 
 
