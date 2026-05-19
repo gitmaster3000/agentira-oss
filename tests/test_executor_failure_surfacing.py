@@ -31,7 +31,7 @@ class _ScriptedRuntime:
         self._script = script
 
     def build_args(self, prompt, *, model="", max_turns=20, system_prompt="",
-                   mcp_config_path="", resume_session_id=""):
+                   mcp_config_path="", mcp_strict=False, resume_session_id=""):
         return ["-c", self._script]
 
     @staticmethod

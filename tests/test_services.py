@@ -8,6 +8,10 @@ from unittest.mock import patch
 
 from backend.db import Base
 from backend import services
+# Register the forge tables on Base.metadata so create_all can resolve
+# the profiles.runtime_id → forge_runtimes FK even when this file runs
+# on its own (not just alongside tests that import forge models).
+import backend.forge.models  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def test_db():
@@ -111,7 +115,11 @@ def test_get_roadmap(test_db):
     )
     
     roadmap = services.get_roadmap(project["id"])
-    assert len(roadmap) == 1
-    assert roadmap[0]["title"] == "R1"
-    assert roadmap[0]["start"].startswith("2026-06-01")
-    assert roadmap[0]["end"].startswith("2026-06-15")
+    # get_roadmap returns a structured dict: {project, epics, milestones,
+    # summary}. The one task has no epic → a single "Ungrouped" group.
+    assert roadmap["summary"]["total_tasks"] == 1
+    assert len(roadmap["epics"]) == 1
+    task = roadmap["epics"][0]["tasks"][0]
+    assert task["title"] == "R1"
+    assert task["start"].startswith("2026-06-01")
+    assert task["end"].startswith("2026-06-15")

@@ -57,7 +57,12 @@ class ClaudeRuntime(Runtime):
         prompt: str,
         *,
         model: str = "",
-        max_turns: int = 20,
+        # Autonomous coding tasks routinely take 50-150 agentic turns
+        # (read → edit → test → fix loops). 20 was far too low — runs hit
+        # the cap mid-work and exited. 300 leaves ample headroom while
+        # still capping a true runaway; the stale-run reconciler is the
+        # backstop for genuinely stuck runs.
+        max_turns: int = 300,
         system_prompt: str = "",
         mcp_config_path: str = "",
         mcp_strict: bool = False,
@@ -209,14 +214,22 @@ def parse_stream_line(line: str):
         # are present and is_error=true, treat the `result` text as the
         # error message (it's the human-readable explanation, e.g. "There's
         # an issue with the selected model …").
+        subtype = msg.get("subtype", "")
         is_error = bool(msg.get("is_error"))
-        success = (msg.get("subtype") == "success") and not is_error
+        success = (subtype == "success") and not is_error
         result_text = msg.get("result", "")
         explicit_error = msg.get("error", "")
+        error = explicit_error or (result_text if is_error else "")
+        if not success and not error:
+            # A non-success result with no message — name the subtype so
+            # the failure is legible (e.g. "error_max_turns": the agent
+            # hit the turn cap) instead of falling through to a bare
+            # "subprocess exited with code N".
+            error = f"run ended early: {subtype or 'unknown'}"
         return ResultEvent(
             success=success,
             text="" if is_error else result_text,
-            error=explicit_error or (result_text if is_error else ""),
+            error=error,
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
         )

@@ -135,7 +135,9 @@ def test_rebuild_respects_byte_cap_for_task_scope():
         agent_id=agent_id, scope_key=scope, current="now",
     )
     preamble = out[: out.index("now")]
-    assert len(preamble) < 50 * 1024, len(preamble)
+    # ~250KB of message content, capped at the ~200KB preamble budget:
+    # bounded (not all 250KB) but still substantial.
+    assert 100 * 1024 < len(preamble) < 210 * 1024, len(preamble)
     assert "<conversation history>" in preamble
 
 

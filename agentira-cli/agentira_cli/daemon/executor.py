@@ -73,7 +73,7 @@ async def run_cli_stream(
     prompt: str,
     *,
     model: str = "",
-    max_turns: int = 20,
+    max_turns: int = 300,
     system_prompt: str = "",
     mcp_config_json: Optional[str] = None,
     mcp_strict: bool = False,
