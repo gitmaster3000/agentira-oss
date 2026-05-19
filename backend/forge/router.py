@@ -110,6 +110,11 @@ class DaemonTriggerComplete(BaseModel):
     # Daemon-side filesystem path where the runtime ran. Surfaces in UI
     # so the user can navigate to the workdir.
     workdir: str = ""
+    # AP-107: post-mortem diagnostics captured by the daemon at run-end.
+    # Shape: {exit_code, stderr_tail, last_events_tail, captured_at}.
+    # Surfaced via the get_run_diagnostics MCP tool. Optional — older
+    # daemons that don't send this still work.
+    diagnostics: Optional[dict] = None
     # paused=True: the run was parked mid-flight (SIGTERM), not finished.
     # Backend keeps the run PAUSED and only persists the session_id so a
     # later resume can relaunch with `claude --resume`.
@@ -226,6 +231,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         session_id=body.session_id,
         workdir=body.workdir,
         paused=body.paused,
+        diagnostics=body.diagnostics,
     )
 
 

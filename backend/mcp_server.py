@@ -487,6 +487,66 @@ async def get_my_involvement(ctx: Context = None) -> dict:
         raise
 
 
+# ── AP-107: Run-investigation tools (read-only, prod-safe) ─────────────────────
+
+@mcp.tool()
+async def get_run(run_id: str, ctx: Context = None) -> dict:
+    """Look up a specific Forge run by id.
+
+    Returns the run's full state — status, outcome, agent verdict summary,
+    timing, token + cost counters, workdir, diff stat, error message,
+    initial prompt. Returns {error: "run_not_found"} for unknown ids.
+
+    RBAC: you must be a member of the run's project (or hold the
+    project.view_all wildcard). Read-only.
+    """
+    from backend.forge import services as forge_services
+    actor = actor_ctx.get()
+    try:
+        return forge_services.get_run_detail(run_id, actor=actor)
+    except PermissionError as e:
+        return {"error": "forbidden", "detail": str(e)}
+
+
+@mcp.tool()
+async def get_run_events(run_id: str, limit: int = 100, offset: int = 0,
+                         ctx: Context = None) -> dict:
+    """Paginated event log for a run — the recorded tool calls, tool
+    results, and assistant turns the runtime emitted.
+
+    Each event: {role, tool_name, content, created_at}. `content` is
+    capped per event; large outputs are suffixed with "…[truncated]".
+    `limit` defaults to 100 and is capped at 500. RBAC same as get_run.
+    """
+    from backend.forge import services as forge_services
+    actor = actor_ctx.get()
+    try:
+        return forge_services.list_run_events(
+            run_id, actor=actor, limit=limit, offset=offset,
+        )
+    except PermissionError as e:
+        return {"error": "forbidden", "detail": str(e)}
+
+
+@mcp.tool()
+async def get_run_diagnostics(run_id: str, ctx: Context = None) -> dict:
+    """Post-mortem bundle for a run.
+
+    Combines the agent-declared verdict (outcome + summary) with daemon-
+    captured diagnostics (exit code, stderr tail, last events tail) so an
+    investigator agent can answer "why did this run fail?" without
+    touching the host machine. `status_vs_outcome` flags when the process
+    result and the agent's verdict tell different stories (e.g. process
+    failed but agent declared succeeded). RBAC same as get_run.
+    """
+    from backend.forge import services as forge_services
+    actor = actor_ctx.get()
+    try:
+        return forge_services.get_run_diagnostics(run_id, actor=actor)
+    except PermissionError as e:
+        return {"error": "forbidden", "detail": str(e)}
+
+
 # ── Transport: Streamable HTTP ─────────────────────────────────────────────────
 # json_response=True → plain JSON body on POST (simpler, Bruno-compatible).
 # Switch to False when enabling server-push notifications via GET /mcp.

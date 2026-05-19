@@ -185,6 +185,10 @@ class Run(Base):
     # the RunDetail page before clicking Start. Auto-dispatched runs also
     # store it so the prompt is grep-able after the fact.
     initial_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AP-107: post-mortem bundle captured by the daemon at run-end. JSON
+    # blob: {exit_code, stderr_tail, last_events_tail, captured_at}. Surfaced
+    # via the get_run_diagnostics MCP tool for run-investigation flows.
+    diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

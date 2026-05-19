@@ -1186,6 +1186,145 @@ def get_run(run_id: str) -> dict | None:
         return _run_to_dict(r) if r else None
 
 
+# ── AP-107: Run-investigation MCP service layer ─────────────────────────
+#
+# These functions back the get_run / get_run_events / get_run_diagnostics
+# MCP tools. RBAC: the actor must be a member of the run's project (or
+# hold the project.view_all wildcard). System agents already get '*' via
+# the auth layer, so they pass.
+
+_DIAGNOSTICS_BYTE_CAP = 50_000   # ~50KB ceiling on the persisted blob
+_EVENTS_DEFAULT_LIMIT = 100
+_EVENTS_MAX_LIMIT = 500
+_EVENT_CONTENT_CAP = 4_000       # per-event content trim to keep payload sane
+
+
+def _trim_diagnostics_json(diag: dict) -> str:
+    """Serialize and cap a diagnostics blob; aggressively trim stderr_tail
+    if the JSON is over the cap."""
+    blob = dict(diag)
+    s = json.dumps(blob, default=str)
+    if len(s) <= _DIAGNOSTICS_BYTE_CAP:
+        return s
+    tail = blob.get("stderr_tail")
+    if isinstance(tail, str):
+        overflow = len(s) - _DIAGNOSTICS_BYTE_CAP
+        blob["stderr_tail"] = tail[-max(0, len(tail) - overflow - 200):]
+        s = json.dumps(blob, default=str)
+    return s[:_DIAGNOSTICS_BYTE_CAP]
+
+
+def _assert_run_access(db: Session, run: Run, actor: str) -> None:
+    """Raise PermissionError unless `actor` may investigate this run.
+
+    Rule: project.view_all wildcard → always allowed. Otherwise the actor
+    must be a member of the run's project. Runs without a project_id are
+    only visible to wildcard holders (defensive default)."""
+    from backend.auth import has_permission
+    from backend.models import ProjectMember
+    if has_permission(db, actor, "project.view_all"):
+        return
+    if not run.project_id:
+        raise PermissionError(f"'{actor}' lacks access to run {run.id}")
+    profile = db.query(Profile).filter(Profile.name == actor).first()
+    if not profile:
+        raise PermissionError(f"'{actor}' is not a known profile")
+    is_member = (db.query(ProjectMember)
+                   .filter_by(project_id=run.project_id, profile_id=profile.id)
+                   .first())
+    if not is_member:
+        raise PermissionError(
+            f"'{actor}' is not a member of project {run.project_id}")
+
+
+def get_run_detail(run_id: str, *, actor: str = "system") -> dict:
+    """AP-107: full Run state for an investigator. RBAC-checked."""
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "run_not_found"}
+        _assert_run_access(db, r, actor)
+        d = _run_to_dict(r)
+        d["workdir"] = r.workdir or ""
+        d["session_id"] = r.session_id or ""
+        return d
+
+
+def list_run_events(run_id: str, *, actor: str = "system",
+                    limit: int = _EVENTS_DEFAULT_LIMIT,
+                    offset: int = 0) -> dict:
+    """AP-107: paginated event list for a run. Each event is a lean dict;
+    `content` is capped to keep payloads small."""
+    limit = max(1, min(int(limit or _EVENTS_DEFAULT_LIMIT), _EVENTS_MAX_LIMIT))
+    offset = max(0, int(offset or 0))
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "run_not_found"}
+        _assert_run_access(db, r, actor)
+        q = (db.query(AgentMessage)
+               .filter(AgentMessage.run_id == run_id)
+               .order_by(AgentMessage.created_at.asc()))
+        total = q.count()
+        rows = q.offset(offset).limit(limit).all()
+        events = []
+        for m in rows:
+            content = (m.content or "")
+            if len(content) > _EVENT_CONTENT_CAP:
+                content = content[:_EVENT_CONTENT_CAP] + "…[truncated]"
+            events.append({
+                "role": m.role.value,
+                "tool_name": m.tool_name or "",
+                "content": content,
+                "created_at": _iso(m.created_at),
+            })
+        return {"run_id": run_id, "total": total,
+                "limit": limit, "offset": offset, "events": events}
+
+
+def get_run_diagnostics(run_id: str, *, actor: str = "system") -> dict:
+    """AP-107: post-mortem bundle for a run — exit code, stderr tail, last
+    events, and a status-vs-outcome agreement flag."""
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "run_not_found"}
+        _assert_run_access(db, r, actor)
+        diag: dict = {}
+        if r.diagnostics_json:
+            try:
+                diag = json.loads(r.diagnostics_json) or {}
+            except (TypeError, ValueError):
+                diag = {"parse_error": True}
+        return {
+            "run_id": r.id,
+            "status": r.status.value,
+            "outcome": r.outcome.value if r.outcome else None,
+            "error": r.error,
+            "agent_summary": r.summary or "",
+            "status_vs_outcome": _status_outcome_agreement(r.status, r.outcome),
+            "exit_code": diag.get("exit_code"),
+            "stderr_tail": diag.get("stderr_tail", ""),
+            "last_events_tail": diag.get("last_events_tail") or [],
+            "captured_at": diag.get("captured_at"),
+        }
+
+
+def _status_outcome_agreement(status: "RunStatus",
+                              outcome: "RunOutcome | None") -> str:
+    """Coarse agreement classifier: did the process result and the agent's
+    declared verdict tell the same story?"""
+    if outcome is None:
+        return "no_verdict"
+    s, o = status.value, outcome.value
+    failed_status = s in ("failed", "cancelled")
+    if failed_status and o == "succeeded":
+        return "disagree"
+    if s == "completed" and o in ("failed",):
+        return "disagree"
+    return "agree"
+
+
 def create_run(*, agent_id: str, task_id: str | None = None,
                project_id: str | None = None, trigger_event: str = "",
                model_used: str = "") -> dict:
@@ -2994,7 +3133,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      error: str | None = None,
                      diff_stat: str = "", diff: str = "",
                      session_id: str = "", workdir: str = "",
-                     paused: bool = False) -> dict:
+                     paused: bool = False,
+                     diagnostics: dict | None = None) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -3068,6 +3208,10 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.diff = diff
                 if workdir:
                     r.workdir = workdir
+                if diagnostics:
+                    # AP-107: cap the persisted blob so a runaway stderr can't
+                    # bloat the row. The spec budgets ~50KB total.
+                    r.diagnostics_json = _trim_diagnostics_json(diagnostics)
                 db.commit()
 
     # Persist conversation continuity. Look up the scope this trace was
