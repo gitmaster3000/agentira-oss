@@ -107,7 +107,10 @@ def test_compose_report_prompt_renders_facts(test_db):
     prompt = _conductor._compose_report_prompt(facts)
     assert "DAILY REPORT" in prompt
     assert "Reported" in prompt
-    assert "recommended priorities" in prompt
+    # The report is dispatched as an executive HTML fragment.
+    assert "HTML fragment" in prompt
+    assert "<section" in prompt
+    assert "Today's priorities" in prompt
 
 
 # ── run_daily_report ───────────────────────────────────────────────────

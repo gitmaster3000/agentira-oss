@@ -85,7 +85,9 @@ with the agent's exact name as `assignee`. Only touch the tasks you're
 given. Be terse — just make the update_task calls.
 
 DAILY REPORT: compile the digest, review progress, surface blockers and
-stuck runs, recommend priorities.
+stuck runs, recommend priorities. Output it as a self-contained HTML
+fragment exactly as the prompt specifies — the dashboard renders it as a
+formatted executive report.
 
 Rules of economy — you cost tokens, the scripts do not:
 - The facts you need are already in the prompt. Don't re-derive them.
@@ -470,12 +472,29 @@ def _compose_report_prompt(facts: dict) -> str:
         lines.append("- No conductor-enabled worker agents.")
     lines.append("")
     lines.append(
-        "Write the daily report for the workspace owner. Be concise:\n"
-        "1. What got done overnight (the wins).\n"
-        "2. What's blocked or needs input — and what's needed to unblock.\n"
-        "3. Anything failing or stuck that needs attention.\n"
-        "4. 2-3 recommended priorities for today.\n"
-        "Lead with the most important thing. No preamble."
+        "Write the daily report for the workspace owner as an executive "
+        "briefing. Output a SINGLE self-contained HTML fragment and nothing "
+        "else — no preamble, no markdown, no code fences, no <html>/<head>/"
+        "<body> wrapper. Begin your reply with `<section` and end it with "
+        "`</section>`.\n"
+        "\n"
+        "Structure the report exactly like this:\n"
+        "  <section class=\"daily-report\"> wrapping everything.\n"
+        "  1. An <h1> title and a one-line <p class=\"subtitle\"> with the date.\n"
+        "  2. A <div class=\"kpis\"> row of stat cards — one <div class=\"kpi\"> "
+        "per headline metric (tasks done, blocked, failed, in-flight, total "
+        "cost). Each card: <div class=\"kpi-value\">N</div>"
+        "<div class=\"kpi-label\">…</div>.\n"
+        "  3. <h2>Wins</h2> — what got done overnight, as a <ul>.\n"
+        "  4. <h2>Blocked &amp; needs input</h2> — each item and what unblocks "
+        "it.\n"
+        "  5. <h2>Failing / needs attention</h2>.\n"
+        "  6. <h2>Today's priorities</h2> — an ordered <ol> of 2-3 items.\n"
+        "\n"
+        "Use only these tags: section, div, h1, h2, p, ul, ol, li, strong, "
+        "em, span, table, thead, tbody, tr, th, td. Use the class names above "
+        "so the dashboard can style it. Do NOT add inline styles or scripts. "
+        "Lead with the most important thing; be concise and factual."
     )
     return "\n".join(lines)
 
