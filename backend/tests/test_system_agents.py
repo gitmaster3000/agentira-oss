@@ -131,3 +131,34 @@ def test_agent_dict_exposes_conductor_config(test_db):
     for key in ("is_system", "conductor_tick_seconds",
                 "conductor_report_time", "conductor_report_enabled"):
         assert key in agent, key
+
+
+# ── workspace-wide visibility ──────────────────────────────────────────
+
+def test_system_agent_gets_permission_wildcard(test_db):
+    """A system agent must hold the '*' wildcard — otherwise it's scoped
+    to its (empty) project memberships and sees nothing."""
+    from backend import auth
+    conc = _concierge.get_or_create_concierge()
+    with forge_services._session() as db:
+        assert auth.get_permissions(db, conc["name"]) == {"*"}
+        assert auth.has_permission(db, conc["name"], "project.view_all")
+
+
+def test_conductor_sees_projects_it_is_not_a_member_of(test_db):
+    """The bug: the Conductor (member of no project) got [] from
+    list_projects. With the system-agent wildcard it sees everything."""
+    cond = _conductor.get_or_create_conductor()
+    core_services.create_project("Workspace Project", actor="system")
+    visible = core_services.list_projects(actor=cond["name"])
+    assert any(p["name"] == "Workspace Project" for p in visible)
+
+
+def test_normal_agent_does_not_get_the_wildcard(test_db):
+    """Only system agents get '*' — a regular agent stays role-scoped."""
+    from backend import auth
+    rt_id = _seed_runtime(test_db)
+    agent = forge_services.create_agent(name="worker", executor_type="cli",
+                                        runtime_id=rt_id)
+    with forge_services._session() as db:
+        assert auth.get_permissions(db, "worker") != {"*"}

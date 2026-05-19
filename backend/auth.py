@@ -15,7 +15,9 @@ def get_permissions(db: Session, actor: str) -> set[str]:
     """Get the full set of permission codenames for an actor.
 
     Union of role permissions + profile-level extra permissions.
-    'system' actor gets wildcard '*'.
+    The 'system' actor and system agents (the Conductor, the Concierge)
+    get the wildcard '*' — they operate workspace-wide and must see and
+    act across every project, not just ones they're a member of.
     """
     if actor == "system":
         return {"*"}
@@ -23,6 +25,12 @@ def get_permissions(db: Session, actor: str) -> set[str]:
     profile = db.query(Profile).filter(Profile.name == actor).first()
     if not profile:
         return set()
+
+    # System agents are seeded by Agentira to orchestrate / guide the
+    # whole workspace — scoping them to project memberships would blind
+    # them (the Conductor's `list_projects` returned []). Full perms.
+    if getattr(profile, "is_system", False):
+        return {"*"}
 
     # Role permissions
     role_perms = (
