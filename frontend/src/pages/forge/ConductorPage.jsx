@@ -90,8 +90,14 @@ export function ConductorPage() {
                 : kind === 'plan' ? api.forge.runConductorPlan
                 : api.forge.runConductorReport;
             const res = await fn();
-            setMsg(`${kind}: ${res.skipped ? 'skipped — ' + res.skipped
-                : res.error ? 'error — ' + res.error : 'done'}`);
+            // The tick returns {dispatched, skipped:[…], reconciled};
+            // plan/report return {ok} | {skipped:"reason"} | {error}.
+            let m;
+            if (res.error) m = `error — ${res.error}`;
+            else if (kind === 'tick') m = tickSummary(res);
+            else if (res.skipped) m = `skipped — ${res.skipped}`;
+            else m = 'done';
+            setMsg(`${kind}: ${m}`);
             await load();
         } catch (err) {
             setMsg(`${kind} failed: ` + (err.message || err));
@@ -235,10 +241,20 @@ export function ConductorPage() {
 
 function tickSummary(t) {
     if (!t) return 'not run yet';
-    if (t.skipped) return `skipped — ${t.skipped}`;
+    if (t.disabled) return 'conductor disabled';
     const d = (t.dispatched || []).length;
+    // `skipped` is a list of {agent, reason} records — surface the reasons.
+    const sk = Array.isArray(t.skipped) ? t.skipped : [];
     const r = (t.reconciled || []).length;
-    return `${d} dispatched${r ? `, ${r} reconciled` : ''}`;
+    if (!d && !sk.length && !r) return 'idle — nothing to dispatch';
+    const reasons = [...new Set(sk.map((s) => s && s.reason).filter(Boolean))];
+    let s = `${d} dispatched`;
+    if (sk.length) {
+        s += `, ${sk.length} skipped`;
+        if (reasons.length) s += ` (${reasons.join(', ')})`;
+    }
+    if (r) s += `, ${r} reconciled`;
+    return s;
 }
 function planSummary(p) {
     if (!p) return 'not run yet';
