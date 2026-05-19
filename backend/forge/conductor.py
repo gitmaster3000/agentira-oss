@@ -328,8 +328,10 @@ def run_tick() -> dict:
     """
     global _LAST_TICK
     if not _conductor_active():
-        _LAST_TICK = {"skipped": "conductor_disabled",
-                      "dispatched": [], "skipped_agents": [], "reconciled": []}
+        # Keep the same shape as a normal tick — `skipped` is always the
+        # list of skipped-agent records; `disabled` is the off marker.
+        _LAST_TICK = {"disabled": True,
+                      "dispatched": [], "skipped": [], "reconciled": []}
         return _LAST_TICK
     dispatched: list[dict] = []
     skipped: list[dict] = []
