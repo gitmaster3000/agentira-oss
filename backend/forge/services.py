@@ -2962,6 +2962,35 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                 # comment couldn't be posted; just print so it shows in logs.
                 print(f"[finish_run] task-comment failed: {exc}")
 
+        # AP-36: an agent that declares blocked or needs_input is asking
+        # for human attention — notify admins so the dashboard surfaces it
+        # instead of leaving it buried in the run history. Succeeded /
+        # failed don't notify here: succeeded is routine, failed already
+        # has its own run-complete notification path.
+        if outcome_enum in (RunOutcome.BLOCKED, RunOutcome.NEEDS_INPUT):
+            try:
+                from backend.models import Task as _Task
+                task_label = ""
+                link = f"/forge/runs/{r.id}"
+                if r.task_id:
+                    task = db.get(_Task, r.task_id)
+                    if task:
+                        task_label = f" {task.key}" if task.key else ""
+                        link = f"/projects/{task.project_id}/tasks/{task.id}"
+                verb = ("blocked" if outcome_enum is RunOutcome.BLOCKED
+                        else "needs input on")
+                title = (f"Agent {verb} task{task_label}: "
+                         f"{(summary or '').strip()[:140]}")
+                _notify_admins(
+                    db,
+                    type_=f"agent.{outcome_enum.value}",
+                    title=title,
+                    link=link,
+                )
+                db.commit()
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                print(f"[finish_run] notify-admins failed: {exc}")
+
         db.refresh(r)
         return {"ok": True, "run": _run_to_dict(r)}
 
