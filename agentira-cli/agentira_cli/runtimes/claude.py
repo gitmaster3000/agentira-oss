@@ -67,6 +67,13 @@ class ClaudeRuntime(Runtime):
         mcp_config_path: str = "",
         mcp_strict: bool = False,
         resume_session_id: str = "",
+        # AP-83 Path A: explicit tool allowlist on top of bypassPermissions.
+        # bypassPermissions already skips permission prompts, but new MCP
+        # servers and certain shell commands can still trip a prompt and
+        # stall an overnight run. Enumerating the agent's expected tool
+        # surface here makes the surface predictable and the run robust.
+        # Empty tuple disables the flag.
+        allowed_tools: tuple[str, ...] = (),
     ) -> list[str]:
         args = [
             "-p", prompt,
@@ -94,6 +101,11 @@ class ClaudeRuntime(Runtime):
             args += ["--mcp-config", mcp_config_path]
         if resume_session_id:
             args += ["--resume", resume_session_id]
+        if allowed_tools:
+            # claude-code expects a single arg with space-separated tool
+            # names. `mcp__<server>` wildcards every tool from that server;
+            # `mcp__<server>__<tool>` pins one specific tool.
+            args += ["--allowedTools", " ".join(allowed_tools)]
         return args
 
     @classmethod

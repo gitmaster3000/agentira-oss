@@ -31,6 +31,37 @@ _BATCH_INTERVAL = 0.5  # seconds between event flushes
 _CRASH_TAIL_EVENTS = 8  # how many trailing stream events to keep for diagnostics
 
 
+def _derive_allowed_tools(mcp_config_json: Optional[str], provider: str) -> tuple[str, ...]:
+    """AP-83 Path A — assemble the explicit tool allowlist for this dispatch.
+
+    Returns a tuple of tool names suitable for claude-code's --allowedTools:
+    the runtime's stable builtins (Read, Edit, Bash, …) plus a `mcp__<server>`
+    wildcard for every MCP server in the dispatch config. Other providers
+    return an empty tuple — only claude consumes this today.
+
+    Empty tuple means "do not emit --allowedTools at all" so behavior is
+    unchanged when no MCP servers are configured AND the provider has no
+    builtins on file.
+    """
+    if provider != "claude":
+        return ()
+    # Stable claude-code builtins. Kept in sync with daemon.host_tools.
+    builtins: list[str] = [
+        "Read", "Edit", "Write", "Bash", "Grep", "Glob",
+        "WebFetch", "WebSearch", "Task", "TodoWrite",
+        "NotebookEdit", "BashOutput", "KillShell",
+    ]
+    servers: list[str] = []
+    if mcp_config_json:
+        try:
+            cfg = json.loads(mcp_config_json)
+            for name in (cfg.get("mcpServers") or {}).keys():
+                servers.append(f"mcp__{name}")
+        except (TypeError, ValueError):
+            pass
+    return tuple(builtins + servers)
+
+
 def _crash_tail(recent) -> str:
     """Render the last few stream events as human-readable crash context.
 
@@ -105,6 +136,9 @@ async def run_cli_stream(
             for w in warnings:
                 logger.warning("%s", w)
 
+        allowed_tools = _derive_allowed_tools(
+            mcp_config_json, getattr(runtime_cls, "provider", ""),
+        )
         args = runtime_cls.build_args(
             prompt,
             model=model,
@@ -113,6 +147,7 @@ async def run_cli_stream(
             mcp_config_path=mcp_config_path,
             mcp_strict=mcp_strict,
             resume_session_id=resume_session_id,
+            allowed_tools=allowed_tools,
         )
 
         env = _build_env(env_extra or {})
