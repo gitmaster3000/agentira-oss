@@ -345,10 +345,11 @@ class AgentiraDaemon:
         # trigger with an actionable error instead of vanishing into a
         # silent never-returning subprocess spawn.
         cwd_path = None
+        materialize_reason = ""  # surfaced in diagnostics for run debugging
         try:
             if run_id and task_id:
                 logger.info("step=materialize trace=%s (task run)", trace_id)
-                cwd_path, _ = await asyncio.wait_for(
+                cwd_path, _, materialize_reason = await asyncio.wait_for(
                     asyncio.to_thread(
                         materialize,
                         workspace_id=agent_id,
@@ -363,7 +364,7 @@ class AgentiraDaemon:
                 # Chat in a project: don't allocate a workdir, just resolve
                 # the repo path so the runtime cwd is right. Materialize
                 # conventions there too — repo-local, idempotent, safe.
-                cwd_path, _ = await asyncio.wait_for(
+                cwd_path, _, materialize_reason = await asyncio.wait_for(
                     asyncio.to_thread(
                         materialize,
                         workspace_id=agent_id,
@@ -525,7 +526,9 @@ class AgentiraDaemon:
                     output_tokens=output_tokens,
                     error=error,
                     session_id=session_id,
+                    workdir=str(cwd_path) if cwd_path else "",
                     cancelled=True,
+                    materialize_reason=materialize_reason,
                 )
             except Exception as exc:
                 logger.warning("cancelled-complete post failed trace=%s: %s",
@@ -559,7 +562,9 @@ class AgentiraDaemon:
                     output_tokens=output_tokens,
                     error="",
                     session_id=session_id,
+                    workdir=str(cwd_path) if cwd_path else "",
                     paused=True,
+                    materialize_reason=materialize_reason,
                 )
             except Exception as exc:
                 logger.warning("paused-complete post failed trace=%s: %s",
@@ -587,6 +592,7 @@ class AgentiraDaemon:
                 diff_stat=diff_stat, diff=diff_body,
                 session_id=session_id,
                 workdir=str(cwd_path) if cwd_path else "",
+                materialize_reason=materialize_reason,
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)

@@ -215,6 +215,13 @@ class Run(Base):
     # resume can re-enter. NULL on legacy rows — cleanup is a no-op.
     worktree_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     worktree_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Diagnostic flag from the daemon's materializer. "ok" when the
+    # frame's repo_path resolved and the agent ran inside the repo;
+    # "no_repo_path" when no repo was attached; "repo_path_not_found:..."
+    # when the stamped path didn't exist on the daemon host (silent
+    # empty-scratch-dir failure mode). Surfaced on the Run page so the
+    # user knows immediately why a run "did nothing".
+    materialize_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

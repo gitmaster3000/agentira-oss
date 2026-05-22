@@ -65,7 +65,8 @@ class AgentiraClient:
                               diff_stat: str = "", diff: str = "",
                               session_id: str = "",
                               workdir: str = "", paused: bool = False,
-                              cancelled: bool = False) -> dict:
+                              cancelled: bool = False,
+                              materialize_reason: str = "") -> dict:
         return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
             "trace_id": trace_id,
@@ -84,6 +85,9 @@ class AgentiraClient:
             # cancelled=True: daemon confirmed kill on user-initiated cancel.
             # Backend flips to CANCELLED and skips the failure notification.
             "cancelled": cancelled,
+            # Daemon's materializer outcome — flagged to the user so they
+            # know when an agent ran in an empty scratch dir.
+            "materialize_reason": materialize_reason,
         })
 
     def get_agent(self, agent_id: str) -> dict:

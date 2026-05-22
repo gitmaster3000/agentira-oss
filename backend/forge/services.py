@@ -614,6 +614,10 @@ def _run_to_dict(r: Run) -> dict:
         # the human can `cd` into the right directory to inspect.
         "worktree_path": r.worktree_path or "",
         "worktree_branch": r.worktree_branch or "",
+        # Daemon's materializer outcome — flags the "agent ran in an
+        # empty scratch dir because the stamped path didn't exist" case
+        # so the user knows what happened without grepping logs.
+        "materialize_reason": r.materialize_reason or "",
     }
 
 
@@ -3346,7 +3350,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      session_id: str = "", workdir: str = "",
                      paused: bool = False,
                      cancelled: bool = False,
-                     diagnostics: dict | None = None) -> dict:
+                     diagnostics: dict | None = None,
+                     materialize_reason: str = "") -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -3381,6 +3386,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.diff_stat = diff_stat
                 if diff:
                     r.diff = diff
+                if materialize_reason:
+                    r.materialize_reason = materialize_reason
                 db.commit()
         _TRACE_SCOPE.pop(trace_id, None)
         cleanup = _worktree_cleanup_hint(run_id)
@@ -3417,6 +3424,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                 if r:
                     if session_id:
                         r.session_id = session_id
+                    if materialize_reason:
+                        r.materialize_reason = materialize_reason
                     if r.status == RunStatus.PAUSING:
                         r.status = RunStatus.PAUSED
                         r.stop_requested_at = None
@@ -3466,6 +3475,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     # AP-107: cap the persisted blob so a runaway stderr can't
                     # bloat the row. The spec budgets ~50KB total.
                     r.diagnostics_json = _trim_diagnostics_json(diagnostics)
+                if materialize_reason:
+                    r.materialize_reason = materialize_reason
                 db.commit()
 
     # Persist conversation continuity. Look up the scope this trace was

@@ -60,36 +60,56 @@ def materialize(
 ) -> tuple[Path, Path]:
     """Set up the run environment.
 
-    Returns (cwd, conventions_dir) where:
+    Returns (cwd, conventions_dir, reason) where:
       cwd               — what to pass as subprocess cwd (repo_path if set,
                           else the per-task workdir)
       conventions_dir   — directory the conventions file was written to
                           (matches cwd in the common case)
+      reason            — diagnostic string: "ok" when repo_path resolved,
+                          "no_repo_path" when no repo on the frame,
+                          "repo_path_not_found:<expanded>" when the
+                          stamped path didn't exist (silent-empty-dir
+                          failure mode that used to make agents look
+                          frozen). The daemon includes this in
+                          trigger-complete diagnostics so the Run page
+                          can surface it.
 
     Idempotent: callers can re-invoke; we never overwrite a CONVENTIONS.md
     that already matches, never replace user-authored AGENTS.md/CLAUDE.md.
     """
     workdir = task_workdir(workspace_id, task_id)
+    reason = "ok"
 
     # Where the agent runs: in the repo if we have one, else the scratch
     # workdir. Running inside repo_path is critical — the agent needs to
-    # see git history and existing files to work meaningfully.
+    # see git history and existing files to work meaningfully. A
+    # silent fallback used to mean "agent ran in an empty dir and
+    # produced nothing"; we now log loudly AND return the reason so
+    # the daemon can post it back as diagnostics on the Run row.
     if repo_path:
-        cwd = Path(os.path.expanduser(repo_path)).resolve()
+        expanded = os.path.expanduser(repo_path)
+        cwd = Path(expanded).resolve()
         if not cwd.exists():
             logger.warning(
-                "repo_path %s does not exist — falling back to workdir %s",
-                repo_path, workdir,
+                "MATERIALIZER FALLBACK: repo_path '%s' (expanded to '%s') "
+                "does not exist on this daemon host — agent will run in "
+                "scratch workdir '%s' which is EMPTY. Symptoms: agent "
+                "appears to do nothing, no diff produced.",
+                repo_path, expanded, workdir,
             )
+            reason = f"repo_path_not_found:{expanded}"
             cwd = workdir
     else:
+        logger.info("no repo_path on dispatch frame — using scratch workdir %s",
+                    workdir)
+        reason = "no_repo_path"
         cwd = workdir
 
     if conventions_md:
         _write_conventions(cwd, conventions_md)
         _link_courtesy_files(cwd)
 
-    return cwd, cwd
+    return cwd, cwd, reason
 
 
 def _write_conventions(cwd: Path, content: str) -> None:

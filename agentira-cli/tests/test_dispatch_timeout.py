@@ -75,7 +75,7 @@ def test_setup_timeout_surfaces_as_run_failure(daemon_instance, monkeypatch):
     # on its own. Keep the sleep short so the test suite stays fast.
     def slow_materialize(**kwargs):
         time.sleep(2.0)
-        return ("/tmp/never", {})
+        return ("/tmp/never", {}, "ok")
 
     monkeypatch.setattr(
         "agentira_cli.daemon.materializer.materialize", slow_materialize,

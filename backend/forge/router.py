@@ -124,6 +124,10 @@ class DaemonTriggerComplete(BaseModel):
     # suppresses the "execution failed" admin notification — this isn't a
     # failure, the user asked for it.
     cancelled: bool = False
+    # Daemon's materializer outcome — "ok", "no_repo_path", or
+    # "repo_path_not_found:<expanded>". Surfaces on the Run page so the
+    # user knows when an agent ran in an empty scratch dir.
+    materialize_reason: str = ""
 
 
 class MessageCreate(BaseModel):
@@ -238,6 +242,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         paused=body.paused,
         cancelled=body.cancelled,
         diagnostics=body.diagnostics,
+        materialize_reason=body.materialize_reason,
     )
 
 

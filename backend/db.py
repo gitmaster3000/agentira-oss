@@ -389,6 +389,10 @@ def run_migrations():
                                     "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runs", "worktree_branch",
                                     "VARCHAR(255)")
+            # Materializer outcome from the daemon (ok / no_repo_path /
+            # repo_path_not_found:<expanded>). Surfaced on the Run page.
+            added |= _ensure_column(conn, "forge_runs", "materialize_reason",
+                                    "VARCHAR(255)")
             if added:
                 conn.commit()
 
