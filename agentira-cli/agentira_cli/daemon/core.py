@@ -415,10 +415,28 @@ class AgentiraDaemon:
                 self._run_to_trace[run_id] = trace_id
 
         def on_proc(proc):
+            # P1: close the race between dispatch and a cancel/pause frame
+            # that arrived in the tiny window before the subprocess was
+            # bound. If the user already asked to stop, kill immediately —
+            # otherwise the subprocess would run unattended.
+            stop_now = False
+            kind = ""
             with self._inflight_lock:
                 entry = self._inflight.get(trace_id)
                 if entry is not None:
                     entry["proc"] = proc
+                    if entry.get("cancelled"):
+                        stop_now, kind = True, "cancel"
+                    elif entry.get("paused"):
+                        stop_now, kind = True, "pause"
+            if stop_now and proc is not None:
+                try:
+                    proc.terminate()
+                    logger.info("on_proc kill-on-bind trace=%s kind=%s pid=%s",
+                                trace_id, kind, proc.pid)
+                    self._sigkill_watchdog(trace_id, proc)
+                except (ProcessLookupError, Exception) as exc:
+                    logger.debug("on_proc kill ignored: %s", exc)
 
         async def on_event(evts: list) -> None:
             try:
@@ -488,6 +506,27 @@ class AgentiraDaemon:
         if entry and entry.get("cancelled"):
             success = False
             error = "Cancelled by user."
+            # P1: post a dedicated cancelled completion so the backend
+            # flips the run to CANCELLED (not FAILED) and skips the
+            # admin "execution failed" notification. Without this the
+            # cancel was indistinguishable from a crash.
+            try:
+                self.client.post_trigger_complete(
+                    agent_id,
+                    daemon_id=self._daemon_id,
+                    trace_id=trace_id,
+                    run_id=run_id,
+                    success=False,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    error=error,
+                    session_id=session_id,
+                    cancelled=True,
+                )
+            except Exception as exc:
+                logger.warning("cancelled-complete post failed trace=%s: %s",
+                                trace_id, exc)
+            return
 
         # If the run was PAUSED, the backend already set status=PAUSED. The
         # subprocess was terminated cleanly (SIGTERM) — that exit is NOT a
@@ -541,6 +580,31 @@ class AgentiraDaemon:
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
 
+    # P1: SIGTERM is graceful but the subprocess can ignore it (claude-code
+    # in the middle of an MCP call has been observed to take ~30s to react).
+    # Schedule a SIGKILL fallback so Stop is actually reliable.
+    _STOP_GRACE_S = 5.0
+
+    def _sigkill_watchdog(self, trace_id: str, proc) -> None:
+        """Spawn a daemon thread that SIGKILLs `proc` if it's still alive
+        after _STOP_GRACE_S. Safe if the proc has already exited."""
+        import threading as _th
+
+        def _wait_then_kill() -> None:
+            try:
+                _th.Event().wait(self._STOP_GRACE_S)
+                if proc.poll() is None:  # still alive
+                    proc.kill()
+                    logger.warning(
+                        "SIGKILL fallback fired trace=%s pid=%s — "
+                        "subprocess ignored SIGTERM for %.1fs",
+                        trace_id, proc.pid, self._STOP_GRACE_S)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("sigkill watchdog ignored: %s", exc)
+
+        _th.Thread(target=_wait_then_kill, daemon=True,
+                   name=f"sigkill-watchdog-{trace_id[:8]}").start()
+
     def _signal_proc(self, frame: dict, signal_kind: str) -> None:
         """Pause/resume an in-flight CLI run.
 
@@ -581,6 +645,7 @@ class AgentiraDaemon:
             proc.terminate()  # SIGTERM — graceful stop, NOT SIGSTOP
             logger.info("pause trace=%s — terminated pid %s "
                         "(resumable via --resume)", trace_id, proc.pid)
+            self._sigkill_watchdog(trace_id, proc)
         except (ProcessLookupError, AttributeError, Exception) as exc:
             logger.warning("pause failed for trace=%s: %s", trace_id, exc)
 
@@ -588,9 +653,12 @@ class AgentiraDaemon:
         """Handle a cancel frame from the WS hub.
 
         Resolves to a trace_id (directly given, or via the run_id map),
-        marks the in-flight entry cancelled, and kills the subprocess
-        if one is registered. The execute loop notices the kill on
-        stdout EOF and the cancelled flag drives the complete payload.
+        marks the in-flight entry cancelled, and kills the subprocess if
+        one is registered. P1: if the subprocess hasn't been bound yet
+        (small race between dispatch and an immediate cancel), the
+        cancelled flag is still set — on_proc kills it as soon as it's
+        bound. SIGTERM is followed by a SIGKILL watchdog so the cancel
+        is actually reliable.
         """
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "")
@@ -603,12 +671,13 @@ class AgentiraDaemon:
                 return
             entry["cancelled"] = True
             proc = entry.get("proc")
-        logger.info("cancel trace=%s run=%s — killing proc=%s", trace_id, run_id or "-", bool(proc))
+        logger.info("cancel trace=%s run=%s — proc_bound=%s", trace_id, run_id or "-", bool(proc))
         if proc is not None:
             try:
-                proc.kill()
+                proc.terminate()  # graceful first
+                self._sigkill_watchdog(trace_id, proc)
             except (ProcessLookupError, Exception) as exc:
-                logger.debug("proc.kill ignored: %s", exc)
+                logger.debug("proc.terminate ignored: %s", exc)
 
     def _heartbeat(self) -> None:
         if not self._registered:

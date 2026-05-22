@@ -119,6 +119,11 @@ class DaemonTriggerComplete(BaseModel):
     # Backend keeps the run PAUSED and only persists the session_id so a
     # later resume can relaunch with `claude --resume`.
     paused: bool = False
+    # P1: the daemon confirmed it killed the subprocess in response to a
+    # user-initiated cancel. Backend flips the run to CANCELLED and
+    # suppresses the "execution failed" admin notification — this isn't a
+    # failure, the user asked for it.
+    cancelled: bool = False
 
 
 class MessageCreate(BaseModel):
@@ -231,6 +236,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         session_id=body.session_id,
         workdir=body.workdir,
         paused=body.paused,
+        cancelled=body.cancelled,
         diagnostics=body.diagnostics,
     )
 

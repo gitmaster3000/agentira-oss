@@ -3163,6 +3163,7 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      diff_stat: str = "", diff: str = "",
                      session_id: str = "", workdir: str = "",
                      paused: bool = False,
+                     cancelled: bool = False,
                      diagnostics: dict | None = None) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
@@ -3170,6 +3171,34 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+
+    # P1 cancel path: the daemon confirmed it killed the subprocess in
+    # response to a user-initiated cancel. Flip the run to CANCELLED. We
+    # deliberately do NOT post the "⚠ execution failed" system message or
+    # notify admins of a failure — the user asked for this, it's not a
+    # bug. Symmetric with the `paused` branch below.
+    if cancelled and run_id:
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r:
+                r.status = RunStatus.CANCELLED
+                r.finished_at = datetime.now(timezone.utc)
+                if r.outcome is None:
+                    r.outcome = RunOutcome.FAILED  # for the verdict badge
+                if r.summary is None:
+                    r.summary = "Run cancelled by user."
+                r.input_tokens = (r.input_tokens or 0) + input_tokens
+                r.output_tokens = (r.output_tokens or 0) + output_tokens
+                if workdir:
+                    r.workdir = workdir
+                if diff_stat:
+                    r.diff_stat = diff_stat
+                if diff:
+                    r.diff = diff
+                db.commit()
+        _TRACE_SCOPE.pop(trace_id, None)
+        return {"ok": True, "trace_id": trace_id, "cancelled": True,
+                "logged": logger_msg + " [cancelled — no admin notify]"}
 
     # Pause path: the daemon parked the run (SIGTERM'd the subprocess) and
     # posts back ONLY to hand us the session_id. The run stays PAUSED —
