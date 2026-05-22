@@ -270,6 +270,23 @@ class AgentiraDaemon:
         mcp_config_json = frame.get("mcp_config_json", "") or ""
         mcp_strict = bool(frame.get("mcp_strict", False))
         resume_session_id = frame.get("resume_session_id", "") or ""
+        # Per-run log directory the backend stamped on the Run row.
+        # Daemon tees stdout / stderr into log files here and writes
+        # meta.json at end. Expanduser on the daemon host (the path
+        # was intentionally NOT expanded on the backend side, where ~
+        # would resolve to /root inside the container).
+        log_dir = _os.path.expanduser(frame.get("log_dir", "") or "")
+        stdout_log_path = ""
+        stderr_log_path = ""
+        if log_dir:
+            try:
+                _os.makedirs(log_dir, exist_ok=True)
+                stdout_log_path = _os.path.join(log_dir, "stdout.log")
+                stderr_log_path = _os.path.join(log_dir, "stderr.log")
+                logger.info("per-run logs: %s", log_dir)
+            except OSError as exc:
+                logger.warning("log_dir create failed (%s): %s", log_dir, exc)
+                log_dir = ""
 
         # Daemon owns filesystem provisioning. Ensure the agent's home
         # exists (with subdirs); if a worktree source is provided, ensure
@@ -491,6 +508,8 @@ class AgentiraDaemon:
                     mcp_strict=mcp_strict,
                     resume_session_id=resume_session_id,
                     env_extra=env_extra,
+                    stdout_log_path=stdout_log_path or None,
+                    stderr_log_path=stderr_log_path or None,
                 )
             success = result.success
             error = result.error
@@ -534,6 +553,16 @@ class AgentiraDaemon:
                 logger.warning("cancelled-complete post failed trace=%s: %s",
                                 trace_id, exc)
                 resp = {}
+            if log_dir:
+                self._write_run_meta(log_dir, {
+                    "run_id": run_id, "trace_id": trace_id, "agent_id": agent_id,
+                    "cwd": str(cwd_path) if cwd_path else "",
+                    "worktree_branch": worktree_branch,
+                    "session_id": session_id,
+                    "materialize_reason": materialize_reason,
+                    "success": False, "cancelled": True,
+                    "error": error,
+                })
             # AP-123: same cleanup hint on the cancelled path.
             if isinstance(resp, dict):
                 cw = resp.get("cleanup_worktree")
@@ -569,6 +598,15 @@ class AgentiraDaemon:
             except Exception as exc:
                 logger.warning("paused-complete post failed trace=%s: %s",
                                 trace_id, exc)
+            if log_dir:
+                self._write_run_meta(log_dir, {
+                    "run_id": run_id, "trace_id": trace_id, "agent_id": agent_id,
+                    "cwd": str(cwd_path) if cwd_path else "",
+                    "worktree_branch": worktree_branch,
+                    "session_id": session_id,
+                    "materialize_reason": materialize_reason,
+                    "success": False, "paused": True,
+                })
             return
 
         # Capture git diff of the workdir if it's a repo — best-effort,
@@ -580,6 +618,24 @@ class AgentiraDaemon:
                 diff_stat, diff_body = capture(cwd_path)
             except Exception as exc:
                 logger.debug("diff capture failed trace=%s: %s", trace_id, exc)
+
+        # Per-run meta.json: cwd, branch, session, materializer outcome,
+        # exit info. Written every time we post a completion (normal +
+        # cancelled + paused paths each call _write_run_meta below).
+        if log_dir:
+            self._write_run_meta(log_dir, {
+                "run_id": run_id,
+                "trace_id": trace_id,
+                "agent_id": agent_id,
+                "cwd": str(cwd_path) if cwd_path else "",
+                "worktree_branch": worktree_branch,
+                "session_id": session_id,
+                "materialize_reason": materialize_reason,
+                "success": success,
+                "error": error,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            })
 
         try:
             resp = self.client.post_trigger_complete(
@@ -612,6 +668,18 @@ class AgentiraDaemon:
     # run is terminal. Best-effort — failures are logged, never raised.
     # PAUSED runs go through a different return path that doesn't carry
     # the cleanup hint, so resume can re-enter the same worktree.
+    @staticmethod
+    def _write_run_meta(log_dir: str, meta: dict) -> None:
+        """Drop meta.json in the per-run log directory. Best-effort;
+        failure is logged but doesn't break the dispatch."""
+        import json
+        try:
+            target = os.path.join(log_dir, "meta.json")
+            with open(target, "w") as f:
+                json.dump(meta, f, indent=2, default=str)
+        except OSError as exc:
+            logger.debug("meta.json write failed (%s): %s", log_dir, exc)
+
     @staticmethod
     def _cleanup_worktree(worktree_path: str, worktree_branch: str) -> None:
         import os

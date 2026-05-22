@@ -393,6 +393,9 @@ def run_migrations():
             # repo_path_not_found:<expanded>). Surfaced on the Run page.
             added |= _ensure_column(conn, "forge_runs", "materialize_reason",
                                     "VARCHAR(255)")
+            # Per-run log directory (~/.agentira/runs/<run_id>/).
+            added |= _ensure_column(conn, "forge_runs", "log_dir",
+                                    "VARCHAR(500)")
             if added:
                 conn.commit()
 

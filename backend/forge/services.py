@@ -618,6 +618,8 @@ def _run_to_dict(r: Run) -> dict:
         # empty scratch dir because the stamped path didn't exist" case
         # so the user knows what happened without grepping logs.
         "materialize_reason": r.materialize_reason or "",
+        # Per-run log directory the daemon tees stdout/stderr into.
+        "log_dir": r.log_dir or "",
     }
 
 
@@ -2198,7 +2200,8 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      # worktree the user's repo into the agent's cwd.
                      worktree_source_path: str = "",
                      worktree_source_url: str = "",
-                     worktree_branch: str = "") -> dict:
+                     worktree_branch: str = "",
+                     log_dir: str = "") -> dict:
     """Single rail for invoking an agent.
 
     Saves the user prompt as an AgentMessage tagged with a fresh `trace_id`,
@@ -2347,6 +2350,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         resume_session_id=resume_session_id,
         env_extra=env_extra_combined,
         run_token=run_token,
+        log_dir=log_dir,
     ))
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
@@ -2435,6 +2439,7 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     worktree_path, worktree_branch = _compute_worktree_paths(
         agent_id=agent_id, project_id=project_id, run_id=run_id,
     )
+    log_dir = _compute_log_dir(run_id=run_id)
     with _session() as db:
         r = db.query(Run).filter(Run.id == run_id).first()
         if r:
@@ -2442,10 +2447,17 @@ def prepare_task_run(*, task_id: str, agent_id: str,
             r.status = RunStatus.READY
             r.worktree_path = worktree_path
             r.worktree_branch = worktree_branch
+            r.log_dir = log_dir
             db.commit()
             db.refresh(r)
             return _run_to_dict(r)
     return run
+
+
+def _compute_log_dir(*, run_id: str) -> str:
+    """Per-run log directory. Tilde-prefixed; daemon expanduser's at use
+    time. Daemon writes stdout.log / stderr.log / meta.json here."""
+    return f"~/.agentira/runs/{run_id}/"
 
 
 # AP-123: per-run worktree path + branch are stamped on the Run row at
@@ -2592,6 +2604,7 @@ def dispatch_pending_run(*, run_id: str,
             # back to the legacy shared-per-agent worktree for legacy rows
             # without the new fields set (e.g. runs created before this
             # migration), so old data keeps working.
+            run_log_dir = run.log_dir or ""
             if run.worktree_path and run.worktree_branch:
                 repo_path = run.worktree_path
                 worktree_branch = run.worktree_branch
@@ -2690,6 +2703,7 @@ def dispatch_pending_run(*, run_id: str,
         run_token=run_token,
         resume_session_id=resume_id,
         scope_key=scope,
+        log_dir=run_log_dir,
     )
     return {**result, "run_id": run_id, "task_id": task_id}
 

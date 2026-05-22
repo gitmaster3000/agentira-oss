@@ -222,6 +222,13 @@ class Run(Base):
     # empty-scratch-dir failure mode). Surfaced on the Run page so the
     # user knows immediately why a run "did nothing".
     materialize_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Per-run log directory on the daemon host. Contains:
+    #   stdout.log  — full claude stream-json output, lossless
+    #   stderr.log  — full claude stderr
+    #   meta.json   — cwd, branch, session_id, materialize_reason at end
+    # Path is tilde-prefixed; daemon expanduser's at use time. NULL on
+    # legacy rows or for runs prepared before this column landed.
+    log_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

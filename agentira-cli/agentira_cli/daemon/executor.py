@@ -113,6 +113,12 @@ async def run_cli_stream(
     env_extra: Optional[dict] = None,
     on_event=None,        # async callable(event_list) for batching to backend
     on_proc=None,         # called with the spawned proc (and again with None on exit) so callers can kill() externally
+    # Per-run log files. When set, every byte of stdout / stderr is
+    # tee'd to disk (append, line-buffered) so the run is debuggable
+    # in isolation even on daemon restart. Best-effort: I/O errors are
+    # logged and the run keeps going.
+    stdout_log_path: Optional[str] = None,
+    stderr_log_path: Optional[str] = None,
 ) -> StreamResult:
     """Spawn a CLI runtime with stream-json I/O; drain stdout line-by-line; return StreamResult."""
     result = StreamResult()
@@ -190,6 +196,26 @@ async def run_cli_stream(
         # has been observed to exit 0 after rejecting an unentitled
         # model string, which would otherwise look like silent success).
         saw_result_event = False
+        # Per-run tee'd log files. Opened in unbuffered binary mode so a
+        # crashed daemon doesn't lose recent bytes; closed in the finally
+        # block below.
+        stdout_log_f = None
+        stderr_log_f = None
+        if stdout_log_path:
+            try:
+                os.makedirs(os.path.dirname(stdout_log_path), exist_ok=True)
+                stdout_log_f = open(stdout_log_path, "ab", buffering=0)
+            except OSError as exc:
+                logger.warning("stdout log open failed (%s): %s",
+                               stdout_log_path, exc)
+        if stderr_log_path:
+            try:
+                os.makedirs(os.path.dirname(stderr_log_path), exist_ok=True)
+                stderr_log_f = open(stderr_log_path, "ab", buffering=0)
+            except OSError as exc:
+                logger.warning("stderr log open failed (%s): %s",
+                               stderr_log_path, exc)
+
         # Drain stderr concurrently. If we only read it on failure we
         # risk a PIPE-buffer deadlock on chatty runtimes, AND we miss
         # the human-readable error message on the no-ResultEvent path.
@@ -202,6 +228,11 @@ async def run_cli_stream(
                     if not chunk:
                         break
                     stderr_chunks.append(chunk)
+                    if stderr_log_f is not None:
+                        try:
+                            stderr_log_f.write(chunk)
+                        except OSError:
+                            pass
             except Exception as exc:  # noqa: BLE001 — best-effort
                 logger.debug("stderr drain error: %s", exc)
 
@@ -218,6 +249,11 @@ async def run_cli_stream(
             last_flush = time.monotonic()
 
         async for raw_line in proc.stdout:
+            if stdout_log_f is not None:
+                try:
+                    stdout_log_f.write(raw_line)
+                except OSError:
+                    pass
             line = raw_line.decode(errors="replace")
             event = runtime_cls.parse_event(line)
             if event is None:
@@ -312,6 +348,15 @@ async def run_cli_stream(
                 os.unlink(mcp_config_path)
             except OSError:
                 pass
+        # Close per-run log files. Guarded — they may not have opened
+        # successfully (caller passed paths, but OSError on open landed
+        # both at None).
+        for f in (stdout_log_f, stderr_log_f):
+            if f is not None:
+                try:
+                    f.close()
+                except OSError:
+                    pass
 
     return result
 
