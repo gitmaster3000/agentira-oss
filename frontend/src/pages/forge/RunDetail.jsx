@@ -80,10 +80,49 @@ export function RunDetail() {
         }
     };
 
+    // P4: live run-status updates via WebSocket. The 5s poll stays as a
+    // fallback (longer cadence: WS is the fast path). When the WS pushes
+    // a status, we patch the local `run` immediately so transient
+    // states (Pausing…/Cancelling…/Resuming…) and the terminal landing
+    // appear without waiting for a poll.
+    const [wsConnected, setWsConnected] = useState(false);
     useEffect(() => {
         load();
-        const interval = setInterval(load, 5000);
+        // Poll cadence: 5s when WS is down, 30s when WS is connected.
+        const interval = setInterval(load, wsConnected ? 30000 : 5000);
         return () => clearInterval(interval);
+    }, [runId, wsConnected]);
+
+    useEffect(() => {
+        // Same-origin proxy or env override. Falls back to ws/wss based
+        // on the page protocol.
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${proto}://${window.location.host}/api/forge/ws/runs/${runId}`;
+        let ws;
+        let stopped = false;
+        try {
+            ws = new WebSocket(url);
+        } catch {
+            return;
+        }
+        ws.onopen = () => { if (!stopped) setWsConnected(true); };
+        ws.onclose = () => { if (!stopped) setWsConnected(false); };
+        ws.onerror = () => { if (!stopped) setWsConnected(false); };
+        ws.onmessage = (ev) => {
+            try {
+                const m = JSON.parse(ev.data);
+                if (m.type === 'run_status' && m.run_id === runId) {
+                    setRun((prev) => prev
+                        ? { ...prev, status: m.status,
+                            outcome: m.outcome ?? prev.outcome }
+                        : prev);
+                }
+            } catch { /* malformed frame — ignore */ }
+        };
+        return () => {
+            stopped = true;
+            try { ws.close(); } catch { /* ignore */ }
+        };
     }, [runId]);
 
     if (loading) {
@@ -97,7 +136,13 @@ export function RunDetail() {
     const s = STATUS_CONFIG[run.status] || STATUS_CONFIG.queued;
     const StatusIcon = s.icon;
     const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0) + (run.total_tokens || 0);
-    const isActive = ['queued', 'pending', 'running', 'waiting_human', 'blocked'].includes(run.status);
+    // "Cancellable" — Stop button shows. PAUSED is cancellable too: the
+    // user might want to abandon the work entirely instead of resuming.
+    // Transient states (pausing/cancelling/resuming) are intentionally
+    // excluded — the daemon hasn't confirmed yet, so a second Stop would
+    // race the first. The reconciler escalates stuck transients.
+    const isActive = ['queued', 'pending', 'running', 'waiting_human',
+                      'blocked', 'paused'].includes(run.status);
     // AP-112: READY = the prompt-editor screen. Hide the top
     // pause/resume/stop controls there — they're meaningless before
     // dispatch, and the editor card has its own Start/Discard buttons.
