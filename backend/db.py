@@ -278,6 +278,11 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "repo_path", "VARCHAR(500)")
             added |= _ensure_column(conn, "projects", "repo_url", "VARCHAR(500)")
             added |= _ensure_column(conn, "projects", "conventions_md", "TEXT")
+            # AP-4: template provenance + AC check registry.
+            added |= _ensure_column(conn, "projects", "template_name",
+                                    "VARCHAR(120)")
+            added |= _ensure_column(conn, "projects", "ac_check_types_json",
+                                    "TEXT")
             if added:
                 conn.commit()
 

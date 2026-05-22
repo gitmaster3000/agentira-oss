@@ -230,6 +230,13 @@ class Project(Base):
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     conventions_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # AP-4: provenance + registry for projects spawned from a template.
+    # template_name is the source template's `name` field — also drives
+    # idempotency in `instantiate_project_from_template`.
+    # ac_check_types_json is the JSON list of AC check definitions the
+    # template registered (used later by the gate engine).
+    template_name: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
+    ac_check_types_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")

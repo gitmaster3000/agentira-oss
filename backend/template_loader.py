@@ -86,3 +86,85 @@ def load_template(path: str | Path) -> Template:
         raise ValueError("Template YAML must be a mapping at the top level")
 
     return Template(**data)
+
+
+# ── AP-4: instantiation ──────────────────────────────────────────────
+
+
+def instantiate_project_from_template(
+    template: Template,
+    project_name: str,
+    *,
+    actor: str = "system",
+) -> dict:
+    """Materialize a Template into a Project + agent rows + AC registry.
+
+    Idempotent: a second call with the same (template.name, project_name)
+    returns the existing project and skips any agent already present
+    (matched by name). Re-running is safe — useful for retries / replays.
+
+    Returns:
+        {
+          "project": {...},                 # Project dict
+          "created": bool,                  # False on idempotent return
+          "agents_created": [name, ...],    # newly created agent names
+          "agents_skipped": [name, ...],    # already-present agents
+        }
+    """
+    import json
+    from backend import services as core_services
+    from backend.db import SessionLocal
+    from backend.models import Project, Profile
+
+    # 1. Idempotency: same template_name + project_name → return existing.
+    with SessionLocal() as db:
+        existing = (db.query(Project)
+                      .filter(Project.template_name == template.name,
+                              Project.name == project_name)
+                      .first())
+        if existing:
+            proj_dict = core_services._project_to_dict(existing)
+            return {"project": proj_dict, "created": False,
+                    "agents_created": [], "agents_skipped": []}
+
+    # 2. Create the project (descriptions inherited from the template).
+    project = core_services.create_project(
+        project_name, description=template.description, actor=actor,
+    )
+
+    # 3. Stamp template provenance + AC registry on the new row.
+    with SessionLocal() as db:
+        p = db.query(Project).filter(Project.id == project["id"]).first()
+        if p:
+            p.template_name = template.name
+            if template.ac_check_types:
+                p.ac_check_types_json = json.dumps(
+                    [ct.model_dump() for ct in template.ac_check_types],
+                )
+            db.commit()
+            db.refresh(p)
+            project = core_services._project_to_dict(p)
+
+    # 4. Create agent rows. Per-agent idempotent on `name` — re-running
+    # against a project that already has some agents (because an earlier
+    # run partially succeeded) won't duplicate them. Created as service
+    # accounts; the template doesn't pin a runtime (host-specific
+    # concern), so runtime_id stays null until the operator binds one.
+    created: list[str] = []
+    skipped: list[str] = []
+    for ta in template.agents:
+        with SessionLocal() as db:
+            existing_prof = (db.query(Profile)
+                               .filter(Profile.name == ta.name)
+                               .first())
+        if existing_prof:
+            skipped.append(ta.name)
+            continue
+        try:
+            core_services.create_service_account(ta.name)
+            created.append(ta.name)
+        except Exception:
+            skipped.append(ta.name)
+
+    return {"project": project, "created": True,
+            "agents_created": created, "agents_skipped": skipped}
