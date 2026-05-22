@@ -423,6 +423,43 @@ def api_put_webhook_config(project_id: str, body: WebhookConfigUpdate):
         raise HTTPException(404, str(e))
 
 
+# ── AP-121: Project repos REST surface ───────────────────────────────────
+# Backend services + MCP tool shipped in #74. This adds the thin REST
+# wrappers the browser UI needs (the browser can't call MCP directly).
+
+class ProjectRepoCreate(BaseModel):
+    name: str
+    repo_path: str = ""
+    repo_url: str = ""
+    default_branch: str = "main"
+    is_primary: bool = False
+
+
+@projects.get("/{project_id}/repos")
+def api_list_project_repos(project_id: str):
+    return services.list_project_repos(project_id)
+
+
+@projects.post("/{project_id}/repos")
+def api_add_project_repo(project_id: str, body: ProjectRepoCreate):
+    res = services.add_project_repo(
+        project_id, name=body.name,
+        repo_path=body.repo_path, repo_url=body.repo_url,
+        default_branch=body.default_branch,
+        is_primary=body.is_primary,
+    )
+    if "error" in res:
+        raise HTTPException(400, res["error"])
+    return res
+
+
+@projects.delete("/{project_id}/repos/{repo_name}")
+def api_remove_project_repo(project_id: str, repo_name: str):
+    if not services.remove_project_repo(project_id, repo_name):
+        raise HTTPException(404, "Repo not found")
+    return {"ok": True}
+
+
 # ── Tasks Router ─────────────────────────────────────────────────────────
 
 tasks = APIRouter(prefix="/api/tasks", tags=["tasks"],
