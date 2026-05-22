@@ -351,10 +351,28 @@ export function RunDetail() {
 
             {/* AP-126: Artifacts — structured "here's what got built"
                 links the agent registered via register_run_artifact.
-                Hidden when the list is empty so there's no noise on
-                runs that don't produce anything. */}
-            {Array.isArray(run.artifacts) && run.artifacts.length > 0 && (
+                Empty-success guard: if the run is succeeded but
+                produced nothing (no artifacts, no diff, no PR), call
+                that out loudly rather than hiding the panel — same
+                hallucinated-completion failure mode the backend now
+                blocks at finish_run time. */}
+            {Array.isArray(run.artifacts) && run.artifacts.length > 0 ? (
                 <ArtifactsPanel artifacts={run.artifacts} />
+            ) : (
+                isTerminalSuccess(run) && !hasAnyOutput(run) && (
+                    <div className="card bg-yellow-500/10 border border-yellow-500/30 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-text-secondary">
+                            <div className="font-medium text-yellow-300 mb-1">
+                                Agent declared success but produced no output.
+                            </div>
+                            No registered artifacts, empty diff, no PR on the linked task.
+                            Likely a hallucinated completion. Open the chat or stdout.log to
+                            see what the agent actually did, then retry the task with a
+                            clearer prompt or check the task description for ambiguity.
+                        </div>
+                    </div>
+                )
             )}
 
             {/* Summary */}
@@ -802,6 +820,21 @@ function DiagRow({ label, value, hint, mono }) {
 function encodeClaudePath(p) {
     if (!p) return '';
     return p.replace(/^\//, '-').replace(/\//g, '-').replace(/\/$/, '');
+}
+
+// Terminal + agent-declared-success. Distinct from "process completed
+// cleanly" — the agent has to explicitly say outcome=succeeded.
+function isTerminalSuccess(run) {
+    return run.outcome === 'succeeded';
+}
+
+// Did the run produce ANY artifact a human can open? Artifacts list,
+// non-empty git diff, or a PR URL on the linked task.
+function hasAnyOutput(run) {
+    if (Array.isArray(run.artifacts) && run.artifacts.length > 0) return true;
+    if ((run.diff_stat || '').trim()) return true;
+    if ((run.task_pr_url || '').trim()) return true;
+    return false;
 }
 
 
