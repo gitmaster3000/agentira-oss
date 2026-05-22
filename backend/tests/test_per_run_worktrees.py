@@ -73,6 +73,9 @@ def test_prepare_stamps_worktree_path_and_branch(test_db):
     assert s["agent_id"] in r["worktree_path"]
     assert r["worktree_path"].rstrip("/").endswith(f"run-{r['id']}")
     assert r["worktree_branch"].startswith(f"agent/{s['agent_id'][:8]}/run/")
+    # Path stays tilde-prefixed — backend container's ~ is /root but the
+    # daemon runs on the host. The daemon expanduser's at use time.
+    assert r["worktree_path"].startswith("~/.agentira/"), r["worktree_path"]
 
 
 def test_two_runs_get_distinct_worktrees(test_db):

@@ -2458,13 +2458,18 @@ def _compute_worktree_paths(*, agent_id: str, project_id: str | None,
 
     `project_id` may be None for non-task chat runs — those don't get a
     worktree (the daemon falls back to the agent's home dir as today).
+
+    The path is intentionally tilde-prefixed and NOT expanded here. The
+    backend may run in a container where `~` = `/root`, but the daemon
+    runs on the host where `~` = the operator's home. Expansion happens
+    on the daemon side at use time (materializer + git worktree add).
+    Pre-expanding here stamped `/root/...` on the row, which the daemon
+    could not resolve, silently breaking per-run worktrees.
     """
-    import os.path
     if not project_id:
         return "", ""
-    path = os.path.expanduser(
-        f"~/.agentira/agents/{agent_id}/home/repos/"
-        f"{project_id}/run-{run_id}/")
+    path = (f"~/.agentira/agents/{agent_id}/home/repos/"
+            f"{project_id}/run-{run_id}/")
     branch = f"agent/{agent_id[:8]}/run/{run_id[:8]}"
     return path, branch
 
