@@ -207,6 +207,14 @@ class Run(Base):
     # without scraping the chat transcript. Set via the register_run_
     # artifact MCP tool from inside the agent.
     artifacts_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # AP-123: per-run git worktree. Every run gets its own isolated
+    # working tree + branch so concurrent runs of the same agent don't
+    # scribble over each other's index. The daemon materializes the
+    # worktree at dispatch (git worktree add) and removes it on terminal
+    # complete (cleanup_worktree=True). PAUSED runs keep theirs so
+    # resume can re-enter. NULL on legacy rows — cleanup is a no-op.
+    worktree_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    worktree_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

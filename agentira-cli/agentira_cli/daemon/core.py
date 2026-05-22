@@ -515,7 +515,7 @@ class AgentiraDaemon:
             # admin "execution failed" notification. Without this the
             # cancel was indistinguishable from a crash.
             try:
-                self.client.post_trigger_complete(
+                resp = self.client.post_trigger_complete(
                     agent_id,
                     daemon_id=self._daemon_id,
                     trace_id=trace_id,
@@ -530,6 +530,13 @@ class AgentiraDaemon:
             except Exception as exc:
                 logger.warning("cancelled-complete post failed trace=%s: %s",
                                 trace_id, exc)
+                resp = {}
+            # AP-123: same cleanup hint on the cancelled path.
+            if isinstance(resp, dict):
+                cw = resp.get("cleanup_worktree")
+                cb = resp.get("cleanup_branch")
+                if cw and cb:
+                    self._cleanup_worktree(cw, cb)
             return
 
         # If the run was PAUSED, the backend already set status=PAUSED. The
@@ -570,7 +577,7 @@ class AgentiraDaemon:
                 logger.debug("diff capture failed trace=%s: %s", trace_id, exc)
 
         try:
-            self.client.post_trigger_complete(
+            resp = self.client.post_trigger_complete(
                 agent_id,
                 daemon_id=self._daemon_id,
                 trace_id=trace_id,
@@ -583,6 +590,62 @@ class AgentiraDaemon:
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
+            resp = {}
+
+        # AP-123: backend returns cleanup_worktree + cleanup_branch on
+        # terminal completions (success, fail, cancelled — NOT paused).
+        # The per-run worktree we materialized at dispatch is now orphan
+        # disk space — `git worktree remove` it and delete the branch.
+        if isinstance(resp, dict):
+            cw = resp.get("cleanup_worktree")
+            cb = resp.get("cleanup_branch")
+            if cw and cb:
+                self._cleanup_worktree(cw, cb)
+
+    # AP-123: tear down a per-run worktree after the backend confirms the
+    # run is terminal. Best-effort — failures are logged, never raised.
+    # PAUSED runs go through a different return path that doesn't carry
+    # the cleanup hint, so resume can re-enter the same worktree.
+    @staticmethod
+    def _cleanup_worktree(worktree_path: str, worktree_branch: str) -> None:
+        import os
+        import subprocess
+        try:
+            if not worktree_path or not os.path.isdir(worktree_path):
+                return
+            # Resolve the source repo BEFORE removing the worktree —
+            # afterward `git -C <worktree_path>` can't run (dir is gone).
+            source_dir = None
+            try:
+                source_dir = subprocess.check_output(
+                    ["git", "-C", worktree_path, "rev-parse",
+                     "--show-superproject-working-tree",
+                     "--git-common-dir"],
+                    text=True, timeout=5,
+                ).strip().splitlines()[-1]
+                # --git-common-dir is `<source>/.git`; strip the suffix.
+                if source_dir.endswith("/.git"):
+                    source_dir = source_dir[:-5]
+            except Exception:
+                source_dir = None
+            subprocess.run(
+                ["git", "-C", worktree_path, "worktree", "remove",
+                 "--force", worktree_path],
+                check=False, timeout=20,
+            )
+            # Delete the per-run branch from the source repo (we can't
+            # cwd into the now-deleted worktree).
+            if worktree_branch and source_dir and os.path.isdir(source_dir):
+                subprocess.run(
+                    ["git", "-C", source_dir, "branch", "-D",
+                     worktree_branch],
+                    check=False, timeout=10,
+                )
+            logger.info("cleaned worktree=%s branch=%s", worktree_path,
+                        worktree_branch)
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            logger.warning("worktree cleanup failed path=%s: %s",
+                           worktree_path, exc)
 
     # P1: SIGTERM is graceful but the subprocess can ignore it (claude-code
     # in the middle of an MCP call has been observed to take ~30s to react).

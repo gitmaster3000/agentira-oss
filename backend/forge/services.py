@@ -610,6 +610,10 @@ def _run_to_dict(r: Run) -> dict:
         "initial_prompt": r.initial_prompt or "",
         # AP-125: artifacts the agent registered during/after the run.
         "artifacts": _parse_artifacts(r.artifacts_json),
+        # AP-123: per-run worktree path + branch — surfaces in the UI so
+        # the human can `cd` into the right directory to inspect.
+        "worktree_path": r.worktree_path or "",
+        "worktree_branch": r.worktree_branch or "",
     }
 
 
@@ -2420,15 +2424,49 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     # PENDING (the create_run default) → READY so the UI knows this run is
     # waiting on the user, not on the system.
     prompt = prompt_template.replace("{run_id}", run_id)
+    # AP-123: stamp the per-run worktree path + branch on the row so the
+    # dispatcher can pass them to the daemon (which materializes via
+    # `git worktree add`). Each run gets its own isolated working tree
+    # so concurrent runs of the same agent are safe.
+    worktree_path, worktree_branch = _compute_worktree_paths(
+        agent_id=agent_id, project_id=project_id, run_id=run_id,
+    )
     with _session() as db:
         r = db.query(Run).filter(Run.id == run_id).first()
         if r:
             r.initial_prompt = prompt
             r.status = RunStatus.READY
+            r.worktree_path = worktree_path
+            r.worktree_branch = worktree_branch
             db.commit()
             db.refresh(r)
             return _run_to_dict(r)
     return run
+
+
+# AP-123: per-run worktree path + branch are stamped on the Run row at
+# prepare time and passed to the daemon at dispatch. Format:
+#   path:   ~/.agentira/agents/<agent_id>/home/repos/<project_id>/run-<run_id>/
+#   branch: agent/<agent_id[:8]>/run/<run_id[:8]>
+# The path mirrors the legacy single-worktree layout but with a run-
+# scoped final component so two concurrent runs never collide. Branch
+# is short enough to scan in `git branch -a` without wrapping.
+
+def _compute_worktree_paths(*, agent_id: str, project_id: str | None,
+                            run_id: str) -> tuple[str, str]:
+    """Return (worktree_path, worktree_branch) for a fresh run.
+
+    `project_id` may be None for non-task chat runs — those don't get a
+    worktree (the daemon falls back to the agent's home dir as today).
+    """
+    import os.path
+    if not project_id:
+        return "", ""
+    path = os.path.expanduser(
+        f"~/.agentira/agents/{agent_id}/home/repos/"
+        f"{project_id}/run-{run_id}/")
+    branch = f"agent/{agent_id[:8]}/run/{run_id[:8]}"
+    return path, branch
 
 
 # Sent as the prompt when a PAUSED run is resumed. claude --resume reloads
@@ -2489,25 +2527,31 @@ def dispatch_pending_run(*, run_id: str,
         task = db.get(Task, task_id) if task_id else None
 
         # Serialize task runs per agent. All of an agent's task runs share
-        # ONE git worktree (agent/<id>/work) — running two claude
-        # subprocesses in the same directory corrupts both (clobbered
-        # writes, git index locks) and they die with "subprocess exited
-        # with code 1". So an agent runs at most one task at a time.
-        # (True per-agent concurrency needs a worktree per run — separate
-        # follow-up.) `resume` excludes the run itself.
+        # AP-123: each run now gets its own git worktree (set in
+        # prepare_task_run), so concurrent runs of the same agent are
+        # finally safe. The cap is the agent's `max_concurrent_runs`
+        # rather than the old "one at a time, always" rule. `resume`
+        # excludes the run itself.
         if task_id:
-            busy = (db.query(Run)
-                      .filter(Run.agent_id == agent_id,
-                              Run.status == RunStatus.RUNNING,
-                              Run.task_id.isnot(None),
-                              Run.id != run_id)
-                      .first())
-            if busy:
+            cap = max(1, int(agent.max_concurrent_runs or 1) if hasattr(agent, "max_concurrent_runs")
+                      else 1)
+            # Profile carries max_concurrent_runs (forge_agents row is the
+            # transitional shim — read from the linked profile).
+            from backend.models import Profile as _Profile
+            prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
+            if prof:
+                cap = max(1, int(prof.max_concurrent_runs or 1))
+            in_flight = (db.query(Run)
+                           .filter(Run.agent_id == agent_id,
+                                   Run.status == RunStatus.RUNNING,
+                                   Run.task_id.isnot(None),
+                                   Run.id != run_id)
+                           .count())
+            if in_flight >= cap:
                 return {"error": (
-                    f"Agent already has a task run in flight "
-                    f"(run {busy.id}). Task runs are serialized per agent "
-                    f"— they share one git worktree. Wait for it to finish "
-                    f"or stop it first.")}
+                    f"Agent at concurrency cap ({in_flight}/{cap} task "
+                    f"runs in flight). Wait for one to finish, raise "
+                    f"max_concurrent_runs, or stop a run first.")}
 
         if resume:
             # Resume: send a continuation nudge, keep initial_prompt as the
@@ -2535,10 +2579,18 @@ def dispatch_pending_run(*, run_id: str,
         project = db.get(Project, project_id) if project_id else None
         conventions_md = (project.conventions_md or "") if project else ""
         if project:
-            repo_path = ensure_agent_worktree(agent, project)   # template
+            # AP-123: use the per-run worktree the Run row carries. Falls
+            # back to the legacy shared-per-agent worktree for legacy rows
+            # without the new fields set (e.g. runs created before this
+            # migration), so old data keeps working.
+            if run.worktree_path and run.worktree_branch:
+                repo_path = run.worktree_path
+                worktree_branch = run.worktree_branch
+            else:
+                repo_path = ensure_agent_worktree(agent, project)   # template
+                worktree_branch = f"agent/{agent.id}/work"
             worktree_source_path = project.repo_path or ""
             worktree_source_url = (getattr(project, "repo_url", None) or "")
-            worktree_branch = f"agent/{agent.id}/work"
         else:
             repo_path = ensure_agent_home_dir(agent)            # template
             worktree_source_path = ""
@@ -3310,8 +3362,11 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.diff = diff
                 db.commit()
         _TRACE_SCOPE.pop(trace_id, None)
+        cleanup = _worktree_cleanup_hint(run_id)
         return {"ok": True, "trace_id": trace_id, "cancelled": True,
-                "logged": logger_msg + " [cancelled — no admin notify]"}
+                "logged": logger_msg + " [cancelled — no admin notify]",
+                "cleanup_worktree": cleanup["path"],
+                "cleanup_branch": cleanup["branch"]}
 
     # Pause path: the daemon parked the run (SIGTERM'd the subprocess) and
     # posts back ONLY to hand us the session_id. The run stays PAUSED —
@@ -3451,8 +3506,29 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             ))
             db.commit()
 
+    # AP-123: tell the daemon to tear down the per-run worktree on the
+    # terminal completion path. PAUSED branches return earlier and skip
+    # this — they need the worktree intact for resume. Best-effort: the
+    # daemon ignores cleanup when worktree_path is empty.
+    cleanup = _worktree_cleanup_hint(run_id)
     return {"ok": True, "trace_id": trace_id, "logged": logger_msg,
-            "auto_retried": retried}
+            "auto_retried": retried,
+            "cleanup_worktree": cleanup["path"],
+            "cleanup_branch": cleanup["branch"]}
+
+
+def _worktree_cleanup_hint(run_id: str | None) -> dict:
+    """Pull worktree_path + worktree_branch from the Run row so the
+    daemon can `git worktree remove` and `git branch -D` after a
+    terminal completion. Empty strings on legacy rows / non-task runs."""
+    if not run_id:
+        return {"path": "", "branch": ""}
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"path": "", "branch": ""}
+        return {"path": r.worktree_path or "",
+                "branch": r.worktree_branch or ""}
 
 
 def get_trigger_events(trace_id: str) -> list[dict]:

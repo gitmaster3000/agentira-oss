@@ -351,6 +351,11 @@ def run_migrations():
                                     "TIMESTAMP")
             # AP-125: structured artifacts list (JSON).
             added |= _ensure_column(conn, "forge_runs", "artifacts_json", "TEXT")
+            # AP-123: per-run worktree path + branch.
+            added |= _ensure_column(conn, "forge_runs", "worktree_path",
+                                    "VARCHAR(500)")
+            added |= _ensure_column(conn, "forge_runs", "worktree_branch",
+                                    "VARCHAR(255)")
             if added:
                 conn.commit()
 
