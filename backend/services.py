@@ -569,6 +569,7 @@ def create_task(
     tags: list[str] | None = None,
     start_date: str | None = None,
     due_date: str | None = None,
+    dod_items: Optional[list[dict]] = None,
     epic_id: str | None = None,
     actor: str = "system",
 ) -> dict:
@@ -590,6 +591,7 @@ def create_task(
             if not is_member:
                 raise PermissionError(f"User {actor} is not a member of project {project_id}")
 
+        import json
         status_id = _get_status_id(db, status)
         from datetime import datetime
         start_dt = None
@@ -619,6 +621,7 @@ def create_task(
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
+            dod_items=json.dumps(dod_items) if dod_items else None,
             epic_id=epic_id if epic_id and epic_id.strip() else None,
         )
         db.add(task)
