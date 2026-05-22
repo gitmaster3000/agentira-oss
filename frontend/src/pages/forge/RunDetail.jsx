@@ -4,6 +4,10 @@ import {
     ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle,
     XCircle, Pause, Play, Ban, RefreshCw, User, Wrench, MessageSquare,
     ClipboardList, Folder,
+    // AP-126: artifact panel icons. One per kind so a glance is enough
+    // to tell a PR from a file from a log.
+    GitPullRequest, GitCommit, File, Link as LinkIcon,
+    ScrollText, FileText, Package,
 } from 'lucide-react';
 import { api } from '../../api';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
@@ -345,6 +349,14 @@ export function RunDetail() {
                 </div>
             )}
 
+            {/* AP-126: Artifacts — structured "here's what got built"
+                links the agent registered via register_run_artifact.
+                Hidden when the list is empty so there's no noise on
+                runs that don't produce anything. */}
+            {Array.isArray(run.artifacts) && run.artifacts.length > 0 && (
+                <ArtifactsPanel artifacts={run.artifacts} />
+            )}
+
             {/* Summary */}
             {run.summary && (
                 <div className="card bg-bg-hover border-l-4" style={{ borderLeftColor: s.bg }}>
@@ -634,6 +646,62 @@ function DetailLink({ label, to, primary, sub, id, icon: Icon }) {
             {sub && <div className="text-text-secondary text-xs mt-0.5 truncate">{sub}</div>}
             {id && <div className="text-text-tertiary text-[10px] font-mono mt-0.5 truncate">{id}</div>}
         </Link>
+    );
+}
+
+// AP-126: structured artifact links the agent registered for this run.
+// Backend caps the list at 50; here we render them as a tight grid with
+// per-kind icons so the human's eye gets "PR | report | log" at a
+// glance rather than wading through 50 generic links.
+const ARTIFACT_ICON = {
+    pr: GitPullRequest,
+    commit: GitCommit,
+    file: File,
+    log: ScrollText,
+    report: FileText,
+    url: LinkIcon,
+};
+
+function ArtifactsPanel({ artifacts }) {
+    return (
+        <div className="card space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                <Package className="w-4 h-4 text-accent-primary" />
+                Artifacts
+                <span className="text-text-tertiary text-xs">
+                    {artifacts.length}
+                </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {artifacts.map((a, i) => {
+                    const Icon = ARTIFACT_ICON[a.kind] || LinkIcon;
+                    const isHttp = /^https?:\/\//i.test(a.url);
+                    const inner = (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-app transition-colors min-w-0">
+                            <Icon className="w-4 h-4 text-text-secondary flex-shrink-0" />
+                            <div className="min-w-0">
+                                <div className="text-sm text-text-primary truncate">
+                                    {a.label || a.url}
+                                </div>
+                                {a.label && (
+                                    <div className="text-xs text-text-tertiary truncate font-mono">
+                                        {a.url}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                    return isHttp
+                        ? (
+                            <a key={i} href={a.url} target="_blank" rel="noreferrer"
+                               className="block">
+                                {inner}
+                            </a>
+                        )
+                        : <div key={i}>{inner}</div>;
+                })}
+            </div>
+        </div>
     );
 }
 
