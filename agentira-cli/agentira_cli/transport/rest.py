@@ -66,7 +66,8 @@ class AgentiraClient:
                               session_id: str = "",
                               workdir: str = "", paused: bool = False,
                               cancelled: bool = False,
-                              materialize_reason: str = "") -> dict:
+                              materialize_reason: str = "",
+                              session_lost: bool = False) -> dict:
         return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
             "trace_id": trace_id,
@@ -88,6 +89,10 @@ class AgentiraClient:
             # Daemon's materializer outcome — flagged to the user so they
             # know when an agent ran in an empty scratch dir.
             "materialize_reason": materialize_reason,
+            # AP-133: daemon retried without --resume because the stamped
+            # session_id wasn't on disk. Backend clears the stale id from
+            # forge_conversations so the next dispatch doesn't pick it up.
+            "session_lost": session_lost,
         })
 
     def get_agent(self, agent_id: str) -> dict:

@@ -3365,13 +3365,49 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      paused: bool = False,
                      cancelled: bool = False,
                      diagnostics: dict | None = None,
-                     materialize_reason: str = "") -> dict:
+                     materialize_reason: str = "",
+                     session_lost: bool = False) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
     sitting silent forever."""
     logger_msg = (f"complete_trigger trace={trace_id} agent={agent_id} "
                   f"run={run_id or '-'} ok={success} tokens={input_tokens}/{output_tokens}")
+
+    # AP-133: daemon flagged that the stamped session_id wasn't on disk
+    # locally; it retried without --resume. Clear the stale id from the
+    # scope's Conversation row so the NEXT dispatch doesn't reuse it and
+    # land in the same broken state. Also drop a chat-thread system
+    # message so the user knows what happened. Runs unconditionally —
+    # cancelled / paused / normal completions all benefit.
+    if session_lost:
+        scope = _TRACE_SCOPE.get(trace_id) or ""
+        if not scope:
+            with _session() as db:
+                m = (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.scope_key.isnot(None),
+                               AgentMessage.scope_key != "")
+                       .order_by(AgentMessage.created_at.desc())
+                       .first())
+                if m:
+                    scope = m.scope_key
+        if scope:
+            with _session() as db:
+                conv = (db.query(Conversation)
+                          .filter(Conversation.agent_id == agent_id,
+                                  Conversation.scope_key == scope)
+                          .first())
+                if conv:
+                    conv.runtime_session_id = ""
+                db.add(AgentMessage(
+                    agent_id=agent_id, run_id=run_id, trace_id=trace_id,
+                    scope_key=scope, role=MessageRole.SYSTEM,
+                    content=("ℹ Previous claude session wasn't found on "
+                             "this daemon — resumed from conversation "
+                             "history instead."),
+                ))
+                db.commit()
 
     # P1 cancel path: the daemon confirmed it killed the subprocess in
     # response to a user-initiated cancel. Flip the run to CANCELLED. We

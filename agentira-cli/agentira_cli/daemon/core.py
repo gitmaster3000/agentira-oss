@@ -476,6 +476,7 @@ class AgentiraDaemon:
         error = ""
         input_tokens = 0
         output_tokens = 0
+        session_lost = False  # AP-133: flipped when we retry after --resume miss
         try:
             if "http_gateway" in capabilities:
                 # AP-103: OpenClaw's chat-completions endpoint takes no
@@ -511,6 +512,36 @@ class AgentiraDaemon:
                     stdout_log_path=stdout_log_path or None,
                     stderr_log_path=stderr_log_path or None,
                 )
+                # AP-133: graceful recovery when the stamped session_id
+                # isn't on disk anymore (path mismatch, daemon restart
+                # that wiped ~/.claude, cross-machine resume). Detect the
+                # claude-code signature, retry once WITHOUT --resume, and
+                # tell the backend to clear the stale id from the scope.
+                session_lost = bool(
+                    resume_session_id
+                    and not result.success
+                    and "No conversation found with session ID"
+                        in (result.error or "")
+                )
+                if session_lost:
+                    logger.warning(
+                        "session_not_found trace=%s — claude couldn't find "
+                        "session %s. Retrying without --resume; conversation "
+                        "history will be rebuilt from AgentMessage on the "
+                        "next chat turn.",
+                        trace_id, resume_session_id[:8])
+                    result = await run_cli_stream(
+                        runtime_cls, binary_path, prompt,
+                        model=model, system_prompt=system_prompt,
+                        on_event=on_event, on_proc=on_proc,
+                        workdir=str(cwd_path) if cwd_path else None,
+                        mcp_config_json=mcp_config_json or None,
+                        mcp_strict=mcp_strict,
+                        resume_session_id="",  # fresh
+                        env_extra=env_extra,
+                        stdout_log_path=stdout_log_path or None,
+                        stderr_log_path=stderr_log_path or None,
+                    )
             success = result.success
             error = result.error
             input_tokens = result.input_tokens
@@ -649,6 +680,7 @@ class AgentiraDaemon:
                 session_id=session_id,
                 workdir=str(cwd_path) if cwd_path else "",
                 materialize_reason=materialize_reason,
+                session_lost=session_lost,
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)

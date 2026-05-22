@@ -128,6 +128,10 @@ class DaemonTriggerComplete(BaseModel):
     # "repo_path_not_found:<expanded>". Surfaces on the Run page so the
     # user knows when an agent ran in an empty scratch dir.
     materialize_reason: str = ""
+    # AP-133: daemon retried without --resume because the stamped
+    # session id wasn't found locally. Backend clears the stale id from
+    # forge_conversations so the next dispatch doesn't reuse it.
+    session_lost: bool = False
 
 
 class MessageCreate(BaseModel):
@@ -243,6 +247,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         cancelled=body.cancelled,
         diagnostics=body.diagnostics,
         materialize_reason=body.materialize_reason,
+        session_lost=body.session_lost,
     )
 
 
