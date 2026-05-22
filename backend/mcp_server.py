@@ -487,6 +487,46 @@ async def get_my_involvement(ctx: Context = None) -> dict:
         raise
 
 
+# ── AP-125: Run artifacts ──────────────────────────────────────────────────────
+
+@mcp.tool()
+async def register_run_artifact(
+    run_id: str,
+    url: str,
+    label: str = "",
+    kind: str = "url",
+    ctx: Context = None,
+) -> dict:
+    """Register a structured artifact produced by THIS run.
+
+    The Run page surfaces artifacts as a "Here's what got built" panel,
+    so the human reading the run sees the deliverable directly instead
+    of scraping the chat transcript. Call this whenever you produce
+    something the user is supposed to look at: a PR URL, a generated
+    report file, a deployed preview URL, a build log, etc.
+
+    Arguments:
+      run_id: the AGENTIRA_RUN_ID env var the daemon injected on dispatch.
+      url:    the artifact's address — http(s), file://, or a workspace-
+              relative path. Required.
+      label:  short human-readable name ("PR #42", "Audit report",
+              "Deployed preview"). Optional but strongly recommended.
+      kind:   one of "pr", "commit", "file", "url", "log", "report".
+              Defaults to "url".
+
+    Idempotent: re-registering the same (url, kind) refreshes the label.
+    Capped at 50 artifacts per run.
+    """
+    from backend.forge import services as forge_services
+    try:
+        return forge_services.register_run_artifact(
+            run_id=run_id, url=url, label=label, kind=kind,
+        )
+    except Exception as exc:
+        logger.error(f"register_run_artifact failed: {exc}\n{traceback.format_exc()}")
+        raise
+
+
 # ── AP-107: Run-investigation tools (read-only, prod-safe) ─────────────────────
 
 @mcp.tool()

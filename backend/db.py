@@ -344,6 +344,8 @@ def run_migrations():
             # P3: transient-state audit timestamp.
             added |= _ensure_column(conn, "forge_runs", "stop_requested_at",
                                     "TIMESTAMP")
+            # AP-125: structured artifacts list (JSON).
+            added |= _ensure_column(conn, "forge_runs", "artifacts_json", "TEXT")
             if added:
                 conn.commit()
 

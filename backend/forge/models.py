@@ -201,6 +201,12 @@ class Run(Base):
     # to escalate "stuck PAUSING" rows (daemon dropped the frame).
     stop_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # AP-125: structured artifacts the agent produced during the run.
+    # JSON list of {"url": str, "label": str, "kind": str}. Surfaces in
+    # the Run dict so the UI can render "Here's what got built" links
+    # without scraping the chat transcript. Set via the register_run_
+    # artifact MCP tool from inside the agent.
+    artifacts_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

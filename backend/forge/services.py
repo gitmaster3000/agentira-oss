@@ -608,7 +608,72 @@ def _run_to_dict(r: Run) -> dict:
         "created_at": _iso(r.created_at),
         # AP-112: editable prompt persisted at prepare time.
         "initial_prompt": r.initial_prompt or "",
+        # AP-125: artifacts the agent registered during/after the run.
+        "artifacts": _parse_artifacts(r.artifacts_json),
     }
+
+
+# AP-125: a single artifact is small and structured. Caps keep an agent
+# from filling the DB with megabytes of "links."
+_ARTIFACT_LABEL_CAP = 200
+_ARTIFACT_URL_CAP = 1000
+_ARTIFACT_MAX_PER_RUN = 50
+_ARTIFACT_KINDS = ("pr", "commit", "file", "url", "log", "report")
+
+
+def _parse_artifacts(raw: str | None) -> list[dict]:
+    """Lenient parse — return [] for unset/malformed blobs so consumers
+    don't have to defend."""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def register_run_artifact(*, run_id: str, url: str, label: str = "",
+                          kind: str = "url") -> dict:
+    """AP-125: append a structured artifact to a Run.
+
+    Called by the agent via the MCP tool of the same name. Idempotent on
+    duplicate (url, kind, label); capped at _ARTIFACT_MAX_PER_RUN total
+    per run; field widths bounded so a runaway agent can't bloat the row.
+    Returns the full artifacts list after the upsert.
+    """
+    url = (url or "").strip()
+    label = (label or "").strip()
+    kind = (kind or "url").strip().lower()
+    if not url:
+        return {"error": "url is required"}
+    if kind not in _ARTIFACT_KINDS:
+        return {"error": f"kind must be one of: {', '.join(_ARTIFACT_KINDS)}"}
+    url = url[:_ARTIFACT_URL_CAP]
+    label = label[:_ARTIFACT_LABEL_CAP]
+
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "run_not_found"}
+        existing = _parse_artifacts(r.artifacts_json)
+        # Idempotent: if the same (url, kind) is already present, just
+        # refresh the label (the agent may have polished it) and return.
+        for art in existing:
+            if art.get("url") == url and art.get("kind") == kind:
+                if label and art.get("label") != label:
+                    art["label"] = label
+                    r.artifacts_json = json.dumps(existing)
+                    db.commit()
+                return {"ok": True, "artifacts": existing,
+                        "deduplicated": True}
+        if len(existing) >= _ARTIFACT_MAX_PER_RUN:
+            return {"error": f"artifact cap reached "
+                              f"({_ARTIFACT_MAX_PER_RUN}/run)"}
+        existing.append({"url": url, "label": label, "kind": kind})
+        r.artifacts_json = json.dumps(existing)
+        db.commit()
+        return {"ok": True, "artifacts": existing}
 
 
 # ── Runtime serializer ──────────────────────────────────────────────────
