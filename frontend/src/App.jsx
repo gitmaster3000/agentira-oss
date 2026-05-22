@@ -4,6 +4,8 @@ import { Layout } from './components/Layout';
 import { ProjectLayout } from './pages/ProjectLayout';
 import { Board } from './pages/Board';
 import { Backlog } from './pages/Backlog';
+import { ProjectOverview } from './pages/ProjectOverview';
+import { ProjectSettings } from './pages/ProjectSettings';
 import { RoadmapView } from './components/RoadmapView/RoadmapView';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Landing } from './pages/Landing';
@@ -67,10 +69,12 @@ export default function App() {
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
                         <Route index element={<StudioDashboard />} />
                         <Route path="project/:projectId" element={<ProjectLayout />}>
-                            <Route index element={<Navigate to="board" replace />} />
+                            <Route index element={<Navigate to="overview" replace />} />
+                            <Route path="overview" element={<ProjectOverview />} />
                             <Route path="board" element={<Board />} />
                             <Route path="backlog" element={<Backlog />} />
                             <Route path="roadmap" element={<RoadmapView />} />
+                            <Route path="settings" element={<ProjectSettings />} />
                         </Route>
                         {/* Legacy flat board route — redirect to the new nested form. */}
                         <Route path="board/:projectId" element={<LegacyBoardRedirect />} />

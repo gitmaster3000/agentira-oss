@@ -297,6 +297,11 @@ export function ProjectLayout() {
         requestSelectTask,
     };
 
+    // Overview / Settings get a clean header (no filters, no activity feed).
+    // Board / Backlog / Roadmap keep the heavy header.
+    const isBoardView = /\/(board|backlog|roadmap)(\/|$)/.test(location.pathname)
+        || /\/project\/[^/]+\/?$/.test(location.pathname);
+
     return (
         <div className="flex flex-row h-full overflow-hidden w-full relative">
             <div className="flex flex-col flex-1 overflow-hidden min-w-0">
@@ -305,6 +310,10 @@ export function ProjectLayout() {
                         <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
                         <p className="text-body-sm mb-3 truncate text-text-secondary">{board.project.description || "No description"}</p>
 
+                        {/* Filters + search are board-flavored; only show on the
+                            board / backlog / roadmap routes. Overview and
+                            Settings get a clean header. */}
+                        {isBoardView && (
                         <div className="flex flex-wrap items-center gap-4 mt-2">
                             <div className="flex items-center gap-1">
                                 {members.map(m => (
@@ -338,10 +347,11 @@ export function ProjectLayout() {
                                 )}
                             </div>
                         </div>
+                        )}
                     </div>
                 </header>
 
-                <ProjectActivityPanel projectId={board.project.id} />
+                {isBoardView && <ProjectActivityPanel projectId={board.project.id} />}
 
                 <div className="flex-1 overflow-hidden relative">
                     <Outlet context={filters} />

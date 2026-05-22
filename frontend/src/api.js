@@ -84,6 +84,16 @@ export const api = {
     updateProject: (id, data) => request(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteProject: (id) => request(`/projects/${id}`, { method: 'DELETE' }),
 
+    // AP-121: per-project repos
+    listProjectRepos: (id) => request(`/projects/${id}/repos`),
+    addProjectRepo: (id, data) => request(`/projects/${id}/repos`, {
+        method: 'POST', body: JSON.stringify(data),
+    }),
+    removeProjectRepo: (id, name) => request(
+        `/projects/${id}/repos/${encodeURIComponent(name)}`,
+        { method: 'DELETE' },
+    ),
+
     // Members
     getProjectMembers: (projectId) => request(`/projects/${projectId}/members`),
     addProjectMember: (projectId, profileName) => request(`/projects/${projectId}/members`, {

@@ -5,6 +5,8 @@ import {
     ListTodo,
     TrendingUp,
     PanelLeft,
+    Home,
+    Settings as SettingsIcon,
 } from 'lucide-react';
 import { ROUTES } from '../routes';
 
@@ -26,9 +28,11 @@ export function Sidebar() {
     };
 
     const navItems = [
-        { icon: LayoutGrid, label: 'Board', path: ROUTES.STUDIO_PROJECT_BOARD(projectId), view: 'board' },
-        { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId), view: 'backlog' },
-        { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId), view: 'roadmap' },
+        { icon: Home, label: 'Overview', path: ROUTES.STUDIO_PROJECT_OVERVIEW(projectId) },
+        { icon: LayoutGrid, label: 'Board', path: ROUTES.STUDIO_PROJECT_BOARD(projectId) },
+        { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId) },
+        { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId) },
+        { icon: SettingsIcon, label: 'Settings', path: ROUTES.STUDIO_PROJECT_SETTINGS(projectId) },
     ];
 
     return (

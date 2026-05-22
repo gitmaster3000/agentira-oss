@@ -15,6 +15,8 @@ export const ROUTES = {
     STUDIO_PROJECT_BOARD: (projectId) => `/studio/project/${projectId}/board`,
     STUDIO_PROJECT_BACKLOG: (projectId) => `/studio/project/${projectId}/backlog`,
     STUDIO_PROJECT_ROADMAP: (projectId) => `/studio/project/${projectId}/roadmap`,
+    STUDIO_PROJECT_OVERVIEW: (projectId) => `/studio/project/${projectId}/overview`,
+    STUDIO_PROJECT_SETTINGS: (projectId) => `/studio/project/${projectId}/settings`,
     STUDIO_SETTINGS: '/studio/settings',
     STUDIO_TASK: (taskId) => `/studio/tasks/${taskId}`,
     STUDIO_EPIC: (epicId) => `/studio/epics/${epicId}`,
