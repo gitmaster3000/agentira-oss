@@ -22,7 +22,7 @@ from backend.db import SessionLocal
 from backend.forge.models import (
     Agent, ForgeRuntime, Run, RunStatus, RunOutcome,
 )
-from backend.forge.services import _notify_admins
+from backend.forge.services import _notify_admins, _broadcast_status
 
 logger = logging.getLogger("agentira.forge.reconciler")
 
@@ -82,6 +82,7 @@ def reconcile_stale_runs() -> dict:
             run.stop_requested_at = None
             escalated.append({"run_id": run.id, "from": prior.value,
                               "to": run.status.value})
+            _broadcast_status(run.id, run.status)
         if escalated:
             db.commit()
             logger.warning("Reconciler escalated %d stuck transient(s): %s",
@@ -112,6 +113,7 @@ def reconcile_stale_runs() -> dict:
             if run.outcome is None:
                 run.outcome = RunOutcome.FAILED
             run.error = "Daemon offline — run reconciled as failed."
+            _broadcast_status(run.id, RunStatus.FAILED)
             agent_name = run.agent.name if run.agent else "agent"
             _notify_admins(
                 db,

@@ -201,6 +201,124 @@ class WsHub:
 hub = WsHub()
 
 
+# ── P4: client-side WS hub for browser run-status subscribers ─────────────
+#
+# Daemons own the daemon `hub` above. Browsers connecting to RunDetail
+# subscribe here for live status updates so they don't have to wait for
+# the 5s poll. One subscriber map per run_id; broadcast on every Run
+# status transition the backend writes.
+
+
+class ClientHub:
+    """Per-run subscriber registry for browser WS clients (RunDetail).
+
+    Lightweight: no dedup ring, no daemon_id, no runtime routing — just
+    "anyone watching this run, here's an update."
+    """
+
+    def __init__(self) -> None:
+        # run_id → list of (WebSocket, asyncio.Queue) tuples
+        self._subs: dict[str, list[tuple]] = {}
+        self._lock = asyncio.Lock()
+
+    async def subscribe(self, run_id: str, ws: "WebSocket") -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=_SEND_BUF)
+        async with self._lock:
+            self._subs.setdefault(run_id, []).append((ws, q))
+        return q
+
+    async def unsubscribe(self, run_id: str, ws: "WebSocket") -> None:
+        async with self._lock:
+            arr = self._subs.get(run_id)
+            if not arr:
+                return
+            self._subs[run_id] = [t for t in arr if t[0] is not ws]
+            if not self._subs[run_id]:
+                self._subs.pop(run_id, None)
+
+    def broadcast_run_status(self, run_id: str, status: str,
+                             outcome: str | None = None) -> None:
+        """Schedule a broadcast to every subscriber of `run_id`. Safe to
+        call from sync code (services.py / scheduler ticks) — we hop onto
+        the running asyncio loop via `asyncio.run_coroutine_threadsafe`."""
+        if not run_id:
+            return
+        payload = {"type": "run_status", "run_id": run_id,
+                   "status": status, "outcome": outcome}
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return  # no loop here — caller is fully sync; broadcast lost
+        # asyncio.get_event_loop in a sync context sometimes returns a
+        # non-running loop. Use threadsafe scheduling when we're outside
+        # the loop's thread.
+        if loop.is_running():
+            asyncio.ensure_future(self._fanout(run_id, payload), loop=loop)
+        else:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._fanout(run_id, payload), loop)
+            except RuntimeError:
+                pass
+
+    async def _fanout(self, run_id: str, payload: dict) -> None:
+        async with self._lock:
+            arr = list(self._subs.get(run_id, []))
+        for _ws, q in arr:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                logger.debug("Client send buffer full for run %s", run_id[:8])
+
+
+client_hub = ClientHub()
+
+
+async def handle_client_run_ws(ws: "WebSocket", run_id: str) -> None:
+    """Browser WS handler for /api/forge/ws/runs/{run_id}.
+
+    Subscribes, sends one immediate `run_status` snapshot, then pumps
+    queued broadcasts until the client disconnects.
+    """
+    from fastapi import WebSocketDisconnect
+    await ws.accept()
+    q = await client_hub.subscribe(run_id, ws)
+
+    # Initial snapshot so the client doesn't have to poll the REST
+    # endpoint separately on connect.
+    try:
+        from backend.forge import services as _svc
+        run = _svc.get_run(run_id)
+        if run:
+            await ws.send_json({
+                "type": "run_status",
+                "run_id": run_id,
+                "status": run.get("status"),
+                "outcome": run.get("outcome"),
+                "initial": True,
+            })
+    except Exception as exc:
+        logger.debug("initial snapshot failed run=%s: %s", run_id[:8], exc)
+
+    async def pump() -> None:
+        while True:
+            msg = await q.get()
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                break
+
+    pump_task = asyncio.create_task(pump())
+    try:
+        while True:
+            await ws.receive_text()  # keep-alive
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        pump_task.cancel()
+        await client_hub.unsubscribe(run_id, ws)
+
+
 async def handle_daemon_ws(ws: "WebSocket") -> None:
     """WebSocket handler called from the router for /api/forge/daemon/ws."""
     from fastapi import WebSocketDisconnect

@@ -816,6 +816,19 @@ async def daemon_ws(ws: WebSocket):
     await handle_daemon_ws(ws)
 
 
+# P4: browser WS — subscribe to live run-status updates so RunDetail
+# doesn't have to wait for the 5s poll. Sits under `daemon_router`
+# (which is auth-free) because browser WebSockets can't send the
+# Authorization header — auth on this channel is the unguessable run_id
+# itself, same model as the existing /daemon/ws. Read-only; no
+# server-trust on inbound frames.
+@daemon_router.websocket("/ws/runs/{run_id}")
+async def client_run_ws(ws: WebSocket, run_id: str):
+    """Browser subscribes to run-status updates for a single run."""
+    from backend.forge.ws_dispatch import handle_client_run_ws
+    await handle_client_run_ws(ws, run_id)
+
+
 # ── WS hub status (debugging) ────────────────────────────────────────────
 
 @router.get("/daemon/connections")

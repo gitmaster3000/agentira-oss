@@ -563,6 +563,25 @@ def _webhook_log_to_dict(w: WebhookLog) -> dict:
     }
 
 
+def _broadcast_status(run_id: str | None,
+                      status: "RunStatus | None",
+                      outcome: "RunOutcome | None" = None) -> None:
+    """P4: push a run_status frame to every browser subscribed to this
+    run via the WS client hub. Best-effort — silent if no event loop
+    is available (e.g. some test environments). Schedules the broadcast
+    asynchronously; the caller is not blocked on socket writes."""
+    if not run_id or status is None:
+        return
+    try:
+        from backend.forge.ws_dispatch import client_hub
+        client_hub.broadcast_run_status(
+            run_id, status.value,
+            outcome.value if outcome is not None else None,
+        )
+    except Exception:
+        pass
+
+
 def _run_to_dict(r: Run) -> dict:
     return {
         "id": r.id,
@@ -1350,6 +1369,7 @@ def start_run(run_id: str) -> dict | None:
             return None
         r.status = RunStatus.RUNNING
         r.started_at = datetime.now(timezone.utc)
+        _broadcast_status(run_id, RunStatus.RUNNING)
         # Mark agent busy
         if r.agent:
             r.agent.status = AgentStatus.BUSY
@@ -1366,6 +1386,7 @@ def complete_run(run_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
             return None
         now = datetime.now(timezone.utc)
         r.status = RunStatus.FAILED if error else RunStatus.COMPLETED
+        _broadcast_status(run_id, r.status)
         r.finished_at = now
         r.input_tokens = input_tokens
         r.output_tokens = output_tokens
@@ -2736,6 +2757,7 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
             run.status = target_status
             db.commit()
             db.refresh(run)
+            _broadcast_status(run_id, target_status)
         run_dict = _run_to_dict(run)
 
     if runtime_id:
@@ -2785,6 +2807,7 @@ def resume_run(run_id: str) -> dict:
         if r and r.status == RunStatus.PAUSED:
             r.status = RunStatus.RESUMING
             db.commit()
+            _broadcast_status(run_id, RunStatus.RESUMING)
     return dispatch_pending_run(run_id=run_id, resume=True)
 
 
@@ -2889,6 +2912,7 @@ def cancel_run(run_id: str) -> dict:
         # the daemon never acks (stuck >> STOP_GRACE_S * 4).
         now = datetime.now(timezone.utc)
         run.status = RunStatus.CANCELLING
+        _broadcast_status(run_id, RunStatus.CANCELLING)
         run.stop_requested_at = now
         run.error = "Cancelled by user."
         if run.agent and run.agent.status == AgentStatus.BUSY:
@@ -3202,6 +3226,7 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             r = db.query(Run).filter(Run.id == run_id).first()
             if r:
                 r.status = RunStatus.CANCELLED
+                _broadcast_status(run_id, RunStatus.CANCELLED, r.outcome)
                 # P3: clear the audit timestamp so the reconciler stops
                 # treating CANCELLING as a stuck transient.
                 r.stop_requested_at = None
@@ -3254,6 +3279,7 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     if r.status == RunStatus.PAUSING:
                         r.status = RunStatus.PAUSED
                         r.stop_requested_at = None
+                        _broadcast_status(run_id, RunStatus.PAUSED)
                     db.commit()
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
@@ -3444,6 +3470,7 @@ def send_runtime_message(
                 # trigger → start_run drives the transition.
                 paused.status = RunStatus.RUNNING
                 db.commit()
+                _broadcast_status(paused.id, RunStatus.RUNNING)
 
     # AP-120: chatting into a task whose latest run FAILED schedules a
     # fresh run (a retry) carrying this message as a follow-up, instead
