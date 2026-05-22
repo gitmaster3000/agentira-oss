@@ -18,6 +18,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from backend.db import SessionLocal
 from backend.forge import conductor as _conductor
 from backend.forge import concierge as _concierge
+from backend.forge import reconciler as _reconciler
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus
 
 logger = logging.getLogger("agentira.forge.scheduler")
@@ -60,6 +61,18 @@ class ForgeScheduler:
         except Exception as exc:
             logger.warning("Concierge seed failed: %s", exc)
         self._reschedule_conductor()
+        # P2: stale-run reconciler — sweeps non-terminal runs whose daemon
+        # is offline. Cheap (one query), idempotent, ~30s cadence.
+        self._scheduler.add_job(
+            _reconciler.reconcile_stale_runs,
+            trigger=IntervalTrigger(seconds=_reconciler.RECONCILE_INTERVAL_S),
+            id="stale_run_reconciler",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Stale-run reconciler scheduled every %ss.",
+                    _reconciler.RECONCILE_INTERVAL_S)
         logger.info("Forge scheduler started.")
 
     def _reschedule_conductor(self) -> int:
@@ -128,6 +141,15 @@ class ForgeScheduler:
         self._scheduler.remove_all_jobs()
         count = self._load_jobs()
         tick = self._reschedule_conductor()
+        # P2: refresh also drops the reconciler job — put it back.
+        self._scheduler.add_job(
+            _reconciler.reconcile_stale_runs,
+            trigger=IntervalTrigger(seconds=_reconciler.RECONCILE_INTERVAL_S),
+            id="stale_run_reconciler",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         return {"scheduled": count, "conductor_tick_seconds": tick}
 
     # ── Internal ─────────────────────────────────────────────────────────
