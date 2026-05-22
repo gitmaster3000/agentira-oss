@@ -245,6 +245,27 @@ class Project(Base):
     activities: Mapped[list["Activity"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Activity.created_at.desc()")
 
 
+class ProjectRepo(Base):
+    """AP-121: a project can map to multiple git repos.
+
+    The legacy `Project.repo_path` / `Project.repo_url` model assumed one
+    project = one repo. Real codebases (UI + backend + MCP) often span
+    repos. Each task picks a target repo via `Task.repo_name`; the
+    primary repo is the default when a task doesn't specify.
+    """
+    __tablename__ = "project_repos"
+    __table_args__ = (UniqueConstraint("project_id", "name"),)
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. "backend", "frontend"
+    repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    default_branch: Mapped[str] = mapped_column(String(120), default="main")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Epic(Base):
     __tablename__ = "epics"
 
@@ -279,6 +300,10 @@ class Task(Base):
     dod_items: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: [{"text": "...", "checked": false}]
     branch: Mapped[str] = mapped_column(String(255), default="")
     pr_url: Mapped[str] = mapped_column(String(500), default="")
+    # AP-121: which repo in the project this task targets. NULL = the
+    # project's primary repo (back-compat with single-repo projects).
+    # Validated at create/update time against project_repos.name.
+    repo_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

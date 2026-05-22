@@ -2589,8 +2589,24 @@ def dispatch_pending_run(*, run_id: str,
             else:
                 repo_path = ensure_agent_worktree(agent, project)   # template
                 worktree_branch = f"agent/{agent.id}/work"
-            worktree_source_path = project.repo_path or ""
-            worktree_source_url = (getattr(project, "repo_url", None) or "")
+            # AP-121: pick the right repo for THIS task. Single-repo
+            # projects (legacy) → resolve_project_repo synthesizes a row
+            # from Project.repo_path so this code path is unchanged.
+            # Multi-repo projects → uses the task's repo_name, defaults
+            # to the primary repo when NULL.
+            from backend.models import Task as _Task
+            task_row = db.get(_Task, task_id) if task_id else None
+            task_repo_name = task_row.repo_name if task_row else None
+            from backend import services as _core_services
+            chosen = _core_services.resolve_project_repo(
+                project.id, task_repo_name,
+            )
+            if chosen:
+                worktree_source_path = chosen["repo_path"] or ""
+                worktree_source_url = chosen["repo_url"] or ""
+            else:
+                worktree_source_path = project.repo_path or ""
+                worktree_source_url = (getattr(project, "repo_url", None) or "")
         else:
             repo_path = ensure_agent_home_dir(agent)            # template
             worktree_source_path = ""

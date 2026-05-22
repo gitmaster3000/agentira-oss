@@ -487,6 +487,19 @@ async def get_my_involvement(ctx: Context = None) -> dict:
         raise
 
 
+# ── AP-121: Project repos ──────────────────────────────────────────────────────
+
+@mcp.tool()
+async def list_project_repos(project_id: str, ctx: Context = None) -> list[dict]:
+    """List repos attached to a project (AP-121 multi-repo).
+
+    Each returned dict: {id, project_id, name, repo_path, repo_url,
+    default_branch, is_primary, created_at}. Use to discover which
+    repos a project tracks before picking a `repo_name` on a task.
+    """
+    return services.list_project_repos(project_id)
+
+
 # ── AP-125: Run artifacts ──────────────────────────────────────────────────────
 
 @mcp.tool()

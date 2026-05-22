@@ -32,7 +32,7 @@ def get_db():
 
 def init_db():
     """Create all tables."""
-    from backend.models import Project, Task, Activity, Epic, OAuthAccount  # noqa: F401
+    from backend.models import Project, Task, Activity, Epic, OAuthAccount, ProjectRepo  # noqa: F401
     from backend.forge.models import Agent, Run, ForgeRuntime  # noqa: F401
     Base.metadata.create_all(bind=engine)
     run_migrations()
@@ -106,6 +106,31 @@ def _drop_not_null(conn: Connection, table: str, column: str) -> None:
     """Idempotent on Postgres; on SQLite this is a no-op (caller must table-rebuild)."""
     if _dialect_name() == "postgresql":
         conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL"))
+
+
+def _backfill_primary_project_repo(conn: Connection) -> None:
+    """AP-121: one-shot backfill — every project with a legacy
+    repo_path/repo_url AND no project_repos row yet gets a primary
+    row built from those values. Idempotent on rerun (skips projects
+    that already have any repo)."""
+    import uuid
+    rows = conn.execute(text(
+        "SELECT id, repo_path, repo_url FROM projects "
+        "WHERE id NOT IN (SELECT DISTINCT project_id FROM project_repos)"
+    )).all()
+    for project_id, repo_path, repo_url in rows:
+        if not (repo_path or repo_url):
+            continue
+        conn.execute(text(
+            "INSERT INTO project_repos (id, project_id, name, repo_path, "
+            "                            repo_url, default_branch, "
+            "                            is_primary, created_at) "
+            "VALUES (:id, :pid, 'primary', :rp, :ru, 'main', :pri, "
+            "        CURRENT_TIMESTAMP)"
+        ), {"id": uuid.uuid4().hex[:12], "pid": project_id,
+            "rp": repo_path, "ru": repo_url, "pri": True})
+    if rows:
+        conn.commit()
 
 
 def _migrate_forge_agents_to_profiles(conn: Connection) -> None:
@@ -283,6 +308,14 @@ def run_migrations():
                                     "VARCHAR(120)")
             added |= _ensure_column(conn, "projects", "ac_check_types_json",
                                     "TEXT")
+        # AP-121: tasks gain repo_name pointing at one of the project's repos.
+        if "tasks" in tables:
+            _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")
+        # AP-121: backfill — for every project with a legacy repo_path /
+        # repo_url and no project_repos rows, insert one primary row.
+        # Runs after `Base.metadata.create_all` has created project_repos.
+        if "projects" in tables and "project_repos" in tables:
+            _backfill_primary_project_repo(conn)
             if added:
                 conn.commit()
 

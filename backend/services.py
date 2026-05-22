@@ -899,6 +899,147 @@ def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
         return [_activity_to_dict(a) for a in activities]
 
 
+def _project_repo_to_dict(r) -> dict:
+    return {
+        "id": r.id,
+        "project_id": r.project_id,
+        "name": r.name,
+        "repo_path": r.repo_path or "",
+        "repo_url": r.repo_url or "",
+        "default_branch": r.default_branch or "main",
+        "is_primary": bool(r.is_primary),
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def list_project_repos(project_id: str) -> list[dict]:
+    """AP-121: enumerate repos attached to a project."""
+    from backend.models import ProjectRepo
+    with _session() as db:
+        rows = (db.query(ProjectRepo)
+                  .filter(ProjectRepo.project_id == project_id)
+                  .order_by(ProjectRepo.is_primary.desc(),
+                            ProjectRepo.created_at.asc())
+                  .all())
+        return [_project_repo_to_dict(r) for r in rows]
+
+
+def add_project_repo(project_id: str, *, name: str,
+                     repo_path: str = "", repo_url: str = "",
+                     default_branch: str = "main",
+                     is_primary: bool = False) -> dict:
+    """AP-121: attach a repo to a project. If `is_primary=True`, demotes
+    any existing primary in the same project (only one primary at a
+    time). Returns the new row's dict.
+    """
+    from backend.models import ProjectRepo
+    name = (name or "").strip()
+    if not name:
+        return {"error": "name is required"}
+    if not (repo_path or repo_url):
+        return {"error": "repo_path or repo_url is required"}
+    with _session() as db:
+        if not db.get(Project, project_id):
+            return {"error": "Project not found"}
+        # Name collision?
+        if (db.query(ProjectRepo)
+              .filter(ProjectRepo.project_id == project_id,
+                      ProjectRepo.name == name)
+              .first()):
+            return {"error": f"Repo '{name}' already attached to project"}
+        if is_primary:
+            (db.query(ProjectRepo)
+               .filter(ProjectRepo.project_id == project_id,
+                       ProjectRepo.is_primary == True)  # noqa: E712
+               .update({"is_primary": False}))
+        # If no repos yet for this project, the first one is implicitly
+        # primary so dispatch's "primary repo" fallback always resolves.
+        existing_any = (db.query(ProjectRepo)
+                          .filter(ProjectRepo.project_id == project_id)
+                          .first())
+        effective_primary = is_primary or (existing_any is None)
+        row = ProjectRepo(
+            project_id=project_id,
+            name=name,
+            repo_path=repo_path or None,
+            repo_url=repo_url or None,
+            default_branch=default_branch or "main",
+            is_primary=effective_primary,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return _project_repo_to_dict(row)
+
+
+def remove_project_repo(project_id: str, repo_name: str) -> bool:
+    """AP-121: detach a repo from a project. Returns True if removed."""
+    from backend.models import ProjectRepo
+    with _session() as db:
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id,
+                         ProjectRepo.name == repo_name)
+                 .first())
+        if not row:
+            return False
+        was_primary = row.is_primary
+        db.delete(row)
+        if was_primary:
+            # Promote the next-oldest repo to primary so dispatch still
+            # has a fallback target. If none remain, leave it — the
+            # project becomes repo-less and tasks targeting "primary"
+            # error cleanly at dispatch.
+            next_row = (db.query(ProjectRepo)
+                          .filter(ProjectRepo.project_id == project_id)
+                          .order_by(ProjectRepo.created_at.asc())
+                          .first())
+            if next_row:
+                next_row.is_primary = True
+        db.commit()
+        return True
+
+
+def resolve_project_repo(project_id: str, repo_name: str | None) -> dict | None:
+    """AP-121: pick the repo a task / run should materialize against.
+
+    - If `repo_name` is given, look it up exactly; return None if not
+      found (caller decides whether to error).
+    - If `repo_name` is None, return the project's primary repo.
+    - If the project has no project_repos rows AT ALL (legacy, pre-
+      backfill), fall back to a synthetic dict built from
+      `projects.repo_path` / `repo_url` so old dispatch paths keep
+      working without a hard cutover.
+    """
+    from backend.models import ProjectRepo
+    with _session() as db:
+        if repo_name:
+            row = (db.query(ProjectRepo)
+                     .filter(ProjectRepo.project_id == project_id,
+                             ProjectRepo.name == repo_name)
+                     .first())
+            return _project_repo_to_dict(row) if row else None
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id,
+                         ProjectRepo.is_primary == True)  # noqa: E712
+                 .first())
+        if row:
+            return _project_repo_to_dict(row)
+        # Legacy fallback.
+        proj = db.get(Project, project_id)
+        if proj and (proj.repo_path or proj.repo_url):
+            return {
+                "id": "",
+                "project_id": project_id,
+                "name": "primary",
+                "repo_path": proj.repo_path or "",
+                "repo_url": proj.repo_url or "",
+                "default_branch": "main",
+                "is_primary": True,
+                "created_at": None,
+            }
+        return None
+
+
 def get_webhook_config(project_id: str) -> dict | None:
     """Return the project's webhook config, falling back to DEFAULT_WEBHOOK_RULES."""
     with _session() as db:
