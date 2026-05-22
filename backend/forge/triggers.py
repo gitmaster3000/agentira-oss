@@ -16,13 +16,18 @@ logger = logging.getLogger("agentira.forge.triggers")
 
 
 def fire_task_assigned(task_id: str, assignee_name: str) -> None:
-    """Look up the agent by name, schedule a real Run via the unified rail.
+    """AP-129: assigning an agent to a task creates a READY run, NOT a
+    running one. The user lands on the Run page, sees the prepared
+    prompt, edits it if needed, and clicks Start.
 
-    A Run row is created (visible in the UI), the prompt is assembled from
-    the task's title + description + DoD items (real work content, not a
-    placeholder), and the project's repo_path / conventions / MCP toolset
-    are materialized for the agent. finish_run callback closes the loop:
-    the agent declares an outcome which the human sees in the runs list.
+    Why: the previous behavior (schedule_task_run → straight to RUNNING)
+    surprised users — assigning an agent burned LLM tokens before the
+    user had a chance to look at what was about to be sent. The READY
+    gate puts the user back in control on the manual-assignment path.
+
+    The Conductor's autopilot tick (which DOES auto-dispatch) bypasses
+    this trigger and calls schedule_task_run directly — that opt-in
+    behavior is unaffected.
     """
     with SessionLocal() as db:
         agent = db.query(Agent).filter(Agent.name == assignee_name).first()
@@ -30,15 +35,15 @@ def fire_task_assigned(task_id: str, assignee_name: str) -> None:
             return  # human assignee (or unknown), nothing to dispatch
         if not agent.runtime_id:
             logger.info("task %s assigned to agent %s but it has no runtime — "
-                        "skipping dispatch", task_id, assignee_name)
+                        "skipping prepare", task_id, assignee_name)
             return
         agent_id = agent.id
 
     try:
         from backend.forge import services
-        result = services.schedule_task_run(task_id=task_id, agent_id=agent_id)
+        result = services.prepare_task_run(task_id=task_id, agent_id=agent_id)
         if "error" in result:
-            logger.warning("schedule_task_run rejected task %s for agent %s: %s",
+            logger.warning("prepare_task_run rejected task %s for agent %s: %s",
                            task_id, assignee_name, result["error"])
     except Exception as exc:
-        logger.warning("schedule_task_run for task assignment failed: %s", exc)
+        logger.warning("prepare_task_run for task assignment failed: %s", exc)
