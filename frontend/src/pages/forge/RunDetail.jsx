@@ -21,7 +21,20 @@ const STATUS_CONFIG = {
     completed:     { bg: '#2ecc71', label: 'Completed', icon: CheckCircle },
     failed:        { bg: '#e74c3c', label: 'Failed',   icon: XCircle },
     cancelled:     { bg: '#9aa0a6', label: 'Cancelled', icon: Ban },
+    paused:        { bg: '#9aa0a6', label: 'Paused',    icon: Pause },
+    // P3: transient states — Stop / Resume was requested, daemon hasn't
+    // confirmed yet. UI is honest about "asked but not done"; Stop /
+    // Resume buttons disable while in a transient state so the user
+    // can't double-click into a race. The terminal state lands when the
+    // daemon's trigger-complete arrives (or the backend reconciler
+    // escalates after STUCK_TRANSIENT_THRESHOLD_S).
+    pausing:       { bg: '#9aa0a6', label: 'Pausing…',    icon: Pause },
+    cancelling:    { bg: '#9aa0a6', label: 'Cancelling…', icon: Ban },
+    resuming:      { bg: '#f1c40f', label: 'Resuming…',   icon: RefreshCw },
 };
+
+// Treat these as "stop in flight" — buttons disable, no auto-resume.
+export const TRANSIENT_RUN_STATUSES = new Set(['pausing', 'cancelling', 'resuming']);
 
 export function RunDetail() {
     const { runId } = useParams();
