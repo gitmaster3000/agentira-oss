@@ -403,6 +403,11 @@ export function RunDetail() {
                 />
             </div>
 
+            {/* Diagnostics — where the agent ran, which branch, which
+                claude session. Surfaces the silent-empty-dir failure mode
+                so the user knows immediately why a run "did nothing". */}
+            <RunDiagnostics run={run} />
+
             {/* Timeline */}
             <div className="card">
                 <h2 className="text-lg font-semibold text-text-primary mb-4">Timeline</h2>
@@ -704,6 +709,101 @@ function ArtifactsPanel({ artifacts }) {
         </div>
     );
 }
+
+// Run diagnostics — surfaces the daemon's view of WHERE the agent ran.
+// Especially calls out the "agent ran in an empty scratch dir" failure
+// mode (materialize_reason="repo_path_not_found:...") that used to be
+// silent.
+function RunDiagnostics({ run }) {
+    const reason = run.materialize_reason || '';
+    const fellBack = reason.startsWith('repo_path_not_found');
+    const noRepo = reason === 'no_repo_path';
+
+    return (
+        <div className="card space-y-2">
+            <h2 className="text-lg font-semibold text-text-primary mb-2">
+                Where it ran
+            </h2>
+
+            {fellBack && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded p-3 mb-2 text-sm text-red-300">
+                    <div className="font-semibold mb-1">⚠ Agent ran in an empty scratch directory.</div>
+                    <div className="text-xs text-text-secondary">
+                        The repo path stamped on the dispatch frame didn't exist on the daemon's host machine.
+                        The agent had no codebase to work on — that's why nothing was produced.
+                        Detail: <code className="text-text-tertiary">{reason}</code>.
+                        Fix: attach a valid repo via Project Settings → Repos.
+                    </div>
+                </div>
+            )}
+            {noRepo && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-3 mb-2 text-sm text-yellow-300">
+                    No repo on the dispatch frame — agent ran in its scratch workdir.
+                    Attach a repo on the project settings page if it should have a codebase.
+                </div>
+            )}
+
+            <DiagRow label="Workdir (cwd)" value={run.workdir} mono />
+            <DiagRow label="Worktree branch" value={run.worktree_branch} mono />
+            <DiagRow label="Worktree path (stamped)" value={run.worktree_path}
+                hint="The path the backend asked the daemon to use. ~ resolves on the daemon host."
+                mono />
+            <DiagRow label="Claude session id" value={run.session_id} mono />
+            {run.session_id && run.workdir && (
+                <DiagRow label="Session file"
+                    value={`~/.claude/projects/${encodeClaudePath(run.workdir)}/${run.session_id}.jsonl`}
+                    hint="On the daemon host. Useful for verifying --resume found the right file."
+                    mono />
+            )}
+            {run.log_dir && (
+                <>
+                    <DiagRow label="Per-run logs" value={run.log_dir}
+                        hint="On the daemon host. Per-run dir — stdout.log + stderr.log + meta.json. ls $(echo VALUE | sed s~^~~$HOME~) — or use the helpers below."
+                        mono />
+                    <DiagRow label="    stdout"
+                        value={`${run.log_dir.replace(/\/$/, '')}/stdout.log`}
+                        hint="Full raw claude stream-json output, lossless."
+                        mono />
+                    <DiagRow label="    stderr"
+                        value={`${run.log_dir.replace(/\/$/, '')}/stderr.log`}
+                        hint="claude stderr — error messages land here."
+                        mono />
+                    <DiagRow label="    meta.json"
+                        value={`${run.log_dir.replace(/\/$/, '')}/meta.json`}
+                        hint="cwd / branch / session_id / materialize_reason snapshot at run end."
+                        mono />
+                </>
+            )}
+            <DiagRow label="Daemon log (global)"
+                value="~/.agentira/daemon.log"
+                hint="On the daemon host. Interleaved across all runs — grep by trace_id."
+                mono />
+        </div>
+    );
+}
+
+function DiagRow({ label, value, hint, mono }) {
+    return (
+        <div className="grid grid-cols-[170px_1fr] gap-3 items-baseline">
+            <div className="text-xs text-text-tertiary">{label}</div>
+            <div>
+                <div className={`text-sm text-text-primary break-all ${mono ? 'font-mono' : ''}`}>
+                    {value || <span className="text-text-tertiary italic">—</span>}
+                </div>
+                {hint && <div className="text-[11px] text-text-tertiary mt-0.5">{hint}</div>}
+            </div>
+        </div>
+    );
+}
+
+// claude-code encodes the cwd by replacing path separators with '-' and
+// stripping leading '/'. Mirrors what `~/.claude/projects/` directory
+// names look like so we can show the user where to find the session.
+function encodeClaudePath(p) {
+    if (!p) return '';
+    return p.replace(/^\//, '-').replace(/\//g, '-').replace(/\/$/, '');
+}
+
 
 function MetricCard({ icon: Icon, label, value, sub, color }) {
     return (
