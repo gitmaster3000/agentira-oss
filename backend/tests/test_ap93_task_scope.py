@@ -127,7 +127,10 @@ def test_stop_chat_pauses_active_run_for_task_scope(monkeypatch):
 
     with forge_services._session() as db:
         r = db.query(Run).filter_by(id=run_id).first()
-        assert r.status == RunStatus.PAUSED
+        # P3: stop_chat → pause_run writes the PAUSING transient. The
+        # terminal PAUSED state arrives on the daemon's trigger-complete
+        # (paused=True) post (covered by test_run_lifecycle.py).
+        assert r.status == RunStatus.PAUSING
 
 
 def test_stop_chat_no_active_run_falls_back_to_dispatch_cancel(monkeypatch):

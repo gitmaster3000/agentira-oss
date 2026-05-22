@@ -32,6 +32,11 @@ RECONCILE_INTERVAL_S = 30
 # Heartbeat cadence is well under a minute; 120s gives enough slack for
 # transient network blips without holding zombie runs for too long.
 STALE_RUN_THRESHOLD_S = 120
+# P3: how long a run can sit in a transient state (PAUSING/CANCELLING/
+# RESUMING) before we assume the daemon dropped the frame and force the
+# terminal state. The daemon's SIGTERM→SIGKILL window is ~5s; 30s gives
+# generous slack while still feeling responsive.
+STUCK_TRANSIENT_THRESHOLD_S = 30
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -46,9 +51,41 @@ def reconcile_stale_runs() -> dict:
     a summary suitable for logging / a future status endpoint."""
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=STALE_RUN_THRESHOLD_S)
+    transient_cutoff = now - timedelta(seconds=STUCK_TRANSIENT_THRESHOLD_S)
     reconciled: list[dict] = []
+    escalated: list[dict] = []
 
     with SessionLocal() as db:
+        # P3: escalate stuck transient states first — these resolve fast
+        # in the happy path, so anything past the threshold means the
+        # daemon didn't ack and we need to pick the terminal state.
+        stuck = (db.query(Run)
+                   .filter(Run.status.in_([
+                       RunStatus.PAUSING, RunStatus.CANCELLING,
+                       RunStatus.RESUMING]))
+                   .filter(Run.stop_requested_at.isnot(None))
+                   .filter(Run.stop_requested_at <= transient_cutoff)
+                   .all())
+        for run in stuck:
+            prior = run.status
+            if prior == RunStatus.PAUSING:
+                run.status = RunStatus.PAUSED  # SIGKILL has run; treat as paused
+            elif prior == RunStatus.CANCELLING:
+                run.status = RunStatus.CANCELLED
+                run.finished_at = now
+            else:  # RESUMING — daemon never picked up the dispatch
+                run.status = RunStatus.FAILED
+                run.finished_at = now
+                run.error = "Resume failed to dispatch (no daemon ack)."
+                if run.outcome is None:
+                    run.outcome = RunOutcome.FAILED
+            run.stop_requested_at = None
+            escalated.append({"run_id": run.id, "from": prior.value,
+                              "to": run.status.value})
+        if escalated:
+            db.commit()
+            logger.warning("Reconciler escalated %d stuck transient(s): %s",
+                           len(escalated), escalated)
         # Join Run → Agent → ForgeRuntime in one query so we can compute
         # staleness without N+1.
         rows = (db.query(Run, ForgeRuntime)
@@ -95,4 +132,5 @@ def reconcile_stale_runs() -> dict:
                 len(reconciled), [r["run_id"] for r in reconciled],
             )
 
-    return {"reconciled": reconciled, "at": now.isoformat()}
+    return {"reconciled": reconciled, "escalated": escalated,
+            "at": now.isoformat()}

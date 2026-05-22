@@ -43,6 +43,13 @@ class RunStatus(str, enum.Enum):
     READY     = "ready"
     PENDING   = "pending"
     RUNNING   = "running"
+    # P3: transient states. The user clicked Stop / Resume; we've dispatched
+    # the WS frame and persisted intent, but the daemon hasn't confirmed
+    # yet. UI shows "Pausing…/Cancelling…/Resuming…". The terminal state
+    # arrives via the daemon's trigger-complete post (paused/cancelled).
+    PAUSING    = "pausing"
+    CANCELLING = "cancelling"
+    RESUMING   = "resuming"
     PAUSED    = "paused"
     COMPLETED = "completed"
     FAILED    = "failed"
@@ -189,6 +196,11 @@ class Run(Base):
     # blob: {exit_code, stderr_tail, last_events_tail, captured_at}. Surfaced
     # via the get_run_diagnostics MCP tool for run-investigation flows.
     diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P3: when did the user click Stop / Resume? Set the moment a transient
+    # state is entered; cleared on confirmation. The reconciler reads this
+    # to escalate "stuck PAUSING" rows (daemon dropped the frame).
+    stop_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

@@ -2379,7 +2379,10 @@ def dispatch_pending_run(*, run_id: str,
         if not run:
             return {"error": "Run not found"}
         if resume:
-            if run.status != RunStatus.PAUSED:
+            # P3: resume_run flips PAUSED → RESUMING before calling us so
+            # the UI shows the transient state; accept both here. The
+            # daemon's first event / start_run flips RESUMING → RUNNING.
+            if run.status not in (RunStatus.PAUSED, RunStatus.RESUMING):
                 return {"error": f"Run is {run.status.value}; "
                                   "only PAUSED runs can be resumed"}
         elif run.status not in (RunStatus.READY, RunStatus.PENDING):
@@ -2751,11 +2754,19 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
 def pause_run(run_id: str) -> dict:
     """Pause a run. The daemon terminates the CLI subprocess (SIGTERM) —
     a live claude process can't be safely frozen, SIGSTOP corrupts its
-    streaming sockets. The run is parked at status=PAUSED with its
-    session_id persisted; `resume_run` relaunches it via `claude --resume`.
-    Best-effort: openclaw HTTP runs aren't pausable (the request completes
-    naturally)."""
-    return _signal_run(run_id, "pause", RunStatus.PAUSED)
+    streaming sockets. P3: the run is parked at status=PAUSING with its
+    `stop_requested_at` stamped; the daemon's trigger-complete(paused=True)
+    is what flips it to terminal PAUSED with the session_id persisted.
+    `resume_run` relaunches it via `claude --resume`. Best-effort:
+    openclaw HTTP runs aren't pausable (the request completes naturally)."""
+    res = _signal_run(run_id, "pause", RunStatus.PAUSING)
+    if res.get("ok"):
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r:
+                r.stop_requested_at = datetime.now(timezone.utc)
+                db.commit()
+    return res
 
 
 def resume_run(run_id: str) -> dict:
@@ -2765,7 +2776,15 @@ def resume_run(run_id: str) -> dict:
     Resume re-dispatches a fresh process that reloads the conversation
     from the captured session via `claude --resume` and continues. The
     run_id is reused — the run is one continuous record across the pause.
+
+    P3: the row flips PAUSED→RESUMING here; the daemon's first event post
+    (via start_run) flips it to RUNNING.
     """
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if r and r.status == RunStatus.PAUSED:
+            r.status = RunStatus.RESUMING
+            db.commit()
     return dispatch_pending_run(run_id=run_id, resume=True)
 
 
@@ -2850,7 +2869,8 @@ def cancel_run(run_id: str) -> dict:
         run = db.query(Run).filter(Run.id == run_id).first()
         if not run:
             return {"error": "Run not found"}
-        if run.status in (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED):
+        if run.status in (RunStatus.COMPLETED, RunStatus.FAILED,
+                          RunStatus.CANCELLED, RunStatus.CANCELLING):
             return {"error": f"Run already {run.status.value}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
@@ -2862,15 +2882,15 @@ def cancel_run(run_id: str) -> dict:
                     .first())
         trace_id = last_msg.trace_id if last_msg else ""
 
-        # Mark run cancelled now — don't make the user wait for the daemon's
-        # complete-event round-trip. complete_trigger from the daemon will
-        # see the run already cancelled and skip the state flip.
+        # P3: mark CANCELLING (transient) — the daemon's trigger-complete
+        # (cancelled=True) flips it to the terminal CANCELLED. Until that
+        # arrives the UI shows "Cancelling…" so the user knows we asked
+        # but haven't been confirmed yet. The reconciler will escalate if
+        # the daemon never acks (stuck >> STOP_GRACE_S * 4).
         now = datetime.now(timezone.utc)
-        run.status = RunStatus.CANCELLED
-        run.finished_at = now
+        run.status = RunStatus.CANCELLING
+        run.stop_requested_at = now
         run.error = "Cancelled by user."
-        if run.started_at:
-            run.duration_ms = int((now - _utc(run.started_at)).total_seconds() * 1000)
         if run.agent and run.agent.status == AgentStatus.BUSY:
             run.agent.status = AgentStatus.ONLINE
         db.commit()
@@ -3182,6 +3202,9 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             r = db.query(Run).filter(Run.id == run_id).first()
             if r:
                 r.status = RunStatus.CANCELLED
+                # P3: clear the audit timestamp so the reconciler stops
+                # treating CANCELLING as a stuck transient.
+                r.stop_requested_at = None
                 r.finished_at = datetime.now(timezone.utc)
                 if r.outcome is None:
                     r.outcome = RunOutcome.FAILED  # for the verdict badge
@@ -3216,16 +3239,22 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                        .first())
                 if m:
                     scope = m.scope_key
-        if session_id:
-            if scope:
-                upsert_conversation(agent_id=agent_id, scope_key=scope,
-                                    runtime_session_id=session_id)
-            if run_id:
-                with _session() as db:
-                    r = db.query(Run).filter(Run.id == run_id).first()
-                    if r:
+        if session_id and scope:
+            upsert_conversation(agent_id=agent_id, scope_key=scope,
+                                runtime_session_id=session_id)
+        # P3: flip PAUSING → PAUSED unconditionally on the daemon's ack.
+        # Even if no session_id arrived (non-claude runtimes), the daemon
+        # confirmed the kill — that's the signal we were waiting for.
+        if run_id:
+            with _session() as db:
+                r = db.query(Run).filter(Run.id == run_id).first()
+                if r:
+                    if session_id:
                         r.session_id = session_id
-                        db.commit()
+                    if r.status == RunStatus.PAUSING:
+                        r.status = RunStatus.PAUSED
+                        r.stop_requested_at = None
+                    db.commit()
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
 
@@ -3385,6 +3414,20 @@ def send_runtime_message(
     if scope_key and scope_key.startswith("task:"):
         task_id = scope_key.split(":", 1)[1]
         with _session() as db:
+            # P3: a stop in flight wins. If the daemon hasn't confirmed
+            # PAUSING / CANCELLING yet, sending a message would race the
+            # kill (and on success would silently spawn a second proc).
+            # Refuse cleanly so the user retries once the dust settles.
+            in_flight_stop = (db.query(Run)
+                              .filter(Run.task_id == task_id,
+                                      Run.agent_id == agent_id,
+                                      Run.status.in_([RunStatus.PAUSING,
+                                                      RunStatus.CANCELLING]))
+                              .first())
+            if in_flight_stop:
+                return {"error": (f"Run is {in_flight_stop.status.value}; "
+                                  "wait for the stop to confirm before "
+                                  "sending another message.")}
             paused = (db.query(Run)
                         .filter(Run.task_id == task_id,
                                 Run.agent_id == agent_id,
@@ -3393,6 +3436,12 @@ def send_runtime_message(
                         .first())
             if paused:
                 resumed_run_id = paused.id
+                # PAUSED is a confirmed-terminated state (daemon already
+                # posted paused=True for it), so there's no live process
+                # to race here — flip directly to RUNNING. The transient
+                # RESUMING state is reserved for the explicit Resume
+                # button path, where dispatch_pending_run → dispatch_
+                # trigger → start_run drives the transition.
                 paused.status = RunStatus.RUNNING
                 db.commit()
 
