@@ -2385,6 +2385,24 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
     if extra_context:
         parts.append("\n## Follow-up from the user\n" + extra_context)
     parts.append(
+        "\n## Output contract — do NOT skip this\n"
+        "A task is only \"succeeded\" if there is something the human can\n"
+        "look at when they open the Run page. Before calling finish_run\n"
+        "with outcome=\"succeeded\":\n"
+        "\n"
+        "1. **Commit your changes** in the worktree you're in. The Run page's\n"
+        "   Changes tab reads from `git diff` — if you didn't commit, the\n"
+        "   page shows nothing and the work looks lost.\n"
+        "2. **Register at least one artifact** via\n"
+        "   mcp__agentira__register_run_artifact for the deliverable —\n"
+        "   the PR URL (kind=\"pr\"), a generated report (kind=\"report\"),\n"
+        "   a deployed preview (kind=\"url\"), or a key file (kind=\"file\").\n"
+        "   This is what shows up in the \"Here's what got built\" panel\n"
+        "   on the Run page. No artifact = the human can't tell what you did.\n"
+        "\n"
+        "If you didn't actually produce a deliverable, **do NOT pretend you\n"
+        "did**. Call finish_run with outcome=\"blocked\" (and a real\n"
+        "explanation in summary) or outcome=\"failed\" instead.\n"
         "\nWhen you finish, call mcp__agentira__finish_run with:\n"
         "  - run_id: \"{run_id}\"\n"
         "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
@@ -3118,6 +3136,41 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return {"ok": False, "error": "Run not found"}
+        # Empty-success guard: an agent can't declare succeeded without
+        # producing something the human can look at. The Run page would
+        # render as "completed ✅" with an empty diff, no artifacts, no
+        # PR — i.e. the hallucinated-completion failure mode. Reject up
+        # front so the agent has a chance to correct course (commit
+        # something, register an artifact, or declare blocked instead).
+        if outcome_enum == RunOutcome.SUCCEEDED:
+            empty_diff = not (r.diff_stat or "").strip()
+            empty_artifacts = not _parse_artifacts(r.artifacts_json)
+            no_pr_on_task = True
+            if r.task_id:
+                from backend.models import Task as _Task
+                task_for_pr = db.get(_Task, r.task_id)
+                no_pr_on_task = not (task_for_pr and (task_for_pr.pr_url or "").strip())
+            if empty_diff and empty_artifacts and no_pr_on_task:
+                return {
+                    "ok": False,
+                    "error": (
+                        "Cannot declare outcome=\"succeeded\" with no "
+                        "deliverable. Either:\n"
+                        "  1. Commit your changes (the Run's Changes tab "
+                        "reads from git diff — empty diff means the "
+                        "human sees nothing).\n"
+                        "  2. Call register_run_artifact with at least "
+                        "one URL / file path / PR link.\n"
+                        "  3. If you don't have a deliverable, call "
+                        "finish_run(outcome=\"blocked\") with a real "
+                        "explanation in summary."
+                    ),
+                    "missing": {
+                        "diff": empty_diff,
+                        "artifacts": empty_artifacts,
+                        "pr": no_pr_on_task,
+                    },
+                }
         r.outcome = outcome_enum
         if summary:
             r.summary = summary

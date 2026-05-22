@@ -38,7 +38,12 @@ def test_db():
 
 
 def _make_run(test_db) -> str:
-    """Create an agent + task + run; return run_id."""
+    """Create an agent + task + run; return run_id.
+
+    Stamps a synthetic diff_stat on the run so the empty-success guard
+    in finish_run lets `outcome=succeeded` through — these tests are
+    about finish_run semantics, not about the deliverable requirement
+    which has its own test file (test_empty_success_guard.py)."""
     db = test_db()
     rt = ForgeRuntime(daemon_id="d", provider="claude",
                        binary_path="/tmp/c", status=RuntimeStatus.ONLINE)
@@ -54,6 +59,10 @@ def _make_run(test_db) -> str:
     run = forge_services.create_run(
         agent_id=agent["id"], task_id=task["id"], project_id=project["id"],
     )
+    with forge_services._session() as db:
+        r = db.query(forge_services.Run).filter(forge_services.Run.id == run["id"]).first()
+        r.diff_stat = " 1 file changed, 1 insertion(+)"
+        db.commit()
     return run["id"]
 
 
