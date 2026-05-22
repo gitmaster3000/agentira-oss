@@ -27,13 +27,15 @@ def _fake_proc(pid: int = 4242):
 
 
 def test_pause_terminates_not_sigstops():
+    """P5: pause now group-SIGTERMs via _signal_group rather than a per-
+    PID proc.terminate(). Still no SIGSTOP."""
     d = _daemon()
     proc = _fake_proc()
     d._inflight["t1"] = {"proc": proc}
 
-    d._signal_proc({"trace_id": "t1"}, "pause")
-
-    proc.terminate.assert_called_once()
+    with mock.patch.object(d, "_signal_group") as sg:
+        d._signal_proc({"trace_id": "t1"}, "pause")
+        sg.assert_called_once_with(proc, signal.SIGTERM)
     # The bug was send_signal(SIGSTOP) — must never happen.
     for call in proc.send_signal.call_args_list:
         assert call.args[0] != signal.SIGSTOP, "pause must not SIGSTOP"
@@ -63,8 +65,9 @@ def test_pause_resolves_trace_via_run_id():
     proc = _fake_proc()
     d._inflight["trace-x"] = {"proc": proc}
     d._run_to_trace["run-9"] = "trace-x"
-    d._signal_proc({"run_id": "run-9"}, "pause")
-    proc.terminate.assert_called_once()
+    with mock.patch.object(d, "_signal_group") as sg:
+        d._signal_proc({"run_id": "run-9"}, "pause")
+        sg.assert_called_once_with(proc, signal.SIGTERM)
 
 
 def test_pause_unknown_trace_is_safe():

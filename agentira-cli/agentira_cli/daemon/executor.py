@@ -162,6 +162,15 @@ async def run_cli_stream(
             cwd=workdir,
             env=env,
             limit=10 * 1024 * 1024,
+            # P5: spawn claude as a session/process-group leader. Without
+            # this, claude inherits the daemon's group and SIGTERM hits
+            # only claude — any bash-backgrounded child (`vite dev`,
+            # `pytest &`, watchers) is reparented to init and survives.
+            # With it, cancel/pause uses os.killpg(claude.pid, ...) to
+            # take down the whole group. Detached daemon-managed children
+            # (`docker run -d`, systemd) still escape — that's deferred
+            # to AP-83 Path B (container isolation).
+            start_new_session=True,
         )
         # Hand the proc up so the caller can kill() us on cancel.
         if on_proc:

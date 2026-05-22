@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import queue
 import signal
 import threading
@@ -431,7 +432,10 @@ class AgentiraDaemon:
                         stop_now, kind = True, "pause"
             if stop_now and proc is not None:
                 try:
-                    proc.terminate()
+                    # P5: group-kill so a fast-spawning child of claude
+                    # (rare in the bind window, but possible) doesn't
+                    # outlive its parent.
+                    self._signal_group(proc, signal.SIGTERM)
                     logger.info("on_proc kill-on-bind trace=%s kind=%s pid=%s",
                                 trace_id, kind, proc.pid)
                     self._sigkill_watchdog(trace_id, proc)
@@ -585,16 +589,53 @@ class AgentiraDaemon:
     # Schedule a SIGKILL fallback so Stop is actually reliable.
     _STOP_GRACE_S = 5.0
 
+    @staticmethod
+    def _signal_group(proc, sig: int) -> None:
+        """P5: send `sig` to the whole process group claude leads.
+
+        run_cli_stream spawns claude with start_new_session=True, so
+        claude is the leader of its own session/group and `proc.pid` is
+        the group id. os.killpg(pid, sig) takes down claude PLUS any
+        bash-backgrounded children, MCP stdio servers, foreground tool
+        subprocs — the common leak sources. Falls back to a per-PID
+        signal if the spawn didn't get its own group (e.g. some
+        platforms or test stand-ins).
+
+        Detached daemon-managed children (`docker run -d`, systemd,
+        double-fork) escape the group and are NOT caught here; container
+        isolation (AP-83 Path B) is the structural fix for those.
+        """
+        if proc is None:
+            return
+        try:
+            os.killpg(proc.pid, sig)
+            return
+        except ProcessLookupError:
+            return  # already gone
+        except (PermissionError, OSError):
+            # Spawn might not have entered a new session (e.g. test
+            # double doesn't set start_new_session). Fall back to a
+            # plain signal so we at least kill claude itself.
+            pass
+        try:
+            if sig == signal.SIGKILL:
+                proc.kill()
+            else:
+                proc.terminate()
+        except (ProcessLookupError, Exception):
+            pass
+
     def _sigkill_watchdog(self, trace_id: str, proc) -> None:
-        """Spawn a daemon thread that SIGKILLs `proc` if it's still alive
-        after _STOP_GRACE_S. Safe if the proc has already exited."""
+        """Spawn a daemon thread that SIGKILLs `proc`'s whole group if
+        it's still alive after _STOP_GRACE_S. Safe if the proc has
+        already exited."""
         import threading as _th
 
         def _wait_then_kill() -> None:
             try:
                 _th.Event().wait(self._STOP_GRACE_S)
                 if proc.poll() is None:  # still alive
-                    proc.kill()
+                    self._signal_group(proc, signal.SIGKILL)
                     logger.warning(
                         "SIGKILL fallback fired trace=%s pid=%s — "
                         "subprocess ignored SIGTERM for %.1fs",
@@ -642,8 +683,11 @@ class AgentiraDaemon:
                         trace_id or "-", run_id or "-")
             return
         try:
-            proc.terminate()  # SIGTERM — graceful stop, NOT SIGSTOP
-            logger.info("pause trace=%s — terminated pid %s "
+            # P5: pause kills the whole group (claude + any bash-bg
+            # children it left running). Bash-backgrounded dev servers
+            # were the most common leak under the old `proc.terminate()`.
+            self._signal_group(proc, signal.SIGTERM)
+            logger.info("pause trace=%s — terminated group pid %s "
                         "(resumable via --resume)", trace_id, proc.pid)
             self._sigkill_watchdog(trace_id, proc)
         except (ProcessLookupError, AttributeError, Exception) as exc:
@@ -674,10 +718,12 @@ class AgentiraDaemon:
         logger.info("cancel trace=%s run=%s — proc_bound=%s", trace_id, run_id or "-", bool(proc))
         if proc is not None:
             try:
-                proc.terminate()  # graceful first
+                # P5: group SIGTERM so bash-backgrounded children die
+                # with claude; watchdog escalates to group SIGKILL.
+                self._signal_group(proc, signal.SIGTERM)
                 self._sigkill_watchdog(trace_id, proc)
             except (ProcessLookupError, Exception) as exc:
-                logger.debug("proc.terminate ignored: %s", exc)
+                logger.debug("group SIGTERM ignored: %s", exc)
 
     def _heartbeat(self) -> None:
         if not self._registered:
