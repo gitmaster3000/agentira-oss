@@ -347,6 +347,16 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
     conn = DaemonConnection(ws, daemon_id, runtime_ids)
     await hub.connect(conn)
 
+    # ADR 009 / B5: ack the registration as the first frame so the daemon
+    # knows the hub actually holds its connection. A socket that "connected"
+    # but never registered (half-open) silently dropped every dispatch — the
+    # daemon now treats a missing ack as a failed connect and reconnects.
+    try:
+        await ws.send_json({"type": "registered", "daemon_id": daemon_id})
+    except Exception:  # noqa: BLE001 — if this fails the socket is dead anyway
+        await hub.disconnect(daemon_id, expected=conn)
+        return
+
     pump_task = asyncio.create_task(conn.write_pump())
     try:
         while True:

@@ -756,8 +756,18 @@ def register_runtimes(daemon_id: str, device_name: str | None, runtimes: list[di
         return {"registered": results}
 
 
-def heartbeat_runtimes(daemon_id: str, providers: list[str]) -> dict:
+def heartbeat_runtimes(daemon_id: str, providers: list[str],
+                       inflight: list[dict] | None = None) -> dict:
     now = datetime.now(timezone.utc)
+    # ADR 009 / B4: refresh the backend's live-turn mirror from the daemon's
+    # report. Survives a backend restart (re-populated within one heartbeat)
+    # so stop-by-scope and the always-on Stop button don't depend on the
+    # in-process _TRACE_SCOPE map.
+    try:
+        from backend.forge import live_inflight
+        live_inflight.set_for_daemon(daemon_id, inflight or [])
+    except Exception:  # noqa: BLE001 — never fail a heartbeat on the mirror
+        pass
     with _session() as db:
         updated = (
             db.query(ForgeRuntime)
@@ -3021,6 +3031,14 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     for tid, sc in list(_TRACE_SCOPE.items()):
         if sc == scope_key:
             trace_id = tid  # last one wins (insertion order)
+    # ADR 009 / B4: if the in-process map missed (e.g. backend restarted),
+    # use the daemon-reported live-turn mirror — authoritative and fresher
+    # than the persisted-message fallback below (which can point at a
+    # finished trace). The daemon also resolves by scope_key on its side,
+    # so this is mainly for an accurate response/log.
+    if not trace_id:
+        from backend.forge import live_inflight
+        trace_id = live_inflight.lookup_trace(scope_key)
     if not trace_id:
         with _session() as db:
             m = (db.query(AgentMessage)
