@@ -981,7 +981,15 @@ class AgentiraDaemon:
         if not self._registered:
             return
         providers = [r.get("provider", "") for r in self._registered if r.get("provider")]
+        # ADR 009 / B4: report the live turns from the durable registry so the
+        # backend keeps a restart-proof view of what's running per scope.
         try:
-            self.client.heartbeat_runtimes(daemon_id=self._daemon_id, providers=providers)
+            from agentira_cli.daemon import inflight as _inflight_reg
+            live = _inflight_reg.list_live()
+        except Exception:  # noqa: BLE001
+            live = []
+        try:
+            self.client.heartbeat_runtimes(
+                daemon_id=self._daemon_id, providers=providers, inflight=live)
         except Exception as exc:
             logger.debug("Heartbeat failed: %s", exc)

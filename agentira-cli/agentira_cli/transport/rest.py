@@ -39,10 +39,14 @@ class AgentiraClient:
             "runtimes": runtimes,
         })
 
-    def heartbeat_runtimes(self, daemon_id: str, providers: list[str]) -> dict:
+    def heartbeat_runtimes(self, daemon_id: str, providers: list[str],
+                           inflight: list[dict] | None = None) -> dict:
         return self._post("/api/forge/runtimes/heartbeat", {
             "daemon_id": daemon_id,
             "providers": providers,
+            # ADR 009 / B4: report live turns so the backend keeps a
+            # restart-proof view of what's running per scope.
+            "inflight": inflight or [],
         })
 
     def list_runtimes(self) -> list[dict]:
