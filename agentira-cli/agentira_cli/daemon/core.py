@@ -695,10 +695,11 @@ class AgentiraDaemon:
         # Capture git diff of the workdir if it's a repo — best-effort,
         # never fails the run on its own.
         diff_stat, diff_body = "", ""
+        work_signal: dict = {"tracked": False, "untracked": False, "committed": False}
         if cwd_path:
             try:
-                from agentira_cli.daemon.diff_capture import capture
-                diff_stat, diff_body = capture(cwd_path)
+                from agentira_cli.daemon.diff_capture import capture_with_signal
+                diff_stat, diff_body, work_signal = capture_with_signal(cwd_path)
             except Exception as exc:
                 logger.debug("diff capture failed trace=%s: %s", trace_id, exc)
 
@@ -733,6 +734,7 @@ class AgentiraDaemon:
                 workdir=str(cwd_path) if cwd_path else "",
                 materialize_reason=materialize_reason,
                 session_lost=session_lost,
+                work_signal=work_signal,
             )
         except Exception as exc:
             logger.warning("post_trigger_complete failed trace=%s: %s", trace_id, exc)
