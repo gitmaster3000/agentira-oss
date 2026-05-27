@@ -490,6 +490,10 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // working so the Stop button stays visible the whole time the agent
     // is busy — not just during the brief send-API window.
     const [scopeActiveRun, setScopeActiveRun] = useState(null);
+    // ADR 009 / E2: daemon-reported "a turn is live for this scope" — keeps
+    // Stop available for ANY in-flight turn (incl. run-less chats, and across
+    // a backend restart), replacing the 10-minute staleness guess.
+    const [scopeLive, setScopeLive] = useState(false);
     // AP-93: 1Hz tick that drives the "thinking… Ns" elapsed counter.
     // Only running while the indicator is visible — see useEffect below.
     const [nowTick, setNowTick] = useState(() => Date.now());
@@ -613,6 +617,23 @@ function ChatTab({ agentId, agent, initialScope = null }) {
             } catch {
                 setScopeActiveRun(null);
             }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
+
+    // ADR 009 / E2: poll the daemon-reported live-turn mirror for this scope
+    // (every scope, not just task scopes) so Stop stays available exactly
+    // while something is running — no 10-minute heuristic, restart-proof.
+    useEffect(() => {
+        if (!activeScope) { setScopeLive(false); return; }
+        let alive = true;
+        const tick = async () => {
+            try {
+                const r = await api.forge.scopeLive(agentId, activeScope);
+                if (alive) setScopeLive(!!(r && r.live));
+            } catch { if (alive) setScopeLive(false); }
         };
         tick();
         const t = setInterval(tick, 3000);
@@ -788,7 +809,9 @@ function ChatTab({ agentId, agent, initialScope = null }) {
         ? nowTick - new Date(_lastMsg.created_at).getTime()
         : 0;
     const _userTurnLive = _lastIsUser && _userTurnAgeMs < _STALE_THINKING_MS;
-    const agentThinking = _userTurnLive || _runRunning;
+    // ADR 009 / E2: scopeLive (daemon-reported) is authoritative — keep Stop
+    // up whenever a turn is actually running, regardless of the heuristics.
+    const agentThinking = _userTurnLive || _runRunning || scopeLive;
     // Elapsed seconds since "thinking" started. Start time is the last
     // user message's created_at (chat) or the run's started_at (task).
     const _thinkStartMs = (() => {
