@@ -87,7 +87,22 @@ class DaemonWsClient:
                 "daemon_id": self._daemon_id,
                 "runtime_ids": self._runtime_ids,
             }))
-            logger.info("WS connected to %s", url)
+
+            # ADR 009 / B5: the backend acks registration as the very first
+            # frame (sent right after it adds us to the hub, before any
+            # dispatch). If we don't get it, the connection is half-open —
+            # the hub doesn't hold us and every dispatch would silently drop.
+            # Treat a missing/wrong ack as a failed connect so the outer loop
+            # reconnects with backoff instead of sitting in a dead zone.
+            try:
+                ack = json.loads(ws.recv(timeout=10))
+            except (TimeoutError, Exception) as exc:
+                raise ConnectionError(
+                    f"no WS registration ack within 10s ({exc}) — reconnecting")
+            if ack.get("type") != "registered":
+                raise ConnectionError(
+                    f"unexpected first WS frame (want 'registered'): {ack!r}")
+            logger.info("WS connected + registered to %s", url)
 
             while not self._stop.is_set():
                 try:

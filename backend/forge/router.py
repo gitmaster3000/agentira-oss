@@ -204,6 +204,9 @@ class RuntimeRegisterRequest(BaseModel):
 class RuntimeHeartbeatRequest(BaseModel):
     daemon_id: str
     providers: list[str]  # which providers are still alive
+    # ADR 009 / B4: the daemon's currently-live turns, so the backend has a
+    # restart-proof view of what's running (and stoppable) per scope.
+    inflight: list[dict] = []
 
 
 # ── Runtime endpoints ─────────────────────────────────────────────────────
@@ -219,7 +222,10 @@ def register_runtimes(body: RuntimeRegisterRequest):
 
 @daemon_router.post("/runtimes/heartbeat")
 def runtime_heartbeat(body: RuntimeHeartbeatRequest):
-    return services.heartbeat_runtimes(daemon_id=body.daemon_id, providers=body.providers)
+    return services.heartbeat_runtimes(
+        daemon_id=body.daemon_id, providers=body.providers,
+        inflight=body.inflight,
+    )
 
 
 @daemon_router.post("/agents/{agent_id}/trigger-events")

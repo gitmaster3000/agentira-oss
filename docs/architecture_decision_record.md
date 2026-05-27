@@ -1,3 +1,129 @@
+# ADR 009: Conversations, Turns & Runs — the Execution Backbone
+
+## Status
+
+Accepted (AP — "Conversations, Turns & Runs" epic)
+
+## Context
+
+We dogfood Agentira on its own development and kept hitting three failures that all
+trace back to one under-specified piece of the architecture: the relationship between
+a conversation, a dispatch, and a "run".
+
+1. **`--resume` is unreliable.** claude keys `--resume <session_id>` by the **cwd** the
+   session was created in. After a run finished or was cancelled, the daemon
+   `git worktree remove`d that cwd (`_cleanup_worktree`, triggered by `cleanup_worktree`
+   hints from `complete_trigger`). The next turn relaunched in a now-missing dir →
+   "No conversation found with session ID". No-git projects never created the dir at
+   all, and chats vs runs fell back to *different* scratch dirs (materializer `task_id="chat"`
+   vs the real task id) — so a chat could never resume a run's session.
+2. **Task chats ran as un-stoppable zombies.** A chat dispatch created **no Run row**, and
+   its only liveness record was in-memory (`_TRACE_SCOPE` on the backend, `_inflight` on
+   the daemon). A restart on either side orphaned it; `start_new_session=True` kept the
+   claude process alive and unkillable. `scope_key` was never even sent on the trigger
+   frame, so the daemon could neither serialize nor cancel by scope.
+3. **No coherent model for "when is a conversation turn a run?"** — which produced endless
+   thrash over whether a throwaway "hey" should create a run.
+
+**Why runs exist at all.** Synchronous IDE assistants (Cursor, Claude Code, Antigravity)
+have no concept of a "run" because a human watches every step live — the human *is* the
+orchestrator, observer, and stop button. Agentira's value is the opposite: **autonomous
+work while the human is absent.** The moment the human isn't watching, you need a durable
+record that artifacts alone cannot provide: liveness (running/done/dead), a verdict
+(succeeded/blocked/needs_input/failed), a stop/pause/resume handle, accounting (tokens,
+cost, duration), trigger provenance (cron/webhook/manual), reconciliation when a daemon
+dies, and an anchor for notifications. So we keep runs — but **demote** them from "the unit
+you create per message" to "an emergent span over the turns that did work."
+
+## Decisions
+
+### 1. Three layered concepts (+ artifacts)
+
+- **Conversation** — the agent's working memory for a scope; the claude `--resume` session.
+  Belongs to the agent, continuous across everything in `(agent, scope_key)`. Stored in
+  `forge_conversations`; the portable source of truth for replay is `forge_messages`.
+- **Turn** — one dispatch (a user message + the agent's response, sharing one `trace_id`).
+  **The atomic, always-durable, always-stoppable unit.**
+- **Run** — an **emergent span grouping the turns of one work episode**, carrying the
+  verdict, control surface, and accounting. Stored in `forge_runs`.
+- **Artifact** — a concrete deliverable (pr/commit/file/url/log/report) on a run.
+
+Some turns belong to a run (`run_id` set); some are standalone (`run_id` null) — and that
+is fine.
+
+### 2. Runs are demoted to emergent spans
+
+A run is opened by the task **Run button**, or **lazily** when a standalone turn produces
+work. A throwaway chat turn that produces nothing is just a turn — no run, no artifact.
+
+### 3. Stable, never-destroyed conversation cwd
+
+cwd is pinned per **(agent, task)** and is never torn down for the life of the task — it
+*is* the conversation home, which is what makes `--resume` reliable. Git projects get a
+per-(agent,task) worktree materialized once and reused; no-git projects use the directory
+itself. The per-run worktree-teardown scheme (the un-ADR'd AP-123) is reverted; worktree
+cleanup moves to a task archive/delete hook.
+
+### 4. The DB is the portable source of truth
+
+`forge_messages` is authoritative; `--resume` is a machine-local accelerator. When the
+local session `.jsonl` is absent (fresh container, cloud daemon), history-replay
+(`_prepend_history_for_prompt`) is a first-class fallback, not an error path. This is what
+makes conversations portable to isolated/cloud daemons later. **Maximize `--resume`; replay
+is the backup.**
+
+### 5. One message-routing rule in a task scope
+
+| Scope's run state | A new message does |
+|---|---|
+| no open run | start a standalone turn; lazily opens a run only if it produces work |
+| RUNNING | interrupt-and-steer: pause the live turn, resume via `--resume` with the message — same `run_id` |
+| PAUSED / NEEDS_INPUT / BLOCKED (parked) | resume the run via `--resume` |
+| COMPLETED / FAILED / CANCELLED (terminal) | start a new turn that `--resume`s the conversation; new run only if it produces work |
+
+The **Stop** button targets the live turn: if it belongs to a run, Stop = pause (resumable);
+if standalone, terminate the turn.
+
+### 6. Run detection never depends on `finish_run`
+
+A standalone turn crystallizes into a run if **any** of: git work (per the work-signal
+setting) **OR** `register_run_artifact` **OR** `finish_run`. `finish_run` is advisory and
+non-blocking, so it can never be the sole gate. The **work-signal** is a project/run-default
+setting — `working_tree` (default; committed + uncommitted tracked + new untracked,
+excluding `.gitignore` and the materializer's `.agentira/*`), `tracked`, or `committed`.
+
+### 7. Turns are durably stoppable across restarts
+
+`scope_key` rides on the trigger frame; the daemon keeps an on-disk inflight registry keyed
+by scope (written on spawn, cleared on completion); a startup orphan-reaper kills/re-adopts
+survivors of a prior daemon; the heartbeat carries the live inflight set so the backend/UI
+always know what's live (retiring the fragile in-memory `_TRACE_SCOPE`); the backend acks WS
+registration so half-open sockets are detected; Stop is by scope, not a possibly-stale trace.
+
+## Out of scope (intentional)
+
+- Cross-machine *live* session handoff — replay covers correctness; deferred.
+- Parallel worktrees for multiple concurrent runs *within one task* — runs serialize per
+  (agent, task); cross-task concurrency is capped by `max_concurrent_runs`.
+- Multi-repo per project (AP-121) — rebased onto the per-(agent,task) cwd as a fresh ticket.
+- Per-run container isolation (AP-83 path B).
+
+## Consequences
+
+- `--resume` is reliable; zombie chats are gone; there is one durable handle (the turn);
+  runs stay meaningful (work episodes), and chat is the primary ergonomic surface.
+- `forge_runs` is no longer 1:1 with a dispatch — reporting/queries that assumed that must
+  group by run across turns.
+- `complete_trigger` gains a lazy-run-creation branch; the daemon gains an on-disk registry
+  and a startup reaper.
+
+## See also
+
+ADR 008 (conversation scopes — this builds directly on `task:<task_id>` scoping), the
+Stop/Pause/Resume P1–P4 reliability work, AP-130 (settings — hosts the work-signal selector).
+
+---
+
 # ADR 008: Conversation Scopes — Task-Based Memory, Universal `/clear`, Pause-on-Stop
 
 ## Status
