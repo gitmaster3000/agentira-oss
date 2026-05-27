@@ -79,6 +79,9 @@ class AgentiraDaemon:
         # to kill mid-request, the run completes naturally).
         self._inflight: dict[str, dict] = {}
         self._run_to_trace: dict[str, str] = {}
+        # ADR 009 / B6: scope_key → trace_id so a stop frame can target the
+        # live turn for a scope (chats have no run_id to key on).
+        self._scope_to_trace: dict[str, str] = {}
         self._inflight_lock = threading.Lock()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -88,6 +91,16 @@ class AgentiraDaemon:
         self._install_signal_handlers()
 
         self._registered = self._register_runtimes()
+
+        # ADR 009 / B3: reap orphaned turns a prior daemon left running
+        # (start_new_session keeps claude alive across our death). A fresh
+        # daemon owns no in-memory inflight, so any on-disk record is an
+        # orphan — kill its process group, then clear the record.
+        try:
+            from agentira_cli.daemon import inflight as _inflight_reg
+            _inflight_reg.reap_orphans(daemon_id=self._daemon_id)
+        except Exception as exc:  # noqa: BLE001 — never block startup
+            logger.warning("inflight reaper failed: %s", exc)
 
         from agentira_cli.daemon.workdir import WorkdirGC
         self._gc = WorkdirGC()
@@ -249,6 +262,14 @@ class AgentiraDaemon:
         prompt = frame.get("prompt", "")
         provider = frame.get("provider", "")
         kind = frame.get("kind", "chat")
+        # ADR 009 / B1: the conversation scope rides the frame. It keys the
+        # durable inflight registry (one live turn per scope) and lets a
+        # task-scoped CHAT (no run_id, so no AGENTIRA_TASK_ID) recover its
+        # task_id — without this the materializer fell back to a divergent
+        # "chat" workdir, splitting claude --resume across cwds (ADR 009).
+        scope_key = frame.get("scope_key", "") or ""
+        if not task_id and scope_key.startswith("task:"):
+            task_id = scope_key.split(":", 1)[1]
 
         # Run-context bundle (Phase C dispatched these; empty for free-floating chat).
         # repo_path is a path TEMPLATE from backend (may contain `~`).
@@ -381,11 +402,14 @@ class AgentiraDaemon:
                 # Chat in a project: don't allocate a workdir, just resolve
                 # the repo path so the runtime cwd is right. Materialize
                 # conventions there too — repo-local, idempotent, safe.
+                # ADR 009: use the real task_id (derived from scope_key above)
+                # so a task chat shares the run's workdir on the scratch-
+                # fallback path; only a task-less project chat uses "chat".
                 cwd_path, _, materialize_reason = await asyncio.wait_for(
                     asyncio.to_thread(
                         materialize,
                         workspace_id=agent_id,
-                        task_id="chat",
+                        task_id=task_id or "chat",
                         repo_path=repo_path,
                         conventions_md=conventions_md,
                     ),
@@ -429,9 +453,12 @@ class AgentiraDaemon:
 
         # Register in-flight bookkeeping so a cancel frame can find us.
         with self._inflight_lock:
-            self._inflight[trace_id] = {"proc": None, "cancelled": False}
+            self._inflight[trace_id] = {"proc": None, "cancelled": False,
+                                        "scope_key": scope_key, "run_id": run_id}
             if run_id:
                 self._run_to_trace[run_id] = trace_id
+            if scope_key:
+                self._scope_to_trace[scope_key] = trace_id
 
         def on_proc(proc):
             # P1: close the race between dispatch and a cancel/pause frame
@@ -459,6 +486,21 @@ class AgentiraDaemon:
                     self._sigkill_watchdog(trace_id, proc)
                 except (ProcessLookupError, Exception) as exc:
                     logger.debug("on_proc kill ignored: %s", exc)
+            elif proc is not None and scope_key:
+                # ADR 009 / B2: now that we have a pid, persist the live
+                # turn so a stop (even after a daemon/backend restart) can
+                # find and kill it, and so the next startup can reap it if
+                # we die. Best-effort — never break the dispatch.
+                try:
+                    from agentira_cli.daemon import inflight as _inflight_reg
+                    _inflight_reg.record(
+                        scope_key=scope_key, trace_id=trace_id,
+                        run_id=run_id, pid=proc.pid,
+                        daemon_id=self._daemon_id,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("inflight record skipped trace=%s: %s",
+                                 trace_id, exc)
 
         async def on_event(evts: list) -> None:
             try:
@@ -558,6 +600,16 @@ class AgentiraDaemon:
             entry = self._inflight.pop(trace_id, None)
             if run_id:
                 self._run_to_trace.pop(run_id, None)
+            if scope_key and self._scope_to_trace.get(scope_key) == trace_id:
+                self._scope_to_trace.pop(scope_key, None)
+        # ADR 009 / B2: drop the durable record (only if it's still ours —
+        # clear() guards against clobbering a newer turn that took the scope).
+        if scope_key:
+            try:
+                from agentira_cli.daemon import inflight as _inflight_reg
+                _inflight_reg.clear(scope_key=scope_key, trace_id=trace_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("inflight clear skipped trace=%s: %s", trace_id, exc)
         if entry and entry.get("cancelled"):
             success = False
             error = "Cancelled by user."
@@ -834,9 +886,14 @@ class AgentiraDaemon:
         """
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "")
+        scope_key = frame.get("scope_key", "") or ""
         with self._inflight_lock:
             if not trace_id and run_id:
                 trace_id = self._run_to_trace.get(run_id, "")
+            # ADR 009 / B6: resolve by scope when the backend stops by scope
+            # (e.g. after a backend restart that lost the trace mapping).
+            if not trace_id and scope_key:
+                trace_id = self._scope_to_trace.get(scope_key, "")
             entry = self._inflight.get(trace_id)
             proc = entry.get("proc") if entry else None
             if signal_kind == "pause" and entry is not None:
@@ -875,15 +932,28 @@ class AgentiraDaemon:
         """
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "")
+        scope_key = frame.get("scope_key", "") or ""
         with self._inflight_lock:
             if not trace_id and run_id:
                 trace_id = self._run_to_trace.get(run_id, "")
+            # ADR 009 / B6: resolve by scope (stop-by-scope) when neither
+            # trace nor run resolves — the common path after a backend
+            # restart, where the chat's trace mapping was in-memory only.
+            if not trace_id and scope_key:
+                trace_id = self._scope_to_trace.get(scope_key, "")
             entry = self._inflight.get(trace_id)
-            if entry is None:
-                logger.info("cancel for unknown trace=%s run=%s — already finished", trace_id, run_id)
-                return
-            entry["cancelled"] = True
-            proc = entry.get("proc")
+            if entry is not None:
+                entry["cancelled"] = True
+            proc = entry.get("proc") if entry else None
+        if entry is None:
+            # No in-memory entry. Before giving up, consult the durable
+            # registry (outside the lock — a kill can take a grace pause):
+            # a process may still be alive for this scope that we lost
+            # track of — kill it by pid so it can't zombie.
+            killed = self._cancel_via_registry(scope_key)
+            logger.info("cancel: no in-memory entry trace=%s run=%s scope=%s — registry_kill=%s",
+                        trace_id, run_id, scope_key or "-", killed)
+            return
         logger.info("cancel trace=%s run=%s — proc_bound=%s", trace_id, run_id or "-", bool(proc))
         if proc is not None:
             try:
@@ -893,6 +963,19 @@ class AgentiraDaemon:
                 self._sigkill_watchdog(trace_id, proc)
             except (ProcessLookupError, Exception) as exc:
                 logger.debug("group SIGTERM ignored: %s", exc)
+
+    def _cancel_via_registry(self, scope_key: str) -> bool:
+        """ADR 009 / B6 fallback: when there's no in-memory entry for a
+        stop-by-scope, kill the process the durable registry recorded for
+        the scope (if still alive). Returns True iff something was killed."""
+        if not scope_key:
+            return False
+        try:
+            from agentira_cli.daemon import inflight as _inflight_reg
+            return _inflight_reg.cancel_scope(scope_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cancel via registry failed scope=%s: %s", scope_key, exc)
+            return False
 
     def _heartbeat(self) -> None:
         if not self._registered:
