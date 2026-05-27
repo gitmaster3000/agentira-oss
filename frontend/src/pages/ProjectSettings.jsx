@@ -82,6 +82,7 @@ function GeneralTab({ projectId }) {
                 repo_path: p.repo_path || '',
                 repo_url: p.repo_url || '',
                 conventions_md: p.conventions_md || '',
+                work_signal: p.work_signal || 'working_tree',
             });
         }).catch(() => setProject(null));
     }, [projectId]);
@@ -94,6 +95,7 @@ function GeneralTab({ projectId }) {
         || form.repo_path !== (project.repo_path || '')
         || form.repo_url !== (project.repo_url || '')
         || form.conventions_md !== (project.conventions_md || '')
+        || form.work_signal !== (project.work_signal || 'working_tree')
     );
 
     const save = async () => {
@@ -106,6 +108,7 @@ function GeneralTab({ projectId }) {
                 repo_path: form.repo_path || null,
                 repo_url: form.repo_url || null,
                 conventions_md: form.conventions_md || null,
+                work_signal: form.work_signal || null,
             });
             setProject(updated);
             setMsg('Saved');
@@ -145,6 +148,15 @@ function GeneralTab({ projectId }) {
                     value={form.conventions_md}
                     placeholder={'# Conventions\nUse ruff. All commits on a feature branch.'}
                     onChange={(e) => setForm({ ...form, conventions_md: e.target.value })} />
+            </Field>
+            <Field label="Run detection (work signal)"
+                hint="When a chat turn in a task counts as work and becomes a tracked run. 'Working tree' is the most thorough — nothing the agent touches is lost.">
+                <select className="input" value={form.work_signal}
+                    onChange={(e) => setForm({ ...form, work_signal: e.target.value })}>
+                    <option value="working_tree">Working tree — any tracked change or new untracked file (default)</option>
+                    <option value="tracked">Tracked changes only — edits to tracked files</option>
+                    <option value="committed">Committed only — a new commit</option>
+                </select>
             </Field>
             <div className="flex items-center gap-3">
                 <button className="btn btn-primary" onClick={save}

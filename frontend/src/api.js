@@ -338,6 +338,11 @@ export const api = {
             `/forge/agents/${agentId}/chat/stop`,
             { method: 'POST', body: JSON.stringify({ scope_key }) },
         ),
+        // ADR 009 / E2: is a turn live for this scope right now? Keeps the
+        // Stop button available while anything runs (no 10-min heuristic).
+        scopeLive: (agentId, scope_key) => request(
+            `/forge/agents/${agentId}/scope-live?scope_key=${encodeURIComponent(scope_key)}`,
+        ),
         getConversation: (agentId, projectId, taskId) => {
             const params = new URLSearchParams();
             if (projectId) params.set('project_id', projectId);
