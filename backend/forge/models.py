@@ -215,6 +215,11 @@ class Run(Base):
     # resume can re-enter. NULL on legacy rows — cleanup is a no-op.
     worktree_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     worktree_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # ADR 009 / AP-137 (chat-during-run): a message sent while this run was
+    # RUNNING is parked here, then dispatched as the next turn once the
+    # pause confirms (we can't --resume a session whose id isn't finalized
+    # until the daemon posts paused=True). Cleared when dispatched.
+    pending_steer: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Diagnostic flag from the daemon's materializer. "ok" when the
     # frame's repo_path resolved and the agent ran inside the repo;
     # "no_repo_path" when no repo was attached; "repo_path_not_found:..."

@@ -2613,9 +2613,12 @@ def dispatch_pending_run(*, run_id: str,
                     f"max_concurrent_runs, or stop a run first.")}
 
         if resume:
-            # Resume: send a continuation nudge, keep initial_prompt as the
-            # original task prompt. The session is reloaded via --resume.
-            prompt = _RESUME_CONTINUATION_PROMPT
+            # Resume: by default a continuation nudge; but if a steer message
+            # was provided (chat-during-run, or resuming a parked run with the
+            # user's new instruction), dispatch THAT as the next turn instead.
+            # initial_prompt (the original task prompt) is left untouched; the
+            # session is reloaded via --resume.
+            prompt = prompt_override or _RESUME_CONTINUATION_PROMPT
         else:
             # Persist the (possibly edited) prompt and pick what we dispatch.
             if prompt_override is not None:
@@ -3573,6 +3576,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         # P3: flip PAUSING → PAUSED unconditionally on the daemon's ack.
         # Even if no session_id arrived (non-claude runtimes), the daemon
         # confirmed the kill — that's the signal we were waiting for.
+        pending_steer = None
+        steer_task_id = None
         if run_id:
             with _session() as db:
                 r = db.query(Run).filter(Run.id == run_id).first()
@@ -3585,7 +3590,28 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                         r.status = RunStatus.PAUSED
                         r.stop_requested_at = None
                         _broadcast_status(run_id, RunStatus.PAUSED)
+                    # ADR 009 / D1: a message arrived while this run was
+                    # RUNNING and was parked here. Now that the pause is
+                    # confirmed (session_id captured), dispatch it as the
+                    # next turn — resuming THIS run via --resume.
+                    pending_steer = r.pending_steer
+                    steer_task_id = r.task_id
+                    if pending_steer:
+                        r.pending_steer = None
                     db.commit()
+        # The run's own task is the reliable scope source (the trace's
+        # _TRACE_SCOPE / messages may be gone after a backend restart).
+        steer_scope = scope or (f"task:{steer_task_id}" if steer_task_id else "")
+        if pending_steer and steer_scope:
+            try:
+                # Re-enter send_runtime_message: the run is now PAUSED, so it
+                # takes the resume branch and continues the episode with the
+                # user's steering message (same run_id).
+                send_runtime_message(agent_id, content=pending_steer,
+                                     scope_key=steer_scope)
+            except Exception as exc:  # noqa: BLE001
+                _dispatch_logger.warning(
+                    "pending-steer dispatch failed run=%s: %s", run_id, exc)
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
 
@@ -3809,21 +3835,67 @@ def send_runtime_message(
                 return {"error": (f"Run is {in_flight_stop.status.value}; "
                                   "wait for the stop to confirm before "
                                   "sending another message.")}
+            # D1 (chat-during-run): a message into a RUNNING/RESUMING run
+            # interrupts-and-steers. We can't --resume a session whose id
+            # isn't finalized until the daemon confirms the kill, so park the
+            # message on the run, pause it (clean SIGTERM, session captured),
+            # and let complete_trigger's paused branch dispatch it as the next
+            # turn. Return early — no fresh chat turn.
+            active = (db.query(Run)
+                        .filter(Run.task_id == task_id,
+                                Run.agent_id == agent_id,
+                                Run.status.in_([RunStatus.RUNNING,
+                                                RunStatus.RESUMING]))
+                        .order_by(Run.created_at.desc())
+                        .first())
+            if active:
+                steer_run_id = active.id
+                active.pending_steer = content
+                db.add(AgentMessage(
+                    agent_id=agent_id, run_id=steer_run_id, scope_key=scope_key,
+                    role=MessageRole.SYSTEM,
+                    content=("⏸ Pausing the current run to fold in your "
+                             "message — it'll continue from where it left off."),
+                ))
+                db.commit()
+                pause_run(steer_run_id)
+                return {"ok": True, "steering_run_id": steer_run_id,
+                        "note": "paused the running run to fold in your message"}
+
+            # PAUSED, or parked-by-outcome (needs_input / blocked) and still
+            # the latest activity → resume THIS run with the user's message as
+            # the next turn (same run_id, so it continues the episode rather
+            # than crystallizing a new run). resumed_run_id is threaded onto
+            # the dispatch below so complete_trigger updates this run.
             paused = (db.query(Run)
                         .filter(Run.task_id == task_id,
                                 Run.agent_id == agent_id,
                                 Run.status == RunStatus.PAUSED)
                         .order_by(Run.created_at.desc())
                         .first())
+            if not paused:
+                parked = (db.query(Run)
+                            .filter(Run.task_id == task_id,
+                                    Run.agent_id == agent_id,
+                                    Run.outcome.in_([RunOutcome.NEEDS_INPUT,
+                                                     RunOutcome.BLOCKED]))
+                            .order_by(Run.created_at.desc())
+                            .first())
+                if parked:
+                    newer = (db.query(Run)
+                               .filter(Run.task_id == task_id,
+                                       Run.agent_id == agent_id,
+                                       Run.created_at > parked.created_at)
+                               .count())
+                    if newer == 0:
+                        paused = parked  # revive the parked run
             if paused:
                 resumed_run_id = paused.id
-                # PAUSED is a confirmed-terminated state (daemon already
-                # posted paused=True for it), so there's no live process
-                # to race here — flip directly to RUNNING. The transient
-                # RESUMING state is reserved for the explicit Resume
-                # button path, where dispatch_pending_run → dispatch_
-                # trigger → start_run drives the transition.
+                # PAUSED/parked are confirmed-terminated (no live proc to
+                # race), so flip straight to RUNNING. Clear the parked
+                # verdict — the agent re-declares one when it finishes.
                 paused.status = RunStatus.RUNNING
+                paused.outcome = None
                 db.commit()
                 _broadcast_status(paused.id, RunStatus.RUNNING)
 
@@ -4005,7 +4077,11 @@ def send_runtime_message(
                     _TRACE_SCOPE.pop(_tid, None)
 
             result = dispatch_trigger(
-                agent_id, prompt_with_history, run_id=run_id, kind="chat",
+                # ADR 009 / D: when resuming a run, the turn carries its
+                # run_id so complete_trigger updates THAT run (and C1 won't
+                # crystallize a duplicate). Plain chat turns stay run-less.
+                agent_id, prompt_with_history,
+                run_id=run_id or resumed_run_id, kind="chat",
                 repo_path=repo_path,
                 worktree_source_path=worktree_source_path,
                 worktree_source_url=worktree_source_url,

@@ -389,6 +389,8 @@ def run_migrations():
                                     "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runs", "worktree_branch",
                                     "VARCHAR(255)")
+            # ADR 009 / AP-137: parked steer message (chat-during-run).
+            added |= _ensure_column(conn, "forge_runs", "pending_steer", "TEXT")
             # Materializer outcome from the daemon (ok / no_repo_path /
             # repo_path_not_found:<expanded>). Surfaced on the Run page.
             added |= _ensure_column(conn, "forge_runs", "materialize_reason",
