@@ -3012,6 +3012,15 @@ def resume_run(run_id: str) -> dict:
     return dispatch_pending_run(run_id=run_id, resume=True)
 
 
+def scope_live(scope_key: str) -> dict:
+    """ADR 009 / E2: whether a turn is live for this scope, from the
+    daemon-reported live-inflight mirror (survives a backend restart).
+    Lets the chat UI keep Stop available while anything is running."""
+    from backend.forge import live_inflight
+    trace = live_inflight.lookup_trace(scope_key)
+    return {"live": bool(trace), "trace_id": trace or ""}
+
+
 def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     """ADR 008: Stop button in chat.
 

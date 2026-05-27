@@ -675,6 +675,15 @@ def list_conversations(agent_id: str):
     return services.list_conversations(agent_id)
 
 
+@router.get("/agents/{agent_id}/scope-live")
+def agent_scope_live(agent_id: str, scope_key: str):
+    """ADR 009 / E2: is a turn live for this scope right now? Backed by the
+    daemon-reported live-inflight mirror, so the chat UI can keep Stop
+    available while anything is running (no 10-minute heuristic) and across
+    a backend restart."""
+    return services.scope_live(scope_key)
+
+
 # ── ADR 008: chat controls (clear + stop) ──────────────────────────────
 
 @router.post("/agents/{agent_id}/conversations/clear")

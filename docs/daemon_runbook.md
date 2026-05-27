@@ -167,3 +167,30 @@ systemctl --user enable --now agentira-daemon
 - **Agent detail**: runtime status indicator with green/red dot
 
 When a dispatch is attempted with no daemon online, the run fails immediately with a "no daemon online" system message in the chat thread — no silent stall.
+
+## In-flight registry & orphan reaping (ADR 009)
+
+The daemon mirrors every live turn to `~/.agentira/inflight/<scope>.json`
+(`trace_id`, `run_id`, `pid`, `daemon_id`). This is what makes Stop reliable
+across restarts and kills the "zombie chat" class:
+
+- **Stop-by-scope**: a cancel/pause frame carries `scope_key`; the daemon
+  resolves the live turn by scope even if the in-memory trace map was lost
+  (e.g. after a backend restart), and can kill by `pid` from the registry.
+- **Startup reaper**: a fresh daemon owns no in-memory in-flight state, so any
+  on-disk record is an orphan a prior daemon left running (claude is spawned
+  `start_new_session=True`, so it survives the daemon's death). On startup the
+  daemon kills each such process group and clears the record. Watch for
+  `inflight reaper: N record(s) cleared` in the log right after start.
+- **WS registration ack**: the backend acks the daemon's WS registration as
+  the first frame; the daemon reconnects if the ack doesn't arrive, closing
+  the half-open-socket "Dispatch dropped: no daemon online" dead-zone.
+
+Inspect what the daemon thinks is live:
+
+    ls ~/.agentira/inflight/ && cat ~/.agentira/inflight/*.json
+
+Manual recovery for a stuck process (rare, if a registry entry is missing):
+`ps -ef | grep claude` then `kill -TERM -<pgid>`.
+
+See [ADR 009](./architecture_decision_record.md).

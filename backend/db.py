@@ -308,6 +308,8 @@ def run_migrations():
                                     "VARCHAR(120)")
             added |= _ensure_column(conn, "projects", "ac_check_types_json",
                                     "TEXT")
+            # ADR 009 / AP-136: work-signal mode for run crystallization.
+            added |= _ensure_column(conn, "projects", "work_signal", "VARCHAR(20)")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         if "tasks" in tables:
             _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")

@@ -97,3 +97,34 @@ flows in `user_context.references[]` and is read by the agent's MCP tools.
 - AP-96 — @mention dispatch
 
 [ADR 008]: ./architecture_decision_record.md
+
+## Turns & runs (ADR 009)
+
+The conversation is continuous, but it's made of **turns** and **runs**:
+
+- **Turn** — one dispatch (one `trace_id`): your message + the agent's reply.
+  It's the atomic unit — always durably tracked and always stoppable, even a
+  plain chat turn with no run.
+- **Run** — an *emergent span* over the turns that did work. A turn becomes a
+  run only when it produces work (a tracked/untracked change, a registered
+  artifact, or a `finish_run` verdict). A throwaway "hey" stays a turn.
+
+What a message does in a `task:` scope depends on the run's state:
+
+| Scope's run | A new message |
+|---|---|
+| none | a plain turn (crystallizes into a run only if it does work) |
+| RUNNING | pauses it and folds your message in as the next turn (same run) |
+| PAUSED / needs_input / blocked | resumes that run |
+| completed / failed / cancelled | a fresh turn |
+
+**Stop** pauses the live run (resumable); a follow-up message continues it.
+`--resume` is reliable because every turn/run in a task shares one stable
+working directory that's never torn down; if the local session is missing
+(fresh machine / container), the agent rebuilds context from message history.
+
+**Run detection** is per-project (Project Settings → *Run detection*):
+`working_tree` (default — any tracked change or new untracked file),
+`tracked`, or `committed`.
+
+[ADR 009]: ./architecture_decision_record.md
