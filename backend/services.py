@@ -126,6 +126,8 @@ def _project_to_dict(p: Project) -> dict:
         "description": p.description,
         "repo_path": p.repo_path or "",
         "conventions_md": p.conventions_md or "",
+        # ADR 009 / AP-136: run-crystallization work-signal mode ("" = default).
+        "work_signal": getattr(p, "work_signal", None) or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -352,7 +354,8 @@ def get_project(project_id: str) -> dict | None:
 
 
 def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
-                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None) -> dict:
+                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
+                   work_signal: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -365,6 +368,11 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.repo_path = repo_path
         if conventions_md is not None:
             p.conventions_md = conventions_md
+        if work_signal is not None:
+            # ADR 009: validate against the known modes; ignore junk.
+            from backend.forge.turns import WORK_SIGNAL_MODES
+            if work_signal in WORK_SIGNAL_MODES:
+                p.work_signal = work_signal
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)

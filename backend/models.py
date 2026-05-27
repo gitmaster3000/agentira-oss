@@ -237,6 +237,10 @@ class Project(Base):
     # template registered (used later by the gate engine).
     template_name: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
     ac_check_types_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # ADR 009 / AP-136: work-signal mode deciding when a standalone chat turn
+    # crystallizes into a run — "working_tree" (default; any tracked change or
+    # new untracked file), "tracked", or "committed". NULL = workspace default.
+    work_signal: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")

@@ -55,6 +55,8 @@ class ProjectUpdate(BaseModel):
     repo_path: Optional[str] = None
     repo_url: Optional[str] = None
     conventions_md: Optional[str] = None
+    # ADR 009 / AP-136: run-crystallization work-signal mode.
+    work_signal: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -348,6 +350,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             description=body.description,
             repo_path=body.repo_path,
             conventions_md=body.conventions_md,
+            work_signal=body.work_signal,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
