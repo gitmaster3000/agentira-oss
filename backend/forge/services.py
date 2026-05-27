@@ -3470,7 +3470,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      cancelled: bool = False,
                      diagnostics: dict | None = None,
                      materialize_reason: str = "",
-                     session_lost: bool = False) -> dict:
+                     session_lost: bool = False,
+                     work_signal: dict | None = None) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -3643,6 +3644,33 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             agent_id=agent_id, scope_key=scope,
             runtime_session_id=session_id or "",
         )
+
+    # ADR 009 / AP-136: a standalone (run-less) task chat turn that produced
+    # work crystallizes into a run — emergent, never declared, so a throwaway
+    # "hey" stays a turn but real changes become a traceable run. Only on a
+    # successful turn; only task scopes. `scope` may be empty after a backend
+    # restart — recover it from the trace's persisted messages first.
+    if (not run_id) and effective_success:
+        cz_scope = scope
+        if not cz_scope:
+            with _session() as db:
+                m = (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.scope_key.isnot(None),
+                               AgentMessage.scope_key != "")
+                       .order_by(AgentMessage.created_at.desc())
+                       .first())
+                cz_scope = m.scope_key if m else ""
+        try:
+            from backend.forge import turns
+            turns.maybe_crystallize_chat_turn(
+                agent_id=agent_id, trace_id=trace_id, scope_key=cz_scope,
+                work_signal=work_signal, diff_stat=diff_stat, diff=diff,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+            )
+        except Exception as exc:  # noqa: BLE001 — never fail completion
+            _dispatch_logger.warning("chat-turn crystallize failed trace=%s: %s",
+                                     trace_id, exc)
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a

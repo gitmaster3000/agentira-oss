@@ -132,6 +132,11 @@ class DaemonTriggerComplete(BaseModel):
     # session id wasn't found locally. Backend clears the stale id from
     # forge_conversations so the next dispatch doesn't reuse it.
     session_lost: bool = False
+    # ADR 009 / AP-136: raw git work facts {tracked, untracked, committed}.
+    # The backend maps these onto the project's work-signal setting to
+    # decide whether a standalone (run-less) chat turn crystallizes into a
+    # run. Empty/absent for older daemons — the turn just stays a turn.
+    work_signal: dict = {}
 
 
 class MessageCreate(BaseModel):
@@ -254,6 +259,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         diagnostics=body.diagnostics,
         materialize_reason=body.materialize_reason,
         session_lost=body.session_lost,
+        work_signal=body.work_signal,
     )
 
 
