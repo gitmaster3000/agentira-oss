@@ -2351,6 +2351,11 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         env_extra=env_extra_combined,
         run_token=run_token,
         log_dir=log_dir,
+        # ADR 009 / B1: the scope rides the frame so the daemon can key its
+        # durable on-disk inflight registry by scope (one live turn per
+        # scope), derive task_id for a chat dispatch, and let stop-by-scope
+        # find the right process even across a backend restart.
+        scope_key=scope_key or "",
     ))
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
@@ -2450,12 +2455,11 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     # PENDING (the create_run default) → READY so the UI knows this run is
     # waiting on the user, not on the system.
     prompt = prompt_template.replace("{run_id}", run_id)
-    # AP-123: stamp the per-run worktree path + branch on the row so the
-    # dispatcher can pass them to the daemon (which materializes via
-    # `git worktree add`). Each run gets its own isolated working tree
-    # so concurrent runs of the same agent are safe.
+    # Stamp the task-scoped worktree path + branch on the row. Shared
+    # across all runs and chats for this (agent, task) so claude's
+    # `--resume` (cwd-keyed) works.
     worktree_path, worktree_branch = _compute_worktree_paths(
-        agent_id=agent_id, project_id=project_id, run_id=run_id,
+        agent_id=agent_id, project_id=project_id, task_id=task_id,
     )
     log_dir = _compute_log_dir(run_id=run_id)
     with _session() as db:
@@ -2478,33 +2482,36 @@ def _compute_log_dir(*, run_id: str) -> str:
     return f"~/.agentira/runs/{run_id}/"
 
 
-# AP-123: per-run worktree path + branch are stamped on the Run row at
-# prepare time and passed to the daemon at dispatch. Format:
-#   path:   ~/.agentira/agents/<agent_id>/home/repos/<project_id>/run-<run_id>/
-#   branch: agent/<agent_id[:8]>/run/<run_id[:8]>
-# The path mirrors the legacy single-worktree layout but with a run-
-# scoped final component so two concurrent runs never collide. Branch
-# is short enough to scan in `git branch -a` without wrapping.
+# Worktree path + branch are stamped on the Run row at prepare time and
+# passed to the daemon at dispatch. Pinned BY TASK SCOPE — every run and
+# chat dispatch for the same (agent, task) shares one worktree so
+# claude's `--resume <session_id>` (which is keyed by cwd at session
+# creation) keeps working across runs and chats.
+#
+#   path:   ~/.agentira/agents/<agent_id>/home/repos/<project_id>/task-<task_id[:8]>/
+#   branch: agent/<agent_id[:8]>/task/<task_id[:8]>
+#
+# Tradeoff vs the earlier per-run scheme (AP-123): two concurrent runs
+# on the same (agent, task) would collide in the shared working tree,
+# so runs serialize per (agent, task). Concurrent runs across DIFFERENT
+# tasks for the same agent still work (capped by max_concurrent_runs).
 
 def _compute_worktree_paths(*, agent_id: str, project_id: str | None,
-                            run_id: str) -> tuple[str, str]:
-    """Return (worktree_path, worktree_branch) for a fresh run.
+                            task_id: str | None) -> tuple[str, str]:
+    """Return (worktree_path, worktree_branch) pinned to (agent, task).
 
-    `project_id` may be None for non-task chat runs — those don't get a
-    worktree (the daemon falls back to the agent's home dir as today).
+    Returns ("", "") when there's no task scope or project — the daemon
+    falls back to the agent's home dir as today.
 
-    The path is intentionally tilde-prefixed and NOT expanded here. The
-    backend may run in a container where `~` = `/root`, but the daemon
-    runs on the host where `~` = the operator's home. Expansion happens
-    on the daemon side at use time (materializer + git worktree add).
-    Pre-expanding here stamped `/root/...` on the row, which the daemon
-    could not resolve, silently breaking per-run worktrees.
+    Path is tilde-prefixed and NOT expanded here: backend may run in a
+    container where `~` = `/root`, but the daemon runs on the host.
+    Expansion happens daemon-side at use time.
     """
-    if not project_id:
+    if not project_id or not task_id:
         return "", ""
     path = (f"~/.agentira/agents/{agent_id}/home/repos/"
-            f"{project_id}/run-{run_id}/")
-    branch = f"agent/{agent_id[:8]}/run/{run_id[:8]}"
+            f"{project_id}/task-{task_id[:8]}/")
+    branch = f"agent/{agent_id[:8]}/task/{task_id[:8]}"
     return path, branch
 
 
@@ -2565,21 +2572,24 @@ def dispatch_pending_run(*, run_id: str,
         agent_id = agent.id
         task = db.get(Task, task_id) if task_id else None
 
-        # Serialize task runs per agent. All of an agent's task runs share
-        # AP-123: each run now gets its own git worktree (set in
-        # prepare_task_run), so concurrent runs of the same agent are
-        # finally safe. The cap is the agent's `max_concurrent_runs`
-        # rather than the old "one at a time, always" rule. `resume`
-        # excludes the run itself.
+        # Concurrency model: cwd is pinned per (agent, task), so two
+        # runs on the SAME task would clobber each other's working tree.
+        # Serialize per (agent, task), then cap total runs across tasks
+        # by the agent's max_concurrent_runs.
         if task_id:
-            cap = max(1, int(agent.max_concurrent_runs or 1) if hasattr(agent, "max_concurrent_runs")
-                      else 1)
-            # Profile carries max_concurrent_runs (forge_agents row is the
-            # transitional shim — read from the linked profile).
+            same_task_in_flight = (db.query(Run)
+                                     .filter(Run.agent_id == agent_id,
+                                             Run.task_id == task_id,
+                                             Run.status == RunStatus.RUNNING,
+                                             Run.id != run_id)
+                                     .count())
+            if same_task_in_flight:
+                return {"error": (
+                    "Agent already running this task. Wait for it to "
+                    "finish or stop it first.")}
             from backend.models import Profile as _Profile
             prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
-            if prof:
-                cap = max(1, int(prof.max_concurrent_runs or 1))
+            cap = max(1, int(prof.max_concurrent_runs or 1)) if prof else 1
             in_flight = (db.query(Run)
                            .filter(Run.agent_id == agent_id,
                                    Run.status == RunStatus.RUNNING,
@@ -2922,6 +2932,9 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
             return {"error": f"Run is {run.status.value}; cannot {frame_type}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
+        # ADR 009 / B6: scope so the daemon can resolve the live turn by
+        # scope when the trace mapping was lost (backend restart).
+        signal_scope_key = f"task:{run.task_id}" if run.task_id else ""
         last_msg = (db.query(AgentMessage)
                     .filter(AgentMessage.run_id == run_id)
                     .order_by(AgentMessage.created_at.desc())
@@ -2941,6 +2954,7 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
                 signal=frame_type,
                 trace_id=trace_id,
                 run_id=run_id,
+                scope_key=signal_scope_key,
             ))
         except Exception:
             pass
@@ -3039,10 +3053,25 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     if paused_run_id:
         # pause_run also fires the WS pause frame and flips status.
         pause_run(paused_run_id)
-    elif runtime_id:
+        return {"ok": True, "paused_run_id": paused_run_id,
+                "cancelled_trace_id": trace_id or None}
+
+    # No active Run row — fire a bare cancel to the daemon. Guard with a
+    # daemon-online check so the UI gets a clear error instead of a
+    # silent ok=True when the WS link is half-open (the failure mode
+    # that hid every "zombie chat I can't stop" bug).
+    if runtime_id:
+        from backend.forge.ws_dispatch import hub as _hub
+        online = any(runtime_id in c.runtime_ids for c in _hub._conns.values())
+        if not online:
+            return {"ok": False, "error": (
+                "Daemon offline — cancel could not be delivered. The "
+                "chat process may still be running on the host. Restart "
+                "the daemon or kill the subprocess manually.")}
         try:
             _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id,
+                scope_key=scope_key,
             ))
         except Exception:
             pass
@@ -3071,6 +3100,9 @@ def cancel_run(run_id: str) -> dict:
             return {"error": f"Run already {run.status.value}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
+        # ADR 009 / B6: the run's task scope, so the daemon can resolve the
+        # live turn by scope if the trace mapping was lost.
+        cancel_scope_key = f"task:{run.task_id}" if run.task_id else ""
 
         # Look up the latest trace_id for this run so the daemon can match.
         last_msg = (db.query(AgentMessage)
@@ -3100,6 +3132,7 @@ def cancel_run(run_id: str) -> dict:
         try:
             _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
+                scope_key=cancel_scope_key,
             ))
         except Exception as exc:
             # WS dispatch is best-effort — the run is already marked cancelled.
@@ -3653,17 +3686,17 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
 
 
 def _worktree_cleanup_hint(run_id: str | None) -> dict:
-    """Pull worktree_path + worktree_branch from the Run row so the
-    daemon can `git worktree remove` and `git branch -D` after a
-    terminal completion. Empty strings on legacy rows / non-task runs."""
-    if not run_id:
-        return {"path": "", "branch": ""}
-    with _session() as db:
-        r = db.query(Run).filter(Run.id == run_id).first()
-        if not r:
-            return {"path": "", "branch": ""}
-        return {"path": r.worktree_path or "",
-                "branch": r.worktree_branch or ""}
+    """ADR 009: the (agent, task) worktree is the conversation home and
+    must survive for the life of the task — it's reused by every run and
+    chat in the task so the agent's working files persist and claude
+    `--resume` keeps landing in one stable cwd. So a terminal run NEVER
+    tears it down: we always return empty hints (the daemon's cleanup is
+    guarded by `if cw and cb`, so empty = no-op). Worktree teardown moves
+    to a task archive/delete hook (AP-134 A4), the only place it's safe.
+
+    `run_id` is kept in the signature for the call sites that still pass
+    it; the value is ignored on purpose."""
+    return {"path": "", "branch": ""}
 
 
 def get_trigger_events(trace_id: str) -> list[dict]:
@@ -3830,10 +3863,23 @@ def send_runtime_message(
             # cwd is a template (`~/...`); daemon expands and ensures the
             # dir + git worktree. Backend can't touch the host filesystem.
             if proj:
-                repo_path = ensure_agent_worktree(a, proj)
                 worktree_source_path = proj.repo_path or ""
                 worktree_source_url = getattr(proj, "repo_url", None) or ""
-                worktree_branch = f"agent/{a.id}/work"
+                # Task-scoped chats share cwd with the task's runs so
+                # claude --resume works across run/chat boundaries.
+                _task_id_for_cwd = None
+                if scope_key and scope_key.startswith("task:"):
+                    _task_id_for_cwd = scope_key.split(":", 1)[1]
+                task_path, task_branch = _compute_worktree_paths(
+                    agent_id=a.id, project_id=project_id,
+                    task_id=_task_id_for_cwd,
+                )
+                if task_path:
+                    repo_path = task_path
+                    worktree_branch = task_branch
+                else:
+                    repo_path = ensure_agent_worktree(a, proj)
+                    worktree_branch = f"agent/{a.id}/work"
             else:
                 repo_path = ensure_agent_home_dir(a)
                 worktree_source_path = ""
@@ -3890,6 +3936,27 @@ def send_runtime_message(
                 prompt_with_history = _prepend_history_for_prompt(
                     agent_id=a.id, scope_key=scope, current=content,
                 )
+
+            # Serialize chats per (agent, scope). Two claude subprocesses
+            # sharing one cwd corrupt each other's index; the older one
+            # also keeps running invisibly because the UI only knows
+            # about the latest trace. Cancel any prior in-flight trace
+            # for this scope before spawning a new one.
+            _runtime_id_for_cancel = a.runtime_id
+            _prior_traces = [tid for tid, sc in list(_TRACE_SCOPE.items())
+                             if sc == scope]
+            if _prior_traces:
+                from backend.forge.ws_dispatch import hub as _hub
+                for _tid in _prior_traces:
+                    try:
+                        _dispatch_coro(_hub.dispatch_cancel(
+                            runtime_id=_runtime_id_for_cancel,
+                            trace_id=_tid,
+                            scope_key=scope,
+                        ))
+                    except Exception:
+                        pass
+                    _TRACE_SCOPE.pop(_tid, None)
 
             result = dispatch_trigger(
                 agent_id, prompt_with_history, run_id=run_id, kind="chat",

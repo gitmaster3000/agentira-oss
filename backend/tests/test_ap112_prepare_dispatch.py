@@ -219,7 +219,7 @@ def test_second_concurrent_task_run_is_refused(test_db):
         r2 = _drive(lambda: forge_services.dispatch_pending_run(run_id=b["id"]))
 
     assert "error" not in r1
-    assert "error" in r2 and "in flight" in r2["error"]
+    assert "error" in r2 and "already running this task" in r2["error"].lower()
     assert len(fake.calls) == 1, "the second run must not dispatch"
 
 
