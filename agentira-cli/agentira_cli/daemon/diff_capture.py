@@ -32,9 +32,42 @@ logger = logging.getLogger("agentira.daemon.diff_capture")
 MAX_DIFF_BYTES = 50_000  # ~50KB; readable in DB / UI, plenty for typical PRs
 TRIM_NOTICE = "\n\n... [diff truncated; full patch exceeds 50KB] ..."
 
-# The materializer drops these into the cwd; they must never count as the
-# agent's work nor pollute the displayed diff.
-_EXCLUDE_PREFIXES = (".agentira/", "AGENTS.md", "CLAUDE.md", "GEMINI.md")
+# AP-149 — Paths that must NEVER count as agent work, no matter where they
+# appear (tracked, untracked, committed). Two reasons:
+#
+#   (1) Materializer-owned files — Agentira itself drops these into the cwd
+#       at dispatch (`.agentira/CONVENTIONS.md` + courtesy CLAUDE.md /
+#       AGENTS.md / GEMINI.md symlinks). If the user accidentally commits
+#       any of them, a re-run that rewrites them would otherwise crystallize
+#       a fake run.
+#
+#   (2) Common scratch / build / cache directories. A brand-new project
+#       without a complete `.gitignore` would otherwise crystallize a run
+#       from `npm install` side-effects (node_modules), `__pycache__/`,
+#       compiled outputs (`dist/`, `build/`), virtualenvs, etc. The user can
+#       still add their own .gitignore; this is Agentira being defensive about
+#       opinionated scratch on its first-project loop.
+#
+# Applied via git pathspec exclusion (`:(exclude)<path>`) to every diff /
+# ls-files call so the filter is identical for tracked, untracked, and
+# committed work.
+_EXCLUDED_PATHS = (
+    # Materializer-owned (always)
+    ".agentira/",
+    "AGENTS.md", "CLAUDE.md", "GEMINI.md",
+    # Common scratch / build / cache dirs
+    "node_modules/",
+    "__pycache__/", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/",
+    ".cache/",
+    ".venv/", "venv/", "env/",
+    "dist/", "build/", "target/", "out/", ".next/", ".nuxt/",
+    ".tox/", ".nox/", ".gradle/",
+    # OS detritus
+    ".DS_Store", "Thumbs.db",
+)
+
+# git pathspec args — passed after `--` on every git diff/ls-files call.
+_EXCLUDE_PATHSPECS = [f":(exclude){p}" for p in _EXCLUDED_PATHS]
 
 
 def capture(workdir: str | Path | None) -> tuple[str, str]:
@@ -48,11 +81,25 @@ def capture_with_signal(
 ) -> tuple[str, str, dict]:
     """Return (diff_stat, diff, facts).
 
-    facts = {"tracked": bool, "untracked": bool, "committed": bool} — the
-    raw git observations the backend maps onto the project's work-signal
-    setting (working_tree | tracked | committed) to decide run crystallization.
+    facts = {
+        "tracked": bool,         # tracked-file edits exist (committed or not)
+        "untracked": bool,       # new untracked files exist (post-exclusion)
+        "committed": bool,       # commits exist vs upstream
+        "lines_changed": int,    # +/- lines in the tracked diff (AP-149)
+        "files_changed": int,    # unique tracked files touched (AP-149)
+        "untracked_count": int,  # untracked file count post-exclusion (AP-149)
+    } — the raw git observations the backend maps onto the project's
+    work-signal setting (working_tree | tracked | committed) to decide run
+    crystallization. The three diagnostic counts are for sanity-checking and
+    future tuning; they don't change crystallization behavior today.
+
+    AP-149: exclusions in `_EXCLUDED_PATHS` are applied via git pathspec to
+    every git call, so a materializer-owned file that *is* tracked, or a
+    new `node_modules/` from a fresh `npm install`, is never credited as
+    agent work.
     """
-    empty_facts = {"tracked": False, "untracked": False, "committed": False}
+    empty_facts = {"tracked": False, "untracked": False, "committed": False,
+                   "lines_changed": 0, "files_changed": 0, "untracked_count": 0}
     if not workdir:
         return "", "", dict(empty_facts)
     cwd = Path(workdir)
@@ -76,26 +123,35 @@ def capture_with_signal(
     # 1. Committed work the agent hasn't pushed (upstream..HEAD)
     upstream = _run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd)
     if upstream:
-        diff_stat = _run(["git", "diff", "--stat", "@{upstream}..HEAD"], cwd) or ""
-        diff_body = _run(["git", "diff", "@{upstream}..HEAD"], cwd) or ""
+        diff_stat = _run(["git", "diff", "--stat", "@{upstream}..HEAD",
+                          "--", *_EXCLUDE_PATHSPECS], cwd) or ""
+        diff_body = _run(["git", "diff", "@{upstream}..HEAD",
+                          "--", *_EXCLUDE_PATHSPECS], cwd) or ""
         committed = bool(diff_body.strip())
 
     # 2. Uncommitted tracked changes (vs HEAD)
-    uncommitted_body = _run(["git", "diff"], cwd) or ""
+    uncommitted_body = _run(["git", "diff", "--", *_EXCLUDE_PATHSPECS], cwd) or ""
     if uncommitted_body.strip():
         tracked = True
         if not diff_body:
-            diff_stat = _run(["git", "diff", "--stat"], cwd) or ""
+            diff_stat = _run(["git", "diff", "--stat", "--", *_EXCLUDE_PATHSPECS], cwd) or ""
             diff_body = uncommitted_body
     tracked = tracked or committed
 
-    # 3. NEW untracked files (respect .gitignore via --exclude-standard,
-    #    then drop our own materializer files). Surface them in the diff
-    #    so nothing the agent created is silently lost.
+    # 3. Diagnostic counts (AP-149) on the tracked diff, BEFORE we append the
+    # untracked listing — `lines_changed` reflects code edits only; untracked
+    # files contribute via `untracked_count` not lines.
+    lines_changed = _count_diff_lines(diff_body)
+    files_changed = _count_changed_files(cwd, upstream)
+
+    # 4. NEW untracked files (respect .gitignore via --exclude-standard
+    #    AND our exclusion pathspecs). Surface them in the diff so nothing
+    #    the agent created is silently lost.
     untracked_files = _untracked_files(cwd)
+    untracked_count = len(untracked_files)
     if untracked_files:
         listing = "\n".join(f"  + {p}" for p in untracked_files)
-        diff_stat = (diff_stat + f"\n{len(untracked_files)} new untracked file(s)\n").lstrip("\n")
+        diff_stat = (diff_stat + f"\n{untracked_count} new untracked file(s)\n").lstrip("\n")
         diff_body = (diff_body + "\n\n# New untracked files (not yet committed):\n"
                      + listing).lstrip("\n")
 
@@ -104,20 +160,59 @@ def capture_with_signal(
             "utf-8", errors="ignore"
         ) + TRIM_NOTICE
 
-    facts = {"tracked": tracked, "untracked": bool(untracked_files),
-             "committed": committed}
+    facts = {
+        "tracked": tracked, "untracked": bool(untracked_files),
+        "committed": committed,
+        "lines_changed": lines_changed,
+        "files_changed": files_changed,
+        "untracked_count": untracked_count,
+    }
     return diff_stat, diff_body, facts
 
 
+def _count_diff_lines(diff_body: str) -> int:
+    """Sum of `+`/`-` lines in a diff body, excluding `+++`/`---` headers.
+
+    Doesn't double-count the "Untracked files" section we append later —
+    those lines start with `  + ` (two spaces) so `startswith("+")` is False.
+    """
+    if not diff_body:
+        return 0
+    n = 0
+    for line in diff_body.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+") or line.startswith("-"):
+            n += 1
+    return n
+
+
+def _count_changed_files(cwd: Path, upstream: str | None) -> int:
+    """How many unique tracked files were changed (committed + uncommitted),
+    post-exclusion. One small extra git call for accuracy; we use --name-only
+    instead of parsing --shortstat because we already strip excluded paths."""
+    files: set[str] = set()
+    if upstream:
+        out = _run(["git", "diff", "--name-only", "@{upstream}..HEAD",
+                    "--", *_EXCLUDE_PATHSPECS], cwd) or ""
+        files.update(p for p in (ln.strip() for ln in out.splitlines()) if p)
+    out = _run(["git", "diff", "--name-only", "--", *_EXCLUDE_PATHSPECS], cwd) or ""
+    files.update(p for p in (ln.strip() for ln in out.splitlines()) if p)
+    return len(files)
+
+
 def _untracked_files(cwd: Path) -> list[str]:
-    """New, non-ignored files the agent created, excluding materializer
-    artifacts. `--exclude-standard` honors .gitignore/.git/info/exclude."""
-    out = _run(["git", "ls-files", "--others", "--exclude-standard"], cwd)
+    """New, non-ignored files the agent created, post-exclusion.
+
+    `--exclude-standard` honors .gitignore/.git/info/exclude; our own
+    `:(exclude)` pathspecs add a defensive opinionated layer for materializer
+    files and common scratch dirs (AP-149) so a repo without a complete
+    .gitignore doesn't crystallize a run from npm-install / pyc / etc."""
+    out = _run(["git", "ls-files", "--others", "--exclude-standard",
+                "--", *_EXCLUDE_PATHSPECS], cwd)
     if not out:
         return []
-    files = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    return [f for f in files
-            if not any(f == p or f.startswith(p) for p in _EXCLUDE_PREFIXES)]
+    return [ln.strip() for ln in out.splitlines() if ln.strip()]
 
 
 def _run(cmd: list[str], cwd: Path) -> str | None:
