@@ -377,6 +377,7 @@ async def run_gateway(
     system_prompt: str = "",
     on_event=None,
     provider: str = "openclaw",
+    session_key: str = "",
 ) -> StreamResult:
     """POST prompt to an OpenAI-compatible HTTP gateway.
 
@@ -412,6 +413,16 @@ async def run_gateway(
     headers = {"Content-Type": "application/json"}
     if gateway_token:
         headers["Authorization"] = f"Bearer {gateway_token}"
+    # ADR 009 / Runtime Adapter contract: OpenClaw routes per-turn session
+    # via the `x-openclaw-session-key` header (per OpenClaw's
+    # docs/gateway/openai-http-api.md). One key per (agent, scope) gives
+    # us a server-side thread with the KV cache warm across turns.
+    if session_key and provider == "openclaw":
+        headers["x-openclaw-session-key"] = session_key
+        # Round-trip the key as the captured session_id so the backend
+        # stores it on forge_conversations.runtime_session_id and replays
+        # it on the next dispatch (parity with claude's session_id flow).
+        result.session_id = session_key
     try:
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=120) as resp:

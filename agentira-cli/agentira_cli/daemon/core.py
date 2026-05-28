@@ -536,10 +536,26 @@ class AgentiraDaemon:
                     except Exception as exc:
                         logger.warning("MCP register (openclaw) failed trace=%s: %s",
                                        trace_id, exc)
+                # ADR 009 / Runtime Adapter contract: derive the per-(agent,
+                # scope) session handle so OpenClaw routes the turn to its
+                # own thread (x-openclaw-session-key). Falls back to "" for
+                # providers without server-side threading (ollama etc.) —
+                # then the gateway picks its default (no isolation, today's
+                # behavior).
+                gw_session_key = ""
+                if runtime_cls is not None:
+                    try:
+                        gw_session_key = runtime_cls.derive_session_handle(
+                            agent_id=agent_id, scope_key=scope_key,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("derive_session_handle failed trace=%s: %s",
+                                     trace_id, exc)
                 result = await run_gateway(
                     gateway_url, gateway_token, agent_name, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
                     provider=provider,
+                    session_key=gw_session_key,
                 )
             else:
                 result = await run_cli_stream(
