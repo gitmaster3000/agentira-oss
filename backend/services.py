@@ -17,9 +17,12 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend import agent_notifier
 
+import logging
 import os
 import hashlib
 import secrets
+
+logger = logging.getLogger("agentira.services")
 
 def _hash_password(password: str) -> str:
     """Simple SHA-256 hash for basic auth."""
@@ -298,6 +301,28 @@ def _derive_prefix(name: str) -> str:
     return ''.join(w[0].upper() for w in words[:5])
 
 
+_KICKOFF_TASK_TITLE = "Plan this project"
+_KICKOFF_TASK_DESCRIPTION = (
+    "You are kicking off a new project. Read the project description and any "
+    "attachments (use `list_attachments` / `download_attachment` MCP tools to "
+    "see designs, briefs, requirements). Then:\n\n"
+    "1. **Pick the tools/tech stack** that fit the product, with a brief "
+    "justification for each choice. Consider the team size, deployment "
+    "target, and any constraints visible in the brief.\n"
+    "2. **Write a one-page plan** covering the architecture, the milestones, "
+    "and the risks. Register it as a real artifact via "
+    "`register_run_artifact(kind='report', label='Project plan')` so it "
+    "shows up on the Run page — don't just emit it as chat text.\n"
+    "3. **Break the work into 3–8 concrete tasks** using the "
+    "`create_task` MCP tool. Each task gets a clear title, a description, "
+    "and DoD items. Order them so the dependencies are obvious.\n\n"
+    "Then call `finish_run(outcome='succeeded')` once the artifact and "
+    "child tasks are in place. If something blocks you (missing brief, "
+    "ambiguous requirement), call `finish_run(outcome='needs_input')` with "
+    "a specific question — a follow-up comment on this task will resume you."
+)
+
+
 def create_project(name: str, description: str = "", actor: str = "system") -> dict:
     with _session() as db:
         prefix = _derive_prefix(name)
@@ -321,7 +346,62 @@ def create_project(name: str, description: str = "", actor: str = "system") -> d
         _log_activity(db, actor, "project.create", f"Created project: {name}", project_id=project.id)
         db.commit()
         db.refresh(project)
-        return _project_to_dict(project)
+        project_id = project.id
+        result = _project_to_dict(project)
+
+    # ── Kickoff: auto-add the Conductor + create the first task ──────────
+    # Conductor is the workspace orchestrator (backend/forge/conductor.py).
+    # Every new project starts with it as a member and one "Plan this
+    # project" task already assigned and ready to Run — the user just
+    # attaches the design + clicks Run, and the Conductor produces the
+    # plan as an artifact + spawns the concrete child tasks.
+    # Best-effort: if the Conductor isn't seedable in this workspace
+    # (missing 'bot' role on a fresh install) we still return the project.
+    try:
+        _seed_project_kickoff(project_id=project_id, actor=actor)
+    except Exception as exc:  # noqa: BLE001 — project must still be created
+        logger.warning("project kickoff seeding failed project=%s: %s",
+                       project_id, exc)
+
+    return result
+
+
+def _seed_project_kickoff(*, project_id: str, actor: str) -> None:
+    """Add the Conductor as a project member and create the kickoff task."""
+    from backend.forge.conductor import get_or_create_conductor, CONDUCTOR_NAME
+    cond = get_or_create_conductor()
+    if not isinstance(cond, dict) or cond.get("error"):
+        logger.info("Conductor not available — skipping kickoff: %s", cond)
+        return
+
+    # Add Conductor as a project member (idempotent — duplicate inserts
+    # just fail benignly; we catch).
+    with _session() as db:
+        cond_prof = _get_profile_by_name(db, CONDUCTOR_NAME)
+        if not cond_prof:
+            return
+        already = (db.query(ProjectMember)
+                     .filter_by(project_id=project_id, profile_id=cond_prof.id)
+                     .first())
+        if not already:
+            db.add(ProjectMember(project_id=project_id, profile_id=cond_prof.id))
+            db.commit()
+
+    # Create the kickoff task assigned to the Conductor. status=todo so it
+    # shows up immediately, not buried in backlog.
+    try:
+        create_task(
+            project_id=project_id,
+            title=_KICKOFF_TASK_TITLE,
+            description=_KICKOFF_TASK_DESCRIPTION,
+            status="todo",
+            priority="high",
+            assignee=CONDUCTOR_NAME,
+            actor=actor,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("kickoff task create failed project=%s: %s",
+                       project_id, exc)
 
 
 def list_projects(actor: str = "system") -> list[dict]:
@@ -876,13 +956,13 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         if not task:
             raise ValueError(f"Task {task_id} not found")
         task_id = task.id
-        
+
         act = _log_activity(
             db, actor, "commented", comment,
             project_id=task.project_id, task_id=task_id,
             notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
         )
-        
+
         db.commit()
         if task.assignee and task.assignee != actor:
             target_prof = _get_profile_by_name(db, task.assignee)
@@ -891,7 +971,53 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         agent_notifier.dispatch(db, "task.commented", _task_to_dict(task), actor)
 
         db.refresh(act)
-        return _activity_to_dict(act)
+        result = _activity_to_dict(act)
+
+    # Wake the assigned agent — comment lands in its task chat and triggers
+    # the ADR 009 D routing (running -> pause+steer, paused/parked -> resume,
+    # terminal -> fresh turn). Best-effort, never fails the comment write.
+    # Skip if the actor IS the assignee (avoids an agent's own comment
+    # re-dispatching itself).
+    if task.assignee and task.assignee != actor:
+        try:
+            _wake_assigned_agent_on_comment(
+                task_id=task_id, assignee_name=task.assignee,
+                actor=actor, comment=comment,
+            )
+        except Exception as exc:  # noqa: BLE001 — comment must succeed regardless
+            logger.warning("wake-on-comment failed task=%s: %s", task_id, exc)
+
+    return result
+
+
+def _wake_assigned_agent_on_comment(*, task_id: str, assignee_name: str,
+                                    actor: str, comment: str) -> None:
+    """Comment -> assigned agent's task chat + dispatch (ADR 009 D).
+
+    Find the Forge agent whose profile.name == assignee_name; if it has a
+    bound runtime, deliver the comment as a USER message into the task
+    scope via send_runtime_message — which auto-routes per the run state
+    (running pauses+steers, paused resumes, idle/terminal starts a turn).
+    Skips silently for non-agent assignees (humans) or agents without a
+    runtime (purely HTTP-executor agents).
+    """
+    from backend.forge.models import Agent as ForgeAgent
+    from backend.forge import services as forge_services
+    with _session() as db:
+        prof = _get_profile_by_name(db, assignee_name)
+        if not prof:
+            return
+        agent = (db.query(ForgeAgent)
+                   .filter(ForgeAgent.profile_id == prof.id)
+                   .first())
+        if not agent or not agent.runtime_id:
+            return
+        agent_id = agent.id
+    forge_services.send_runtime_message(
+        agent_id,
+        content=f"[Comment from {actor}] {comment}",
+        scope_key=f"task:{task_id}",
+    )
 
 
 def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
