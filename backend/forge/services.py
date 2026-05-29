@@ -2237,6 +2237,13 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
 
     trace_id = uuid.uuid4().hex[:12]
 
+    # AP-151 shadow-run trackers — populated inside the with-block only when a
+    # shadow Run is created (run-less task chat). Initialized here so the
+    # frame-build code below can reference them unconditionally.
+    _shadow_task_id = ""
+    _shadow_project_id = ""
+    _shadow_log_dir = ""
+
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a or not a.runtime_id:
@@ -2245,7 +2252,46 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         if not runtime:
             return {"error": "Runtime not found"}
 
-        # Persist the user message tagged with trace_id (and run_id when present)
+        # AP-151 — Shadow run reservation for run-less task chat turns. When a
+        # chat lands in `task:T` without an explicit run_id (no Run button
+        # click, no D-routing resume), reserve a Run row + a log_dir + an
+        # AGENTIRA_RUN_ID env var BEFORE dispatch — so the agent can call
+        # `register_run_artifact`, the daemon can tee stdout/stderr to a
+        # run-keyed dir, and post-mortem diagnostics route correctly. If the
+        # turn does no work, `complete_trigger` deletes the row at the end so
+        # the runs list isn't polluted. This is the "eager infrastructure,
+        # lazy visibility" fix for the lazy-run feature-incompleteness gap.
+        if (run_id is None and kind == "chat" and scope_key
+                and scope_key.startswith("task:")):
+            from backend.models import Task as _Task
+            _shadow_task_id = scope_key.split(":", 1)[1]
+            _shadow_task = db.get(_Task, _shadow_task_id)
+            if _shadow_task:
+                _shadow_project_id = _shadow_task.project_id or ""
+                shadow = Run(
+                    agent_id=a.id, task_id=_shadow_task_id,
+                    project_id=_shadow_project_id or None,
+                    trigger_event="chat.shadow",
+                    status=RunStatus.RUNNING,
+                    model_used=a.model or "",
+                    started_at=datetime.now(timezone.utc),
+                )
+                shadow.worktree_path, shadow.worktree_branch = _compute_worktree_paths(
+                    agent_id=a.id, project_id=_shadow_project_id or None,
+                    task_id=_shadow_task_id,
+                )
+                db.add(shadow)
+                db.flush()
+                run_id = shadow.id
+                _shadow_log_dir = _compute_log_dir(run_id=run_id)
+                shadow.log_dir = _shadow_log_dir
+            else:
+                # Task lookup failed — reset trackers; fall through to a
+                # normal chat dispatch with no shadow.
+                _shadow_task_id = ""
+
+        # Persist the user message tagged with trace_id (and run_id when present
+        # — for shadow runs, this is the freshly-reserved id from above).
         db.add(AgentMessage(
             agent_id=a.id,
             run_id=run_id,
@@ -2321,9 +2367,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         else:
             system_prompt = awareness_preamble
 
-    # If this trigger belongs to a Run (cron, scheduled task, …), flip the
-    # run state to RUNNING before dispatching. complete_trigger will close
-    # it out at the daemon side.
+    # If this trigger belongs to a Run (cron, scheduled task, shadow, …), flip
+    # the run state to RUNNING before dispatching. complete_trigger will close
+    # it out at the daemon side. Shadow runs were already created with status
+    # RUNNING so start_run is a no-op for them.
     if run_id:
         start_run(run_id)
 
@@ -2333,6 +2380,19 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     env_extra_combined = dict(env_extra or {})
     if user_context:
         env_extra_combined["AGENTIRA_USER_CONTEXT_JSON"] = json.dumps(user_context)
+
+    # AP-151: for shadow runs (created above when no explicit run_id was
+    # passed), inject AGENTIRA_RUN_ID / TASK_ID / PROJECT_ID so the agent's
+    # MCP tools (`register_run_artifact` etc.) can target the right run, and
+    # use the shadow's log_dir for the dispatch frame. dispatch_pending_run
+    # sets these for run-button dispatches; setdefault keeps that intact.
+    if run_id:
+        env_extra_combined.setdefault("AGENTIRA_RUN_ID", run_id)
+        if _shadow_task_id:
+            env_extra_combined.setdefault("AGENTIRA_TASK_ID", _shadow_task_id)
+        if _shadow_project_id:
+            env_extra_combined.setdefault("AGENTIRA_PROJECT_ID", _shadow_project_id)
+    effective_log_dir = log_dir or _shadow_log_dir
 
     if scope_key:
         _TRACE_SCOPE[trace_id] = scope_key
@@ -2360,7 +2420,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         resume_session_id=resume_session_id,
         env_extra=env_extra_combined,
         run_token=run_token,
-        log_dir=log_dir,
+        log_dir=effective_log_dir,
         # ADR 009 / B1: the scope rides the frame so the daemon can key its
         # durable on-disk inflight registry by scope (one live turn per
         # scope), derive task_id for a chat dispatch, and let stop-by-scope
@@ -3680,11 +3740,12 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             runtime_session_id=session_id or "",
         )
 
-    # ADR 009 / AP-136: a standalone (run-less) task chat turn that produced
-    # work crystallizes into a run — emergent, never declared, so a throwaway
-    # "hey" stays a turn but real changes become a traceable run. Only on a
-    # successful turn; only task scopes. `scope` may be empty after a backend
-    # restart — recover it from the trace's persisted messages first.
+    # ADR 009 / AP-136 (legacy lazy crystallize). Task chat turns now get a
+    # shadow run reserved up-front in dispatch_trigger (AP-151), so for task
+    # scopes run_id is always set here and this branch is inert. The path
+    # remains for non-task scopes where `maybe_crystallize_chat_turn` is a
+    # no-op anyway (its first check returns None for any non-`task:` scope).
+    # Kept as a defensive belt+suspenders; harmless.
     if (not run_id) and effective_success:
         cz_scope = scope
         if not cz_scope:
@@ -3706,6 +3767,38 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         except Exception as exc:  # noqa: BLE001 — never fail completion
             _dispatch_logger.warning("chat-turn crystallize failed trace=%s: %s",
                                      trace_id, exc)
+
+    # AP-151 — Shadow-run delete-if-no-work. A Run was reserved at dispatch
+    # for run-less task chats so the agent could register artifacts and the
+    # daemon could capture logs/diagnostics. Now: if the turn produced no
+    # work (per the project's work-signal mode), no agent-declared outcome,
+    # and no artifacts → delete the row + NULL the trace's message rows so
+    # the runs list isn't polluted. The chat transcript stays intact (the
+    # messages keep their scope_key + trace_id; only their run_id link is
+    # severed). Trivial chat stays trivial; material chat keeps its run.
+    if run_id:
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r and r.trigger_event == "chat.shadow":
+                had_explicit_outcome = agent_declared_outcome is not None
+                arts = (r.artifacts_json or "").strip()
+                had_artifacts = bool(arts) and arts != "[]"
+                try:
+                    from backend.forge import turns as _turns
+                    mode = _turns.resolve_work_signal_mode(r.project_id)
+                    did_work = _turns.turn_did_work(work_signal, mode)
+                except Exception:  # noqa: BLE001
+                    did_work = bool((r.diff or "").strip())
+                if not (did_work or had_explicit_outcome or had_artifacts):
+                    db.query(AgentMessage).filter(
+                        AgentMessage.run_id == run_id
+                    ).update({"run_id": None}, synchronize_session=False)
+                    db.delete(r)
+                    db.commit()
+                    _dispatch_logger.info(
+                        "shadow run deleted trace=%s run=%s — no work crystallized",
+                        trace_id, run_id)
+                    run_id = None  # downstream sees a run-less chat turn
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a
