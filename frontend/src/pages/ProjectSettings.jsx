@@ -83,6 +83,7 @@ function GeneralTab({ projectId }) {
                 repo_url: p.repo_url || '',
                 conventions_md: p.conventions_md || '',
                 work_signal: p.work_signal || 'working_tree',
+                gates_enabled: !!p.gates_enabled,  // AP-158
             });
         }).catch(() => setProject(null));
     }, [projectId]);
@@ -96,6 +97,7 @@ function GeneralTab({ projectId }) {
         || form.repo_url !== (project.repo_url || '')
         || form.conventions_md !== (project.conventions_md || '')
         || form.work_signal !== (project.work_signal || 'working_tree')
+        || form.gates_enabled !== !!project.gates_enabled
     );
 
     const save = async () => {
@@ -109,6 +111,7 @@ function GeneralTab({ projectId }) {
                 repo_url: form.repo_url || null,
                 conventions_md: form.conventions_md || null,
                 work_signal: form.work_signal || null,
+                gates_enabled: form.gates_enabled,
             });
             setProject(updated);
             setMsg('Saved');
@@ -157,6 +160,19 @@ function GeneralTab({ projectId }) {
                     <option value="tracked">Tracked changes only — edits to tracked files</option>
                     <option value="committed">Committed only — a new commit</option>
                 </select>
+            </Field>
+            <Field label="Gated transitions (AP-158)"
+                hint={
+                    "Block column moves when evidence is missing — DoD on the task, assignee, branch/PR linked, all DoD items checked before done. Off by default; turn on for strict workflows."
+                }>
+                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={form.gates_enabled}
+                        onChange={(e) => setForm({ ...form, gates_enabled: e.target.checked })}
+                    />
+                    Enforce column-exit gates on this project
+                </label>
             </Field>
             <div className="flex items-center gap-3">
                 <button className="btn btn-primary" onClick={save}
