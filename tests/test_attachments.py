@@ -11,11 +11,16 @@ from backend import services
 
 
 @pytest.fixture(autouse=True)
-def test_db():
+def test_db(tmp_path):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession):
+    # AP-152: attachment logic moved to `backend.attachments`; services.py
+    # functions are thin shims. Patch both module bindings + the storage
+    # dir so the test stays self-contained.
+    with patch("backend.services.SessionLocal", TestSession), \
+         patch("backend.attachments.SessionLocal", TestSession), \
+         patch("backend.attachments.ATTACHMENTS_DIR", str(tmp_path)):
         db = TestSession()
         services._seed_defaults(db)
         db.close()

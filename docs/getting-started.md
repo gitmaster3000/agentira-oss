@@ -65,7 +65,7 @@ Click **New Project** in the Studio sidebar. You'll get a dialog with:
 
 - **Name** — what you'll call it. The first letters become the prefix for task keys (e.g. "Voice Code App" → `VCA-1`, `VCA-2`).
 - **Description** — a paragraph or two about what you want built. The Conductor reads this; be specific.
-- **Attachments** *(use the attachments dropzone)* — drop in any UI designs, mockups, briefs, requirements docs. PNG, PDF, MD, anything. The Conductor reads these too.
+- **Attachments** *(use the attachments dropzone)* — drop in any UI designs, mockups, briefs, requirements docs. PNG, PDF, MD, anything. They land on the project itself (visible later on the project dashboard) — the Conductor reads them via the `list_project_attachments` MCP tool.
 
 Hit **Create**.
 
@@ -73,8 +73,17 @@ Hit **Create**.
 
 - The Conductor is auto-added as a project member.
 - A task titled **"Plan this project"** is already in the `todo` column, assigned to the Conductor.
+- Your uploaded files are listed on the project dashboard under **Attachments**. You can drag in more there at any time.
 
 You did not have to set any of that up.
+
+### Teaching agents to use the project attachments
+
+Prompts are configuration, not code — every agent's system prompt is editable in **Agent Settings → System prompt**. For the Conductor (and any other agent you want browsing project files), append something like:
+
+> When you start work on a task, call `list_project_attachments(AGENTIRA_PROJECT_ID)` first. Text files come back inline. For binary files (PNGs, PDFs), use `read_attachment_text(<id>)` — for binary it returns a `download_url` and `api_key_env`; fetch with `curl -H "Authorization: Bearer $AGENTIRA_API_KEY" http://backend:8000<download_url>`.
+
+The agent's API key is already injected as `$AGENTIRA_API_KEY` in its environment at dispatch time, so this works without extra setup.
 
 ---
 
