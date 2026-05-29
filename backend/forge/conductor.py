@@ -142,12 +142,12 @@ def get_or_create_conductor() -> dict:
                        .first())
         rt_id = claude_rt.id if claude_rt else None
 
-        # System singleton — always sync the prompt to the canonical
-        # source. Users who want a custom orchestrator persona should
-        # create their own agent rather than mutating this one (otherwise
-        # new "modes" like the kickoff added for AP-150 never reach
-        # existing workspaces).
-        if prof.system_prompt != CONDUCTOR_SYSTEM_PROMPT:
+        # AP-152: prompts are configuration, not code. Seed the
+        # Conductor's system_prompt ONCE on first create; never overwrite
+        # a user-edited prompt with the code constant. The user owns the
+        # agent's prompt from the moment it exists — Agent Settings UI is
+        # the source of truth.
+        if not prof.system_prompt:
             prof.system_prompt = CONDUCTOR_SYSTEM_PROMPT
         if not prof.model:
             prof.model = CONDUCTOR_DEFAULT_MODEL
