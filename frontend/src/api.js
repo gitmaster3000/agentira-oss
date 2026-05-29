@@ -238,6 +238,7 @@ export const api = {
         createRun: (data) => request('/forge/runs', { method: 'POST', body: JSON.stringify(data) }),
         startRun: (id) => request(`/forge/runs/${id}/start`, { method: 'POST' }),
         cancelRun: (id) => request(`/forge/runs/${id}/cancel`, { method: 'POST' }),
+        retryRun: (id) => request(`/forge/runs/${id}/retry`, { method: 'POST' }),
         pauseRun: (id) => request(`/forge/runs/${id}/pause`, { method: 'POST' }),
         resumeRun: (id) => request(`/forge/runs/${id}/resume`, { method: 'POST' }),
         completeRun: (id, data) => request(`/forge/runs/${id}/complete`, { method: 'POST', body: JSON.stringify(data) }),
