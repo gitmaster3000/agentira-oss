@@ -60,18 +60,12 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                 description: buildDescription(),
             });
 
-            // Upload staged files as attachments to a setup task if files exist
+            // AP-152: upload staged files directly to the project — no stray
+            // setup task. Files surface on the project dashboard.
             if (files.length > 0) {
                 try {
-                    const setupTask = await api.createTask({
-                        project_id: p.id,
-                        title: '📎 Project Setup Files',
-                        description: `Files uploaded during project creation:\n${files.map(f => `- ${f.name}`).join('\n')}`,
-                        priority: 'low',
-                        status: 'backlog',
-                    });
                     for (const file of files) {
-                        await api.uploadAttachment(setupTask.id, file);
+                        await api.uploadProjectAttachment(p.id, file);
                     }
                 } catch (uploadErr) {
                     console.error('Failed to upload project files:', uploadErr);
@@ -260,7 +254,7 @@ export function CreateProjectModal({ onClose, onSuccess }) {
                                 <div className="flex items-center gap-1 mt-1 px-1">
                                     <AlertCircle className="w-3 h-3" style={{ color: 'var(--text-tertiary)' }} />
                                     <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
-                                        Files will be attached to a setup task in the project
+                                        Files will be available on the project dashboard
                                     </span>
                                 </div>
                             </div>

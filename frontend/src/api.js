@@ -180,6 +180,25 @@ export const api = {
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
     getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
 
+    // AP-152: project-level attachments — same table, same download/delete
+    // endpoints above, distinct list/upload routes.
+    listProjectAttachments: (projectId) => request(`/projects/${projectId}/attachments`),
+    uploadProjectAttachment: (projectId, file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return fetch(`${API_BASE}/projects/${projectId}/attachments`, {
+            method: 'POST',
+            body: formData,
+            headers,
+        }).then(res => {
+            if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+            return res.json();
+        });
+    },
+
     // Roadmap
     // getRoadmap already defined above
 
