@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useOutletContext, Link } from 'react-router-dom';
+import { useSearchParams, useOutletContext, useParams, Link } from 'react-router-dom';
 import { ROUTES } from '../routes';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
@@ -7,7 +7,8 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { CreateEpicModal } from '../components/CreateEpicModal';
 import { ChevronDown, ChevronRight, UserPlus, Zap, Tag } from 'lucide-react';
 
-export function Backlog({ projectId }) {
+export function Backlog() {
+    const { projectId } = useParams();
     const [tasks, setTasks] = useState([]);
     const [epics, setEpics] = useState([]);
     const [loading, setLoading] = useState(true);
