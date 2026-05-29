@@ -17,9 +17,12 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend import agent_notifier
 
+import logging
 import os
 import hashlib
 import secrets
+
+logger = logging.getLogger("agentira.services")
 
 def _hash_password(password: str) -> str:
     """Simple SHA-256 hash for basic auth."""
@@ -34,9 +37,6 @@ def authenticate_user(username: str, password: str) -> dict | None:
         if p.password_hash == _hash_password(password):
             return _profile_to_dict(p)
     return None
-
-ATTACHMENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "attachments")
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -126,6 +126,8 @@ def _project_to_dict(p: Project) -> dict:
         "description": p.description,
         "repo_path": p.repo_path or "",
         "conventions_md": p.conventions_md or "",
+        # ADR 009 / AP-136: run-crystallization work-signal mode ("" = default).
+        "work_signal": getattr(p, "work_signal", None) or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -175,19 +177,6 @@ def _profile_to_dict(p: Profile) -> dict:
         "projects": [pm.project_id for pm in p.project_memberships],
         "runtime_id": p.runtime_id,
         "created_at": p.created_at.isoformat(),
-    }
-
-
-def _attachment_to_dict(a: Attachment) -> dict:
-    return {
-        "id": a.id,
-        "task_id": a.task_id,
-        "filename": a.filename,
-        "content_type": a.content_type,
-        "size_bytes": a.size_bytes,
-        "uploaded_by": a.uploaded_by,
-        "download_url": f"/api/attachments/{a.id}/download",
-        "created_at": a.created_at.isoformat(),
     }
 
 
@@ -296,6 +285,13 @@ def _derive_prefix(name: str) -> str:
     return ''.join(w[0].upper() for w in words[:5])
 
 
+_KICKOFF_TASK_TITLE = "Plan this project"
+# AP-152 / prompts-as-config: the task body is intentionally empty.
+# The Conductor's UI-editable system prompt is the source of truth for
+# how it handles a kickoff task. Body content belongs on the agent's
+# persona, not in service code.
+
+
 def create_project(name: str, description: str = "", actor: str = "system") -> dict:
     with _session() as db:
         prefix = _derive_prefix(name)
@@ -319,7 +315,62 @@ def create_project(name: str, description: str = "", actor: str = "system") -> d
         _log_activity(db, actor, "project.create", f"Created project: {name}", project_id=project.id)
         db.commit()
         db.refresh(project)
-        return _project_to_dict(project)
+        project_id = project.id
+        result = _project_to_dict(project)
+
+    # ── Kickoff: auto-add the Conductor + create the first task ──────────
+    # Conductor is the workspace orchestrator (backend/forge/conductor.py).
+    # Every new project starts with it as a member and one "Plan this
+    # project" task already assigned and ready to Run — the user just
+    # attaches the design + clicks Run, and the Conductor produces the
+    # plan as an artifact + spawns the concrete child tasks.
+    # Best-effort: if the Conductor isn't seedable in this workspace
+    # (missing 'bot' role on a fresh install) we still return the project.
+    try:
+        _seed_project_kickoff(project_id=project_id, actor=actor)
+    except Exception as exc:  # noqa: BLE001 — project must still be created
+        logger.warning("project kickoff seeding failed project=%s: %s",
+                       project_id, exc)
+
+    return result
+
+
+def _seed_project_kickoff(*, project_id: str, actor: str) -> None:
+    """Add the Conductor as a project member and create the kickoff task."""
+    from backend.forge.conductor import get_or_create_conductor, CONDUCTOR_NAME
+    cond = get_or_create_conductor()
+    if not isinstance(cond, dict) or cond.get("error"):
+        logger.info("Conductor not available — skipping kickoff: %s", cond)
+        return
+
+    # Add Conductor as a project member (idempotent — duplicate inserts
+    # just fail benignly; we catch).
+    with _session() as db:
+        cond_prof = _get_profile_by_name(db, CONDUCTOR_NAME)
+        if not cond_prof:
+            return
+        already = (db.query(ProjectMember)
+                     .filter_by(project_id=project_id, profile_id=cond_prof.id)
+                     .first())
+        if not already:
+            db.add(ProjectMember(project_id=project_id, profile_id=cond_prof.id))
+            db.commit()
+
+    # Create the kickoff task assigned to the Conductor. status=todo so it
+    # shows up immediately, not buried in backlog.
+    try:
+        create_task(
+            project_id=project_id,
+            title=_KICKOFF_TASK_TITLE,
+            description="",
+            status="todo",
+            priority="high",
+            assignee=CONDUCTOR_NAME,
+            actor=actor,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("kickoff task create failed project=%s: %s",
+                       project_id, exc)
 
 
 def list_projects(actor: str = "system") -> list[dict]:
@@ -352,7 +403,8 @@ def get_project(project_id: str) -> dict | None:
 
 
 def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
-                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None) -> dict:
+                   repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
+                   work_signal: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -365,6 +417,11 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.repo_path = repo_path
         if conventions_md is not None:
             p.conventions_md = conventions_md
+        if work_signal is not None:
+            # ADR 009: validate against the known modes; ignore junk.
+            from backend.forge.turns import WORK_SIGNAL_MODES
+            if work_signal in WORK_SIGNAL_MODES:
+                p.work_signal = work_signal
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -871,13 +928,13 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         if not task:
             raise ValueError(f"Task {task_id} not found")
         task_id = task.id
-        
+
         act = _log_activity(
             db, actor, "commented", comment,
             project_id=task.project_id, task_id=task_id,
             notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
         )
-        
+
         db.commit()
         if task.assignee and task.assignee != actor:
             target_prof = _get_profile_by_name(db, task.assignee)
@@ -886,7 +943,53 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         agent_notifier.dispatch(db, "task.commented", _task_to_dict(task), actor)
 
         db.refresh(act)
-        return _activity_to_dict(act)
+        result = _activity_to_dict(act)
+
+    # Wake the assigned agent — comment lands in its task chat and triggers
+    # the ADR 009 D routing (running -> pause+steer, paused/parked -> resume,
+    # terminal -> fresh turn). Best-effort, never fails the comment write.
+    # Skip if the actor IS the assignee (avoids an agent's own comment
+    # re-dispatching itself).
+    if task.assignee and task.assignee != actor:
+        try:
+            _wake_assigned_agent_on_comment(
+                task_id=task_id, assignee_name=task.assignee,
+                actor=actor, comment=comment,
+            )
+        except Exception as exc:  # noqa: BLE001 — comment must succeed regardless
+            logger.warning("wake-on-comment failed task=%s: %s", task_id, exc)
+
+    return result
+
+
+def _wake_assigned_agent_on_comment(*, task_id: str, assignee_name: str,
+                                    actor: str, comment: str) -> None:
+    """Comment -> assigned agent's task chat + dispatch (ADR 009 D).
+
+    Find the Forge agent whose profile.name == assignee_name; if it has a
+    bound runtime, deliver the comment as a USER message into the task
+    scope via send_runtime_message — which auto-routes per the run state
+    (running pauses+steers, paused resumes, idle/terminal starts a turn).
+    Skips silently for non-agent assignees (humans) or agents without a
+    runtime (purely HTTP-executor agents).
+    """
+    from backend.forge.models import Agent as ForgeAgent
+    from backend.forge import services as forge_services
+    with _session() as db:
+        prof = _get_profile_by_name(db, assignee_name)
+        if not prof:
+            return
+        agent = (db.query(ForgeAgent)
+                   .filter(ForgeAgent.profile_id == prof.id)
+                   .first())
+        if not agent or not agent.runtime_id:
+            return
+        agent_id = agent.id
+    forge_services.send_runtime_message(
+        agent_id,
+        content=f"[Comment from {actor}] {comment}",
+        scope_key=f"task:{task_id}",
+    )
 
 
 def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
@@ -1407,74 +1510,33 @@ def revoke_profile_permission(profile_id: str, codename: str) -> bool:
 
 
 # ── Attachment operations ────────────────────────────────────────────────
+# AP-152: the actual logic lives in `backend.attachments`. These remain
+# as thin back-compat shims so existing REST + MCP imports keep working.
+
+from backend import attachments as _attachments
+
 
 def add_attachment(task_id: str, filename: str, file_bytes: bytes, content_type: str = "application/octet-stream", uploaded_by: str = "system") -> dict:
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-        task_id = task.id
-
-        task_dir = os.path.join(ATTACHMENTS_DIR, task_id)
-        os.makedirs(task_dir, exist_ok=True)
-
-        import uuid
-        safe_name = f"{uuid.uuid4().hex[:8]}_{filename}"
-        file_path = os.path.join(task_dir, safe_name)
-
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
-
-        att = Attachment(
-            task_id=task_id, filename=filename, content_type=content_type,
-            file_path=file_path, size_bytes=len(file_bytes), uploaded_by=uploaded_by,
-        )
-        db.add(att)
-
-        activity = Activity(task_id=task_id, actor=uploaded_by, action="attached", detail=f"Attached: {filename}")
-        db.add(activity)
-        db.commit()
-        db.refresh(att)
-        return _attachment_to_dict(att)
+    return _attachments.add(
+        task_id=task_id, filename=filename, file_bytes=file_bytes,
+        content_type=content_type, uploaded_by=uploaded_by,
+    )
 
 
 def list_attachments(task_id: str) -> list[dict]:
-    with _session() as db:
-        atts = db.query(Attachment).filter(Attachment.task_id == task_id).order_by(Attachment.created_at.desc()).all()
-        return [_attachment_to_dict(a) for a in atts]
+    return _attachments.list_for_task(task_id)
 
 
 def get_attachment(attachment_id: str) -> tuple[dict, str] | None:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        return _attachment_to_dict(a), a.file_path
+    return _attachments.get(attachment_id)
 
 
 def get_attachment_bytes(attachment_id: str) -> tuple[dict, bytes] | None:
-    """Return attachment metadata and raw file bytes. Used by MCP download tool."""
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        if not os.path.exists(a.file_path):
-            return None
-        with open(a.file_path, "rb") as f:
-            file_bytes = f.read()
-        return _attachment_to_dict(a), file_bytes
+    return _attachments.get_bytes(attachment_id)
 
 
 def delete_attachment(attachment_id: str) -> bool:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return False
-        if os.path.exists(a.file_path):
-            os.remove(a.file_path)
-        db.delete(a)
-        db.commit()
-        return True
+    return _attachments.delete(attachment_id)
 
 
 # ── Profile operations ──────────────────────────────────────────────────

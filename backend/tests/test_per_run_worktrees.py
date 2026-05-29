@@ -1,15 +1,18 @@
-"""AP-123: per-run git worktrees.
+"""Task-scoped git worktrees.
 
 Backend side of the contract:
   - prepare_task_run stamps worktree_path + worktree_branch on the row
     so the daemon knows where to materialize.
-  - Each run gets its own path + branch (different runs of the same
-    task collide-free).
-  - complete_trigger's terminal returns carry cleanup_worktree +
-    cleanup_branch so the daemon can git-worktree-remove on the way out.
-  - The paused branch does NOT cleanup (resume needs the worktree).
-  - The serialize-by-single-worktree guard is lifted: an agent with
-    max_concurrent_runs=2 can have two RUNNING task runs at once.
+  - The path + branch are pinned to (agent, task) — every run/chat on
+    the same (agent, task) shares one worktree so claude --resume keeps
+    working across runs and chats.
+  - ADR 009: the worktree is the conversation home and is NEVER torn
+    down on a terminal run (success/cancel/pause) — it's reused by every
+    run/chat in the task so working files + claude --resume survive.
+    Teardown lives only in a task archive/delete hook.
+  - Two RUNNING runs on the same (agent, task) are rejected (shared
+    cwd would collide). Concurrent runs across DIFFERENT tasks are
+    allowed up to max_concurrent_runs.
 
 The daemon-side git operations are exercised in agentira-cli/tests.
 """
@@ -71,16 +74,16 @@ def test_prepare_stamps_worktree_path_and_branch(test_db):
     assert r["worktree_path"], "worktree_path must be set on prepare"
     assert r["worktree_branch"], "worktree_branch must be set on prepare"
     assert s["agent_id"] in r["worktree_path"]
-    assert r["worktree_path"].rstrip("/").endswith(f"run-{r['id']}")
-    assert r["worktree_branch"].startswith(f"agent/{s['agent_id'][:8]}/run/")
-    # Path stays tilde-prefixed — backend container's ~ is /root but the
-    # daemon runs on the host. The daemon expanduser's at use time.
+    assert r["worktree_path"].rstrip("/").endswith(f"task-{s['task_id'][:8]}")
+    assert r["worktree_branch"].startswith(f"agent/{s['agent_id'][:8]}/task/")
+    # Tilde-prefixed; daemon expanduser's at use time (backend may be in
+    # a container where ~ = /root).
     assert r["worktree_path"].startswith("~/.agentira/"), r["worktree_path"]
 
 
-def test_two_runs_get_distinct_worktrees(test_db):
-    """Re-running the same task lands a second Run row with its own
-    path + branch — no collision."""
+def test_two_runs_on_same_task_share_worktree(test_db):
+    """Pinned-by-scope: the second run on the same (agent, task) lands
+    in the SAME worktree + branch. claude --resume needs this."""
     s = _setup(test_db)
     r1 = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
@@ -88,20 +91,34 @@ def test_two_runs_get_distinct_worktrees(test_db):
     r2 = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
     )
+    assert r1["worktree_path"] == r2["worktree_path"]
+    assert r1["worktree_branch"] == r2["worktree_branch"]
+
+
+def test_runs_on_different_tasks_get_distinct_worktrees(test_db):
+    s = _setup(test_db)
+    t2 = core_services.create_task(s["project_id"], "T2", actor="system")
+    r1 = forge_services.prepare_task_run(
+        task_id=s["task_id"], agent_id=s["agent_id"],
+    )
+    r2 = forge_services.prepare_task_run(
+        task_id=t2["id"], agent_id=s["agent_id"],
+    )
     assert r1["worktree_path"] != r2["worktree_path"]
     assert r1["worktree_branch"] != r2["worktree_branch"]
 
 
 # ── complete_trigger surfaces cleanup hint ───────────────────────────
 
-def test_terminal_complete_returns_cleanup_hint(test_db):
-    """On a successful trigger-complete the daemon needs the path +
-    branch to git-worktree-remove."""
+def test_terminal_complete_does_NOT_cleanup(test_db):
+    """ADR 009: the (agent, task) worktree is the conversation home and
+    is reused by every run/chat in the task, so a terminal run must NOT
+    tear it down — no cleanup hint is returned. (Was the AP-123 behavior;
+    teardown now lives only in a task archive/delete hook.)"""
     s = _setup(test_db)
     r = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
     )
-    # Promote to RUNNING so complete_run won't reject.
     with forge_services._session() as db:
         db.query(Run).filter(Run.id == r["id"]).update({"status": RunStatus.RUNNING})
         db.commit()
@@ -109,11 +126,13 @@ def test_terminal_complete_returns_cleanup_hint(test_db):
         agent_id=s["agent_id"], trace_id="t", run_id=r["id"],
         success=True, input_tokens=10, output_tokens=5,
     )
-    assert res.get("cleanup_worktree") == r["worktree_path"]
-    assert res.get("cleanup_branch") == r["worktree_branch"]
+    assert not res.get("cleanup_worktree")
+    assert not res.get("cleanup_branch")
 
 
-def test_cancelled_complete_also_returns_cleanup_hint(test_db):
+def test_cancelled_complete_also_does_NOT_cleanup(test_db):
+    """ADR 009: cancel is not the end of the task — the worktree (and the
+    conversation cwd) must survive a cancelled run too."""
     s = _setup(test_db)
     r = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
@@ -125,8 +144,8 @@ def test_cancelled_complete_also_returns_cleanup_hint(test_db):
         agent_id=s["agent_id"], trace_id="t", run_id=r["id"],
         success=False, cancelled=True, error="Cancelled by user.",
     )
-    assert res.get("cleanup_worktree") == r["worktree_path"]
-    assert res.get("cleanup_branch") == r["worktree_branch"]
+    assert not res.get("cleanup_worktree")
+    assert not res.get("cleanup_branch")
 
 
 def test_paused_complete_does_NOT_cleanup(test_db):
@@ -142,24 +161,22 @@ def test_paused_complete_does_NOT_cleanup(test_db):
         agent_id=s["agent_id"], trace_id="t", run_id=r["id"],
         success=False, paused=True, session_id="sess-1",
     )
-    # The paused branch returns early — no cleanup keys at all.
     assert "cleanup_worktree" not in res
     assert "cleanup_branch" not in res
 
 
 # ── concurrency cap ──────────────────────────────────────────────────
 
-def test_max_concurrent_runs_2_allows_two_concurrent_dispatches(test_db):
-    """The serialize-per-agent guard is lifted: with concurrency=2 the
-    second dispatch must NOT be rejected by the in-flight check."""
+def test_two_concurrent_runs_on_same_task_rejected(test_db):
+    """Pinned cwd ⇒ the second run on the same (agent, task) MUST be
+    rejected even if max_concurrent_runs is high. Two RUNNING claudes
+    in the same working tree would clobber each other."""
     s = _setup(test_db)
-    # Bump the agent's profile concurrency.
     with forge_services._session() as db:
         prof = db.query(Profile).filter(Profile.id == s["agent_id"]).first()
-        prof.max_concurrent_runs = 2
+        prof.max_concurrent_runs = 5
         db.commit()
 
-    # First task → prepare + simulate it transitioning to RUNNING.
     r1 = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
     )
@@ -167,13 +184,36 @@ def test_max_concurrent_runs_2_allows_two_concurrent_dispatches(test_db):
         db.query(Run).filter(Run.id == r1["id"]).update({"status": RunStatus.RUNNING})
         db.commit()
 
-    # Second task on the same agent — should NOT be rejected (cap=2).
+    r2 = forge_services.prepare_task_run(
+        task_id=s["task_id"], agent_id=s["agent_id"],
+    )
+    from unittest.mock import MagicMock
+    with patch("backend.forge.services._dispatch_coro",
+               MagicMock(return_value=None)):
+        result = forge_services.dispatch_pending_run(run_id=r2["id"])
+    assert "already running this task" in (result.get("error") or "").lower(), result
+
+
+def test_max_concurrent_runs_2_allows_two_different_tasks(test_db):
+    """Cross-task concurrency is allowed up to max_concurrent_runs."""
+    s = _setup(test_db)
+    with forge_services._session() as db:
+        prof = db.query(Profile).filter(Profile.id == s["agent_id"]).first()
+        prof.max_concurrent_runs = 2
+        db.commit()
+
+    r1 = forge_services.prepare_task_run(
+        task_id=s["task_id"], agent_id=s["agent_id"],
+    )
+    with forge_services._session() as db:
+        db.query(Run).filter(Run.id == r1["id"]).update({"status": RunStatus.RUNNING})
+        db.commit()
+
     project = core_services.create_project("P2", actor="system")
     t2 = core_services.create_task(project["id"], "T2", actor="system")
     r2 = forge_services.prepare_task_run(
         task_id=t2["id"], agent_id=s["agent_id"],
     )
-    # Mock the daemon dispatch — we only care about the in-flight guard.
     from unittest.mock import MagicMock
     with patch("backend.forge.services._dispatch_coro",
                MagicMock(return_value=None)):
@@ -181,8 +221,7 @@ def test_max_concurrent_runs_2_allows_two_concurrent_dispatches(test_db):
     assert "error" not in result, result
 
 
-def test_max_concurrent_runs_1_still_rejects_second(test_db):
-    """The cap is real, just configurable. Default 1 still serializes."""
+def test_max_concurrent_runs_1_rejects_second_across_tasks(test_db):
     s = _setup(test_db)
     r1 = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],

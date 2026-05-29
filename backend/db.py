@@ -308,6 +308,8 @@ def run_migrations():
                                     "VARCHAR(120)")
             added |= _ensure_column(conn, "projects", "ac_check_types_json",
                                     "TEXT")
+            # ADR 009 / AP-136: work-signal mode for run crystallization.
+            added |= _ensure_column(conn, "projects", "work_signal", "VARCHAR(20)")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         if "tasks" in tables:
             _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")
@@ -336,6 +338,20 @@ def run_migrations():
         if "epics" in tables:
             if _ensure_column(conn, "epics", "creator", "VARCHAR(120) DEFAULT ''"):
                 conn.commit()
+
+        # attachments — AP-152: project-level attachments share the table.
+        # `task_id` becomes nullable; new `project_id` FK added. A row carries
+        # exactly one (XOR is enforced in `backend.attachments.add`).
+        if "attachments" in tables:
+            if _ensure_column(conn, "attachments", "project_id", "VARCHAR(12)"):
+                conn.commit()
+            if _column_is_not_null(conn, "attachments", "task_id"):
+                if _dialect_name() == "postgresql":
+                    _drop_not_null(conn, "attachments", "task_id")
+                    conn.commit()
+                else:
+                    _sqlite_rebuild_attachments_task_id_nullable(conn)
+                    conn.commit()
 
         # forge_runtimes — for SQLite-only legacy DBs we need to bootstrap
         # the table; on Postgres `create_all` handles fresh deploys cleanly
@@ -389,6 +405,8 @@ def run_migrations():
                                     "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runs", "worktree_branch",
                                     "VARCHAR(255)")
+            # ADR 009 / AP-137: parked steer message (chat-during-run).
+            added |= _ensure_column(conn, "forge_runs", "pending_steer", "TEXT")
             # Materializer outcome from the daemon (ok / no_repo_path /
             # repo_path_not_found:<expanded>). Surfaced on the Run page.
             added |= _ensure_column(conn, "forge_runs", "materialize_reason",
@@ -430,6 +448,36 @@ def run_migrations():
             else:
                 _sqlite_rebuild_forge_agents_profile_id_nullable(conn)
                 conn.commit()
+
+
+def _sqlite_rebuild_attachments_task_id_nullable(conn: Connection) -> None:
+    """SQLite-only: rebuild `attachments` to drop NOT NULL on task_id.
+
+    AP-152: project-scoped attachments need task_id NULL. SQLite can't
+    ALTER COLUMN, so we rename → create_all-shaped fresh table → copy →
+    drop. The fresh table mirrors `models.Attachment` (both FKs nullable).
+    """
+    cols = list(conn.execute(text("PRAGMA table_info(attachments)")))
+    conn.execute(text("PRAGMA foreign_keys=OFF"))
+    conn.execute(text("ALTER TABLE attachments RENAME TO attachments_old"))
+    conn.execute(text("""
+        CREATE TABLE attachments (
+            id VARCHAR(12) PRIMARY KEY,
+            task_id VARCHAR(12) REFERENCES tasks(id),
+            project_id VARCHAR(12) REFERENCES projects(id),
+            filename VARCHAR(255) NOT NULL,
+            content_type VARCHAR(120) DEFAULT 'application/octet-stream',
+            file_path VARCHAR(500) NOT NULL,
+            size_bytes INTEGER DEFAULT 0,
+            uploaded_by VARCHAR(120) DEFAULT 'system',
+            created_at DATETIME
+        )
+    """))
+    old_cols = [c[1] for c in cols]
+    col_list = ", ".join(old_cols)
+    conn.execute(text(f"INSERT INTO attachments ({col_list}) SELECT {col_list} FROM attachments_old"))
+    conn.execute(text("DROP TABLE attachments_old"))
+    conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 def _sqlite_rebuild_forge_agents_profile_id_nullable(conn: Connection) -> None:

@@ -146,7 +146,8 @@ class WsHub:
             )
 
     async def dispatch_signal(self, *, runtime_id: str, signal: str,
-                              trace_id: str = "", run_id: str = "") -> None:
+                              trace_id: str = "", run_id: str = "",
+                              scope_key: str = "") -> None:
         """Generic in-flight control signal — pause / resume / etc.
 
         Uses signal name as the frame type so the daemon's WS client
@@ -159,6 +160,9 @@ class WsHub:
             "trace_id": trace_id,
             "run_id": run_id,
             "runtime_id": runtime_id,
+            # ADR 009 / B6: scope lets the daemon resolve the live turn even
+            # when the trace mapping was lost (backend restart).
+            "scope_key": scope_key,
         }
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
@@ -168,20 +172,23 @@ class WsHub:
                         signal, trace_id or "-", run_id or "-", conn.daemon_id[:8])
 
     async def dispatch_cancel(self, *, runtime_id: str, trace_id: str = "",
-                              run_id: str = "") -> None:
+                              run_id: str = "", scope_key: str = "") -> None:
         """Send a cancel frame to whatever daemon owns runtime_id.
 
-        The daemon resolves trace_id (or run_id → trace_id), marks the
-        in-flight execution cancelled, and kills the subprocess. If
-        nothing is in flight on the daemon side, the cancel is a no-op.
+        The daemon resolves trace_id (or run_id → trace_id, or scope_key →
+        trace_id), marks the in-flight execution cancelled, and kills the
+        subprocess. If nothing is in flight on the daemon side, the cancel
+        falls back to the daemon's durable registry before becoming a no-op.
         """
         import uuid
-        event_id = f"cancel-{trace_id or run_id or uuid.uuid4()}"
+        event_id = f"cancel-{trace_id or run_id or scope_key or uuid.uuid4()}"
         payload = {
             "type": "cancel",
             "trace_id": trace_id,
             "run_id": run_id,
             "runtime_id": runtime_id,
+            # ADR 009 / B6: stop-by-scope — survives a lost trace mapping.
+            "scope_key": scope_key,
         }
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
@@ -339,6 +346,16 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
 
     conn = DaemonConnection(ws, daemon_id, runtime_ids)
     await hub.connect(conn)
+
+    # ADR 009 / B5: ack the registration as the first frame so the daemon
+    # knows the hub actually holds its connection. A socket that "connected"
+    # but never registered (half-open) silently dropped every dispatch — the
+    # daemon now treats a missing ack as a failed connect and reconnects.
+    try:
+        await ws.send_json({"type": "registered", "daemon_id": daemon_id})
+    except Exception:  # noqa: BLE001 — if this fails the socket is dead anyway
+        await hub.disconnect(daemon_id, expected=conn)
+        return
 
     pump_task = asyncio.create_task(conn.write_pump())
     try:

@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from .base import Runtime
+from .base import Runtime, derive_session_handle as _derive_session_handle
 
 logger = logging.getLogger("agentira.runtime.openclaw")
 
@@ -26,7 +26,26 @@ class OpenClawRuntime(Runtime):
     default_binary = "openclaw"
     env_path_override = "AGENTIRA_OPENCLAW_PATH"
     version_args = ("--version",)
+    # ADR 009 / Runtime Adapter contract: OpenClaw's native continuity is
+    # `sessionKey` (server-side thread under the runner agent). The
+    # adapter derives the key in `derive_session_handle` below.
+    # TODO(ADR-009 wire): once the OpenAI-compat /v1/chat/completions body
+    # field name accepted by OpenClaw's gateway is confirmed (CLI flag is
+    # `--session-id`; hooks config uses `sessionKey`; the HTTP shim's body
+    # field is unconfirmed against `gateway` source), add `"resume"` to
+    # capabilities AND send the handle in `run_gateway`'s body. Without
+    # both, declaring `resume` would regress (backend would stop history-
+    # replay while the adapter doesn't actually send the key) — so the
+    # capability flip is the single load-bearing line gated on spec.
     capabilities = ("http_gateway",)
+
+    @classmethod
+    def derive_session_handle(cls, *, agent_id: str, scope_key: str) -> str:
+        """OpenClaw `sessionKey` for (agent, scope_key) — one server-side
+        thread per Agentira conversation scope under the runner agent.
+        Stable: same scope -> same key -> same thread (with KV cache
+        warm)."""
+        return _derive_session_handle(agent_id=agent_id, scope_key=scope_key)
 
     @classmethod
     def introspect(cls, binary_path: str) -> dict:

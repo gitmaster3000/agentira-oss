@@ -39,10 +39,14 @@ class AgentiraClient:
             "runtimes": runtimes,
         })
 
-    def heartbeat_runtimes(self, daemon_id: str, providers: list[str]) -> dict:
+    def heartbeat_runtimes(self, daemon_id: str, providers: list[str],
+                           inflight: list[dict] | None = None) -> dict:
         return self._post("/api/forge/runtimes/heartbeat", {
             "daemon_id": daemon_id,
             "providers": providers,
+            # ADR 009 / B4: report live turns so the backend keeps a
+            # restart-proof view of what's running per scope.
+            "inflight": inflight or [],
         })
 
     def list_runtimes(self) -> list[dict]:
@@ -67,7 +71,8 @@ class AgentiraClient:
                               workdir: str = "", paused: bool = False,
                               cancelled: bool = False,
                               materialize_reason: str = "",
-                              session_lost: bool = False) -> dict:
+                              session_lost: bool = False,
+                              work_signal: dict | None = None) -> dict:
         return self._post(f"/api/forge/agents/{agent_id}/trigger-complete", {
             "daemon_id": daemon_id,
             "trace_id": trace_id,
@@ -93,6 +98,10 @@ class AgentiraClient:
             # session_id wasn't on disk. Backend clears the stale id from
             # forge_conversations so the next dispatch doesn't pick it up.
             "session_lost": session_lost,
+            # ADR 009 / AP-136: raw git work facts {tracked, untracked,
+            # committed} the backend maps onto the project's work-signal
+            # setting to decide whether a standalone turn becomes a run.
+            "work_signal": work_signal or {},
         })
 
     def get_agent(self, agent_id: str) -> dict:

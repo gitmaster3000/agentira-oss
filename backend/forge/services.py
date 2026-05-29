@@ -756,8 +756,18 @@ def register_runtimes(daemon_id: str, device_name: str | None, runtimes: list[di
         return {"registered": results}
 
 
-def heartbeat_runtimes(daemon_id: str, providers: list[str]) -> dict:
+def heartbeat_runtimes(daemon_id: str, providers: list[str],
+                       inflight: list[dict] | None = None) -> dict:
     now = datetime.now(timezone.utc)
+    # ADR 009 / B4: refresh the backend's live-turn mirror from the daemon's
+    # report. Survives a backend restart (re-populated within one heartbeat)
+    # so stop-by-scope and the always-on Stop button don't depend on the
+    # in-process _TRACE_SCOPE map.
+    try:
+        from backend.forge import live_inflight
+        live_inflight.set_for_daemon(daemon_id, inflight or [])
+    except Exception:  # noqa: BLE001 — never fail a heartbeat on the mirror
+        pass
     with _session() as db:
         updated = (
             db.query(ForgeRuntime)
@@ -2227,6 +2237,13 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
 
     trace_id = uuid.uuid4().hex[:12]
 
+    # AP-151 shadow-run trackers — populated inside the with-block only when a
+    # shadow Run is created (run-less task chat). Initialized here so the
+    # frame-build code below can reference them unconditionally.
+    _shadow_task_id = ""
+    _shadow_project_id = ""
+    _shadow_log_dir = ""
+
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a or not a.runtime_id:
@@ -2235,7 +2252,46 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         if not runtime:
             return {"error": "Runtime not found"}
 
-        # Persist the user message tagged with trace_id (and run_id when present)
+        # AP-151 — Shadow run reservation for run-less task chat turns. When a
+        # chat lands in `task:T` without an explicit run_id (no Run button
+        # click, no D-routing resume), reserve a Run row + a log_dir + an
+        # AGENTIRA_RUN_ID env var BEFORE dispatch — so the agent can call
+        # `register_run_artifact`, the daemon can tee stdout/stderr to a
+        # run-keyed dir, and post-mortem diagnostics route correctly. If the
+        # turn does no work, `complete_trigger` deletes the row at the end so
+        # the runs list isn't polluted. This is the "eager infrastructure,
+        # lazy visibility" fix for the lazy-run feature-incompleteness gap.
+        if (run_id is None and kind == "chat" and scope_key
+                and scope_key.startswith("task:")):
+            from backend.models import Task as _Task
+            _shadow_task_id = scope_key.split(":", 1)[1]
+            _shadow_task = db.get(_Task, _shadow_task_id)
+            if _shadow_task:
+                _shadow_project_id = _shadow_task.project_id or ""
+                shadow = Run(
+                    agent_id=a.id, task_id=_shadow_task_id,
+                    project_id=_shadow_project_id or None,
+                    trigger_event="chat.shadow",
+                    status=RunStatus.RUNNING,
+                    model_used=a.model or "",
+                    started_at=datetime.now(timezone.utc),
+                )
+                shadow.worktree_path, shadow.worktree_branch = _compute_worktree_paths(
+                    agent_id=a.id, project_id=_shadow_project_id or None,
+                    task_id=_shadow_task_id,
+                )
+                db.add(shadow)
+                db.flush()
+                run_id = shadow.id
+                _shadow_log_dir = _compute_log_dir(run_id=run_id)
+                shadow.log_dir = _shadow_log_dir
+            else:
+                # Task lookup failed — reset trackers; fall through to a
+                # normal chat dispatch with no shadow.
+                _shadow_task_id = ""
+
+        # Persist the user message tagged with trace_id (and run_id when present
+        # — for shadow runs, this is the freshly-reserved id from above).
         db.add(AgentMessage(
             agent_id=a.id,
             run_id=run_id,
@@ -2254,6 +2310,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         model = a.model or ""
         persona_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
+        # AP-152: agent's api_key — injected into env so the agent can curl
+        # `/api/attachments/<id>/download` (binary project attachments) and
+        # other authed REST endpoints with $AGENTIRA_API_KEY.
+        agent_api_key = (a.profile.api_key if a.profile else "") or ""
 
         # Auto-baked self/project/task awareness preamble.
         # Identity + current screen + project + recent involvement so the
@@ -2311,9 +2371,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         else:
             system_prompt = awareness_preamble
 
-    # If this trigger belongs to a Run (cron, scheduled task, …), flip the
-    # run state to RUNNING before dispatching. complete_trigger will close
-    # it out at the daemon side.
+    # If this trigger belongs to a Run (cron, scheduled task, shadow, …), flip
+    # the run state to RUNNING before dispatching. complete_trigger will close
+    # it out at the daemon side. Shadow runs were already created with status
+    # RUNNING so start_run is a no-op for them.
     if run_id:
         start_run(run_id)
 
@@ -2323,6 +2384,23 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     env_extra_combined = dict(env_extra or {})
     if user_context:
         env_extra_combined["AGENTIRA_USER_CONTEXT_JSON"] = json.dumps(user_context)
+
+    # AP-151: for shadow runs (created above when no explicit run_id was
+    # passed), inject AGENTIRA_RUN_ID / TASK_ID / PROJECT_ID so the agent's
+    # MCP tools (`register_run_artifact` etc.) can target the right run, and
+    # use the shadow's log_dir for the dispatch frame. dispatch_pending_run
+    # sets these for run-button dispatches; setdefault keeps that intact.
+    if run_id:
+        env_extra_combined.setdefault("AGENTIRA_RUN_ID", run_id)
+        if _shadow_task_id:
+            env_extra_combined.setdefault("AGENTIRA_TASK_ID", _shadow_task_id)
+        if _shadow_project_id:
+            env_extra_combined.setdefault("AGENTIRA_PROJECT_ID", _shadow_project_id)
+    # AP-152: agent's own API key so it can authenticate REST calls
+    # (e.g. download binary attachments). setdefault so explicit callers win.
+    if agent_api_key:
+        env_extra_combined.setdefault("AGENTIRA_API_KEY", agent_api_key)
+    effective_log_dir = log_dir or _shadow_log_dir
 
     if scope_key:
         _TRACE_SCOPE[trace_id] = scope_key
@@ -2350,7 +2428,12 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         resume_session_id=resume_session_id,
         env_extra=env_extra_combined,
         run_token=run_token,
-        log_dir=log_dir,
+        log_dir=effective_log_dir,
+        # ADR 009 / B1: the scope rides the frame so the daemon can key its
+        # durable on-disk inflight registry by scope (one live turn per
+        # scope), derive task_id for a chat dispatch, and let stop-by-scope
+        # find the right process even across a backend restart.
+        scope_key=scope_key or "",
     ))
     return {"ok": True, "trace_id": trace_id, "run_id": run_id}
 
@@ -2450,12 +2533,11 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     # PENDING (the create_run default) → READY so the UI knows this run is
     # waiting on the user, not on the system.
     prompt = prompt_template.replace("{run_id}", run_id)
-    # AP-123: stamp the per-run worktree path + branch on the row so the
-    # dispatcher can pass them to the daemon (which materializes via
-    # `git worktree add`). Each run gets its own isolated working tree
-    # so concurrent runs of the same agent are safe.
+    # Stamp the task-scoped worktree path + branch on the row. Shared
+    # across all runs and chats for this (agent, task) so claude's
+    # `--resume` (cwd-keyed) works.
     worktree_path, worktree_branch = _compute_worktree_paths(
-        agent_id=agent_id, project_id=project_id, run_id=run_id,
+        agent_id=agent_id, project_id=project_id, task_id=task_id,
     )
     log_dir = _compute_log_dir(run_id=run_id)
     with _session() as db:
@@ -2478,33 +2560,36 @@ def _compute_log_dir(*, run_id: str) -> str:
     return f"~/.agentira/runs/{run_id}/"
 
 
-# AP-123: per-run worktree path + branch are stamped on the Run row at
-# prepare time and passed to the daemon at dispatch. Format:
-#   path:   ~/.agentira/agents/<agent_id>/home/repos/<project_id>/run-<run_id>/
-#   branch: agent/<agent_id[:8]>/run/<run_id[:8]>
-# The path mirrors the legacy single-worktree layout but with a run-
-# scoped final component so two concurrent runs never collide. Branch
-# is short enough to scan in `git branch -a` without wrapping.
+# Worktree path + branch are stamped on the Run row at prepare time and
+# passed to the daemon at dispatch. Pinned BY TASK SCOPE — every run and
+# chat dispatch for the same (agent, task) shares one worktree so
+# claude's `--resume <session_id>` (which is keyed by cwd at session
+# creation) keeps working across runs and chats.
+#
+#   path:   ~/.agentira/agents/<agent_id>/home/repos/<project_id>/task-<task_id[:8]>/
+#   branch: agent/<agent_id[:8]>/task/<task_id[:8]>
+#
+# Tradeoff vs the earlier per-run scheme (AP-123): two concurrent runs
+# on the same (agent, task) would collide in the shared working tree,
+# so runs serialize per (agent, task). Concurrent runs across DIFFERENT
+# tasks for the same agent still work (capped by max_concurrent_runs).
 
 def _compute_worktree_paths(*, agent_id: str, project_id: str | None,
-                            run_id: str) -> tuple[str, str]:
-    """Return (worktree_path, worktree_branch) for a fresh run.
+                            task_id: str | None) -> tuple[str, str]:
+    """Return (worktree_path, worktree_branch) pinned to (agent, task).
 
-    `project_id` may be None for non-task chat runs — those don't get a
-    worktree (the daemon falls back to the agent's home dir as today).
+    Returns ("", "") when there's no task scope or project — the daemon
+    falls back to the agent's home dir as today.
 
-    The path is intentionally tilde-prefixed and NOT expanded here. The
-    backend may run in a container where `~` = `/root`, but the daemon
-    runs on the host where `~` = the operator's home. Expansion happens
-    on the daemon side at use time (materializer + git worktree add).
-    Pre-expanding here stamped `/root/...` on the row, which the daemon
-    could not resolve, silently breaking per-run worktrees.
+    Path is tilde-prefixed and NOT expanded here: backend may run in a
+    container where `~` = `/root`, but the daemon runs on the host.
+    Expansion happens daemon-side at use time.
     """
-    if not project_id:
+    if not project_id or not task_id:
         return "", ""
     path = (f"~/.agentira/agents/{agent_id}/home/repos/"
-            f"{project_id}/run-{run_id}/")
-    branch = f"agent/{agent_id[:8]}/run/{run_id[:8]}"
+            f"{project_id}/task-{task_id[:8]}/")
+    branch = f"agent/{agent_id[:8]}/task/{task_id[:8]}"
     return path, branch
 
 
@@ -2565,21 +2650,24 @@ def dispatch_pending_run(*, run_id: str,
         agent_id = agent.id
         task = db.get(Task, task_id) if task_id else None
 
-        # Serialize task runs per agent. All of an agent's task runs share
-        # AP-123: each run now gets its own git worktree (set in
-        # prepare_task_run), so concurrent runs of the same agent are
-        # finally safe. The cap is the agent's `max_concurrent_runs`
-        # rather than the old "one at a time, always" rule. `resume`
-        # excludes the run itself.
+        # Concurrency model: cwd is pinned per (agent, task), so two
+        # runs on the SAME task would clobber each other's working tree.
+        # Serialize per (agent, task), then cap total runs across tasks
+        # by the agent's max_concurrent_runs.
         if task_id:
-            cap = max(1, int(agent.max_concurrent_runs or 1) if hasattr(agent, "max_concurrent_runs")
-                      else 1)
-            # Profile carries max_concurrent_runs (forge_agents row is the
-            # transitional shim — read from the linked profile).
+            same_task_in_flight = (db.query(Run)
+                                     .filter(Run.agent_id == agent_id,
+                                             Run.task_id == task_id,
+                                             Run.status == RunStatus.RUNNING,
+                                             Run.id != run_id)
+                                     .count())
+            if same_task_in_flight:
+                return {"error": (
+                    "Agent already running this task. Wait for it to "
+                    "finish or stop it first.")}
             from backend.models import Profile as _Profile
             prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
-            if prof:
-                cap = max(1, int(prof.max_concurrent_runs or 1))
+            cap = max(1, int(prof.max_concurrent_runs or 1)) if prof else 1
             in_flight = (db.query(Run)
                            .filter(Run.agent_id == agent_id,
                                    Run.status == RunStatus.RUNNING,
@@ -2593,9 +2681,12 @@ def dispatch_pending_run(*, run_id: str,
                     f"max_concurrent_runs, or stop a run first.")}
 
         if resume:
-            # Resume: send a continuation nudge, keep initial_prompt as the
-            # original task prompt. The session is reloaded via --resume.
-            prompt = _RESUME_CONTINUATION_PROMPT
+            # Resume: by default a continuation nudge; but if a steer message
+            # was provided (chat-during-run, or resuming a parked run with the
+            # user's new instruction), dispatch THAT as the next turn instead.
+            # initial_prompt (the original task prompt) is left untouched; the
+            # session is reloaded via --resume.
+            prompt = prompt_override or _RESUME_CONTINUATION_PROMPT
         else:
             # Persist the (possibly edited) prompt and pick what we dispatch.
             if prompt_override is not None:
@@ -2922,6 +3013,9 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
             return {"error": f"Run is {run.status.value}; cannot {frame_type}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
+        # ADR 009 / B6: scope so the daemon can resolve the live turn by
+        # scope when the trace mapping was lost (backend restart).
+        signal_scope_key = f"task:{run.task_id}" if run.task_id else ""
         last_msg = (db.query(AgentMessage)
                     .filter(AgentMessage.run_id == run_id)
                     .order_by(AgentMessage.created_at.desc())
@@ -2941,6 +3035,7 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
                 signal=frame_type,
                 trace_id=trace_id,
                 run_id=run_id,
+                scope_key=signal_scope_key,
             ))
         except Exception:
             pass
@@ -2985,6 +3080,15 @@ def resume_run(run_id: str) -> dict:
     return dispatch_pending_run(run_id=run_id, resume=True)
 
 
+def scope_live(scope_key: str) -> dict:
+    """ADR 009 / E2: whether a turn is live for this scope, from the
+    daemon-reported live-inflight mirror (survives a backend restart).
+    Lets the chat UI keep Stop available while anything is running."""
+    from backend.forge import live_inflight
+    trace = live_inflight.lookup_trace(scope_key)
+    return {"live": bool(trace), "trace_id": trace or ""}
+
+
 def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     """ADR 008: Stop button in chat.
 
@@ -3007,6 +3111,14 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     for tid, sc in list(_TRACE_SCOPE.items()):
         if sc == scope_key:
             trace_id = tid  # last one wins (insertion order)
+    # ADR 009 / B4: if the in-process map missed (e.g. backend restarted),
+    # use the daemon-reported live-turn mirror — authoritative and fresher
+    # than the persisted-message fallback below (which can point at a
+    # finished trace). The daemon also resolves by scope_key on its side,
+    # so this is mainly for an accurate response/log.
+    if not trace_id:
+        from backend.forge import live_inflight
+        trace_id = live_inflight.lookup_trace(scope_key)
     if not trace_id:
         with _session() as db:
             m = (db.query(AgentMessage)
@@ -3039,10 +3151,25 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     if paused_run_id:
         # pause_run also fires the WS pause frame and flips status.
         pause_run(paused_run_id)
-    elif runtime_id:
+        return {"ok": True, "paused_run_id": paused_run_id,
+                "cancelled_trace_id": trace_id or None}
+
+    # No active Run row — fire a bare cancel to the daemon. Guard with a
+    # daemon-online check so the UI gets a clear error instead of a
+    # silent ok=True when the WS link is half-open (the failure mode
+    # that hid every "zombie chat I can't stop" bug).
+    if runtime_id:
+        from backend.forge.ws_dispatch import hub as _hub
+        online = any(runtime_id in c.runtime_ids for c in _hub._conns.values())
+        if not online:
+            return {"ok": False, "error": (
+                "Daemon offline — cancel could not be delivered. The "
+                "chat process may still be running on the host. Restart "
+                "the daemon or kill the subprocess manually.")}
         try:
             _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id,
+                scope_key=scope_key,
             ))
         except Exception:
             pass
@@ -3071,6 +3198,9 @@ def cancel_run(run_id: str) -> dict:
             return {"error": f"Run already {run.status.value}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
+        # ADR 009 / B6: the run's task scope, so the daemon can resolve the
+        # live turn by scope if the trace mapping was lost.
+        cancel_scope_key = f"task:{run.task_id}" if run.task_id else ""
 
         # Look up the latest trace_id for this run so the daemon can match.
         last_msg = (db.query(AgentMessage)
@@ -3100,6 +3230,7 @@ def cancel_run(run_id: str) -> dict:
         try:
             _dispatch_coro(hub.dispatch_cancel(
                 runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
+                scope_key=cancel_scope_key,
             ))
         except Exception as exc:
             # WS dispatch is best-effort — the run is already marked cancelled.
@@ -3419,7 +3550,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      cancelled: bool = False,
                      diagnostics: dict | None = None,
                      materialize_reason: str = "",
-                     session_lost: bool = False) -> dict:
+                     session_lost: bool = False,
+                     work_signal: dict | None = None) -> dict:
     """Finalize a trigger. Updates the Run if `run_id` is set; for chat
     triggers we still surface the failure as a system-role message on
     the agent so the chat UI shows what actually went wrong instead of
@@ -3521,6 +3653,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         # P3: flip PAUSING → PAUSED unconditionally on the daemon's ack.
         # Even if no session_id arrived (non-claude runtimes), the daemon
         # confirmed the kill — that's the signal we were waiting for.
+        pending_steer = None
+        steer_task_id = None
         if run_id:
             with _session() as db:
                 r = db.query(Run).filter(Run.id == run_id).first()
@@ -3533,7 +3667,28 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                         r.status = RunStatus.PAUSED
                         r.stop_requested_at = None
                         _broadcast_status(run_id, RunStatus.PAUSED)
+                    # ADR 009 / D1: a message arrived while this run was
+                    # RUNNING and was parked here. Now that the pause is
+                    # confirmed (session_id captured), dispatch it as the
+                    # next turn — resuming THIS run via --resume.
+                    pending_steer = r.pending_steer
+                    steer_task_id = r.task_id
+                    if pending_steer:
+                        r.pending_steer = None
                     db.commit()
+        # The run's own task is the reliable scope source (the trace's
+        # _TRACE_SCOPE / messages may be gone after a backend restart).
+        steer_scope = scope or (f"task:{steer_task_id}" if steer_task_id else "")
+        if pending_steer and steer_scope:
+            try:
+                # Re-enter send_runtime_message: the run is now PAUSED, so it
+                # takes the resume branch and continues the episode with the
+                # user's steering message (same run_id).
+                send_runtime_message(agent_id, content=pending_steer,
+                                     scope_key=steer_scope)
+            except Exception as exc:  # noqa: BLE001
+                _dispatch_logger.warning(
+                    "pending-steer dispatch failed run=%s: %s", run_id, exc)
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
 
@@ -3592,6 +3747,66 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             agent_id=agent_id, scope_key=scope,
             runtime_session_id=session_id or "",
         )
+
+    # ADR 009 / AP-136 (legacy lazy crystallize). Task chat turns now get a
+    # shadow run reserved up-front in dispatch_trigger (AP-151), so for task
+    # scopes run_id is always set here and this branch is inert. The path
+    # remains for non-task scopes where `maybe_crystallize_chat_turn` is a
+    # no-op anyway (its first check returns None for any non-`task:` scope).
+    # Kept as a defensive belt+suspenders; harmless.
+    if (not run_id) and effective_success:
+        cz_scope = scope
+        if not cz_scope:
+            with _session() as db:
+                m = (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.scope_key.isnot(None),
+                               AgentMessage.scope_key != "")
+                       .order_by(AgentMessage.created_at.desc())
+                       .first())
+                cz_scope = m.scope_key if m else ""
+        try:
+            from backend.forge import turns
+            turns.maybe_crystallize_chat_turn(
+                agent_id=agent_id, trace_id=trace_id, scope_key=cz_scope,
+                work_signal=work_signal, diff_stat=diff_stat, diff=diff,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+            )
+        except Exception as exc:  # noqa: BLE001 — never fail completion
+            _dispatch_logger.warning("chat-turn crystallize failed trace=%s: %s",
+                                     trace_id, exc)
+
+    # AP-151 — Shadow-run delete-if-no-work. A Run was reserved at dispatch
+    # for run-less task chats so the agent could register artifacts and the
+    # daemon could capture logs/diagnostics. Now: if the turn produced no
+    # work (per the project's work-signal mode), no agent-declared outcome,
+    # and no artifacts → delete the row + NULL the trace's message rows so
+    # the runs list isn't polluted. The chat transcript stays intact (the
+    # messages keep their scope_key + trace_id; only their run_id link is
+    # severed). Trivial chat stays trivial; material chat keeps its run.
+    if run_id:
+        with _session() as db:
+            r = db.query(Run).filter(Run.id == run_id).first()
+            if r and r.trigger_event == "chat.shadow":
+                had_explicit_outcome = agent_declared_outcome is not None
+                arts = (r.artifacts_json or "").strip()
+                had_artifacts = bool(arts) and arts != "[]"
+                try:
+                    from backend.forge import turns as _turns
+                    mode = _turns.resolve_work_signal_mode(r.project_id)
+                    did_work = _turns.turn_did_work(work_signal, mode)
+                except Exception:  # noqa: BLE001
+                    did_work = bool((r.diff or "").strip())
+                if not (did_work or had_explicit_outcome or had_artifacts):
+                    db.query(AgentMessage).filter(
+                        AgentMessage.run_id == run_id
+                    ).update({"run_id": None}, synchronize_session=False)
+                    db.delete(r)
+                    db.commit()
+                    _dispatch_logger.info(
+                        "shadow run deleted trace=%s run=%s — no work crystallized",
+                        trace_id, run_id)
+                    run_id = None  # downstream sees a run-less chat turn
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a
@@ -3653,17 +3868,17 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
 
 
 def _worktree_cleanup_hint(run_id: str | None) -> dict:
-    """Pull worktree_path + worktree_branch from the Run row so the
-    daemon can `git worktree remove` and `git branch -D` after a
-    terminal completion. Empty strings on legacy rows / non-task runs."""
-    if not run_id:
-        return {"path": "", "branch": ""}
-    with _session() as db:
-        r = db.query(Run).filter(Run.id == run_id).first()
-        if not r:
-            return {"path": "", "branch": ""}
-        return {"path": r.worktree_path or "",
-                "branch": r.worktree_branch or ""}
+    """ADR 009: the (agent, task) worktree is the conversation home and
+    must survive for the life of the task — it's reused by every run and
+    chat in the task so the agent's working files persist and claude
+    `--resume` keeps landing in one stable cwd. So a terminal run NEVER
+    tears it down: we always return empty hints (the daemon's cleanup is
+    guarded by `if cw and cb`, so empty = no-op). Worktree teardown moves
+    to a task archive/delete hook (AP-134 A4), the only place it's safe.
+
+    `run_id` is kept in the signature for the call sites that still pass
+    it; the value is ignored on purpose."""
+    return {"path": "", "branch": ""}
 
 
 def get_trigger_events(trace_id: str) -> list[dict]:
@@ -3730,21 +3945,67 @@ def send_runtime_message(
                 return {"error": (f"Run is {in_flight_stop.status.value}; "
                                   "wait for the stop to confirm before "
                                   "sending another message.")}
+            # D1 (chat-during-run): a message into a RUNNING/RESUMING run
+            # interrupts-and-steers. We can't --resume a session whose id
+            # isn't finalized until the daemon confirms the kill, so park the
+            # message on the run, pause it (clean SIGTERM, session captured),
+            # and let complete_trigger's paused branch dispatch it as the next
+            # turn. Return early — no fresh chat turn.
+            active = (db.query(Run)
+                        .filter(Run.task_id == task_id,
+                                Run.agent_id == agent_id,
+                                Run.status.in_([RunStatus.RUNNING,
+                                                RunStatus.RESUMING]))
+                        .order_by(Run.created_at.desc())
+                        .first())
+            if active:
+                steer_run_id = active.id
+                active.pending_steer = content
+                db.add(AgentMessage(
+                    agent_id=agent_id, run_id=steer_run_id, scope_key=scope_key,
+                    role=MessageRole.SYSTEM,
+                    content=("⏸ Pausing the current run to fold in your "
+                             "message — it'll continue from where it left off."),
+                ))
+                db.commit()
+                pause_run(steer_run_id)
+                return {"ok": True, "steering_run_id": steer_run_id,
+                        "note": "paused the running run to fold in your message"}
+
+            # PAUSED, or parked-by-outcome (needs_input / blocked) and still
+            # the latest activity → resume THIS run with the user's message as
+            # the next turn (same run_id, so it continues the episode rather
+            # than crystallizing a new run). resumed_run_id is threaded onto
+            # the dispatch below so complete_trigger updates this run.
             paused = (db.query(Run)
                         .filter(Run.task_id == task_id,
                                 Run.agent_id == agent_id,
                                 Run.status == RunStatus.PAUSED)
                         .order_by(Run.created_at.desc())
                         .first())
+            if not paused:
+                parked = (db.query(Run)
+                            .filter(Run.task_id == task_id,
+                                    Run.agent_id == agent_id,
+                                    Run.outcome.in_([RunOutcome.NEEDS_INPUT,
+                                                     RunOutcome.BLOCKED]))
+                            .order_by(Run.created_at.desc())
+                            .first())
+                if parked:
+                    newer = (db.query(Run)
+                               .filter(Run.task_id == task_id,
+                                       Run.agent_id == agent_id,
+                                       Run.created_at > parked.created_at)
+                               .count())
+                    if newer == 0:
+                        paused = parked  # revive the parked run
             if paused:
                 resumed_run_id = paused.id
-                # PAUSED is a confirmed-terminated state (daemon already
-                # posted paused=True for it), so there's no live process
-                # to race here — flip directly to RUNNING. The transient
-                # RESUMING state is reserved for the explicit Resume
-                # button path, where dispatch_pending_run → dispatch_
-                # trigger → start_run drives the transition.
+                # PAUSED/parked are confirmed-terminated (no live proc to
+                # race), so flip straight to RUNNING. Clear the parked
+                # verdict — the agent re-declares one when it finishes.
                 paused.status = RunStatus.RUNNING
+                paused.outcome = None
                 db.commit()
                 _broadcast_status(paused.id, RunStatus.RUNNING)
 
@@ -3830,10 +4091,23 @@ def send_runtime_message(
             # cwd is a template (`~/...`); daemon expands and ensures the
             # dir + git worktree. Backend can't touch the host filesystem.
             if proj:
-                repo_path = ensure_agent_worktree(a, proj)
                 worktree_source_path = proj.repo_path or ""
                 worktree_source_url = getattr(proj, "repo_url", None) or ""
-                worktree_branch = f"agent/{a.id}/work"
+                # Task-scoped chats share cwd with the task's runs so
+                # claude --resume works across run/chat boundaries.
+                _task_id_for_cwd = None
+                if scope_key and scope_key.startswith("task:"):
+                    _task_id_for_cwd = scope_key.split(":", 1)[1]
+                task_path, task_branch = _compute_worktree_paths(
+                    agent_id=a.id, project_id=project_id,
+                    task_id=_task_id_for_cwd,
+                )
+                if task_path:
+                    repo_path = task_path
+                    worktree_branch = task_branch
+                else:
+                    repo_path = ensure_agent_worktree(a, proj)
+                    worktree_branch = f"agent/{a.id}/work"
             else:
                 repo_path = ensure_agent_home_dir(a)
                 worktree_source_path = ""
@@ -3891,8 +4165,33 @@ def send_runtime_message(
                     agent_id=a.id, scope_key=scope, current=content,
                 )
 
+            # Serialize chats per (agent, scope). Two claude subprocesses
+            # sharing one cwd corrupt each other's index; the older one
+            # also keeps running invisibly because the UI only knows
+            # about the latest trace. Cancel any prior in-flight trace
+            # for this scope before spawning a new one.
+            _runtime_id_for_cancel = a.runtime_id
+            _prior_traces = [tid for tid, sc in list(_TRACE_SCOPE.items())
+                             if sc == scope]
+            if _prior_traces:
+                from backend.forge.ws_dispatch import hub as _hub
+                for _tid in _prior_traces:
+                    try:
+                        _dispatch_coro(_hub.dispatch_cancel(
+                            runtime_id=_runtime_id_for_cancel,
+                            trace_id=_tid,
+                            scope_key=scope,
+                        ))
+                    except Exception:
+                        pass
+                    _TRACE_SCOPE.pop(_tid, None)
+
             result = dispatch_trigger(
-                agent_id, prompt_with_history, run_id=run_id, kind="chat",
+                # ADR 009 / D: when resuming a run, the turn carries its
+                # run_id so complete_trigger updates THAT run (and C1 won't
+                # crystallize a duplicate). Plain chat turns stay run-less.
+                agent_id, prompt_with_history,
+                run_id=run_id or resumed_run_id, kind="chat",
                 repo_path=repo_path,
                 worktree_source_path=worktree_source_path,
                 worktree_source_url=worktree_source_url,

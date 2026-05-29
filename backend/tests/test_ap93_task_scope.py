@@ -144,5 +144,8 @@ def test_stop_chat_no_active_run_falls_back_to_dispatch_cancel(monkeypatch):
         "backend.forge.ws_dispatch.hub.dispatch_cancel", fake_cancel,
     )
     result = forge_services.stop_chat(agent_id=agent_id, scope_key=scope)
+    # Agent in this test has no runtime_id (http executor), so the
+    # daemon-online guard doesn't fire — stop_chat returns ok=True with
+    # no cancel actually dispatched.
     assert result["ok"] is True
     assert result["paused_run_id"] is None

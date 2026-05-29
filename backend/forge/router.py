@@ -132,6 +132,11 @@ class DaemonTriggerComplete(BaseModel):
     # session id wasn't found locally. Backend clears the stale id from
     # forge_conversations so the next dispatch doesn't reuse it.
     session_lost: bool = False
+    # ADR 009 / AP-136: raw git work facts {tracked, untracked, committed}.
+    # The backend maps these onto the project's work-signal setting to
+    # decide whether a standalone (run-less) chat turn crystallizes into a
+    # run. Empty/absent for older daemons — the turn just stays a turn.
+    work_signal: dict = {}
 
 
 class MessageCreate(BaseModel):
@@ -204,6 +209,9 @@ class RuntimeRegisterRequest(BaseModel):
 class RuntimeHeartbeatRequest(BaseModel):
     daemon_id: str
     providers: list[str]  # which providers are still alive
+    # ADR 009 / B4: the daemon's currently-live turns, so the backend has a
+    # restart-proof view of what's running (and stoppable) per scope.
+    inflight: list[dict] = []
 
 
 # ── Runtime endpoints ─────────────────────────────────────────────────────
@@ -219,7 +227,10 @@ def register_runtimes(body: RuntimeRegisterRequest):
 
 @daemon_router.post("/runtimes/heartbeat")
 def runtime_heartbeat(body: RuntimeHeartbeatRequest):
-    return services.heartbeat_runtimes(daemon_id=body.daemon_id, providers=body.providers)
+    return services.heartbeat_runtimes(
+        daemon_id=body.daemon_id, providers=body.providers,
+        inflight=body.inflight,
+    )
 
 
 @daemon_router.post("/agents/{agent_id}/trigger-events")
@@ -248,6 +259,7 @@ def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
         diagnostics=body.diagnostics,
         materialize_reason=body.materialize_reason,
         session_lost=body.session_lost,
+        work_signal=body.work_signal,
     )
 
 
@@ -661,6 +673,15 @@ def list_messages(agent_id: str, run_id: Optional[str] = None,
 @router.get("/agents/{agent_id}/conversations")
 def list_conversations(agent_id: str):
     return services.list_conversations(agent_id)
+
+
+@router.get("/agents/{agent_id}/scope-live")
+def agent_scope_live(agent_id: str, scope_key: str):
+    """ADR 009 / E2: is a turn live for this scope right now? Backed by the
+    daemon-reported live-inflight mirror, so the chat UI can keep Stop
+    available while anything is running (no 10-minute heuristic) and across
+    a backend restart."""
+    return services.scope_live(scope_key)
 
 
 # ── ADR 008: chat controls (clear + stop) ──────────────────────────────

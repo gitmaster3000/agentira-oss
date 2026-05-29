@@ -376,13 +376,44 @@ async def upload_attachment(task_id: str, filename: str, content_base64: str, co
 
 @mcp.tool()
 async def download_attachment(attachment_id: str) -> dict:
-    """Download an attachment by ID. Returns metadata and base64-encoded file content."""
+    """Download an attachment by ID. Returns metadata and base64-encoded file content.
+
+    Legacy tool. Prefer `read_attachment_text` — it returns text directly
+    and a download/curl hint for binary, no base64 round-trip.
+    """
     import base64
     result = services.get_attachment_bytes(attachment_id)
     if not result:
         return {"error": "Attachment not found or file missing on disk"}
     meta, file_bytes = result
     return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
+
+# AP-152: project attachments + base64-free reads.
+
+@mcp.tool()
+async def list_project_attachments(project_id: str) -> list[dict]:
+    """List attachments uploaded against a project (briefs, designs, brand
+    guides). Text files under 50KB include an `inline_text` field —
+    everything else exposes a `download_url`. Pair with
+    `read_attachment_text` for larger reads.
+    """
+    from backend import attachments as _attachments
+    return _attachments.list_for_project(project_id)
+
+
+@mcp.tool()
+async def read_attachment_text(attachment_id: str) -> dict:
+    """Read an attachment without base64.
+
+    Text/* returns the file's content inline. Binary returns
+    `download_url` + `api_key_env: "AGENTIRA_API_KEY"` + a curl hint —
+    use `$AGENTIRA_API_KEY` from your env to fetch.
+    """
+    from backend import attachments as _attachments
+    result = _attachments.read_text(attachment_id)
+    if not result:
+        return {"error": "Attachment not found"}
+    return result
 
 # ── Project Activity Tools ──────────────────────────────────────────────────────
 

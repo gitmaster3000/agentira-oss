@@ -237,12 +237,23 @@ class Project(Base):
     # template registered (used later by the gate engine).
     template_name: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
     ac_check_types_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # ADR 009 / AP-136: work-signal mode deciding when a standalone chat turn
+    # crystallizes into a run — "working_tree" (default; any tracked change or
+    # new untracked file), "tracked", or "committed". NULL = workspace default.
+    work_signal: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     tasks: Mapped[list["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     activities: Mapped[list["Activity"]] = relationship(back_populates="project", cascade="all, delete-orphan", order_by="Activity.created_at.desc()")
+    # AP-152: project-level attachments (briefs, designs, brand guides).
+    # Same Attachment table — row carries project_id XOR task_id.
+    attachments: Mapped[list["Attachment"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+        primaryjoin="Project.id == Attachment.project_id",
+    )
 
 
 class ProjectRepo(Base):
@@ -340,7 +351,11 @@ class Attachment(Base):
     __tablename__ = "attachments"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
-    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False)
+    # AP-152: task_id XOR project_id — a row attaches to exactly one of them.
+    # Both columns are nullable at the DB level; the XOR invariant is
+    # enforced in `backend.attachments.add`.
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -348,7 +363,8 @@ class Attachment(Base):
     uploaded_by: Mapped[str] = mapped_column(String(120), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
-    task: Mapped["Task"] = relationship(back_populates="attachments")
+    task: Mapped["Task | None"] = relationship(back_populates="attachments")
+    project: Mapped["Project | None"] = relationship(back_populates="attachments")
 
 
 # ── Git Integration ─────────────────────────────────────────────────────
