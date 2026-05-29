@@ -60,10 +60,23 @@ export function CreateProjectWizard({ onClose, onSuccess }) {
     // Step 2 — attachments (uploaded after project create)
     const [files, setFiles] = useState([]);
 
-    // Step 3 — initial tasks. Pre-populated with a single empty-body
-    // "Plan this project" row; user edits it, removes it, or adds more.
+    // Step 3 — initial tasks. Pre-populated with a single "Plan this
+    // project" row carrying a terse starter prompt that's visible in the
+    // form. This is a UI default, not a runtime override — the user sees
+    // it on screen and can edit, expand, or delete before submit. By
+    // the time it lands on Task.description, the user has authored it
+    // (or accepted it). That's the "standard route" the prompts-as-config
+    // principle calls for.
     const [tasks, setTasks] = useState([
-        { title: 'Plan this project', description: '', assignee: 'Conductor', priority: 'high' },
+        {
+            title: 'Plan this project',
+            description:
+                'Read the project description and any uploaded files (they live on the project, ' +
+                'not this task). Output a one-page plan as a `report` artifact and create 3–8 ' +
+                'concrete child tasks for the work, including CI/CD setup if appropriate.',
+            assignee: 'Conductor',
+            priority: 'high',
+        },
     ]);
 
     // Step 4 — available agents to attach
