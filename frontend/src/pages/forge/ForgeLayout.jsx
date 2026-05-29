@@ -7,7 +7,9 @@ import { FloatingChat } from '../../components/FloatingChat';
 export function ForgeLayout() {
     return (
         <div className="flex flex-col h-screen overflow-hidden bg-bg-app">
-            <Navbar onNewProject={() => {}} />
+            {/* AP-144/145: Forge is project-agnostic — hide the Project
+                switcher (which had a dead Create-Project item here too). */}
+            <Navbar onNewProject={() => {}} showProjectSwitcher={false} />
 
             <div className="flex flex-1 overflow-hidden">
                 <ForgeSidebar />

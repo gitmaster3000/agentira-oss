@@ -25,7 +25,12 @@ const PRODUCTS = {
     forge:  { name: 'Forge',  icon: Cpu,    color: '#80cbc4', path: '/forge' },
 };
 
-export function Navbar({ onNewProject }) {
+// AP-144 / AP-145: `showProjectSwitcher` lets callers hide the Project tab +
+// its Create-Project dropdown entirely. Forge surfaces (agents / runs /
+// runtimes / conductor) are project-agnostic — the switcher there did
+// nothing on click in any case (no onNewProject handler), so we just don't
+// render it. Default true keeps Studio behavior unchanged.
+export function Navbar({ onNewProject, showProjectSwitcher = true }) {
     const { user, logout } = useAuth();
     const { projectId } = useParams();
     const location = useLocation();
@@ -165,7 +170,9 @@ export function Navbar({ onNewProject }) {
                     </div>
                 </Link>
 
-                {/* Project Switcher */}
+                {/* Project Switcher (AP-144/145: hidden in Forge — irrelevant
+                    there, plus the Create Project item was a dead button). */}
+                {showProjectSwitcher && (
                 <div className="relative" ref={projectRef}>
                     <button
                         onClick={() => setIsProjectOpen(!isProjectOpen)}
@@ -228,6 +235,7 @@ export function Navbar({ onNewProject }) {
                         </div>
                     )}
                 </div>
+                )}
             </div>
             <div className="flex items-center gap-2">
                 {/* Create Dropdown */}
