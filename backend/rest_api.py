@@ -60,6 +60,8 @@ class ProjectUpdate(BaseModel):
     # AP-155: project-level sandbox containment override. NULL → inherit
     # from the dispatched agent's `Profile.sandbox_mode`.
     sandbox_mode: Optional[str] = None
+    # AP-158: column-exit gate enforcement.
+    gates_enabled: Optional[bool] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -359,6 +361,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             conventions_md=body.conventions_md,
             work_signal=body.work_signal,
             sandbox_mode=body.sandbox_mode,
+            gates_enabled=body.gates_enabled,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -531,10 +534,15 @@ def api_delete_task(task_id: str):
 
 @tasks.post("/{task_id}/move")
 def api_move_task(task_id: str, body: TaskMove, actor: str = Depends(get_current_user)):
+    from backend.gates import GateFailure
     try:
         return services.move_task(task_id, body.status, actor)
     except PermissionError as e:
         raise HTTPException(403, str(e))
+    except GateFailure as e:
+        # AP-158: structured 422 so the UI can surface each failed gate
+        # with its name + reason rather than a one-line message.
+        raise HTTPException(422, detail=e.to_dict())
     except ValueError as e:
         raise HTTPException(400, str(e))
 
