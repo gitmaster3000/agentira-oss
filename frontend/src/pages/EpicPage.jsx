@@ -4,6 +4,7 @@ import { ArrowLeft, Pencil, Trash2, ListTodo } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Breadcrumbs } from '../components/Breadcrumbs';
+import { Markdown } from '../components/Markdown';
 
 const PRIORITY_DOTS = {
     critical: '#e74c3c',
@@ -121,9 +122,13 @@ export function EpicPage() {
 
             <div className="card">
                 <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm text-text-secondary whitespace-pre-wrap">
-                        {epic.description || <span className="italic text-text-tertiary">No description.</span>}
-                    </p>
+                    {/* AP-39: render description as GitHub-flavored markdown
+                        (tables, code, headings, lists) — not as plain text. */}
+                    <div className="flex-1 min-w-0">
+                        {epic.description
+                            ? <Markdown>{epic.description}</Markdown>
+                            : <span className="italic text-text-tertiary text-sm">No description.</span>}
+                    </div>
                     <button
                         onClick={handleEditDescription}
                         className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-text-primary flex-shrink-0"
