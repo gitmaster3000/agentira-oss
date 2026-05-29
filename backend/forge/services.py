@@ -3005,6 +3005,63 @@ def schedule_task_run(*, task_id: str, agent_id: str,
     return result
 
 
+def retry_run(run_id: str, *, actor: str = "system") -> dict:
+    """Explicit user-driven restart of a failed/cancelled run.
+
+    AP-120 already retries implicitly when the user chats into a task
+    whose latest run failed. This is the explicit Restart-button path:
+    same task + same agent, scheduled fresh, with a one-line context
+    hint so the agent knows it's a retry. The chat thread gets a SYSTEM
+    breadcrumb pointing back at the prior run.
+
+    Refuses to restart in-flight runs (PENDING/RUNNING/PAUSED) and
+    free-floating chat runs (no task_id). SUCCEEDED runs are
+    deliberately allowed too — sometimes the user wants to re-do work
+    even after a clean completion (e.g. plan got obsolete).
+    """
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"error": "run_not_found"}
+        try:
+            _assert_run_access(db, r, actor)
+        except PermissionError as exc:
+            return {"error": str(exc)}
+        if not r.task_id:
+            return {"error": "cannot restart a free-floating chat run"}
+        if r.status in (RunStatus.PENDING, RunStatus.RUNNING,
+                        RunStatus.PAUSED, RunStatus.PAUSING,
+                        RunStatus.CANCELLING):
+            return {"error":
+                    f"Run is {r.status.value}; stop or wait for it before restarting"}
+        prior_outcome = (r.outcome.value if r.outcome else r.status.value)
+        task_id = r.task_id
+        agent_id = r.agent_id
+
+    new = schedule_task_run(
+        task_id=task_id, agent_id=agent_id,
+        extra_context=(
+            f"Restart of run {run_id} (previous outcome: {prior_outcome}). "
+            "Read the prior run's chat history if you need context for "
+            "what to do differently."
+        ),
+    )
+    if new.get("error"):
+        return new
+
+    new_run_id = new.get("run_id") or new.get("id") or ""
+    if new_run_id:
+        with _session() as db:
+            db.add(AgentMessage(
+                agent_id=agent_id, run_id=new_run_id,
+                scope_key=f"task:{task_id}",
+                role=MessageRole.SYSTEM,
+                content=f"Restarted from run {run_id} (previous outcome: {prior_outcome}).",
+            ))
+            db.commit()
+    return new
+
+
 def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None") -> dict:
     """Shared body for pause/resume — both fire a WS frame to the daemon
     and optionally flip the Run state. Cancel uses a different path
