@@ -9,6 +9,10 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./scripts:/app/scripts
+      # AP-157: agent templates are app code (versioned with the repo),
+      # not user data. Bind-mounted in dev so edits to templates/agents/
+      # are picked up without a rebuild.
+      - ./templates:/app/templates
     environment:
       # Stable across rebuilds so browser logins don't die — dev only.
       - JWT_SECRET=dev-only-not-for-prod-32-byte-secret-12345678901234
@@ -21,6 +25,7 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./scripts:/app/scripts
+      - ./templates:/app/templates
 
   # Dev frontend = Vite dev server with HMR. Source is bind-mounted so
   # edits to .jsx / .css land in the browser within ~100ms. Compare with

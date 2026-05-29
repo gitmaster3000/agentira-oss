@@ -1,0 +1,6 @@
+# AP-157: Frontend Implementer — React/Vite/Tailwind senior engineer.
+name: Frontend Implementer
+display_name: Frontend Implementer
+model: claude-sonnet-4-6
+mcp_servers: [agentira, memory]
+# system_prompt sourced from sibling frontend-implementer.md

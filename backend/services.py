@@ -2108,16 +2108,27 @@ def bootstrap():
     init_db()
     with _session() as db:
         _seed_defaults(db)
-        
+
         # Ensure admin user exists with password
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if not db.query(Profile).filter(Profile.name == "admin").first():
             print("Creating default admin user (password: admin123)")
             p = Profile(
-                name="admin", 
-                display_name="Admin User", 
+                name="admin",
+                display_name="Admin User",
                 role_id=admin_role.id,
                 password_hash=_hash_password("admin123")
             )
             db.add(p)
             db.commit()
+
+    # AP-157: seed the default agent templates (Conductor + Planner +
+    # Implementers + Reviewer + DevOps). Set-if-empty so existing
+    # workspaces get filled in without clobbering user edits.
+    try:
+        from backend import agent_templates
+        result = agent_templates.seed_all()
+        if result["created"]:
+            logger.info("agent templates seeded: %s", result["created"])
+    except Exception as exc:  # noqa: BLE001 — never fail bootstrap
+        logger.warning("agent template seed failed: %s", exc)

@@ -1,0 +1,16 @@
+# AP-157: Conductor — workspace orchestrator (system agent).
+#
+# The Conductor is a singleton per workspace. Tightly integrated with the
+# queue tick, planning turn, and daily report. `is_system: true` protects
+# it from deletion in the UI.
+name: Conductor
+display_name: Conductor
+model: claude-sonnet-4-6
+mcp_servers: [agentira, memory]
+is_system: true
+conductor_active: true
+conductor_tick_seconds: 60
+conductor_plan_interval_minutes: 10
+conductor_report_time: "09:00"
+conductor_report_enabled: true
+# system_prompt sourced from sibling conductor.md
