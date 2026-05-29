@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
+import { Markdown } from './Markdown';
 import {
     Trash2,
     X,
@@ -368,11 +369,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 />
                             ) : (
                                 <div
-                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors whitespace-pre-wrap break-words overflow-x-auto"
+                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors break-words overflow-x-auto"
                                     onClick={() => setIsEditing(true)}
-                                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
                                 >
-                                    {task.description || "No description provided."}
+                                    {/* AP-39: GitHub-flavored markdown render. */}
+                                    {task.description
+                                        ? <Markdown>{task.description}</Markdown>
+                                        : <span className="italic text-text-tertiary">No description provided.</span>}
                                 </div>
                             )}
                         </div>
