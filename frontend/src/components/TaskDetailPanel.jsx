@@ -71,6 +71,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [editingPrUrl, setEditingPrUrl] = useState(false);
     const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
     const [copiedField, setCopiedField] = useState(null);
+    // AP-154: list of {name, is_primary, ...} from project_repos.
+    const [projectRepos, setProjectRepos] = useState([]);
 
     // Edit state
     const [formData, setFormData] = useState({ ...task });
@@ -98,6 +100,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         if (task.project_id) {
             api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
             api.getEpics(task.project_id).then(setEpics).catch(console.error);
+            // AP-154: load the project's declared repos so the user can
+            // pick a subset for this task (multi-select). Empty array is
+            // a valid response (single-repo legacy project).
+            api.listProjectRepos(task.project_id)
+                .then((r) => setProjectRepos(Array.isArray(r) ? r : []))
+                .catch(() => setProjectRepos([]));
         }
         const interval = setInterval(() => {
             loadActivity();
@@ -262,6 +270,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 branch: branchValue || undefined,
                 pr_url: prUrlValue || undefined,
                 epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
+                // AP-154: send only when the editor showed the multi-select
+                // (project has declared repos). Undefined means "no change."
+                repos: Array.isArray(formData.repos) ? formData.repos : undefined,
             });
             toggleEditing(false);
             onUpdate();
@@ -502,6 +513,58 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             </div>
                         </div>
+
+                        {/* AP-154: declared repos for this task. Multi-select against
+                            the project's project_repos. The daemon worktrees each
+                            named repo into the agent workdir so the agent has all
+                            of them inside its sandbox. Only renders when the project
+                            declared more than zero repos. */}
+                        {projectRepos.length > 0 && (
+                            <div className="mb-4">
+                                <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
+                                    Repos this task touches
+                                </label>
+                                {isEditing ? (
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {projectRepos.map((r) => {
+                                            const selected = Array.isArray(formData.repos)
+                                                ? formData.repos
+                                                : (Array.isArray(task.repos) ? task.repos : (task.repo_name ? [task.repo_name] : []));
+                                            const isSel = selected.includes(r.name);
+                                            return (
+                                                <button key={r.name} type="button"
+                                                    onClick={() => {
+                                                        const next = isSel
+                                                            ? selected.filter((n) => n !== r.name)
+                                                            : [...selected, r.name];
+                                                        setFormData({ ...formData, repos: next });
+                                                    }}
+                                                    className="px-2 py-1 rounded-md text-[11px] border transition-colors"
+                                                    style={isSel ? {
+                                                        borderColor: 'var(--accent-primary)',
+                                                        backgroundColor: 'var(--accent-subtle)',
+                                                        color: 'var(--accent-primary)',
+                                                    } : {
+                                                        borderColor: 'var(--border-subtle)',
+                                                        color: 'var(--text-secondary)',
+                                                    }}>
+                                                    {r.name}
+                                                    {r.is_primary && <span className="ml-1 text-[9px] opacity-70">primary</span>}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-wrap gap-1">
+                                        {(task.repos || []).length > 0
+                                            ? task.repos.map((n) => (
+                                                <span key={n} className="text-[10px] bg-bg-panel px-2 py-0.5 rounded-md border border-border-subtle text-text-secondary">{n}</span>
+                                            ))
+                                            : <span className="text-xs text-text-tertiary italic">none — falls back to project's primary repo</span>}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
 
                         {/* Definition of Done */}
