@@ -57,6 +57,9 @@ class ProjectUpdate(BaseModel):
     conventions_md: Optional[str] = None
     # ADR 009 / AP-136: run-crystallization work-signal mode.
     work_signal: Optional[str] = None
+    # AP-155: project-level sandbox containment override. NULL → inherit
+    # from the dispatched agent's `Profile.sandbox_mode`.
+    sandbox_mode: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -82,6 +85,10 @@ class TaskUpdate(BaseModel):
     branch: Optional[str] = None
     pr_url: Optional[str] = None
     epic_id: Optional[str] = None
+    # AP-154: declared repos this task touches (subset of project_repos.name).
+    # Empty/omitted → derive from the task's legacy `repo_name` or fall back
+    # to the project's primary.
+    repos: Optional[list[str]] = None
 
 class TaskMove(BaseModel):
     status: str
@@ -351,6 +358,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             repo_path=body.repo_path,
             conventions_md=body.conventions_md,
             work_signal=body.work_signal,
+            sandbox_mode=body.sandbox_mode,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -503,7 +511,7 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
             priority=body.priority, assignee=body.assignee, tags=body.tags,
             start_date=body.start_date, due_date=body.due_date,
             dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url,
-            epic_id=body.epic_id, actor=actor,
+            epic_id=body.epic_id, repos=body.repos, actor=actor,
         )
         if body.assignee:
             try:

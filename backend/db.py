@@ -282,6 +282,8 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT 1 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_plan_interval_minutes", "INTEGER DEFAULT 10 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT 1 NOT NULL")
+            # AP-155: agent-level sandbox containment mode.
+            runtime_added |= _ensure_column(conn, "profiles", "sandbox_mode", "VARCHAR(20)")
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked
@@ -310,9 +312,15 @@ def run_migrations():
                                     "TEXT")
             # ADR 009 / AP-136: work-signal mode for run crystallization.
             added |= _ensure_column(conn, "projects", "work_signal", "VARCHAR(20)")
+            # AP-155: project-level sandbox containment override.
+            added |= _ensure_column(conn, "projects", "sandbox_mode", "VARCHAR(20)")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
+        # AP-154: tasks gain repos_json — JSON list when a task touches more
+        # than one of the project's repos. NULL stays back-compat with
+        # repo_name-only callers (sandbox helper derives a single-item list).
         if "tasks" in tables:
             _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")
+            _ensure_column(conn, "tasks", "repos_json", "TEXT")
         # AP-121: backfill — for every project with a legacy repo_path /
         # repo_url and no project_repos rows, insert one primary row.
         # Runs after `Base.metadata.create_all` has created project_repos.

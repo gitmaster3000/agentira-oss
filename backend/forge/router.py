@@ -63,6 +63,9 @@ class AgentUpdate(BaseModel):
     conductor_report_enabled: Optional[bool] = None
     conductor_plan_interval_minutes: Optional[int] = None
     conductor_active: Optional[bool] = None
+    # AP-155: agent's default containment posture (off | cwd | strict | container).
+    # Empty string clears it back to workspace default.
+    sandbox_mode: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):

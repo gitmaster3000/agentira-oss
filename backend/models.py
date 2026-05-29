@@ -164,6 +164,10 @@ class Profile(Base):
     # Master on/off for the Conductor (on its own profile). When False the
     # queue tick, planning turn, and daily report all no-op.
     conductor_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # AP-155: agent-level containment policy for dispatched runs. NULL =
+    # workspace default ("off"). Project-level override wins if set; see
+    # backend.sandbox.resolve_mode. Values: off | cwd | strict | container.
+    sandbox_mode: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
@@ -241,6 +245,9 @@ class Project(Base):
     # crystallizes into a run — "working_tree" (default; any tracked change or
     # new untracked file), "tracked", or "committed". NULL = workspace default.
     work_signal: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # AP-155: project-level containment override. NULL = inherit from the
+    # agent (Profile.sandbox_mode); both NULL = workspace default ("off").
+    sandbox_mode: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -308,6 +315,11 @@ class Task(Base):
     # project's primary repo (back-compat with single-repo projects).
     # Validated at create/update time against project_repos.name.
     repo_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # AP-154: multiple repos a task touches (JSON list of project_repos.name).
+    # NULL = derive from repo_name (legacy) or the project's primary repo.
+    # The daemon materializes each as a named subdirectory of the agent
+    # workdir, so the agent has every linked repo inside its sandbox.
+    repos_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

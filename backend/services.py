@@ -96,10 +96,36 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "branch": t.branch or "",
         "pr_url": t.pr_url or "",
         "commits_count": len(t.commits) if t.commits else 0,
+        # AP-154: surface the resolved repo list to clients. Multi-select
+        # UI reads this; legacy single-repo callers still get `repo_name`.
+        "repo_name": t.repo_name or "",
+        "repos": resolve_task_repos(t),
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "attachments_count": attachments_count,
     }
+
+
+def resolve_task_repos(t: Task) -> list[str]:
+    """AP-154: return the list of project_repos.name values this task
+    targets.
+
+    Order of preference:
+    1. `Task.repos_json` (the new multi-repo column) if set + parseable.
+    2. `Task.repo_name` (legacy single-repo) → wrapped as a one-item list.
+    3. Empty list → daemon falls back to the project's primary repo.
+    """
+    import json as _json
+    if t.repos_json:
+        try:
+            parsed = _json.loads(t.repos_json)
+            if isinstance(parsed, list):
+                return [str(x) for x in parsed if x]
+        except Exception:  # noqa: BLE001
+            pass
+    if t.repo_name:
+        return [t.repo_name]
+    return []
 
 
 def _batch_attachment_counts(db: Session, task_ids: list[str]) -> dict[str, int]:
@@ -131,6 +157,8 @@ def _project_to_dict(p: Project) -> dict:
         "conventions_md": p.conventions_md or "",
         # ADR 009 / AP-136: run-crystallization work-signal mode ("" = default).
         "work_signal": getattr(p, "work_signal", None) or "",
+        # AP-155: project-level sandbox override ("" = inherit from agent).
+        "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -179,6 +207,8 @@ def _profile_to_dict(p: Profile) -> dict:
         "extra_permissions": extra,
         "projects": [pm.project_id for pm in p.project_memberships],
         "runtime_id": p.runtime_id,
+        # AP-155: agent's default containment posture ("" = workspace default).
+        "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
         "created_at": p.created_at.isoformat(),
     }
 
@@ -435,7 +465,8 @@ def get_project(project_id: str) -> dict | None:
 
 def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
                    repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
-                   work_signal: Optional[str] = None) -> dict:
+                   work_signal: Optional[str] = None,
+                   sandbox_mode: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -453,6 +484,12 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             from backend.forge.turns import WORK_SIGNAL_MODES
             if work_signal in WORK_SIGNAL_MODES:
                 p.work_signal = work_signal
+        if sandbox_mode is not None:
+            # AP-155: empty string clears the override (re-inherit from agent).
+            from backend.sandbox import is_valid_mode
+            normalized = sandbox_mode.strip() or None
+            if is_valid_mode(normalized):
+                p.sandbox_mode = normalized
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -804,6 +841,7 @@ def update_task(
     branch: Optional[str] = None,
     pr_url: Optional[str] = None,
     epic_id: Optional[str] = None,
+    repos: Optional[list[str]] = None,
     actor: str = "system",
 ) -> dict:
     with _session() as db:
@@ -881,6 +919,44 @@ def update_task(
                 diff["epic_id"] = {"from": task.epic_id, "to": new_epic_id}
                 task.epic_id = new_epic_id
                 changes.append(f"epic_id → {new_epic_id}")
+
+        if repos is not None:
+            # AP-154: multi-repo. Normalize, dedupe order-preserving,
+            # and validate each against project_repos.
+            seen = set()
+            cleaned: list[str] = []
+            for name in repos:
+                if not name:
+                    continue
+                if name in seen:
+                    continue
+                seen.add(name)
+                cleaned.append(name)
+            from backend.models import ProjectRepo
+            if cleaned and task.project_id:
+                valid_names = {
+                    n[0] for n in db.query(ProjectRepo.name)
+                                     .filter(ProjectRepo.project_id == task.project_id)
+                                     .all()
+                }
+                if valid_names:
+                    bad = [n for n in cleaned if n not in valid_names]
+                    if bad:
+                        raise ValueError(
+                            f"repo(s) {bad} not declared on project"
+                        )
+            new_repos_json = json.dumps(cleaned) if cleaned else None
+            if new_repos_json != task.repos_json:
+                diff["repos"] = {
+                    "from": resolve_task_repos(task),
+                    "to": cleaned,
+                }
+                task.repos_json = new_repos_json
+                # Keep legacy `repo_name` in sync with the first entry so
+                # callers that haven't migrated still see the primary
+                # repo through the old field.
+                task.repo_name = cleaned[0] if cleaned else None
+                changes.append(f"repos → {cleaned}")
 
         if changes:
             _log_activity(
