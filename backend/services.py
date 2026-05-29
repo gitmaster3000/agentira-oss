@@ -38,9 +38,6 @@ def authenticate_user(username: str, password: str) -> dict | None:
             return _profile_to_dict(p)
     return None
 
-ATTACHMENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "attachments")
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _session() -> Session:
@@ -180,19 +177,6 @@ def _profile_to_dict(p: Profile) -> dict:
         "projects": [pm.project_id for pm in p.project_memberships],
         "runtime_id": p.runtime_id,
         "created_at": p.created_at.isoformat(),
-    }
-
-
-def _attachment_to_dict(a: Attachment) -> dict:
-    return {
-        "id": a.id,
-        "task_id": a.task_id,
-        "filename": a.filename,
-        "content_type": a.content_type,
-        "size_bytes": a.size_bytes,
-        "uploaded_by": a.uploaded_by,
-        "download_url": f"/api/attachments/{a.id}/download",
-        "created_at": a.created_at.isoformat(),
     }
 
 
@@ -1538,74 +1522,33 @@ def revoke_profile_permission(profile_id: str, codename: str) -> bool:
 
 
 # ── Attachment operations ────────────────────────────────────────────────
+# AP-152: the actual logic lives in `backend.attachments`. These remain
+# as thin back-compat shims so existing REST + MCP imports keep working.
+
+from backend import attachments as _attachments
+
 
 def add_attachment(task_id: str, filename: str, file_bytes: bytes, content_type: str = "application/octet-stream", uploaded_by: str = "system") -> dict:
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-        task_id = task.id
-
-        task_dir = os.path.join(ATTACHMENTS_DIR, task_id)
-        os.makedirs(task_dir, exist_ok=True)
-
-        import uuid
-        safe_name = f"{uuid.uuid4().hex[:8]}_{filename}"
-        file_path = os.path.join(task_dir, safe_name)
-
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
-
-        att = Attachment(
-            task_id=task_id, filename=filename, content_type=content_type,
-            file_path=file_path, size_bytes=len(file_bytes), uploaded_by=uploaded_by,
-        )
-        db.add(att)
-
-        activity = Activity(task_id=task_id, actor=uploaded_by, action="attached", detail=f"Attached: {filename}")
-        db.add(activity)
-        db.commit()
-        db.refresh(att)
-        return _attachment_to_dict(att)
+    return _attachments.add(
+        task_id=task_id, filename=filename, file_bytes=file_bytes,
+        content_type=content_type, uploaded_by=uploaded_by,
+    )
 
 
 def list_attachments(task_id: str) -> list[dict]:
-    with _session() as db:
-        atts = db.query(Attachment).filter(Attachment.task_id == task_id).order_by(Attachment.created_at.desc()).all()
-        return [_attachment_to_dict(a) for a in atts]
+    return _attachments.list_for_task(task_id)
 
 
 def get_attachment(attachment_id: str) -> tuple[dict, str] | None:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        return _attachment_to_dict(a), a.file_path
+    return _attachments.get(attachment_id)
 
 
 def get_attachment_bytes(attachment_id: str) -> tuple[dict, bytes] | None:
-    """Return attachment metadata and raw file bytes. Used by MCP download tool."""
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        if not os.path.exists(a.file_path):
-            return None
-        with open(a.file_path, "rb") as f:
-            file_bytes = f.read()
-        return _attachment_to_dict(a), file_bytes
+    return _attachments.get_bytes(attachment_id)
 
 
 def delete_attachment(attachment_id: str) -> bool:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return False
-        if os.path.exists(a.file_path):
-            os.remove(a.file_path)
-        db.delete(a)
-        db.commit()
-        return True
+    return _attachments.delete(attachment_id)
 
 
 # ── Profile operations ──────────────────────────────────────────────────

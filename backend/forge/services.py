@@ -2310,6 +2310,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         model = a.model or ""
         persona_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
+        # AP-152: agent's api_key — injected into env so the agent can curl
+        # `/api/attachments/<id>/download` (binary project attachments) and
+        # other authed REST endpoints with $AGENTIRA_API_KEY.
+        agent_api_key = (a.profile.api_key if a.profile else "") or ""
 
         # Auto-baked self/project/task awareness preamble.
         # Identity + current screen + project + recent involvement so the
@@ -2392,6 +2396,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
             env_extra_combined.setdefault("AGENTIRA_TASK_ID", _shadow_task_id)
         if _shadow_project_id:
             env_extra_combined.setdefault("AGENTIRA_PROJECT_ID", _shadow_project_id)
+    # AP-152: agent's own API key so it can authenticate REST calls
+    # (e.g. download binary attachments). setdefault so explicit callers win.
+    if agent_api_key:
+        env_extra_combined.setdefault("AGENTIRA_API_KEY", agent_api_key)
     effective_log_dir = log_dir or _shadow_log_dir
 
     if scope_key:
