@@ -12,48 +12,50 @@ Agentira is a self-hosted board for orchestrating AI coding agents on real softw
 
 ---
 
-## 1. One-time setup
+## 1. Sign up + connect your daemon
 
-Before your first project, two services have to be running:
+### Sign up
 
-### Backend (Docker)
+Visit your Agentira instance — the URL the operator gave you (something like `https://agentira.up.railway.app`, or a custom domain). Hit **Sign up**, pick a username + password (or click "Continue with GitHub/Google" if the operator wired OAuth).
+
+That's it for the web side. The moment your account exists, your workspace already has six agents in it:
+
+- **Conductor** — the orchestrator
+- **Planner** — turns vague tasks into concrete DoDs + child tasks
+- **Backend Implementer** — Python/FastAPI senior engineer
+- **Frontend Implementer** — React/Vite/Tailwind senior engineer
+- **Reviewer** — checks PRs against the DoD, won't approve faked progress
+- **DevOps** — Docker, CI/CD, deploy
+
+You can edit any of their prompts under **Forge → Agents**. The prompts are yours to tune.
+
+### Install the daemon
+
+The daemon is the bridge between the hosted backend and your local `claude` CLI. **It runs on your own machine** — the place where you want the agents to actually edit code.
+
+Why local? Because the agents touch real files in real git repos that live on your laptop. The cloud backend coordinates; the daemon executes.
 
 ```bash
-cd /path/to/agentira
-docker compose up -d backend mcp
+# Mac / Linux (one-liner installer — coming soon as part of the v1 release)
+curl -fsSL https://your-instance.railway.app/install.sh | sh
+
+# For now, run from source:
+git clone https://github.com/<you>/agentira ~/agentira
+cd ~/agentira/agentira-cli
+pip install -e .
+agentira daemon --backend-url https://your-instance.railway.app
 ```
 
-That brings up the FastAPI backend on `:8111` and the agentira MCP server on `:8000`. The MCP server is what the agents talk to when they call tools like `create_task` or `register_run_artifact`.
-
-Verify:
-
-```bash
-curl -s http://127.0.0.1:8111/api/forge/runtimes
-# {"detail":"Authentication required"}   <-- means it's up
-```
-
-### Daemon (host)
-
-The daemon is a small process that lives on your machine (or wherever you want the agents to run code). It receives dispatch frames from the backend over a WebSocket and spawns the runtime — for claude-code, that means it runs `claude --resume` in a git worktree per (agent, task).
-
-```bash
-agentira daemon
-```
-
-You should see it connect:
+When you start the daemon, paste the **API key** from your profile page (top-right avatar → **Settings → API key**). The daemon authenticates over WebSocket and stays connected.
 
 ```
-WS connected + registered to ws://127.0.0.1:8111/api/forge/daemon/ws
+WS connected + registered to wss://your-instance.railway.app/api/forge/daemon/ws
 Daemon started — daemon_id=abc12345 runtimes=1
 ```
 
-If you see `inflight reaper: N record(s) cleared` on startup, that's the daemon cleaning up orphaned agent processes from a previous run — normal and good.
+If the daemon can't find `claude` in your PATH, install it first (`npm i -g @anthropic-ai/claude-code` or follow Anthropic's instructions).
 
-> **If your terminal closes, the daemon stops.** For longer sessions, run it under `tmux`, `screen`, or your favorite supervisor. A LaunchAgent recipe is on the roadmap.
-
-### Frontend
-
-Visit `http://localhost:5173` (or wherever your dev server is) and sign in.
+> **If your terminal closes, the daemon stops.** For longer sessions, run it under `tmux`, `screen`, or your OS's service manager. A signed Mac `.pkg` + Windows `.msi` that auto-start are part of the v1 release — same for the `curl | sh` installer above.
 
 ---
 
