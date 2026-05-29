@@ -89,7 +89,11 @@ export function EpicPage() {
     const inProgress = tasks.filter(t => t.status === 'in_progress' || t.status === 'review').length;
 
     return (
-        <div className="flex-1 p-6 max-w-5xl space-y-6">
+        // AP-147: outer wrapper takes the available height AND scrolls; the
+        // inner div constrains width + adds padding. Without this split the
+        // page couldn't scroll when the description or task list was long.
+        <div className="flex-1 overflow-y-auto">
+            <div className="max-w-5xl mx-auto p-6 space-y-6">
             <Breadcrumbs entity="epic" data={epic} />
             <div className="flex items-center gap-3">
                 <div className="flex-1 flex items-center gap-3 min-w-0">
@@ -166,6 +170,7 @@ export function EpicPage() {
                         ))}
                     </div>
                 )}
+            </div>
             </div>
         </div>
     );
