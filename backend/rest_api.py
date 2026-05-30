@@ -45,9 +45,21 @@ class ProfileUpdate(BaseModel):
     avatar_url: Optional[str] = None
     webhook_url: Optional[str] = None
 
+class InitialTaskSpec(BaseModel):
+    title: str
+    description: str = ""
+    assignee: str = ""
+    priority: str = "medium"
+    status: str = "todo"
+
 class ProjectCreate(BaseModel):
     name: str
     description: str = ""
+    # AP-153 wizard payload. Both omitted → legacy auto-seed
+    # (Conductor + empty "Plan this project" task). Either present
+    # (even empty list) → wizard mode: user owns membership + tasks.
+    initial_tasks: Optional[list[InitialTaskSpec]] = None
+    members: Optional[list[str]] = None
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -333,7 +345,15 @@ def api_list_projects(actor: str = Depends(get_current_user)):
 
 @projects.post("")
 def api_create_project(body: ProjectCreate, actor: str = Depends(get_current_user)):
-    return services.create_project(body.name, body.description, actor=actor)
+    initial_tasks = (
+        [t.model_dump() for t in body.initial_tasks]
+        if body.initial_tasks is not None else None
+    )
+    return services.create_project(
+        body.name, body.description, actor=actor,
+        initial_tasks=initial_tasks,
+        members=body.members,
+    )
 
 @projects.get("/{project_id}")
 def api_get_project(project_id: str):
