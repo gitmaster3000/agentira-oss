@@ -246,14 +246,15 @@ async def create_task(
     tags: list[str] = None,
     start_date: str = None,
     due_date: str = None,
+    dod_items: list[dict] = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a new task in a project."""
+    """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked})."""
     actor = actor_ctx.get()
     try:
         logger.info(f"Tool create_task called for project='{project_id}', title='{title}', actor='{actor}'")
         res = services.create_task(
-            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, actor=actor
+            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, actor=actor
         )
         logger.debug(f"Tool create_task success: {res}")
         return res
