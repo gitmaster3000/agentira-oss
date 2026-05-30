@@ -202,7 +202,10 @@ def test_dispatch_chat_trigger_sends_empty_bundle(test_db):
     assert call["repo_path"] == ""
     assert call["conventions_md"] == ""
     assert call["mcp_config_json"] == ""
-    assert call["env_extra"] == {}
+    # AP-152: dispatch always injects AGENTIRA_API_KEY so the agent can
+    # call REST endpoints (e.g. read binary project attachments). Empty
+    # otherwise.
+    assert set(call["env_extra"].keys()) <= {"AGENTIRA_API_KEY"}
     assert call["run_token"] == ""
 
 
