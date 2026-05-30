@@ -292,7 +292,22 @@ _KICKOFF_TASK_TITLE = "Plan this project"
 # persona, not in service code.
 
 
-def create_project(name: str, description: str = "", actor: str = "system") -> dict:
+def create_project(name: str, description: str = "", actor: str = "system",
+                   *, initial_tasks: list[dict] | None = None,
+                   members: list[str] | None = None) -> dict:
+    """Create a project.
+
+    Two modes:
+    - **Legacy (initial_tasks=None, members=None)**: auto-seed — the
+      Conductor is added as a member and one "Plan this project" task
+      (empty body) is created. Same behavior the MCP `create_project`
+      tool and pre-AP-153 callers rely on.
+    - **Wizard (AP-153)**: caller supplies `initial_tasks` (each
+      `{title, description, assignee?, priority?}`) and `members`
+      (list of profile names). Auto-seed is skipped — the wizard owns
+      both the task bodies *and* membership choices. Empty lists are
+      legitimate: "I want a project with no preset tasks / agents."
+    """
     with _session() as db:
         prefix = _derive_prefix(name)
         # Deduplicate prefix
@@ -318,19 +333,44 @@ def create_project(name: str, description: str = "", actor: str = "system") -> d
         project_id = project.id
         result = _project_to_dict(project)
 
-    # ── Kickoff: auto-add the Conductor + create the first task ──────────
-    # Conductor is the workspace orchestrator (backend/forge/conductor.py).
-    # Every new project starts with it as a member and one "Plan this
-    # project" task already assigned and ready to Run — the user just
-    # attaches the design + clicks Run, and the Conductor produces the
-    # plan as an artifact + spawns the concrete child tasks.
-    # Best-effort: if the Conductor isn't seedable in this workspace
-    # (missing 'bot' role on a fresh install) we still return the project.
-    try:
-        _seed_project_kickoff(project_id=project_id, actor=actor)
-    except Exception as exc:  # noqa: BLE001 — project must still be created
-        logger.warning("project kickoff seeding failed project=%s: %s",
-                       project_id, exc)
+    use_wizard = initial_tasks is not None or members is not None
+    if use_wizard:
+        # AP-153: the wizard owns membership + initial tasks. Bodies come
+        # from the user via the UI, not from a code constant.
+        for profile_name in (members or []):
+            try:
+                add_project_member(project_id, profile_name, actor=actor)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("wizard add_member failed project=%s name=%s: %s",
+                               project_id, profile_name, exc)
+        for spec in (initial_tasks or []):
+            title = (spec.get("title") or "").strip()
+            if not title:
+                continue
+            try:
+                create_task(
+                    project_id=project_id,
+                    title=title,
+                    description=spec.get("description", ""),
+                    status=spec.get("status", "todo"),
+                    priority=spec.get("priority", "medium"),
+                    assignee=spec.get("assignee", "") or "",
+                    actor=actor,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("wizard initial-task create failed project=%s: %s",
+                               project_id, exc)
+    else:
+        # Legacy auto-seed — Conductor + empty "Plan this project" task.
+        # Conductor is the workspace orchestrator
+        # (backend/forge/conductor.py). Best-effort: if the Conductor isn't
+        # seedable (missing 'bot' role on a fresh install) the project is
+        # still returned.
+        try:
+            _seed_project_kickoff(project_id=project_id, actor=actor)
+        except Exception as exc:  # noqa: BLE001 — project must still be created
+            logger.warning("project kickoff seeding failed project=%s: %s",
+                           project_id, exc)
 
     return result
 
@@ -626,6 +666,7 @@ def create_task(
     tags: list[str] | None = None,
     start_date: str | None = None,
     due_date: str | None = None,
+    dod_items: Optional[list[dict]] = None,
     epic_id: str | None = None,
     actor: str = "system",
 ) -> dict:
@@ -647,6 +688,7 @@ def create_task(
             if not is_member:
                 raise PermissionError(f"User {actor} is not a member of project {project_id}")
 
+        import json
         status_id = _get_status_id(db, status)
         from datetime import datetime
         start_dt = None
@@ -676,6 +718,7 @@ def create_task(
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
+            dod_items=json.dumps(dod_items) if dod_items else None,
             epic_id=epic_id if epic_id and epic_id.strip() else None,
         )
         db.add(task)
