@@ -80,6 +80,7 @@ class TaskCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     start_date: Optional[str] = None
     due_date: Optional[str] = None
+    dod_items: Optional[list[dict]] = None
     epic_id: Optional[str] = None
 
 class TaskUpdate(BaseModel):
@@ -527,7 +528,7 @@ def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
             project_id=body.project_id, title=body.title, description=body.description,
             status=body.status, priority=body.priority, assignee=body.assignee,
             tags=body.tags, start_date=body.start_date, due_date=body.due_date,
-            epic_id=body.epic_id, actor=actor,
+            dod_items=body.dod_items, epic_id=body.epic_id, actor=actor,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
