@@ -13,22 +13,41 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         epic_id: '',
         tags: ''
     });
+    const [dodItems, setDodItems] = useState([]);
+    const [newDodText, setNewDodText] = useState('');
+    const [files, setFiles] = useState([]);
 
     useEffect(() => {
         api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
         api.getEpics(projectId).then(setEpics).catch(console.error);
     }, [projectId]);
 
+    const addDodItem = () => {
+        if (!newDodText.trim()) return;
+        setDodItems([...dodItems, { text: newDodText.trim(), checked: false }]);
+        setNewDodText('');
+    };
+
+    const removeDodItem = (index) => setDodItems(dodItems.filter((_, i) => i !== index));
+
+    const addFiles = (fileList) => setFiles([...files, ...Array.from(fileList)]);
+
+    const removeFile = (index) => setFiles(files.filter((_, i) => i !== index));
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         try {
-            await api.createTask({
+            const task = await api.createTask({
                 project_id: projectId,
                 ...formData,
                 epic_id: formData.epic_id || undefined,
-                tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean)
+                tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
+                dod_items: dodItems.length ? dodItems : undefined
             });
+            for (const file of files) {
+                await api.uploadAttachment(task.id, file);
+            }
             onCreated();
             onClose();
         } catch (err) {
@@ -41,7 +60,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     return (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onClose}>
             <div
-                className="w-full max-w-md rounded-xl shadow-2xl overflow-hidden"
+                className="w-full max-w-md rounded-xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
                 style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
             >
@@ -112,6 +131,61 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 ))}
                             </select>
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Tags</label>
+                        <input
+                            className="input"
+                            placeholder="Comma separated, e.g. frontend, urgent"
+                            value={formData.tags}
+                            onChange={e => setFormData({ ...formData, tags: e.target.value })}
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
+                        {dodItems.length > 0 && (
+                            <div className="flex flex-col gap-1.5 mb-2">
+                                {dodItems.map((item, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                                        <span className="flex-1">{item.text}</span>
+                                        <button type="button" onClick={() => removeDodItem(i)} className="btn btn-ghost px-2 py-0.5 text-xs">Remove</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <input
+                                className="input flex-1"
+                                placeholder="Add DOD item..."
+                                value={newDodText}
+                                onChange={e => setNewDodText(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDodItem(); } }}
+                            />
+                            <button type="button" onClick={addDodItem} className="btn btn-ghost">Add</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Attachments</label>
+                        {files.length > 0 && (
+                            <div className="flex flex-col gap-1.5 mb-2">
+                                {files.map((file, i) => (
+                                    <div key={i} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                                        <span className="flex-1 truncate">{file.name}</span>
+                                        <button type="button" onClick={() => removeFile(i)} className="btn btn-ghost px-2 py-0.5 text-xs">Remove</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <input
+                            type="file"
+                            multiple
+                            className="text-sm"
+                            style={{ color: 'var(--text-secondary)' }}
+                            onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+                        />
                     </div>
 
                     <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
