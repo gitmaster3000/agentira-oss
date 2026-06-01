@@ -264,7 +264,34 @@ export function RunDetail() {
                         <Ban className="w-4 h-4" /> Stop
                     </button>
                 )}
-                {!isReady && (
+                {/* Restart: explicit re-run of a terminal Run. Schedules a
+                    fresh run for the same (task, agent) with a context
+                    hint pointing back here. Only shown for terminal runs
+                    that came from a task (free-floating chat runs can't
+                    be restarted — there's no task to schedule against). */}
+                {!isReady && !isActive && run.task_id && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                const res = await api.forge.retryRun(runId);
+                                const newId = res?.run_id || res?.id;
+                                if (newId) navigate(`/forge/runs/${newId}`);
+                                else await load();
+                            } catch (err) {
+                                alert('Restart failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-accent-primary hover:bg-accent-subtle"
+                        title="Restart — schedules a new run for this task"
+                    >
+                        <RefreshCw className="w-4 h-4" /> Restart
+                    </button>
+                )}
+                {/* Refresh only while the run is active — terminal runs are
+                    settled, and the Restart button above already uses
+                    RefreshCw, so showing both would put two same-icon
+                    buttons next to each other. */}
+                {!isReady && isActive && (
                     <button onClick={load} className="btn btn-ghost" title="Refresh">
                         <RefreshCw className="w-4 h-4" />
                     </button>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
-import { CreateProjectModal } from './CreateProjectModal';
+import { CreateProjectWizard } from './CreateProjectWizard';
 import { FloatingChat } from './FloatingChat';
 
 export function Layout() {
@@ -28,7 +28,7 @@ export function Layout() {
                 </main>
             </div>
 
-            {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} onSuccess={handleProjectSuccess} />}
+            {showCreate && <CreateProjectWizard onClose={() => setShowCreate(false)} onSuccess={handleProjectSuccess} />}
 
             <FloatingChat />
         </div>
