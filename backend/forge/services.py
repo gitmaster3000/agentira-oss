@@ -1580,7 +1580,15 @@ def list_messages(agent_id: str, *, run_id: str | None = None,
             q = q.filter(AgentMessage.run_id == run_id)
         if scope_key:
             q = q.filter(AgentMessage.scope_key == scope_key)
-        msgs = q.order_by(AgentMessage.created_at.asc()).offset(offset).limit(limit).all()
+        # Return the NEWEST `limit` messages (then re-ascend for display).
+        # Ordering ASC + limit froze long threads on their oldest N: once a
+        # scope passed `limit` messages, new turns landed beyond the window
+        # and never appeared in the chat view (they were only visible in
+        # run-detail, which queries by run_id). offset pages backwards into
+        # history.
+        msgs = (q.order_by(AgentMessage.created_at.desc())
+                 .offset(offset).limit(limit).all())
+        msgs.reverse()
         return [_message_to_dict(m) for m in msgs]
 
 
