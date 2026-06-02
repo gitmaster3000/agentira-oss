@@ -7,7 +7,7 @@ import {
     // AP-126: artifact panel icons. One per kind so a glance is enough
     // to tell a PR from a file from a log.
     GitPullRequest, GitCommit, File, Link as LinkIcon,
-    ScrollText, FileText, Package,
+    ScrollText, FileText, Package, Copy, Check,
 } from 'lucide-react';
 import { api } from '../../api';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
@@ -723,35 +723,86 @@ function ArtifactsPanel({ artifacts }) {
                 </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {artifacts.map((a, i) => {
-                    const Icon = ARTIFACT_ICON[a.kind] || LinkIcon;
-                    const isHttp = /^https?:\/\//i.test(a.url);
-                    const inner = (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-app transition-colors min-w-0">
-                            <Icon className="w-4 h-4 text-text-secondary flex-shrink-0" />
-                            <div className="min-w-0">
-                                <div className="text-sm text-text-primary truncate">
-                                    {a.label || a.url}
-                                </div>
-                                {a.label && (
-                                    <div className="text-xs text-text-tertiary truncate font-mono">
-                                        {a.url}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                    return isHttp
-                        ? (
-                            <a key={i} href={a.url} target="_blank" rel="noreferrer"
-                               className="block">
-                                {inner}
-                            </a>
-                        )
-                        : <div key={i}>{inner}</div>;
-                })}
+                {artifacts.map((a, i) => (
+                    <ArtifactRow key={i} artifact={a} />
+                ))}
             </div>
         </div>
+    );
+}
+
+
+// One artifact row. HTTP URLs open in a new tab; everything else (local
+// file paths the daemon registered) gets a click-to-copy affordance —
+// the user pastes into their terminal to `cat`/`open` the file locally.
+// Both cases also expose a separate Copy button so you can grab the
+// underlying string without leaving the page.
+function ArtifactRow({ artifact: a }) {
+    const Icon = ARTIFACT_ICON[a.kind] || LinkIcon;
+    const isHttp = /^https?:\/\//i.test(a.url);
+    const [copied, setCopied] = React.useState(false);
+
+    const copy = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(a.url || '');
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+        } catch {
+            // Fallback for non-secure contexts: select via a hidden textarea.
+            const ta = document.createElement('textarea');
+            ta.value = a.url || '';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {}
+            document.body.removeChild(ta);
+        }
+    };
+
+    const body = (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-app transition-colors min-w-0 w-full text-left">
+            <Icon className="w-4 h-4 text-text-secondary flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+                <div className="text-sm text-text-primary truncate">
+                    {a.label || a.url}
+                </div>
+                {a.label && (
+                    <div className="text-xs text-text-tertiary truncate font-mono">
+                        {a.url}
+                    </div>
+                )}
+            </div>
+            <button
+                type="button"
+                onClick={copy}
+                className="p-1 rounded hover:bg-bg-card text-text-tertiary hover:text-text-primary flex-shrink-0 transition-colors"
+                title={copied ? 'Copied' : 'Copy path'}
+            >
+                {copied
+                    ? <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    : <Copy className="w-3.5 h-3.5" />}
+            </button>
+        </div>
+    );
+
+    // HTTPS artifact → wrap the body in an anchor so clicking the label
+    // navigates. The Copy button stopPropagation's its click so it
+    // doesn't open the link.
+    if (isHttp) {
+        return (
+            <a href={a.url} target="_blank" rel="noreferrer" className="block">
+                {body}
+            </a>
+        );
+    }
+    // Local path artifact → the whole row is a copy button. No
+    // confusing "click does nothing" state, no need for the user to know
+    // which icon does which.
+    return (
+        <button type="button" onClick={copy} className="block w-full text-left">
+            {body}
+        </button>
     );
 }
 

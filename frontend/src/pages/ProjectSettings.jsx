@@ -84,6 +84,7 @@ function GeneralTab({ projectId }) {
                 conventions_md: p.conventions_md || '',
                 work_signal: p.work_signal || 'working_tree',
                 sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
+                gates_enabled: !!p.gates_enabled,  // AP-158
             });
         }).catch(() => setProject(null));
     }, [projectId]);
@@ -98,6 +99,7 @@ function GeneralTab({ projectId }) {
         || form.conventions_md !== (project.conventions_md || '')
         || form.work_signal !== (project.work_signal || 'working_tree')
         || form.sandbox_mode !== (project.sandbox_mode || '')
+        || form.gates_enabled !== !!project.gates_enabled
     );
 
     const save = async () => {
@@ -116,6 +118,7 @@ function GeneralTab({ projectId }) {
                 // "don't change" in the PATCH; "" is the explicit
                 // clear value the backend recognizes.
                 sandbox_mode: form.sandbox_mode,
+                gates_enabled: form.gates_enabled,
             });
             setProject(updated);
             setMsg('Saved');
@@ -175,6 +178,19 @@ function GeneralTab({ projectId }) {
                     <option value="strict">strict — OS sandbox (bwrap / sandbox-exec)</option>
                     <option value="container">container — per-agent Docker (strongest)</option>
                 </select>
+            </Field>
+            <Field label="Gated transitions (AP-158)"
+                hint={
+                    "Block column moves when evidence is missing — DoD on the task, assignee, branch/PR linked, all DoD items checked before done. Off by default; turn on for strict workflows."
+                }>
+                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={form.gates_enabled}
+                        onChange={(e) => setForm({ ...form, gates_enabled: e.target.checked })}
+                    />
+                    Enforce column-exit gates on this project
+                </label>
             </Field>
             <div className="flex items-center gap-3">
                 <button className="btn btn-primary" onClick={save}

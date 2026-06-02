@@ -6,6 +6,7 @@ import {
     BarChart3,
     Cpu,
     Radio,
+    Settings as SettingsIcon,
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
@@ -29,6 +30,10 @@ export function ForgeSidebar() {
         { icon: Radio, label: 'Conductor', path: '/forge/conductor' },
         { icon: Cpu, label: 'Runtimes', path: '/forge/runtimes' },
         { icon: Play, label: 'Runs', path: '/forge/runs' },
+        // AP-130: Forge-side settings hub — agent + project config + the
+        // read-only "Run defaults" audit panel so the user can see what
+        // knobs exist without thinking they're missing.
+        { icon: SettingsIcon, label: 'Settings', path: '/forge/settings' },
     ];
 
     return (
