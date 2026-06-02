@@ -248,6 +248,12 @@ class Project(Base):
     # AP-155: project-level containment override. NULL = inherit from the
     # agent (Profile.sandbox_mode); both NULL = workspace default ("off").
     sandbox_mode: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # AP-158: column-exit gate enforcement on transitions. False/NULL =
+    # off (today's behavior — move_task only RBAC-checks). True = the
+    # gate engine evaluates the transition; any failed gate blocks it
+    # with structured reasons. Defaults to False so existing projects
+    # keep working unchanged.
+    gates_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")

@@ -314,6 +314,8 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "work_signal", "VARCHAR(20)")
             # AP-155: project-level sandbox containment override.
             added |= _ensure_column(conn, "projects", "sandbox_mode", "VARCHAR(20)")
+            # AP-158: per-project gate-engine toggle.
+            added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         # AP-154: tasks gain repos_json — JSON list when a task touches more
         # than one of the project's repos. NULL stays back-compat with

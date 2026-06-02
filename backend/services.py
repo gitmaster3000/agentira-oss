@@ -156,6 +156,8 @@ def _project_to_dict(p: Project) -> dict:
         "work_signal": getattr(p, "work_signal", None) or "",
         # AP-155: project-level sandbox override ("" = inherit from agent).
         "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
+        # AP-158: column-exit gates on/off for this project.
+        "gates_enabled": bool(getattr(p, "gates_enabled", False)),
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -475,7 +477,8 @@ def get_project(project_id: str) -> dict | None:
 def update_project(project_id: str, name: Optional[str] = None, description: Optional[str] = None,
                    repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
                    work_signal: Optional[str] = None,
-                   sandbox_mode: Optional[str] = None) -> dict:
+                   sandbox_mode: Optional[str] = None,
+                   gates_enabled: Optional[bool] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -499,6 +502,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             normalized = sandbox_mode.strip() or None
             if is_valid_mode(normalized):
                 p.sandbox_mode = normalized
+        if gates_enabled is not None:
+            p.gates_enabled = bool(gates_enabled)
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -1003,6 +1008,15 @@ def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
             return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
 
         check_transition(db, actor, old, new_status)
+
+        # AP-158: column-exit gate enforcement. Per-project opt-in via
+        # `Project.gates_enabled`. Today's default is OFF so existing
+        # projects keep working unchanged; turning it on (in Project
+        # Settings) makes obvious shortcuts impossible — moving to
+        # `review` without a DoD, marking `done` without a PR, etc.
+        if task.project and getattr(task.project, "gates_enabled", False):
+            from backend import gates as _gates
+            _gates.enforce(task, from_status=old, to_status=new_status)
 
         new_status_id = _get_status_id(db, new_status)
         task.status_id = new_status_id
