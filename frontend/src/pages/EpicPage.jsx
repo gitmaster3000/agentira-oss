@@ -5,6 +5,7 @@ import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Markdown } from '../components/Markdown';
+import { setCurrentProjectId } from '../currentProject';
 
 const PRIORITY_DOTS = {
     critical: '#e74c3c',
@@ -41,6 +42,7 @@ export function EpicPage() {
                 if (!cancelled) {
                     setEpic(e);
                     setTasks(Array.isArray(ts) ? ts : []);
+                    if (e?.project_id) setCurrentProjectId(e.project_id);
                 }
             } catch (err) {
                 if (!cancelled) setError(err.message || 'Failed to load epic');

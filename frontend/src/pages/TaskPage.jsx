@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Breadcrumbs } from '../components/Breadcrumbs';
+import { Markdown } from '../components/Markdown';
+import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
+import { ROUTES } from '../routes';
+import { setCurrentProjectId } from '../currentProject';
 import {
     ChevronLeft,
     Clock,
@@ -51,6 +55,7 @@ export function TaskPage() {
     const [profiles, setProfiles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [commits, setCommits] = useState([]);
+    const [projectRepos, setProjectRepos] = useState([]);
     const [dodItems, setDodItems] = useState([]);
     const [newDodText, setNewDodText] = useState('');
     const [editingBranch, setEditingBranch] = useState(false);
@@ -84,12 +89,17 @@ export function TaskPage() {
                 setDodItems(data.dod_items || []);
                 setBranchValue(data.branch || '');
                 setPrUrlValue(data.pr_url || '');
+                if (data.project_id) setCurrentProjectId(data.project_id);
                 const actData = await api.getActivity(taskId);
                 setActivities(actData);
                 const profData = await api.getProjectMembers(data.project_id);
                 setProfiles(profData);
                 const commitData = await api.listTaskCommits(taskId);
                 if (Array.isArray(commitData)) setCommits(commitData);
+                try {
+                    const repoData = await api.listProjectRepos(data.project_id);
+                    setProjectRepos(Array.isArray(repoData) ? repoData : []);
+                } catch { setProjectRepos([]); }
             } catch (err) {
                 console.error(err);
             } finally {
@@ -178,8 +188,10 @@ export function TaskPage() {
 
                         <div className="mb-10">
                             <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
-                            <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm whitespace-pre-wrap">
-                                {task.description || "No description provided."}
+                            <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm break-words overflow-x-auto">
+                                {task.description
+                                    ? <Markdown>{task.description}</Markdown>
+                                    : <span className="italic text-text-tertiary">No description provided.</span>}
                             </div>
                         </div>
 
@@ -274,6 +286,42 @@ export function TaskPage() {
                                         )) : <span className="text-xs text-text-tertiary italic">None</span>}
                                     </div>
                                 </div>
+
+                                <div>
+                                    <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Epic</label>
+                                    {task.epic_name ? (
+                                        task.epic_id ? (
+                                            <Link
+                                                to={ROUTES.STUDIO_EPIC(task.epic_id)}
+                                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider hover:underline"
+                                                style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                                title={`Open epic: ${task.epic_name}`}
+                                            >
+                                                {task.epic_name}
+                                            </Link>
+                                        ) : (
+                                            <span
+                                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
+                                                style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
+                                            >
+                                                {task.epic_name}
+                                            </span>
+                                        )
+                                    ) : <span className="text-xs text-text-tertiary italic">None</span>}
+                                </div>
+
+                                {projectRepos.length > 0 && (
+                                    <div>
+                                        <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Repos</label>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {(task.repos || []).length > 0
+                                                ? task.repos.map(n => (
+                                                    <span key={n} className="text-[10px] font-medium bg-bg-app px-2 py-0.5 rounded border border-border-subtle text-text-secondary">{n}</span>
+                                                ))
+                                                : <span className="text-xs text-text-tertiary italic">none — falls back to project's primary repo</span>}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -442,6 +490,10 @@ export function TaskPage() {
                                     </div>
                                 </>
                             )}
+                        </div>
+
+                        <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                            <AttachmentsSection taskId={taskId} />
                         </div>
 
                         <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">

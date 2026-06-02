@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link, useLocation } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
+import { useCurrentProjectId } from '../currentProject';
 import { ThemeToggle } from './ThemeToggle';
 import { AppSwitcher } from './AppSwitcher';
 import {
@@ -32,7 +33,11 @@ const PRODUCTS = {
 // render it. Default true keeps Studio behavior unchanged.
 export function Navbar({ onNewProject, showProjectSwitcher = true }) {
     const { user, logout } = useAuth();
-    const { projectId } = useParams();
+    const { projectId: urlProjectId } = useParams();
+    // Detail routes (task/epic) carry no projectId — fall back to the last
+    // selected project so the header switcher stays on the active project.
+    const storedProjectId = useCurrentProjectId();
+    const projectId = urlProjectId || storedProjectId;
     const location = useLocation();
     const activeProduct = PRODUCTS[location.pathname.startsWith('/forge') ? 'forge' : 'studio'];
     const ActiveIcon = activeProduct.icon;
@@ -251,7 +256,7 @@ export function Navbar({ onNewProject, showProjectSwitcher = true }) {
 
                     {isCreateOpen && (
                         <div className="dropdown-menu top-full right-0 mt-1 w-48">
-                            {projectId && (
+                            {urlProjectId && (
                                 <>
                                     <button
                                         onClick={() => {

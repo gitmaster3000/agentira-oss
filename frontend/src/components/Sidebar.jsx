@@ -9,13 +9,21 @@ import {
     Settings as SettingsIcon,
 } from 'lucide-react';
 import { ROUTES } from '../routes';
+import { useCurrentProjectId } from '../currentProject';
 
 export function Sidebar() {
-    const { projectId = 'default' } = useParams();
+    const { projectId: urlProjectId } = useParams();
+    const storedProjectId = useCurrentProjectId();
+    // Task/epic detail routes carry no projectId param — fall back to the
+    // last selected project so the project nav stays available.
+    const projectId = urlProjectId || storedProjectId || 'default';
     const location = useLocation();
 
-    // Check if we are inside a project route to highlight nav items properly
-    const isProjectRoute = location.pathname.includes('/studio/project/');
+    // Show the project nav on project routes and on task/epic detail routes
+    // (which belong to a project even though the URL omits the id).
+    const isProjectRoute = location.pathname.includes('/studio/project/')
+        || location.pathname.startsWith('/studio/tasks/')
+        || location.pathname.startsWith('/studio/epics/');
 
     const [isCollapsed, setIsCollapsed] = useState(() => {
         return localStorage.getItem('sidebar-collapsed') === 'true';
