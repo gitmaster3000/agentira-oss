@@ -38,9 +38,6 @@ def authenticate_user(username: str, password: str) -> dict | None:
             return _profile_to_dict(p)
     return None
 
-ATTACHMENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "attachments")
-
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _session() -> Session:
@@ -215,19 +212,6 @@ def _profile_to_dict(p: Profile) -> dict:
     }
 
 
-def _attachment_to_dict(a: Attachment) -> dict:
-    return {
-        "id": a.id,
-        "task_id": a.task_id,
-        "filename": a.filename,
-        "content_type": a.content_type,
-        "size_bytes": a.size_bytes,
-        "uploaded_by": a.uploaded_by,
-        "download_url": f"/api/attachments/{a.id}/download",
-        "created_at": a.created_at.isoformat(),
-    }
-
-
 def _get_status_id(db: Session, status_name: str) -> str:
     """Resolve a status name to its ID. Raises ValueError if not found."""
     s = db.query(Status).filter(Status.name == status_name).first()
@@ -334,28 +318,28 @@ def _derive_prefix(name: str) -> str:
 
 
 _KICKOFF_TASK_TITLE = "Plan this project"
-_KICKOFF_TASK_DESCRIPTION = (
-    "You are kicking off a new project. Read the project description and any "
-    "attachments (use `list_attachments` / `download_attachment` MCP tools to "
-    "see designs, briefs, requirements). Then:\n\n"
-    "1. **Pick the tools/tech stack** that fit the product, with a brief "
-    "justification for each choice. Consider the team size, deployment "
-    "target, and any constraints visible in the brief.\n"
-    "2. **Write a one-page plan** covering the architecture, the milestones, "
-    "and the risks. Register it as a real artifact via "
-    "`register_run_artifact(kind='report', label='Project plan')` so it "
-    "shows up on the Run page — don't just emit it as chat text.\n"
-    "3. **Break the work into 3–8 concrete tasks** using the "
-    "`create_task` MCP tool. Each task gets a clear title, a description, "
-    "and DoD items. Order them so the dependencies are obvious.\n\n"
-    "Then call `finish_run(outcome='succeeded')` once the artifact and "
-    "child tasks are in place. If something blocks you (missing brief, "
-    "ambiguous requirement), call `finish_run(outcome='needs_input')` with "
-    "a specific question — a follow-up comment on this task will resume you."
-)
+# AP-152 / prompts-as-config: the task body is intentionally empty.
+# The Conductor's UI-editable system prompt is the source of truth for
+# how it handles a kickoff task. Body content belongs on the agent's
+# persona, not in service code.
 
 
-def create_project(name: str, description: str = "", actor: str = "system") -> dict:
+def create_project(name: str, description: str = "", actor: str = "system",
+                   *, initial_tasks: list[dict] | None = None,
+                   members: list[str] | None = None) -> dict:
+    """Create a project.
+
+    Two modes:
+    - **Legacy (initial_tasks=None, members=None)**: auto-seed — the
+      Conductor is added as a member and one "Plan this project" task
+      (empty body) is created. Same behavior the MCP `create_project`
+      tool and pre-AP-153 callers rely on.
+    - **Wizard (AP-153)**: caller supplies `initial_tasks` (each
+      `{title, description, assignee?, priority?}`) and `members`
+      (list of profile names). Auto-seed is skipped — the wizard owns
+      both the task bodies *and* membership choices. Empty lists are
+      legitimate: "I want a project with no preset tasks / agents."
+    """
     with _session() as db:
         prefix = _derive_prefix(name)
         # Deduplicate prefix
@@ -381,19 +365,44 @@ def create_project(name: str, description: str = "", actor: str = "system") -> d
         project_id = project.id
         result = _project_to_dict(project)
 
-    # ── Kickoff: auto-add the Conductor + create the first task ──────────
-    # Conductor is the workspace orchestrator (backend/forge/conductor.py).
-    # Every new project starts with it as a member and one "Plan this
-    # project" task already assigned and ready to Run — the user just
-    # attaches the design + clicks Run, and the Conductor produces the
-    # plan as an artifact + spawns the concrete child tasks.
-    # Best-effort: if the Conductor isn't seedable in this workspace
-    # (missing 'bot' role on a fresh install) we still return the project.
-    try:
-        _seed_project_kickoff(project_id=project_id, actor=actor)
-    except Exception as exc:  # noqa: BLE001 — project must still be created
-        logger.warning("project kickoff seeding failed project=%s: %s",
-                       project_id, exc)
+    use_wizard = initial_tasks is not None or members is not None
+    if use_wizard:
+        # AP-153: the wizard owns membership + initial tasks. Bodies come
+        # from the user via the UI, not from a code constant.
+        for profile_name in (members or []):
+            try:
+                add_project_member(project_id, profile_name, actor=actor)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("wizard add_member failed project=%s name=%s: %s",
+                               project_id, profile_name, exc)
+        for spec in (initial_tasks or []):
+            title = (spec.get("title") or "").strip()
+            if not title:
+                continue
+            try:
+                create_task(
+                    project_id=project_id,
+                    title=title,
+                    description=spec.get("description", ""),
+                    status=spec.get("status", "todo"),
+                    priority=spec.get("priority", "medium"),
+                    assignee=spec.get("assignee", "") or "",
+                    actor=actor,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("wizard initial-task create failed project=%s: %s",
+                               project_id, exc)
+    else:
+        # Legacy auto-seed — Conductor + empty "Plan this project" task.
+        # Conductor is the workspace orchestrator
+        # (backend/forge/conductor.py). Best-effort: if the Conductor isn't
+        # seedable (missing 'bot' role on a fresh install) the project is
+        # still returned.
+        try:
+            _seed_project_kickoff(project_id=project_id, actor=actor)
+        except Exception as exc:  # noqa: BLE001 — project must still be created
+            logger.warning("project kickoff seeding failed project=%s: %s",
+                           project_id, exc)
 
     return result
 
@@ -425,7 +434,7 @@ def _seed_project_kickoff(*, project_id: str, actor: str) -> None:
         create_task(
             project_id=project_id,
             title=_KICKOFF_TASK_TITLE,
-            description=_KICKOFF_TASK_DESCRIPTION,
+            description="",
             status="todo",
             priority="high",
             assignee=CONDUCTOR_NAME,
@@ -699,6 +708,7 @@ def create_task(
     tags: list[str] | None = None,
     start_date: str | None = None,
     due_date: str | None = None,
+    dod_items: Optional[list[dict]] = None,
     epic_id: str | None = None,
     actor: str = "system",
 ) -> dict:
@@ -720,6 +730,7 @@ def create_task(
             if not is_member:
                 raise PermissionError(f"User {actor} is not a member of project {project_id}")
 
+        import json
         status_id = _get_status_id(db, status)
         from datetime import datetime
         start_dt = None
@@ -749,6 +760,7 @@ def create_task(
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
+            dod_items=json.dumps(dod_items) if dod_items else None,
             epic_id=epic_id if epic_id and epic_id.strip() else None,
         )
         db.add(task)
@@ -1628,74 +1640,33 @@ def revoke_profile_permission(profile_id: str, codename: str) -> bool:
 
 
 # ── Attachment operations ────────────────────────────────────────────────
+# AP-152: the actual logic lives in `backend.attachments`. These remain
+# as thin back-compat shims so existing REST + MCP imports keep working.
+
+from backend import attachments as _attachments
+
 
 def add_attachment(task_id: str, filename: str, file_bytes: bytes, content_type: str = "application/octet-stream", uploaded_by: str = "system") -> dict:
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-        task_id = task.id
-
-        task_dir = os.path.join(ATTACHMENTS_DIR, task_id)
-        os.makedirs(task_dir, exist_ok=True)
-
-        import uuid
-        safe_name = f"{uuid.uuid4().hex[:8]}_{filename}"
-        file_path = os.path.join(task_dir, safe_name)
-
-        with open(file_path, "wb") as f:
-            f.write(file_bytes)
-
-        att = Attachment(
-            task_id=task_id, filename=filename, content_type=content_type,
-            file_path=file_path, size_bytes=len(file_bytes), uploaded_by=uploaded_by,
-        )
-        db.add(att)
-
-        activity = Activity(task_id=task_id, actor=uploaded_by, action="attached", detail=f"Attached: {filename}")
-        db.add(activity)
-        db.commit()
-        db.refresh(att)
-        return _attachment_to_dict(att)
+    return _attachments.add(
+        task_id=task_id, filename=filename, file_bytes=file_bytes,
+        content_type=content_type, uploaded_by=uploaded_by,
+    )
 
 
 def list_attachments(task_id: str) -> list[dict]:
-    with _session() as db:
-        atts = db.query(Attachment).filter(Attachment.task_id == task_id).order_by(Attachment.created_at.desc()).all()
-        return [_attachment_to_dict(a) for a in atts]
+    return _attachments.list_for_task(task_id)
 
 
 def get_attachment(attachment_id: str) -> tuple[dict, str] | None:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        return _attachment_to_dict(a), a.file_path
+    return _attachments.get(attachment_id)
 
 
 def get_attachment_bytes(attachment_id: str) -> tuple[dict, bytes] | None:
-    """Return attachment metadata and raw file bytes. Used by MCP download tool."""
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return None
-        if not os.path.exists(a.file_path):
-            return None
-        with open(a.file_path, "rb") as f:
-            file_bytes = f.read()
-        return _attachment_to_dict(a), file_bytes
+    return _attachments.get_bytes(attachment_id)
 
 
 def delete_attachment(attachment_id: str) -> bool:
-    with _session() as db:
-        a = db.get(Attachment, attachment_id)
-        if not a:
-            return False
-        if os.path.exists(a.file_path):
-            os.remove(a.file_path)
-        db.delete(a)
-        db.commit()
-        return True
+    return _attachments.delete(attachment_id)
 
 
 # ── Profile operations ──────────────────────────────────────────────────

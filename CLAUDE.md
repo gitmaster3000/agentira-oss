@@ -15,6 +15,8 @@
 - Real FKs between modules, no string workarounds.
 - Profile stays Profile. Agent = runtime executor. Persona = future role template concept.
 - Push+poll hybrid for notifications (ADR-007).
+- New features go in their own `backend/<domain>.py` (or `backend/forge/<domain>.py`), not appended to `services.py`. Functions, not class hierarchies, unless there's a real polymorphism need. See `backend/attachments.py`, `backend/forge/turns.py`, `backend/forge/live_inflight.py`.
+- **Prompts are configuration, not code.** Agent system prompts live on `Profile.system_prompt` (edited in Agent Settings UI). Task content lives on `Task.description` (edited in Task UI). Don't hardcode prompt text in dispatch code, and never re-apply a code constant on top of a user-edited row (set-if-empty seeds are the only acceptable shape).
 
 ## Products (Flowty umbrella)
 - **Flowty Studio** = existing Agentira workspace/tasks (routes: `/`)
