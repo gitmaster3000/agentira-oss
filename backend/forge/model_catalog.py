@@ -1,21 +1,17 @@
-"""Dynamic model catalog — per-provider discovery with cached fallbacks.
+"""Per-provider model catalog.
 
-Goal: agents bound to a runtime (claude-code, codex, gemini, …) should see
-the latest models from each provider without us editing a static list every
-time a new one ships. Providers expose model-list APIs (Anthropic
-/v1/models, OpenAI /v1/models, Google generativelanguage models.list) —
-when an API key is available we hit them, cache the result, and fall back
-to a curated list otherwise.
+Primary source is `model_catalog_data.json` shipped alongside this module.
+Cloud instances pick up updates via deploys; self-hosted via `git pull`.
+The JSON is refreshed periodically by a developer running
+`scripts/refresh_model_catalog.py` (which can talk to provider APIs with
+the dev's own keys) — end users never need their own provider API keys
+just to see the latest models.
 
-claude-code is the awkward case: it authenticates via the user's logged-in
-Anthropic session, not a developer API key, so /v1/models discovery only
-works if the user separately exports ANTHROPIC_API_KEY (purely for the
-catalog lookup, not for execution). We document that and degrade
-gracefully — the curated `fallback["anthropic"]` list is the floor.
-
-Cache is in-process, per-provider, with a 6h TTL. POST .../refresh forces
-re-fetch. No persistence — the daemon restarts cheaply, and the static
-fallback covers a cold start with no network.
+Optional live discovery: if a self-hoster sets ANTHROPIC_API_KEY /
+OPENAI_API_KEY / GOOGLE_API_KEY in the server env AND turns on
+AGENTIRA_MODEL_CATALOG_LIVE=1, we'll also hit the provider /v1/models
+endpoint and merge live ids on top of the shipped list. Off by default
+so we don't surprise the user with outbound network calls.
 """
 
 from __future__ import annotations
@@ -27,79 +23,15 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger("forge.model_catalog")
 
-# Curated fallbacks — minimum the UI should show when discovery is off or
-# the network is down. Aliases first (always-latest), then a couple of
-# pinned ids so users can reproduce. Keep this small; live discovery is
-# the source of truth when it's available.
-FALLBACKS: dict[str, list[str]] = {
-    "anthropic": [
-        "claude-opus-4-7",
-        "claude-sonnet-4-7",
-        "claude-haiku-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-6",
-        "claude-opus-4-5",
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
-    ],
-    # claude-code accepts both stable aliases and dated SKUs. Aliases come
-    # first so the dropdown defaults to "latest" without users having to
-    # re-pick after each Anthropic release.
-    "claude": [
-        "sonnet",
-        "opus",
-        "haiku",
-        "claude-opus-4-7",
-        "claude-sonnet-4-7",
-        "claude-haiku-4-7",
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-4-6",
-        "claude-opus-4-5",
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
-    ],
-    "openai": [
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-4.1",
-        "gpt-4.1-mini",
-        "o3",
-        "o3-mini",
-    ],
-    "codex": [
-        "gpt-5-codex",
-        "gpt-5",
-        "gpt-5-mini",
-        "gpt-4.1",
-        "o3",
-    ],
-    "google": [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-        "gemini-3.1-flash-lite-preview",
-    ],
-    "gemini": [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-pro-preview",
-        "gemini-3.1-flash-lite-preview",
-    ],
-}
+_DATA_PATH = Path(__file__).parent / "model_catalog_data.json"
 
-# Which env var holds each provider's discovery key. Codex/Claude reuse
-# the API-side key for catalog lookup only — execution still goes through
-# the CLI session.
+# Which env var holds each provider's discovery key (used only when live
+# discovery is opted in). Codex/Claude reuse the API-side key for catalog
+# lookup — execution still goes through the CLI session.
 API_KEY_ENV: dict[str, str] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "claude": "ANTHROPIC_API_KEY",
@@ -109,13 +41,44 @@ API_KEY_ENV: dict[str, str] = {
     "gemini": "GOOGLE_API_KEY",
 }
 
-_TTL_SECONDS = 6 * 60 * 60  # 6h — long enough to avoid hammering the API,
-                            # short enough that a new model shows up same day.
+_LIVE_FLAG_ENV = "AGENTIRA_MODEL_CATALOG_LIVE"
+_TTL_SECONDS = 6 * 60 * 60  # cache for live-discovery merges
 
-# (models, fetched_at_epoch, source) per provider. source ∈ {"live", "fallback"}.
-_cache: dict[str, tuple[list[str], float, str]] = {}
-_lock = threading.Lock()
+# (models, fetched_at_epoch) per provider — only used when live merge is on.
+_live_cache: dict[str, tuple[list[str], float]] = {}
+_cache_lock = threading.Lock()
 
+# Shipped catalog loaded once at import time. Reloadable via _reload_data().
+_shipped: dict = {}
+_shipped_mtime: float = 0.0
+
+
+def _reload_data() -> None:
+    """Read model_catalog_data.json into memory. Cheap; called on import
+    and from tests."""
+    global _shipped, _shipped_mtime
+    try:
+        with open(_DATA_PATH, "r", encoding="utf-8") as f:
+            _shipped = json.load(f)
+        _shipped_mtime = _DATA_PATH.stat().st_mtime
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        logger.warning("model_catalog_data.json unreadable: %s", exc)
+        _shipped = {"providers": {}}
+        _shipped_mtime = 0.0
+
+
+_reload_data()
+
+
+def shipped_providers() -> dict:
+    return _shipped.get("providers", {}) or {}
+
+
+def known_providers() -> list[str]:
+    return list(shipped_providers().keys())
+
+
+# ── Optional live discovery ──────────────────────────────────────────────
 
 def _http_get_json(url: str, headers: dict[str, str], timeout: float = 8.0) -> dict | None:
     try:
@@ -132,8 +95,8 @@ def _http_get_json(url: str, headers: dict[str, str], timeout: float = 8.0) -> d
 
 
 def fetch_anthropic(api_key: str) -> list[str] | None:
-    """List Anthropic models via /v1/models. Requires a developer API key
-    (claude-code's session auth doesn't work here)."""
+    """Anthropic /v1/models. Needs a developer API key (claude-code's
+    session auth doesn't work here)."""
     if not api_key:
         return None
     data = _http_get_json(
@@ -152,8 +115,8 @@ def fetch_anthropic(api_key: str) -> list[str] | None:
 
 
 def fetch_openai(api_key: str) -> list[str] | None:
-    """List OpenAI models via /v1/models. Filters to chat-capable ids by
-    common prefixes — the raw list includes embeddings, tts, etc."""
+    """OpenAI /v1/models. Filters to chat-capable ids by common prefixes
+    — raw list includes embeddings, tts, etc."""
     if not api_key:
         return None
     data = _http_get_json(
@@ -173,9 +136,7 @@ def fetch_openai(api_key: str) -> list[str] | None:
 
 
 def fetch_google(api_key: str) -> list[str] | None:
-    """List Google generativelanguage models. Filters to those supporting
-    generateContent so the dropdown isn't polluted with embedding-only
-    SKUs."""
+    """Google generativelanguage models, filtered to generateContent-capable."""
     if not api_key:
         return None
     data = _http_get_json(
@@ -210,78 +171,87 @@ _FETCHERS = {
 }
 
 
-def _merge_with_fallback(live: list[str], fallback: list[str]) -> list[str]:
-    """Live first, then any fallback ids that aren't already in live. Keeps
-    the curated aliases ("sonnet"/"opus"/"haiku") visible even when live
-    discovery returns only dated SKUs."""
-    seen = set(live)
-    merged = list(live)
-    for m in fallback:
+def _live_enabled() -> bool:
+    return os.environ.get(_LIVE_FLAG_ENV, "").lower() in ("1", "true", "yes")
+
+
+def _merge(live: list[str], shipped: list[str]) -> list[str]:
+    """Shipped first (so curated aliases stay at the top of the dropdown);
+    then any live ids the shipped list didn't already have."""
+    seen = set(shipped)
+    merged = list(shipped)
+    for m in live:
         if m not in seen:
             merged.append(m)
             seen.add(m)
     return merged
 
 
-def get_catalog(provider: str, *, refresh: bool = False) -> dict:
-    """Return the catalog entry for one provider.
-
-    Shape: {"provider", "models" (list[str]), "source", "fetched_at" (iso),
-            "ttl_seconds", "discovery_available" (bool)}.
-    source ∈ {"live", "fallback"}. discovery_available is True iff we know
-    how to query this provider AND have an API key for it.
-    """
-    provider = provider.lower()
-    fallback = FALLBACKS.get(provider, [])
+def _live_for(provider: str, refresh: bool) -> list[str] | None:
+    """Return live-discovered ids for provider, or None if disabled/failed.
+    Cached per-provider with a 6h TTL."""
+    if not _live_enabled():
+        return None
     fetcher = _FETCHERS.get(provider)
     api_key = os.environ.get(API_KEY_ENV.get(provider, ""), "")
+    if not fetcher or not api_key:
+        return None
 
     now = time.time()
-    with _lock:
-        cached = _cache.get(provider)
-        if cached and not refresh:
-            models, fetched_at, source = cached
-            if now - fetched_at < _TTL_SECONDS:
-                return _entry(provider, models, source, fetched_at, fetcher, api_key)
+    with _cache_lock:
+        cached = _live_cache.get(provider)
+        if cached and not refresh and now - cached[1] < _TTL_SECONDS:
+            return cached[0]
 
-        # Need a fresh read.
-        live: list[str] | None = None
-        if fetcher and api_key:
-            live = fetcher(api_key)
-
-        if live:
-            models = _merge_with_fallback(live, fallback)
-            source = "live"
-        else:
-            models = list(fallback)
-            source = "fallback"
-
-        _cache[provider] = (models, now, source)
-        return _entry(provider, models, source, now, fetcher, api_key)
+    live = fetcher(api_key)
+    if live:
+        with _cache_lock:
+            _live_cache[provider] = (live, now)
+    return live
 
 
-def _entry(provider: str, models: list[str], source: str, fetched_at: float,
-           fetcher, api_key: str) -> dict:
+# ── Public API ───────────────────────────────────────────────────────────
+
+def get_catalog(provider: str, *, refresh: bool = False) -> dict:
+    """Catalog entry for one provider.
+
+    Shape: {"provider", "models", "source", "last_updated", "live_enabled",
+            "live_merged" (bool — whether live ids were actually merged
+            this call)}.
+
+    `source` is "shipped" when only the JSON was used, "live+shipped"
+    when live discovery added at least one id on top.
+    """
+    provider = provider.lower()
+    shipped_entry = shipped_providers().get(provider, {})
+    shipped_models: list[str] = list(shipped_entry.get("models", []))
+    last_updated = shipped_entry.get("last_updated", "")
+
+    live = _live_for(provider, refresh)
+    if live:
+        merged = _merge(live, shipped_models)
+        live_merged = merged != shipped_models
+        source = "live+shipped" if live_merged else "shipped"
+    else:
+        merged = shipped_models
+        live_merged = False
+        source = "shipped"
+
     return {
         "provider": provider,
-        "models": models,
+        "models": merged,
         "source": source,
-        "fetched_at": datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat(),
-        "ttl_seconds": _TTL_SECONDS,
-        "discovery_available": bool(fetcher and api_key),
+        "last_updated": last_updated,
+        "live_enabled": _live_enabled(),
+        "live_merged": live_merged,
     }
 
 
 def get_all_catalogs(*, refresh: bool = False) -> dict:
-    """Return catalogs for every known provider, keyed by provider name."""
-    return {p: get_catalog(p, refresh=refresh) for p in FALLBACKS}
+    return {p: get_catalog(p, refresh=refresh) for p in known_providers()}
 
 
-def known_providers() -> list[str]:
-    return list(FALLBACKS.keys())
-
-
-def reset_cache_for_tests() -> None:
-    """Drop the in-process cache. Tests use this to isolate state."""
-    with _lock:
-        _cache.clear()
+def reload_for_tests() -> None:
+    _reload_data()
+    with _cache_lock:
+        _live_cache.clear()

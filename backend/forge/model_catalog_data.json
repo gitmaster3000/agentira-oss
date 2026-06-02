@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "_comment": "Shipped model catalog. Regenerate via scripts/refresh_model_catalog.py (needs provider API keys for live ids). Hand-edited entries are fine — the refresh script preserves alias-first ordering. Update cadence: roughly weekly, or whenever a provider ships a new SKU.",
+  "providers": {
+    "anthropic": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-7",
+        "claude-haiku-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-6",
+        "claude-opus-4-5",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5"
+      ]
+    },
+    "claude": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "sonnet",
+        "opus",
+        "haiku",
+        "claude-opus-4-7",
+        "claude-sonnet-4-7",
+        "claude-haiku-4-7",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-6",
+        "claude-opus-4-5",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+        "claude-sonnet-4-5[1m]",
+        "sonnet[1m]"
+      ]
+    },
+    "openai": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "o3",
+        "o3-mini"
+      ]
+    },
+    "codex": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "gpt-5-codex",
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-4.1",
+        "o3"
+      ]
+    },
+    "google": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite-preview"
+      ]
+    },
+    "gemini": {
+      "last_updated": "2026-06-02",
+      "models": [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite-preview"
+      ]
+    }
+  }
+}
