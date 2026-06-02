@@ -819,6 +819,33 @@ def openclaw_models():
     return services.get_openclaw_models()
 
 
+# ── Dynamic model catalog ────────────────────────────────────────────────
+
+@router.get("/models/catalog")
+def models_catalog_all(refresh: bool = False):
+    """Latest models per provider — live discovery (if API key present)
+    merged with curated fallback. `refresh=true` bypasses the in-process
+    TTL cache."""
+    from backend.forge import model_catalog
+    return {"providers": model_catalog.get_all_catalogs(refresh=refresh)}
+
+
+@router.get("/models/catalog/{provider}")
+def models_catalog_one(provider: str, refresh: bool = False):
+    from backend.forge import model_catalog
+    if provider.lower() not in model_catalog.known_providers():
+        raise HTTPException(404, f"Unknown provider: {provider}")
+    return model_catalog.get_catalog(provider, refresh=refresh)
+
+
+@router.post("/models/catalog/{provider}/refresh")
+def models_catalog_refresh(provider: str):
+    from backend.forge import model_catalog
+    if provider.lower() not in model_catalog.known_providers():
+        raise HTTPException(404, f"Unknown provider: {provider}")
+    return model_catalog.get_catalog(provider, refresh=True)
+
+
 @router.post("/openclaw/agent-model")
 def set_openclaw_model(body: ModelUpdateRequest):
     """Update an agent's model in openclaw.json and Forge DB."""
