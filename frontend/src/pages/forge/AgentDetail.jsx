@@ -1531,6 +1531,8 @@ function ConfigTab({ agent, onSaved }) {
         // Whether the Conductor may auto-dispatch work to this worker agent.
         conductor_enabled: agent.conductor_enabled ?? false,
         max_concurrent_runs: agent.max_concurrent_runs ?? 1,
+        // AP-155: per-agent containment posture. '' = workspace default.
+        sandbox_mode: agent.sandbox_mode || '',
     });
     const isConductor = agent.is_system && agent.name === 'Conductor';
     const [runtimes, setRuntimes] = useState([]);
@@ -2043,6 +2045,29 @@ function ConfigTab({ agent, onSaved }) {
                     )}
                 </section>
             )}
+
+            {/* AP-155: Containment — per-agent sandbox posture. Project
+                override (Project Settings) wins when set. */}
+            <section className="card space-y-2">
+                <h3 className="text-sm font-semibold text-text-primary">
+                    Containment
+                </h3>
+                <p className="text-xs text-text-tertiary">
+                    How tightly to fence this agent's workdir. Projects may override
+                    per-project. Phase 1 ships the config + dispatch logging;
+                    per-adapter enforcement (claude --add-dir / bwrap / Docker)
+                    lands next.
+                </p>
+                <select className="input"
+                    value={form.sandbox_mode}
+                    onChange={(e) => setForm({ ...form, sandbox_mode: e.target.value })}>
+                    <option value="">(workspace default)</option>
+                    <option value="off">Off — cwd set, nothing enforced</option>
+                    <option value="cwd">cwd — claude --add-dir + --disallowedTools (best-effort)</option>
+                    <option value="strict">strict — OS sandbox (bwrap / sandbox-exec)</option>
+                    <option value="container">container — per-agent Docker (strongest)</option>
+                </select>
+            </section>
 
             {/* Schedule — placeholder */}
             <section className="card space-y-2 opacity-60">

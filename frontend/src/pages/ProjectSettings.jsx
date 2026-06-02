@@ -83,6 +83,7 @@ function GeneralTab({ projectId }) {
                 repo_url: p.repo_url || '',
                 conventions_md: p.conventions_md || '',
                 work_signal: p.work_signal || 'working_tree',
+                sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
                 gates_enabled: !!p.gates_enabled,  // AP-158
             });
         }).catch(() => setProject(null));
@@ -97,6 +98,7 @@ function GeneralTab({ projectId }) {
         || form.repo_url !== (project.repo_url || '')
         || form.conventions_md !== (project.conventions_md || '')
         || form.work_signal !== (project.work_signal || 'working_tree')
+        || form.sandbox_mode !== (project.sandbox_mode || '')
         || form.gates_enabled !== !!project.gates_enabled
     );
 
@@ -111,6 +113,11 @@ function GeneralTab({ projectId }) {
                 repo_url: form.repo_url || null,
                 conventions_md: form.conventions_md || null,
                 work_signal: form.work_signal || null,
+                // AP-155: send the literal empty string to clear an
+                // override back to "inherit from agent". null means
+                // "don't change" in the PATCH; "" is the explicit
+                // clear value the backend recognizes.
+                sandbox_mode: form.sandbox_mode,
                 gates_enabled: form.gates_enabled,
             });
             setProject(updated);
@@ -159,6 +166,17 @@ function GeneralTab({ projectId }) {
                     <option value="working_tree">Working tree — any tracked change or new untracked file (default)</option>
                     <option value="tracked">Tracked changes only — edits to tracked files</option>
                     <option value="committed">Committed only — a new commit</option>
+                </select>
+            </Field>
+            <Field label="Sandbox (project override)"
+                hint="Containment level for runs in this project. Overrides each agent's own setting. Leave blank to inherit. Phase 1: backend logs the resolved mode; per-adapter enforcement lands next.">
+                <select className="input" value={form.sandbox_mode}
+                    onChange={(e) => setForm({ ...form, sandbox_mode: e.target.value })}>
+                    <option value="">(inherit from agent)</option>
+                    <option value="off">Off — cwd set, nothing enforced</option>
+                    <option value="cwd">cwd — claude --add-dir / --disallowedTools (best-effort)</option>
+                    <option value="strict">strict — OS sandbox (bwrap / sandbox-exec)</option>
+                    <option value="container">container — per-agent Docker (strongest)</option>
                 </select>
             </Field>
             <Field label="Gated transitions (AP-158)"
