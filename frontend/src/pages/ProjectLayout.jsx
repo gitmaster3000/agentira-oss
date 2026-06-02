@@ -9,6 +9,7 @@ import { UserPlus, X, Search, ChevronDown } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
 import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
 import { ROUTES } from '../routes';
+import { setCurrentProjectId } from '../currentProject';
 
 // Portal Dropdown
 function AddMemberDropdown({ anchorRef, profiles, onAdd, onClose }) {
@@ -121,9 +122,7 @@ export function ProjectLayout() {
     const location = useLocation();
     // Persist last-visited project so StudioDashboard's "Resume" card works.
     useEffect(() => {
-        if (projectId) {
-            try { localStorage.setItem('agentira:studio:lastProjectId', projectId); } catch {}
-        }
+        if (projectId) setCurrentProjectId(projectId);
     }, [projectId]);
     const [board, setBoard] = useState(null);
     const [members, setMembers] = useState([]);
