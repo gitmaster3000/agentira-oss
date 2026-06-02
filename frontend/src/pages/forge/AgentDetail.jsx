@@ -525,6 +525,17 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     const inputRef = useRef(null);
 
     const msgCountRef = useRef(0);
+    // Windowed message loading. The chat keeps a sliding window: the live
+    // tail is refreshed by the 3s poll; older pages are fetched on demand as
+    // the user scrolls up (with prefetch so it feels seamless). Without this,
+    // a thread past PAGE_SIZE messages froze on its first N and new turns
+    // never appeared in the view.
+    const PAGE_SIZE = 80;
+    const PREFETCH_PX = 600;              // start loading older this far from top
+    const messagesRef = useRef([]);       // latest messages, for stale-free reads
+    const loadingOlderRef = useRef(false);
+    const reachedStartRef = useRef(false); // older fetch returned < PAGE → no more
+    const [loadingOlder, setLoadingOlder] = useState(false);
 
     useEffect(() => {
         api.forge.listAgentProjects(agentId).then(setAgentProjects).catch(() => setAgentProjects([]));
@@ -544,24 +555,68 @@ function ChatTab({ agentId, agent, initialScope = null }) {
         : (agent?.default_project_id ? `chat:project:${agent.default_project_id}` : 'chat:default');
     const activeScope = selectedScope || screenScope;
 
+    const _byCreatedAt = (a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+    };
+    // Merge a fetched page into the current window: dedupe server rows by id
+    // (incoming wins, so edits/finalized rows refresh), keep local-only cards
+    // (e.g. /context output, optimistic sends) until a real row supersedes,
+    // and re-sort chronologically.
+    const _mergeWindow = (prev, incoming) => {
+        const byId = new Map();
+        for (const m of (prev || [])) {
+            if (!String(m.id).startsWith('local-')) byId.set(m.id, m);
+        }
+        for (const m of (incoming || [])) byId.set(m.id, m);
+        const locals = (prev || []).filter(m => String(m.id).startsWith('local-'));
+        return [...byId.values(), ...locals].sort(_byCreatedAt);
+    };
+
+    // Live tail: newest PAGE_SIZE messages, merged into the window so older
+    // pages already loaded are retained.
     const loadMessages = useCallback(async () => {
         try {
-            const data = await api.forge.listMessages(agentId, { limit: 200, scope_key: activeScope });
-            // Preserve any local-only messages (e.g. /context output) so the
-            // 3s poll doesn't wipe them, and interleave them by created_at
-            // so the local card sits chronologically where the user typed it.
-            setMessages((prev) => {
-                const locals = (prev || []).filter(m => String(m.id).startsWith('local-'));
-                return [...(data || []), ...locals].sort((a, b) => {
-                    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-                    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-                    return ta - tb;
-                });
+            const data = await api.forge.listMessages(agentId, {
+                limit: PAGE_SIZE, scope_key: activeScope,
             });
+            setMessages((prev) => _mergeWindow(prev, data));
         } catch (err) {
             console.error('Failed to load messages:', err);
         } finally {
             setLoading(false);
+        }
+    }, [agentId, activeScope]);
+
+    // Older page: fetched on scroll-up / prefetch. offset = how many server
+    // rows are already loaded (backend pages backward from newest). Anchors
+    // scroll so prepending doesn't jump the viewport.
+    const loadOlder = useCallback(async () => {
+        if (loadingOlderRef.current || reachedStartRef.current) return;
+        const serverLoaded = messagesRef.current
+            .filter(m => !String(m.id).startsWith('local-')).length;
+        if (serverLoaded === 0) return;
+        loadingOlderRef.current = true;
+        setLoadingOlder(true);
+        try {
+            const older = await api.forge.listMessages(agentId, {
+                limit: PAGE_SIZE, offset: serverLoaded, scope_key: activeScope,
+            });
+            if (!older || older.length === 0) { reachedStartRef.current = true; return; }
+            if (older.length < PAGE_SIZE) reachedStartRef.current = true;
+            const c = containerRef.current;
+            const before = c ? c.scrollHeight : 0;
+            setMessages((prev) => _mergeWindow(prev, older));
+            // Restore scroll position after the prepend so the user stays put.
+            requestAnimationFrame(() => {
+                if (c) c.scrollTop += (c.scrollHeight - before);
+            });
+        } catch (err) {
+            console.error('Failed to load older messages:', err);
+        } finally {
+            loadingOlderRef.current = false;
+            setLoadingOlder(false);
         }
     }, [agentId, activeScope]);
 
@@ -587,11 +642,30 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     }, [agentId]);
     useEffect(() => { loadConversations(); }, [loadConversations]);
 
+    // Keep a ref of the live messages so loadOlder can compute the offset
+    // without a stale closure.
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+    // Reset the window whenever the scope changes: clear, load the tail, then
+    // prefetch one older page so there's scroll headroom immediately.
     useEffect(() => {
-        loadMessages();
+        reachedStartRef.current = false;
+        loadingOlderRef.current = false;
+        setMessages([]);
+        let cancelled = false;
+        (async () => {
+            await loadMessages();
+            if (!cancelled) loadOlder();   // preload one page "back"
+        })();
         const interval = setInterval(() => { loadMessages(); loadConversation(); }, 3000);
-        return () => clearInterval(interval);
-    }, [loadMessages, loadConversation]);
+        return () => { cancelled = true; clearInterval(interval); };
+    }, [loadMessages, loadConversation, loadOlder]);
+
+    // Prefetch older pages as the user nears the top — seamless scrollback.
+    const onScroll = useCallback(() => {
+        const c = containerRef.current;
+        if (c && c.scrollTop < PREFETCH_PX) loadOlder();
+    }, [loadOlder]);
 
     // AP-93: 1Hz tick driving the "thinking… Ns" counter. Only runs
     // while the latest message is the user's (or a task run is going) —
@@ -648,13 +722,17 @@ function ChatTab({ agentId, agent, initialScope = null }) {
         return () => { alive = false; clearInterval(t); };
     }, [activeScope, agentId]);
 
+    // Auto-scroll only when the NEWEST message changes (a real new turn) —
+    // keyed off the last message's id, not the count. Prepending older pages
+    // grows the count too, and keying off length would yank the viewport to
+    // the bottom mid-scrollback.
+    const _lastMsgId = messages.length ? messages[messages.length - 1].id : null;
     useEffect(() => {
-        // Only auto-scroll when new messages arrive, not on every poll
-        if (autoScroll && bottomRef.current && messages.length !== msgCountRef.current) {
+        if (autoScroll && bottomRef.current && _lastMsgId !== msgCountRef.current) {
             bottomRef.current.scrollIntoView({ behavior: 'smooth' });
         }
-        msgCountRef.current = messages.length;
-    }, [messages.length, autoScroll]);
+        msgCountRef.current = _lastMsgId;
+    }, [_lastMsgId, autoScroll]);
 
     // Resolve context client-side. Priority:
     //   1. explicit attached project (via + popover) — user override wins
@@ -1039,7 +1117,12 @@ function ChatTab({ agentId, agent, initialScope = null }) {
             </div>
 
             {/* Messages */}
-            <div ref={containerRef} className="flex-1 overflow-auto p-6 space-y-3">
+            <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-auto p-6 space-y-3">
+                {loadingOlder && (
+                    <div className="flex justify-center py-2 text-text-tertiary">
+                        <Loader className="w-4 h-4 animate-spin" />
+                    </div>
+                )}
                 {messages.length === 0 ? (
                     <div className="text-center py-16 text-text-tertiary">
                         <MessageSquare className="w-10 h-10 mx-auto mb-3 opacity-40" />
