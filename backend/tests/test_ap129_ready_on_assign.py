@@ -33,6 +33,7 @@ def test_db():
     Base.metadata.create_all(engine)
     with patch("backend.services.SessionLocal", TestSession), \
          patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession), \
          patch("backend.forge.triggers.SessionLocal", TestSession):
         db = TestSession()
         core_services._seed_defaults(db)

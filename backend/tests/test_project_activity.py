@@ -25,6 +25,7 @@ def test_db():
     Base.metadata.create_all(engine)
     with patch("backend.services.SessionLocal", TestSession), \
          patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession), \
          patch("backend.forge.conductor.SessionLocal", TestSession), \
          patch("backend.forge.digest.SessionLocal", TestSession):
         db = TestSession()

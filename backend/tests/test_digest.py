@@ -28,6 +28,7 @@ def test_db():
 
     with patch("backend.services.SessionLocal", TestSession), \
          patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession), \
          patch("backend.forge.digest.SessionLocal", TestSession):
         db = TestSession()
         core_services._seed_defaults(db)

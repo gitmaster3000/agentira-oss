@@ -1457,74 +1457,27 @@ def _status_outcome_agreement(status: "RunStatus",
 def create_run(*, agent_id: str, task_id: str | None = None,
                project_id: str | None = None, trigger_event: str = "",
                model_used: str = "") -> dict:
-    with _session() as db:
-        r = Run(
-            agent_id=agent_id,
-            task_id=task_id,
-            project_id=project_id,
-            trigger_event=trigger_event,
-            status=RunStatus.PENDING,
-            model_used=model_used,
-        )
-        db.add(r)
-        db.commit()
-        db.refresh(r)
-        return _run_to_dict(r)
+    # Delegates to RunManager (backend/forge/runs.py) — single owner of
+    # Run lifecycle. Public API kept for back-compat with existing callers.
+    from backend.forge import runs as _runs
+    return _runs.create(
+        agent_id=agent_id, task_id=task_id, project_id=project_id,
+        trigger_event=trigger_event, model_used=model_used,
+    )
 
 
 def start_run(run_id: str) -> dict | None:
-    with _session() as db:
-        r = db.query(Run).filter(Run.id == run_id).first()
-        if not r:
-            return None
-        r.status = RunStatus.RUNNING
-        r.started_at = datetime.now(timezone.utc)
-        _broadcast_status(run_id, RunStatus.RUNNING)
-        # Mark agent busy
-        if r.agent:
-            r.agent.status = AgentStatus.BUSY
-        db.commit()
-        db.refresh(r)
-        return _run_to_dict(r)
+    from backend.forge import runs as _runs
+    return _runs.start(run_id)
 
 
 def complete_run(run_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
                  cost_usd: float = 0.0, error: str | None = None) -> dict | None:
-    with _session() as db:
-        r = db.query(Run).filter(Run.id == run_id).first()
-        if not r:
-            return None
-        now = datetime.now(timezone.utc)
-        r.status = RunStatus.FAILED if error else RunStatus.COMPLETED
-        _broadcast_status(run_id, r.status)
-        r.finished_at = now
-        r.input_tokens = input_tokens
-        r.output_tokens = output_tokens
-        r.cost_usd = cost_usd
-        r.error = error
-        if r.started_at:
-            r.duration_ms = int((now - _utc(r.started_at)).total_seconds() * 1000)
-        # Update agent stats
-        if r.agent:
-            r.agent.status = AgentStatus.ONLINE
-            r.agent.total_runs += 1
-            r.agent.total_cost_usd += cost_usd
-
-        # Notify human admins on failure. Successful runs are silent —
-        # bumping a notification per success would be noise. Per-user
-        # opt-in for success notifications is a future enhancement.
-        if r.status == RunStatus.FAILED:
-            agent_name = r.agent.name if r.agent else "agent"
-            short_err = (error or "unknown error")[:140]
-            _notify_admins(
-                db,
-                type_="forge.run.failed",
-                title=f"{agent_name} run failed: {short_err}",
-                link=f"/forge/runs/{run_id}",
-            )
-        db.commit()
-        db.refresh(r)
-        return _run_to_dict(r)
+    from backend.forge import runs as _runs
+    return _runs.complete(
+        run_id, input_tokens=input_tokens, output_tokens=output_tokens,
+        cost_usd=cost_usd, error=error,
+    )
 
 
 def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
@@ -2289,27 +2242,34 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         if (run_id is None and kind == "chat" and scope_key
                 and scope_key.startswith("task:")):
             from backend.models import Task as _Task
+            from backend.forge import runs as _runs
             _shadow_task_id = scope_key.split(":", 1)[1]
             _shadow_task = db.get(_Task, _shadow_task_id)
             if _shadow_task:
                 _shadow_project_id = _shadow_task.project_id or ""
-                shadow = Run(
-                    agent_id=a.id, task_id=_shadow_task_id,
-                    project_id=_shadow_project_id or None,
-                    trigger_event="chat.shadow",
-                    status=RunStatus.RUNNING,
-                    model_used=a.model or "",
-                    started_at=datetime.now(timezone.utc),
-                )
-                shadow.worktree_path, shadow.worktree_branch = _compute_worktree_paths(
+                _wt_path, _wt_branch = _compute_worktree_paths(
                     agent_id=a.id, project_id=_shadow_project_id or None,
                     task_id=_shadow_task_id,
                 )
-                db.add(shadow)
-                db.flush()
-                run_id = shadow.id
+                # Pre-compute log_dir from a provisional id so the row can
+                # be inserted with all fields set in one shot. We need the
+                # real run_id for the log path though — so insert, flush,
+                # then patch log_dir.
+                run_id = _runs.create_shadow_in_session(
+                    db,
+                    agent_id=a.id,
+                    task_id=_shadow_task_id,
+                    project_id=_shadow_project_id or None,
+                    model_used=a.model or "",
+                    initial_prompt=prompt,
+                    worktree_path=_wt_path,
+                    worktree_branch=_wt_branch,
+                    log_dir="",
+                )
                 _shadow_log_dir = _compute_log_dir(run_id=run_id)
-                shadow.log_dir = _shadow_log_dir
+                db.query(Run).filter(Run.id == run_id).update(
+                    {"log_dir": _shadow_log_dir}
+                )
             else:
                 # Task lookup failed — reset trackers; fall through to a
                 # normal chat dispatch with no shadow.
@@ -3288,64 +3248,9 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
 
 
 def cancel_run(run_id: str) -> dict:
-    """Cancel a pending or running Run.
-
-    Resolves the agent's runtime, fires a cancel WS frame so the daemon
-    kills the in-flight subprocess (if any), and immediately marks the
-    Run as cancelled in the DB. The daemon will also post a complete
-    when it sees the kill, but we don't wait for that — the user
-    pressing cancel needs immediate feedback.
-    """
-    import asyncio
-    from backend.forge.ws_dispatch import hub
-    with _session() as db:
-        run = db.query(Run).filter(Run.id == run_id).first()
-        if not run:
-            return {"error": "Run not found"}
-        if run.status in (RunStatus.COMPLETED, RunStatus.FAILED,
-                          RunStatus.CANCELLED, RunStatus.CANCELLING):
-            return {"error": f"Run already {run.status.value}"}
-        agent = db.get(Agent, run.agent_id)
-        runtime_id = agent.runtime_id if agent else None
-        # ADR 009 / B6: the run's task scope, so the daemon can resolve the
-        # live turn by scope if the trace mapping was lost.
-        cancel_scope_key = f"task:{run.task_id}" if run.task_id else ""
-
-        # Look up the latest trace_id for this run so the daemon can match.
-        last_msg = (db.query(AgentMessage)
-                    .filter(AgentMessage.run_id == run_id)
-                    .order_by(AgentMessage.created_at.desc())
-                    .first())
-        trace_id = last_msg.trace_id if last_msg else ""
-
-        # P3: mark CANCELLING (transient) — the daemon's trigger-complete
-        # (cancelled=True) flips it to the terminal CANCELLED. Until that
-        # arrives the UI shows "Cancelling…" so the user knows we asked
-        # but haven't been confirmed yet. The reconciler will escalate if
-        # the daemon never acks (stuck >> STOP_GRACE_S * 4).
-        now = datetime.now(timezone.utc)
-        run.status = RunStatus.CANCELLING
-        _broadcast_status(run_id, RunStatus.CANCELLING)
-        run.stop_requested_at = now
-        run.error = "Cancelled by user."
-        if run.agent and run.agent.status == AgentStatus.BUSY:
-            run.agent.status = AgentStatus.ONLINE
-        db.commit()
-        db.refresh(run)
-        run_dict = _run_to_dict(run)
-
-    # Best-effort cancel signal to the daemon
-    if runtime_id:
-        try:
-            _dispatch_coro(hub.dispatch_cancel(
-                runtime_id=runtime_id, trace_id=trace_id, run_id=run_id,
-                scope_key=cancel_scope_key,
-            ))
-        except Exception as exc:
-            # WS dispatch is best-effort — the run is already marked cancelled.
-            pass
-
-    return {"ok": True, "run": run_dict}
+    """Cancel a pending or running Run. Delegates to RunManager."""
+    from backend.forge import runs as _runs
+    return _runs.cancel(run_id)
 
 
 def finish_run(run_id: str, *, outcome: str, summary: str = "",
