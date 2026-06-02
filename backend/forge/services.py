@@ -1305,6 +1305,13 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
             q = q.filter(Run.project_id == project_id)
         if status:
             q = q.filter(Run.status == status)
+        # AP-151: a chat.shadow run is a transient reservation, not a real
+        # run. It either gets deleted (no work) or promoted to "chat" (work
+        # crystallized) at complete_trigger. Never surface the un-promoted
+        # shadow in the global list — that's the "every comment becomes a
+        # run" pollution. The task-scoped lookup (list_runs_for_task) still
+        # sees it so the chat Stop button works while it's in flight.
+        q = q.filter(Run.trigger_event != "chat.shadow")
         runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
         return [_run_to_dict(r) for r in runs]
 
@@ -3832,6 +3839,16 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                         "shadow run deleted trace=%s run=%s — no work crystallized",
                         trace_id, run_id)
                     run_id = None  # downstream sees a run-less chat turn
+                else:
+                    # The turn did material work → promote the shadow to a
+                    # real run so it surfaces in the runs list. Flipping the
+                    # trigger_event off "chat.shadow" both un-hides it in
+                    # list_runs and makes this cleanup branch idempotent.
+                    r.trigger_event = "chat"
+                    db.commit()
+                    _dispatch_logger.info(
+                        "shadow run promoted trace=%s run=%s — work crystallized",
+                        trace_id, run_id)
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a
