@@ -93,6 +93,25 @@ def test_create_task_with_dates(test_db):
     assert task["start_date"].startswith("2026-04-01")
     assert task["due_date"].startswith("2026-04-15")
 
+def test_create_task_with_tags_and_dod(test_db):
+    from backend import services
+    project = services.create_project("DOD Project", "Desc", actor="system")
+
+    dod = [{"text": "Tests pass", "checked": False}, {"text": "Docs updated", "checked": True}]
+    task = services.create_task(
+        project["id"],
+        "Task with DOD",
+        tags=["frontend", "backend"],
+        dod_items=dod,
+        actor="system",
+    )
+
+    assert task["tags"] == ["frontend", "backend"]
+    assert task["dod_items"] == dod
+
+    fetched = services.get_task(task["id"])
+    assert fetched["dod_items"] == dod
+
 def test_update_task_dates(test_db):
     from backend import services
     project = services.create_project("Update Dates", "Desc", actor="system")

@@ -62,8 +62,12 @@ def test_create_project_auto_adds_conductor_and_kickoff_task():
         t = tasks[0]
         assert t.title == "Plan this project"
         assert t.assignee == "Conductor"
-        assert "register_run_artifact" in (t.description or "")
-        assert "create_task" in (t.description or "")
+        # Prompt-as-config: the task body is owned by the user, not by
+        # services.py. The Conductor's UI-editable system prompt drives
+        # behavior; the body starts empty and the user fills it (or, in
+        # the future, the project-creation wizard does on the user's
+        # behalf — AP-153).
+        assert t.description == ""
 
 
 def test_kickoff_skipped_gracefully_when_bot_role_missing(test_db):

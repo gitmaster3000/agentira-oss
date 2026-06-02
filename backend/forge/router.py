@@ -530,6 +530,19 @@ async def cancel_run(run_id: str):
     return result
 
 
+@router.post("/runs/{run_id}/retry")
+def retry_run(run_id: str):
+    """Explicit restart of a terminal Run — schedules a fresh run for
+    the same (task, agent) with a context hint pointing at the prior
+    run. UI surfaces this as a "Restart" button on the Run page when
+    the run is in a terminal state (FAILED / CANCELLED / SUCCEEDED).
+    The implicit AP-120 chat-into-failed-task retry is unchanged."""
+    result = services.retry_run(run_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
 @router.post("/runs/{run_id}/pause")
 async def pause_run(run_id: str):
     """Pause a running CLI subprocess (SIGSTOP). Async required so the
