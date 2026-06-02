@@ -202,10 +202,12 @@ def test_dispatch_chat_trigger_sends_empty_bundle(test_db):
     assert call["repo_path"] == ""
     assert call["conventions_md"] == ""
     assert call["mcp_config_json"] == ""
-    # AP-155: dispatch always carries the resolved sandbox mode (defaults
-    # to "off" when neither project nor agent has a setting) so the daemon
-    # receives the policy on every frame. Empty bundle = just sandbox.
-    assert set(call["env_extra"].keys()) <= {"AGENTIRA_SANDBOX_MODE"}
+    # AP-155 + AP-152: dispatch always injects AGENTIRA_SANDBOX_MODE
+    # (resolved containment policy, default "off"), and AGENTIRA_API_KEY
+    # when the agent has one (used to authenticate REST calls — e.g.
+    # binary attachment reads). Empty bundle = just these env vars.
+    assert set(call["env_extra"].keys()) <= {"AGENTIRA_SANDBOX_MODE",
+                                             "AGENTIRA_API_KEY"}
     if "AGENTIRA_SANDBOX_MODE" in call["env_extra"]:
         assert call["env_extra"]["AGENTIRA_SANDBOX_MODE"] == "off"
     assert call["run_token"] == ""

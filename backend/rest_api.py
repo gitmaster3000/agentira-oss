@@ -45,9 +45,21 @@ class ProfileUpdate(BaseModel):
     avatar_url: Optional[str] = None
     webhook_url: Optional[str] = None
 
+class InitialTaskSpec(BaseModel):
+    title: str
+    description: str = ""
+    assignee: str = ""
+    priority: str = "medium"
+    status: str = "todo"
+
 class ProjectCreate(BaseModel):
     name: str
     description: str = ""
+    # AP-153 wizard payload. Both omitted → legacy auto-seed
+    # (Conductor + empty "Plan this project" task). Either present
+    # (even empty list) → wizard mode: user owns membership + tasks.
+    initial_tasks: Optional[list[InitialTaskSpec]] = None
+    members: Optional[list[str]] = None
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -71,6 +83,7 @@ class TaskCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     start_date: Optional[str] = None
     due_date: Optional[str] = None
+    dod_items: Optional[list[dict]] = None
     epic_id: Optional[str] = None
 
 class TaskUpdate(BaseModel):
@@ -339,7 +352,15 @@ def api_list_projects(actor: str = Depends(get_current_user)):
 
 @projects.post("")
 def api_create_project(body: ProjectCreate, actor: str = Depends(get_current_user)):
-    return services.create_project(body.name, body.description, actor=actor)
+    initial_tasks = (
+        [t.model_dump() for t in body.initial_tasks]
+        if body.initial_tasks is not None else None
+    )
+    return services.create_project(
+        body.name, body.description, actor=actor,
+        initial_tasks=initial_tasks,
+        members=body.members,
+    )
 
 @projects.get("/{project_id}")
 def api_get_project(project_id: str):
@@ -414,6 +435,30 @@ def api_get_roadmap(project_id: str, group_by: str = "epic"):
 @projects.get("/{project_id}/activity")
 def api_get_project_activity(project_id: str, limit: int = 50):
     return services.get_project_activity(project_id, limit=limit)
+
+
+# AP-152: project-level attachments. Same Attachment table as tasks
+# (FK swapped); shared `/api/attachments/{id}/download` and DELETE
+# endpoints above handle either side.
+@projects.get("/{project_id}/attachments")
+def api_list_project_attachments(project_id: str):
+    from backend import attachments as _attachments
+    return _attachments.list_for_project(project_id)
+
+
+@projects.post("/{project_id}/attachments")
+async def api_upload_project_attachment(project_id: str, file: UploadFile = File(...),
+                                         actor: str = Depends(get_current_user)):
+    from backend import attachments as _attachments
+    try:
+        file_bytes = await file.read()
+        return _attachments.add(
+            project_id=project_id, filename=file.filename, file_bytes=file_bytes,
+            content_type=file.content_type or "application/octet-stream",
+            uploaded_by=actor,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 @projects.get("/{project_id}/webhook-config")
 def api_get_webhook_config(project_id: str):
@@ -491,7 +536,7 @@ def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
             project_id=body.project_id, title=body.title, description=body.description,
             status=body.status, priority=body.priority, assignee=body.assignee,
             tags=body.tags, start_date=body.start_date, due_date=body.due_date,
-            epic_id=body.epic_id, actor=actor,
+            dod_items=body.dod_items, epic_id=body.epic_id, actor=actor,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

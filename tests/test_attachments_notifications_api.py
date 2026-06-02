@@ -19,8 +19,12 @@ def test_db(tmp_path):
     TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
 
+    # AP-152: attachment logic moved to `backend.attachments`; patch both
+    # the new module's SessionLocal and ATTACHMENTS_DIR alongside the
+    # legacy services.SessionLocal binding used by other code paths.
     with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.services.ATTACHMENTS_DIR", str(tmp_path)):
+         patch("backend.attachments.SessionLocal", TestSession), \
+         patch("backend.attachments.ATTACHMENTS_DIR", str(tmp_path)):
         db = TestSession()
         services._seed_defaults(db)
         db.close()
