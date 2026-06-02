@@ -9,6 +9,7 @@ import {
     Info as InfoIcon,
 } from 'lucide-react';
 import { api } from '../../api';
+import { ToolInput } from '../../components/AskUserQuestionCard';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 
 const STATUS_STYLES = {
@@ -1160,12 +1161,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                                         <div className="text-xs font-medium text-text-secondary mb-1">
                                             <Wrench className="w-3 h-3 inline mr-1" />{msg.tool_name}
                                         </div>
-                                        {msg.tool_input && (
-                                            <details className="text-xs">
-                                                <summary className="text-text-tertiary cursor-pointer hover:text-text-secondary">Input</summary>
-                                                <pre className="mt-1 p-2 bg-bg-hover rounded text-text-secondary overflow-auto max-h-32">{msg.tool_input}</pre>
-                                            </details>
-                                        )}
+                                        <ToolInput toolName={msg.tool_name} toolInput={msg.tool_input} />
                                         {msg.tool_output && (
                                             <details className="text-xs mt-1">
                                                 <summary className="text-text-tertiary cursor-pointer hover:text-text-secondary">Output</summary>

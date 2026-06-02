@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 
 export function CreateTaskModal({ projectId, onClose, onCreated }) {
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
@@ -48,8 +51,9 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
             for (const file of files) {
                 await api.uploadAttachment(task.id, file);
             }
-            onCreated();
+            onCreated(task);
             onClose();
+            if (task?.id) navigate(ROUTES.STUDIO_TASK(task.key || task.id));
         } catch (err) {
             alert(err.message);
         } finally {

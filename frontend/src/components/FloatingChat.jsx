@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, X, Send, Loader, GripVertical, Ban } from 'lucide-react';
 import { api } from '../api';
+import { AskUserQuestionCard } from './AskUserQuestionCard';
 
 // Each agent's floating-chat thread is its own workspace-wide conversation.
 const CHAT_SCOPE = 'chat:default';
@@ -327,6 +328,9 @@ function ChatBubble({ m }) {
         );
     }
     if (role === 'tool') {
+        if (m.tool_name === 'AskUserQuestion') {
+            return <AskUserQuestionCard toolInput={m.tool_input} />;
+        }
         const label = m.tool_name
             ? `Used ${m.tool_name}`
             : (m.content || m.tool_output || 'tool');

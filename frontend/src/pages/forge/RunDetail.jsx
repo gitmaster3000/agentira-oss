@@ -10,6 +10,7 @@ import {
     ScrollText, FileText, Package, Copy, Check,
 } from 'lucide-react';
 import { api } from '../../api';
+import { ToolInput } from '../../components/AskUserQuestionCard';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 
 const STATUS_CONFIG = {
@@ -667,12 +668,7 @@ function MessageRow({ m }) {
                 >
                     {m.content || '(empty)'}
                 </pre>
-                {m.tool_input && (
-                    <details className="mt-1 text-xs">
-                        <summary className="cursor-pointer text-text-tertiary">tool input</summary>
-                        <pre className="mt-1 p-2 bg-bg-app/40 rounded font-mono text-text-secondary overflow-x-auto">{m.tool_input}</pre>
-                    </details>
-                )}
+                <ToolInput toolName={m.tool_name} toolInput={m.tool_input} />
             </div>
         </div>
     );
