@@ -620,6 +620,12 @@ def _run_to_dict(r: Run) -> dict:
         "materialize_reason": r.materialize_reason or "",
         # Per-run log directory the daemon tees stdout/stderr into.
         "log_dir": r.log_dir or "",
+        # Daemon-reported actual cwd (vs. the backend-stamped
+        # worktree_path above) + claude's session id, for the Run page's
+        # diagnostic strip. RunDetail.jsx reads these to surface the
+        # session.jsonl path and the workdir to `cd` into.
+        "workdir": r.workdir or "",
+        "session_id": r.session_id or "",
     }
 
 
@@ -3617,6 +3623,10 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                 r.output_tokens = (r.output_tokens or 0) + output_tokens
                 if workdir:
                     r.workdir = workdir
+                if session_id:
+                    # Mirror the success-path persist: cancelled runs are
+                    # still worth a session pointer for post-mortem.
+                    r.session_id = session_id
                 if diff_stat:
                     r.diff_stat = diff_stat
                 if diff:
@@ -3729,6 +3739,13 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.diff = diff
                 if workdir:
                     r.workdir = workdir
+                if session_id:
+                    # Persist on the Run row too (not just the Conversation
+                    # via upsert_conversation below). The Run page renders
+                    # this to point the user at ~/.claude/projects/<enc>/
+                    # <session>.jsonl. Without it the diagnostic strip
+                    # shows "—" even when a session was captured.
+                    r.session_id = session_id
                 if diagnostics:
                     # AP-107: cap the persisted blob so a runaway stderr can't
                     # bloat the row. The spec budgets ~50KB total.
