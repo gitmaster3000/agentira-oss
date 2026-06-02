@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { ROUTES } from '../routes';
 import { X } from 'lucide-react';
 
 export function CreateEpicModal({ projectId, onClose, onCreated }) {
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         title: '',
@@ -26,13 +29,14 @@ export function CreateEpicModal({ projectId, onClose, onCreated }) {
         if (!formData.title.trim()) return;
         setLoading(true);
         try {
-            await api.createEpic(projectId, {
+            const epic = await api.createEpic(projectId, {
                 title: formData.title.trim(),
                 description: formData.description.trim(),
                 color: formData.color
             });
-            if (onCreated) onCreated();
+            if (onCreated) onCreated(epic);
             onClose();
+            if (epic?.id) navigate(ROUTES.STUDIO_EPIC(epic.id));
         } catch (err) {
             alert(err.message);
         } finally {

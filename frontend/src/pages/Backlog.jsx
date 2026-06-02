@@ -229,8 +229,20 @@ export function Backlog() {
                                     {isCollapsed ? <ChevronRight className="w-4 h-4 text-text-tertiary" /> : <ChevronDown className="w-4 h-4 text-text-tertiary" />}
                                     
                                     {section.type === 'epic' ? <Zap className="w-3.5 h-3.5" style={{ color: section.color || '#7c4dff' }} /> : <Tag className="w-3.5 h-3.5 text-text-tertiary" />}
-                                    
-                                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{section.title}</span>
+
+                                    {section.type === 'epic' ? (
+                                        <Link
+                                            to={ROUTES.STUDIO_EPIC(section.id)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="text-sm font-medium hover:underline"
+                                            style={{ color: 'var(--text-primary)' }}
+                                            title={`Open epic: ${section.title}`}
+                                        >
+                                            {section.title}
+                                        </Link>
+                                    ) : (
+                                        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{section.title}</span>
+                                    )}
                                     <span className="text-[11px] font-medium px-2 py-0.5 rounded-full ml-1" style={{ color: 'var(--text-tertiary)', backgroundColor: 'var(--bg-hover)' }}>{section.tasks.length}</span>
                                 </div>
 

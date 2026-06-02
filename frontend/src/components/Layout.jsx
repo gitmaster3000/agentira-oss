@@ -9,11 +9,9 @@ export function Layout() {
     const [showCreate, setShowCreate] = useState(false);
 
     const handleProjectSuccess = () => {
-        // We might want to trigger a refresh in the Navbar's project list.
-        // For now, Navbar handles its own loading.
+        // Just close — the wizard navigates to the new project's board itself.
+        // A full reload here would cancel that client-side navigation.
         setShowCreate(false);
-        // Refresh the page or use a shared state/context if needed to update project list everywhere
-        window.location.reload();
     };
 
     return (
