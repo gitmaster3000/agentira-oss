@@ -35,6 +35,10 @@ export function FloatingChat() {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
+    // Latches the thinking indicator off after a Stop click. Reset on
+    // the next send — otherwise the heuristic ("last message is user's")
+    // re-asserts thinking even though the user has cancelled.
+    const [stopped, setStopped] = useState(false);
     // One shared anchor (top-left) for both the button and the panel.
     const [pos, setPos] = useState(null);
     const bottomRef = useRef(null);
@@ -135,6 +139,7 @@ export function FloatingChat() {
         const trimmed = input.trim();
         if (!trimmed || sending || !selectedId) return;
         const localId = `local-${Date.now()}`;
+        setStopped(false);
         setMessages((prev) => [...prev, {
             id: localId, role: 'user', content: trimmed,
             created_at: new Date().toISOString(),
@@ -160,22 +165,25 @@ export function FloatingChat() {
         }
     };
 
-    const stop = () => {
+    const stop = async () => {
         if (!selectedId) return;
-        // Optimistic terminal message so the indicator clears immediately;
-        // the backend cancel races the in-flight dispatch.
+        setStopped(true);
         setMessages((prev) => [...prev, {
             id: `local-stop-${Date.now()}`, role: 'system',
             content: '⏹ Stopped.', created_at: new Date().toISOString(),
         }]);
-        api.forge.stopChat(selectedId, CHAT_SCOPE)
-            .catch((err) => console.error('Stop failed:', err));
+        try {
+            await api.forge.stopChat(selectedId, CHAT_SCOPE);
+        } catch (err) {
+            console.error('Stop failed:', err);
+        }
+        loadMessages().catch(() => {});
     };
 
-    // "Thinking" = the last message is the user's, with no reply yet —
-    // capped at 10 min so a dead dispatch can't spin the indicator forever.
+    // "Thinking" = last message is user's with no reply, capped at 10 min,
+    // and forcibly cleared after a Stop click until the next send.
     const _last = messages[messages.length - 1];
-    const lastIsUser = !!_last && _last.role === 'user'
+    const lastIsUser = !stopped && !!_last && _last.role === 'user'
         && _last.created_at
         && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
     const selectedAgent = agents.find((a) => a.id === selectedId);

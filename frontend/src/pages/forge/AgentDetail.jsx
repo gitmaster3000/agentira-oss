@@ -494,6 +494,14 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // Stop available for ANY in-flight turn (incl. run-less chats, and across
     // a backend restart), replacing the 10-minute staleness guess.
     const [scopeLive, setScopeLive] = useState(false);
+    // Latches off the thinking indicator for a scope after the user clicks
+    // Stop. Cleared when the user sends in that scope again. Without this,
+    // the heuristic stack (_userTurnLive / _runRunning / scopeLive) can keep
+    // the spinner up for up to 10 min after a confirmed cancel — happens
+    // when a shadow run never reached the daemon so cancel pauses it but
+    // doesn't terminate the user-message-with-no-reply state. Per-scope so
+    // switching chats doesn't carry a stopped flag across.
+    const [stoppedScopes, setStoppedScopes] = useState({});
     // AP-93: 1Hz tick that drives the "thinking… Ns" elapsed counter.
     // Only running while the indicator is visible — see useEffect below.
     const [nowTick, setNowTick] = useState(() => Date.now());
@@ -761,6 +769,12 @@ function ChatTab({ agentId, agent, initialScope = null }) {
         }]);
         setInput('');
         setSending(true);
+        // A new send means the user is no longer in the "stopped" state
+        // for this scope — clear so the thinking indicator can light up.
+        setStoppedScopes(prev => {
+            if (!prev[activeScope]) return prev;
+            const next = { ...prev }; delete next[activeScope]; return next;
+        });
         try {
             const res = await api.forge.sendRuntimeChat(agentId, {
                 content: trimmed,
@@ -811,7 +825,10 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     const _userTurnLive = _lastIsUser && _userTurnAgeMs < _STALE_THINKING_MS;
     // ADR 009 / E2: scopeLive (daemon-reported) is authoritative — keep Stop
     // up whenever a turn is actually running, regardless of the heuristics.
-    const agentThinking = _userTurnLive || _runRunning || scopeLive;
+    // A user-pressed Stop in this scope overrides all three heuristics until
+    // the next send (see stoppedScopes).
+    const _stoppedHere = !!stoppedScopes[activeScope];
+    const agentThinking = !_stoppedHere && (_userTurnLive || _runRunning || scopeLive);
     // Elapsed seconds since "thinking" started. Start time is the last
     // user message's created_at (chat) or the run's started_at (task).
     const _thinkStartMs = (() => {
@@ -1189,7 +1206,11 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                     {agentThinking ? (
                         <button
                             onClick={() => {
-                                // Optimistic: flip the UI NOW. Don't await.
+                                // Optimistic: flip the UI NOW. Latch the
+                                // stopped flag for this scope so the
+                                // thinking heuristics can't re-assert.
+                                const _scope = activeScope;
+                                setStoppedScopes(prev => ({ ...prev, [_scope]: true }));
                                 setMessages(prev => [...prev, {
                                     id: `local-stop-${Date.now()}`,
                                     role: 'system',
@@ -1199,7 +1220,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                                 if (sending) setSending(false);
                                 // Fire-and-forget cancel. Backend / daemon
                                 // do their best; UI doesn't block.
-                                api.forge.stopChat(agentId, activeScope).catch(err => {
+                                api.forge.stopChat(agentId, _scope).catch(err => {
                                     console.error('Stop failed (background):', err);
                                 });
                             }}
