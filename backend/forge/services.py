@@ -1014,6 +1014,8 @@ _AGENT_TO_PROFILE_MIRROR = {
     "conductor_tick_seconds", "conductor_report_time",
     "conductor_report_enabled", "conductor_plan_interval_minutes",
     "conductor_active",
+    # AP-155 sandbox config — lives on Profile.
+    "sandbox_mode",
 }
 
 
@@ -1037,6 +1039,18 @@ def update_agent(agent_id: str, **fields) -> dict | None:
             fields["mcp_servers"] = json.dumps(list(fields["mcp_servers"]))
         if "mcp_disabled" in fields and fields["mcp_disabled"] is not None:
             fields["mcp_disabled"] = json.dumps(list(fields["mcp_disabled"]))
+        # AP-155: empty-string from the UI clears the override (back to
+        # workspace default). Validate against the known modes. Applied
+        # below the skip-None loop because None IS the legitimate "clear"
+        # value here, unlike the other fields.
+        sandbox_clear_to_none = False
+        if "sandbox_mode" in fields:
+            from backend.sandbox import is_valid_mode
+            v = (fields["sandbox_mode"] or "").strip() or None
+            if not is_valid_mode(v):
+                raise ValueError(f"invalid sandbox_mode: {fields['sandbox_mode']!r}")
+            fields["sandbox_mode"] = v
+            sandbox_clear_to_none = v is None
         for k, v in fields.items():
             if v is not None and hasattr(a, k):
                 setattr(a, k, v)
@@ -1049,6 +1063,11 @@ def update_agent(agent_id: str, **fields) -> dict | None:
                     continue
                 if hasattr(prof, k):
                     setattr(prof, k, v)
+            # AP-155: None is the legitimate clear for sandbox_mode — the
+            # generic loop above skips Nones because most fields treat
+            # None as "no change requested." Apply the clear here.
+            if sandbox_clear_to_none and hasattr(prof, "sandbox_mode"):
+                prof.sandbox_mode = None
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)
@@ -2321,6 +2340,29 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         # other authed REST endpoints with $AGENTIRA_API_KEY.
         agent_api_key = (a.profile.api_key if a.profile else "") or ""
 
+        # AP-155: resolve sandbox containment mode for this dispatch.
+        # Project override > agent default > workspace default ("off").
+        # Phase 1 just logs what would happen; Phase 2 wires per-adapter
+        # enforcement (claude --add-dir / bwrap / Docker).
+        from backend.sandbox import resolve_mode as _resolve_sandbox
+        from backend.models import Project as _Proj
+        ctx_for_sandbox = user_context if isinstance(user_context, dict) else {}
+        sb_project_id = ctx_for_sandbox.get("project_id")
+        sb_project_mode = None
+        if sb_project_id:
+            sb_proj = db.get(_Proj, sb_project_id)
+            sb_project_mode = getattr(sb_proj, "sandbox_mode", None) if sb_proj else None
+        sb_agent_mode = a.profile.sandbox_mode if a.profile else None
+        sandbox_mode = _resolve_sandbox(
+            project_mode=sb_project_mode, agent_mode=sb_agent_mode,
+        )
+        _dispatch_logger.info(
+            "sandbox trace=%s agent=%s project=%s mode=%s "
+            "(source: project=%r agent=%r) — Phase 1 log-only",
+            trace_id, a.id, sb_project_id or "-",
+            sandbox_mode, sb_project_mode, sb_agent_mode,
+        )
+
         # Auto-baked self/project/task awareness preamble.
         # Identity + current screen + project + recent involvement so the
         # agent doesn't open every chat with "this is the start of our
@@ -2402,6 +2444,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
             env_extra_combined.setdefault("AGENTIRA_TASK_ID", _shadow_task_id)
         if _shadow_project_id:
             env_extra_combined.setdefault("AGENTIRA_PROJECT_ID", _shadow_project_id)
+    # AP-155: tell the daemon what containment mode the backend resolved
+    # for this dispatch. Phase 1: daemon logs and proceeds as-is. Phase 2:
+    # adapter honors per its declared capabilities.
+    env_extra_combined.setdefault("AGENTIRA_SANDBOX_MODE", sandbox_mode)
     # AP-152: agent's own API key so it can authenticate REST calls
     # (e.g. download binary attachments). setdefault so explicit callers win.
     if agent_api_key:
