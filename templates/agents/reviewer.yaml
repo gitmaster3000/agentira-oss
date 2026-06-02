@@ -1,0 +1,6 @@
+# AP-157: Reviewer — PR verifier. Won't approve faked progress.
+name: Reviewer
+display_name: Reviewer
+model: claude-sonnet-4-6
+mcp_servers: [agentira, memory]
+# system_prompt sourced from sibling reviewer.md

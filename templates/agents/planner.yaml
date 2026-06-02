@@ -1,0 +1,6 @@
+# AP-157: Planner — turns vague tasks into concrete DoDs + child tasks.
+name: Planner
+display_name: Planner
+model: claude-sonnet-4-6
+mcp_servers: [agentira, memory]
+# system_prompt sourced from sibling planner.md

@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir -e .
 COPY run.py .
 COPY scripts/ scripts/
 
+# AP-157: workspace-default agent templates. App code (versioned with
+# the repo), not user data — ships in the image.
+COPY templates/ templates/
+
 # Create data directory for SQLite
 RUN mkdir -p data
 
