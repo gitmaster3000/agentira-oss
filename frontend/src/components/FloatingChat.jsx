@@ -136,20 +136,21 @@ export function FloatingChat() {
         if (open) inputRef.current?.focus();
     }, [open, selectedId]);
 
-    const send = async () => {
-        const trimmed = input.trim();
-        if (!trimmed || sending || !selectedId) return;
+    // Shared post path — used by the input box (send) and by clickable
+    // AskUserQuestion answers (onAnswer).
+    const postMessage = async (content) => {
+        const text = (content || '').trim();
+        if (!text || !selectedId) return;
         const localId = `local-${Date.now()}`;
         setStopped(false);
         setMessages((prev) => [...prev, {
-            id: localId, role: 'user', content: trimmed,
+            id: localId, role: 'user', content: text,
             created_at: new Date().toISOString(),
         }]);
-        setInput('');
         setSending(true);
         try {
             await api.forge.sendRuntimeChat(selectedId, {
-                content: trimmed,
+                content: text,
                 scope_key: CHAT_SCOPE,
                 user_context: {
                     surface: 'floating_chat',
@@ -164,6 +165,13 @@ export function FloatingChat() {
             setSending(false);
             inputRef.current?.focus();
         }
+    };
+
+    const send = async () => {
+        if (!input.trim() || sending || !selectedId) return;
+        const trimmed = input.trim();
+        setInput('');
+        await postMessage(trimmed);
     };
 
     const stop = async () => {
@@ -265,7 +273,7 @@ export function FloatingChat() {
                             : `Chatting with ${selectedAgent?.name || 'this agent'}.`}
                     </div>
                 )}
-                {messages.map((m) => <ChatBubble key={m.id} m={m} />)}
+                {messages.map((m) => <ChatBubble key={m.id} m={m} onAnswer={postMessage} />)}
                 {lastIsUser && (
                     <div className="flex items-center gap-1.5 px-2 text-xs text-text-tertiary">
                         <Loader className="w-3 h-3 animate-spin" />
@@ -318,7 +326,7 @@ export function FloatingChat() {
     );
 }
 
-function ChatBubble({ m }) {
+function ChatBubble({ m, onAnswer }) {
     const role = m.role || 'assistant';
     if (role === 'system') {
         return (
@@ -329,7 +337,7 @@ function ChatBubble({ m }) {
     }
     if (role === 'tool') {
         if (m.tool_name === 'AskUserQuestion') {
-            return <AskUserQuestionCard toolInput={m.tool_input} />;
+            return <AskUserQuestionCard toolInput={m.tool_input} onAnswer={onAnswer} />;
         }
         const label = m.tool_name
             ? `Used ${m.tool_name}`

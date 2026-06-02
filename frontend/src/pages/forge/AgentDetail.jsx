@@ -836,27 +836,34 @@ function ChatTab({ agentId, agent, initialScope = null }) {
             return;
         }
 
+        setInput('');
+        await postMessage(trimmed);
+    };
+
+    // Shared post path: optimistic render + dispatch + reload. Used by the
+    // input box (handleSend, after its slash-command handling) and by
+    // clickable AskUserQuestion answers.
+    const postMessage = async (content) => {
+        const text = (content || '').trim();
+        if (!text) return;
         // AP-93: optimistic user message so the Stop button appears
-        // instantly. Tagged so we can drop it once the real persisted
-        // row arrives via the poll (otherwise it shows twice).
+        // instantly. Tagged so we drop it once the persisted row arrives.
         const localId = `local-user-${Date.now()}`;
         setMessages(prev => [...prev, {
             id: localId,
             role: 'user',
-            content: trimmed,
+            content: text,
             created_at: new Date().toISOString(),
         }]);
-        setInput('');
         setSending(true);
-        // A new send means the user is no longer in the "stopped" state
-        // for this scope — clear so the thinking indicator can light up.
+        // A new send clears the "stopped" latch so the thinking indicator lights.
         setStoppedScopes(prev => {
             if (!prev[activeScope]) return prev;
             const next = { ...prev }; delete next[activeScope]; return next;
         });
         try {
             const res = await api.forge.sendRuntimeChat(agentId, {
-                content: trimmed,
+                content: text,
                 user_context: buildUserContext(),
                 // AP-105: pin the conversation. Without this, sending a
                 // message while viewing a run:<id> or chat:user:<id> scope
@@ -872,8 +879,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                     n && n.at === res.resumed_run_id ? null : n), 6000);
             }
             // Drop the optimistic local user message — the persisted one
-            // will arrive in loadMessages and the dedupe below would
-            // otherwise leave both visible.
+            // arrives via loadMessages and the dedupe would otherwise dupe.
             setMessages(prev => prev.filter(m => m.id !== localId));
             await loadMessages();
         } catch (err) {
@@ -1161,7 +1167,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                                         <div className="text-xs font-medium text-text-secondary mb-1">
                                             <Wrench className="w-3 h-3 inline mr-1" />{msg.tool_name}
                                         </div>
-                                        <ToolInput toolName={msg.tool_name} toolInput={msg.tool_input} />
+                                        <ToolInput toolName={msg.tool_name} toolInput={msg.tool_input} onAnswer={postMessage} />
                                         {msg.tool_output && (
                                             <details className="text-xs mt-1">
                                                 <summary className="text-text-tertiary cursor-pointer hover:text-text-secondary">Output</summary>
