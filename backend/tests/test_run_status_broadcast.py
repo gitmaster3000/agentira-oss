@@ -46,72 +46,76 @@ def test_db():
 
 
 # ── ClientHub fan-out ────────────────────────────────────────────────
+#
+# Driven via asyncio.run from sync pytest functions — keeps the suite free
+# of a pytest-asyncio plugin dependency (declared in dev deps but not
+# always installed in the runtime image).
 
-@pytest.mark.asyncio
-async def test_client_hub_delivers_to_subscriber():
-    hub = ClientHub()
+def test_client_hub_delivers_to_subscriber():
+    async def _body():
+        hub = ClientHub()
 
-    class _FakeWS:  # minimal stand-in
-        pass
-    ws = _FakeWS()
-    q = await hub.subscribe("run-A", ws)
+        class _FakeWS:
+            pass
+        ws = _FakeWS()
+        q = await hub.subscribe("run-A", ws)
+        await hub._fanout("run-A", {"type": "run_status", "run_id": "run-A",
+                                    "status": "paused"})
+        msg = await asyncio.wait_for(q.get(), 0.5)
+        assert msg["status"] == "paused"
+        assert msg["run_id"] == "run-A"
+    asyncio.run(_body())
 
-    await hub._fanout("run-A", {"type": "run_status", "run_id": "run-A",
-                                "status": "paused"})
-    msg = await asyncio.wait_for(q.get(), 0.5)
-    assert msg["status"] == "paused"
-    assert msg["run_id"] == "run-A"
 
-
-@pytest.mark.asyncio
-async def test_client_hub_skips_other_runs():
+def test_client_hub_skips_other_runs():
     """A subscriber on run A must NOT see updates for run B."""
-    hub = ClientHub()
+    async def _body():
+        hub = ClientHub()
 
-    class _FakeWS:
-        pass
-    ws_a = _FakeWS()
-    q_a = await hub.subscribe("run-A", ws_a)
+        class _FakeWS:
+            pass
+        ws_a = _FakeWS()
+        q_a = await hub.subscribe("run-A", ws_a)
+        await hub._fanout("run-B", {"type": "run_status", "run_id": "run-B",
+                                    "status": "paused"})
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(q_a.get(), 0.1)
+    asyncio.run(_body())
 
-    await hub._fanout("run-B", {"type": "run_status", "run_id": "run-B",
-                                "status": "paused"})
-    # No frame should arrive for ws_a.
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(q_a.get(), 0.1)
 
+def test_client_hub_unsubscribe_removes_listener():
+    async def _body():
+        hub = ClientHub()
 
-@pytest.mark.asyncio
-async def test_client_hub_unsubscribe_removes_listener():
-    hub = ClientHub()
-
-    class _FakeWS:
-        pass
-    ws = _FakeWS()
-    q = await hub.subscribe("run-X", ws)
-    await hub.unsubscribe("run-X", ws)
-    await hub._fanout("run-X", {"type": "run_status", "status": "running"})
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(q.get(), 0.1)
+        class _FakeWS:
+            pass
+        ws = _FakeWS()
+        q = await hub.subscribe("run-X", ws)
+        await hub.unsubscribe("run-X", ws)
+        await hub._fanout("run-X", {"type": "run_status", "status": "running"})
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(q.get(), 0.1)
+    asyncio.run(_body())
 
 
 # ── broadcast_run_status from a sync caller ──────────────────────────
 
-@pytest.mark.asyncio
-async def test_broadcast_from_sync_caller_lands_in_queue():
-    """Services.py calls _broadcast_status from synchronous code.
+def test_broadcast_from_sync_caller_lands_in_queue():
+    """Services.py calls broadcast_run_status from synchronous code.
     The hub must hop onto the loop and deliver."""
-    class _FakeWS:
-        pass
-    ws = _FakeWS()
-    q = await client_hub.subscribe("sync-run", ws)
-    try:
-        # Synchronous call — this is what services.py does.
-        client_hub.broadcast_run_status("sync-run", "pausing")
-        msg = await asyncio.wait_for(q.get(), 0.5)
-        assert msg == {"type": "run_status", "run_id": "sync-run",
-                       "status": "pausing", "outcome": None}
-    finally:
-        await client_hub.unsubscribe("sync-run", ws)
+    async def _body():
+        class _FakeWS:
+            pass
+        ws = _FakeWS()
+        q = await client_hub.subscribe("sync-run", ws)
+        try:
+            client_hub.broadcast_run_status("sync-run", "pausing")
+            msg = await asyncio.wait_for(q.get(), 0.5)
+            assert msg == {"type": "run_status", "run_id": "sync-run",
+                           "status": "pausing", "outcome": None}
+        finally:
+            await client_hub.unsubscribe("sync-run", ws)
+    asyncio.run(_body())
 
 
 # ── transitions fire broadcasts ──────────────────────────────────────
