@@ -45,7 +45,8 @@ def test_db():
         s.commit()
     finally:
         s.close()
-    with patch("backend.forge.services.SessionLocal", TestSession):
+    with patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession):
         yield TestSession
 
 

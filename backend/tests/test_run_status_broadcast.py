@@ -35,7 +35,8 @@ def test_db():
     TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
     with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession):
+         patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession):
         db = TestSession()
         core_services._seed_defaults(db)
         admin_role = db.query(Role).filter(Role.name == "admin").first()
@@ -160,8 +161,11 @@ def test_pause_run_emits_broadcast(test_db, monkeypatch):
 def test_cancel_run_emits_broadcast(test_db, monkeypatch):
     s = _setup(test_db)
     calls = []
+    # cancel_run delegates to backend.forge.runs.cancel — patch the
+    # canonical broadcast function in that module.
+    from backend.forge import runs as runs_module
     monkeypatch.setattr(
-        forge_services, "_broadcast_status",
+        runs_module, "broadcast_status",
         lambda rid, status, outcome=None: calls.append((rid, status, outcome)),
     )
     forge_services.cancel_run(s["run_id"])

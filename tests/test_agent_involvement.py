@@ -33,7 +33,8 @@ def test_db():
     TestSession = sessionmaker(bind=engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
     with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession):
+         patch("backend.forge.services.SessionLocal", TestSession), \
+         patch("backend.forge.runs.SessionLocal", TestSession):
         # Seed the default test profile / workspace so projects can be created.
         db = TestSession()
         core_services._seed_defaults(db)
