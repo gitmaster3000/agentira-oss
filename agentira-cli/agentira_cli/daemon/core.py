@@ -24,24 +24,88 @@ from agentira_cli.transport.rest import AgentiraClient
 logger = logging.getLogger("agentira.daemon")
 
 
-def _ensure_worktree(*, source: str, target: str, branch: str) -> None:
-    """Create a git worktree at `target` off `source` on branch `branch`.
+def _git_common_dir(path: str) -> "str | None":
+    """Resolve the main `.git` dir that owns `path` (a repo or a worktree).
 
-    Idempotent: if `target/.git` already exists, no-op.
-    Runs on the daemon host where both paths are real. Backend can't do
-    this because the user's repo (`source`) lives outside the docker
-    container.
-
-    Quiet about failure modes — log warnings, never crash the dispatch.
+    For a linked worktree, `--absolute-git-dir` is
+    `<main>/.git/worktrees/<name>`; we strip back to `<main>/.git` so two
+    worktrees of the same source compare equal. Returns a realpath, or None
+    if `path` isn't a git work tree.
     """
     import os
     import subprocess
-    if not source or not target:
-        return
+    try:
+        out = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--absolute-git-dir"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    gitdir = out.stdout.strip()
+    marker = "/.git/worktrees/"
+    if marker in gitdir:
+        gitdir = gitdir.split(marker)[0] + "/.git"
+    return os.path.realpath(gitdir)
+
+
+def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
+    """Create / repair a git worktree at `target` off `source` on `branch`.
+
+    Returns a diagnostic reason:
+      ""                                   — nothing to do (no source/branch)
+      "ok"                                 — created, or correctly reused
+      "worktree_recreated_source_mismatch" — an existing worktree belonged to
+                                             a DIFFERENT source repo (e.g. the
+                                             task's repo_name changed); it was
+                                             removed and recreated off `source`
+      "worktree_source_not_found:<path>"   — `source` isn't a git repo dir
+                                             (e.g. a non-absolute/typo'd path);
+                                             NOT silently swallowed anymore
+
+    Runs on the daemon host where both paths are real (the backend can't —
+    `source` lives outside the docker container). Never crashes the dispatch:
+    on a hard git failure it logs and returns a reason.
+    """
+    import os
+    import shutil
+    import subprocess
+    if not source or not target or not branch:
+        return ""
     if not os.path.isdir(source):
-        return
+        # Previously a silent `return` — the worktree was never created and
+        # the run still reported materialize "ok". Surface it instead.
+        logger.warning("worktree source is not a directory: %r", source)
+        return f"worktree_source_not_found:{source}"
+
+    reason = "ok"
     if os.path.exists(os.path.join(target, ".git")):
-        return
+        want = _git_common_dir(source)
+        have = _git_common_dir(target)
+        if want and have and want == have:
+            return "ok"   # correct worktree already present — reuse
+        # Wrong-source / stale worktree → remove and recreate so the agent
+        # doesn't silently run against the wrong repo.
+        logger.warning(
+            "worktree at %s belongs to a different source (have=%s want=%s) "
+            "— removing and recreating", target, have, want,
+        )
+        removed = False
+        if have:
+            owner = os.path.dirname(have)   # repo root that owns the worktree
+            try:
+                subprocess.run(
+                    ["git", "-C", owner, "worktree", "remove", "--force", target],
+                    check=False, timeout=60,
+                )
+                removed = not os.path.exists(os.path.join(target, ".git"))
+            except (subprocess.SubprocessError, OSError):
+                pass
+        if not removed:
+            shutil.rmtree(target, ignore_errors=True)
+        reason = "worktree_recreated_source_mismatch"
+
     os.makedirs(os.path.dirname(target), exist_ok=True)
     # `-B` so re-creating after a worktree prune doesn't trip on the
     # branch already existing.
@@ -49,6 +113,7 @@ def _ensure_worktree(*, source: str, target: str, branch: str) -> None:
         ["git", "-C", source, "worktree", "add", "-B", branch, target],
         check=True, timeout=60,
     )
+    return reason
 
 
 def _load_or_create_daemon_id() -> str:
@@ -312,6 +377,7 @@ class AgentiraDaemon:
         # Daemon owns filesystem provisioning. Ensure the agent's home
         # exists (with subdirs); if a worktree source is provided, ensure
         # the worktree at repo_path is created off the source.
+        worktree_reason = ""   # folded into materialize_reason below
         if repo_path:
             try:
                 _os.makedirs(repo_path, exist_ok=True)
@@ -326,7 +392,7 @@ class AgentiraDaemon:
                     )
                     _os.makedirs(sub_path, exist_ok=True)
                 if worktree_source_path and worktree_branch:
-                    await asyncio.to_thread(
+                    worktree_reason = await asyncio.to_thread(
                         _ensure_worktree,
                         source=worktree_source_path,
                         target=repo_path,
@@ -334,6 +400,7 @@ class AgentiraDaemon:
                     )
             except Exception as exc:  # noqa: BLE001 — log + continue
                 logger.warning("worktree provisioning failed trace=%s: %s", trace_id, exc)
+                worktree_reason = f"worktree_error:{exc!r}"[:200]
         env_extra = frame.get("env_extra", {}) or {}
         if not isinstance(env_extra, dict):
             env_extra = {}
@@ -434,6 +501,16 @@ class AgentiraDaemon:
                 reason=f"setup error: {exc!r}",
             )
             return
+
+        # A worktree problem (wrong-source recreate, source-not-found, error)
+        # must win over the materializer's cwd-exists "ok" — otherwise the run
+        # reports a misleading "ok" while the agent ran against the wrong/empty
+        # tree (the multi-repo "frontend task in a backend worktree" bug).
+        if worktree_reason and worktree_reason not in ("ok", ""):
+            materialize_reason = (
+                worktree_reason if materialize_reason in ("", "ok")
+                else f"{worktree_reason}; {materialize_reason}"
+            )
 
         have_memory = "memory" in (mcp_config_json or "")  # cheap probe
 
