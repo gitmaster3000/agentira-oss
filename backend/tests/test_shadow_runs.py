@@ -185,6 +185,28 @@ def test_shadow_with_diff_is_kept():
         assert r is not None, "shadow with work must be kept"
         assert r.diff_stat == "1 file changed"
         assert r.outcome == RunOutcome.SUCCEEDED
+        # AP-151: a kept shadow is promoted off "chat.shadow" so it surfaces
+        # in the global runs list.
+        assert r.trigger_event == "chat", "kept shadow must be promoted"
+    # Promoted run is now visible in list_runs (was hidden while a shadow).
+    visible = forge_services.list_runs(agent_id=s["agent_id"])
+    assert any(v["id"] == run_id for v in visible), \
+        "promoted run must surface in list_runs"
+
+
+def test_in_flight_shadow_is_hidden_from_global_list_but_visible_per_task():
+    """The reservation must not pollute the global runs list while in flight,
+    but the task-scoped lookup still sees it so the chat Stop button works."""
+    s = _setup_agent_in_task()
+    run_id, _trace_id = _spawn_shadow_run(s)
+
+    visible = forge_services.list_runs(agent_id=s["agent_id"])
+    assert not any(v["id"] == run_id for v in visible), \
+        "in-flight shadow must not appear in the global runs list"
+
+    task_runs = forge_services.list_runs_for_task(s["task_id"])
+    assert any(v["id"] == run_id for v in task_runs), \
+        "in-flight shadow must be visible to the task-scoped lookup"
 
 
 def test_shadow_with_artifact_is_kept():
