@@ -819,6 +819,41 @@ def openclaw_models():
     return services.get_openclaw_models()
 
 
+# ── Model catalog ────────────────────────────────────────────────────────
+# Primary source is backend/forge/model_catalog_data.json, refreshed
+# periodically by scripts/refresh_model_catalog.py and shipped with the
+# repo — end users get updates via deploys / `git pull`, not by holding
+# provider API keys. Live discovery is an optional override (see
+# model_catalog.py for the env flag).
+
+@router.get("/models/catalog")
+def models_catalog_all(refresh: bool = False):
+    """All providers with their shipped model list + freshness date.
+    `refresh=true` only matters when live discovery is opted in — it
+    bypasses the per-provider TTL cache."""
+    from backend.forge import model_catalog
+    return {"providers": model_catalog.get_all_catalogs(refresh=refresh)}
+
+
+@router.get("/models/catalog/{provider}")
+def models_catalog_one(provider: str, refresh: bool = False):
+    from backend.forge import model_catalog
+    if provider.lower() not in model_catalog.known_providers():
+        raise HTTPException(404, f"Unknown provider: {provider}")
+    return model_catalog.get_catalog(provider, refresh=refresh)
+
+
+@router.post("/models/catalog/{provider}/refresh")
+def models_catalog_refresh(provider: str):
+    """Force-refresh the live-discovery cache for one provider. No-op
+    unless AGENTIRA_MODEL_CATALOG_LIVE is on and the relevant API key is
+    set; the shipped JSON is always the floor."""
+    from backend.forge import model_catalog
+    if provider.lower() not in model_catalog.known_providers():
+        raise HTTPException(404, f"Unknown provider: {provider}")
+    return model_catalog.get_catalog(provider, refresh=True)
+
+
 @router.post("/openclaw/agent-model")
 def set_openclaw_model(body: ModelUpdateRequest):
     """Update an agent's model in openclaw.json and Forge DB."""
