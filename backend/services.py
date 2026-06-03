@@ -100,29 +100,37 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "attachments_count": attachments_count,
-        # AP-184: is an agent actively executing on this task right now (a run
-        # in pending/running/interrupting)? Drives the "working" glow on the
-        # card. Set by list_tasks/get_task; default False.
+        # AP-184/185: is an agent actively executing on this task right now (a
+        # run in pending/running/interrupting)? Drives the "working" glow +
+        # indicator. active_agent_id/name name the agent so the indicator can
+        # link to its task chat. Set by list_tasks/get_task; defaults below.
         "agent_active": False,
+        "active_agent_id": None,
+        "active_agent_name": None,
     }
 
 
-def _tasks_with_active_runs(db, task_ids: list[str]) -> set[str]:
-    """Task ids with a live agent execution (a run in pending/running/
-    interrupting). Batched so the board doesn't N+1. Forge is optional —
-    never break task listing if it's unavailable."""
+def _active_run_agents(db, task_ids: list[str]) -> dict[str, dict]:
+    """task_id -> {agent_id, agent_name} for the latest live run (a run in
+    pending/running/interrupting). Batched so the board doesn't N+1. Forge is
+    optional — never break task listing if it's unavailable."""
     if not task_ids:
-        return set()
+        return {}
     try:
-        from backend.forge.models import Run, RunStatus
-        rows = (db.query(Run.task_id)
+        from backend.forge.models import Run, RunStatus, Agent as _FA
+        rows = (db.query(Run.task_id, Run.agent_id, _FA.name)
+                  .outerjoin(_FA, _FA.id == Run.agent_id)
                   .filter(Run.task_id.in_(task_ids),
                           Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING,
                                           RunStatus.INTERRUPTING]))
-                  .distinct().all())
-        return {r[0] for r in rows if r[0]}
+                  .order_by(Run.created_at.desc()).all())
+        out: dict[str, dict] = {}
+        for tid, aid, aname in rows:
+            if tid and tid not in out:
+                out[tid] = {"agent_id": aid, "agent_name": aname}
+        return out
     except Exception:  # noqa: BLE001
-        return set()
+        return {}
 
 
 def resolve_task_repos(t: Task) -> list[str]:
@@ -863,11 +871,15 @@ def list_tasks(
         tasks = q.order_by(Task.updated_at.desc()).all()
         ids = [t.id for t in tasks]
         counts = _batch_attachment_counts(db, ids)
-        active = _tasks_with_active_runs(db, ids)
+        active = _active_run_agents(db, ids)
         out = []
         for t in tasks:
             d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
-            d["agent_active"] = t.id in active
+            info = active.get(t.id)
+            d["agent_active"] = info is not None
+            if info:
+                d["active_agent_id"] = info["agent_id"]
+                d["active_agent_name"] = info["agent_name"]
             out.append(d)
         return out
 
@@ -878,7 +890,11 @@ def get_task(task_id: str) -> dict | None:
         if not t:
             return None
         d = _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
-        d["agent_active"] = t.id in _tasks_with_active_runs(db, [t.id])
+        info = _active_run_agents(db, [t.id]).get(t.id)
+        d["agent_active"] = info is not None
+        if info:
+            d["active_agent_id"] = info["agent_id"]
+            d["active_agent_name"] = info["agent_name"]
         return d
 
 
