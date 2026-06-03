@@ -13,33 +13,30 @@ import { api } from '../../api';
 import { ToolInput } from '../../components/AskUserQuestionCard';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
 
+// Canonical run statuses — must match docs/run-state-machine.md and the
+// backend RunStatus enum. 8 states; the single `interrupting` transient
+// replaces the old pausing/cancelling/resuming trio (intent decides where it
+// lands: PAUSED for Stop, CANCELLED for Discard).
 const STATUS_CONFIG = {
-    queued:        { bg: '#5f6368', label: 'Queued',   icon: Clock },
     // AP-112: READY = prepared, waiting for the user to review/edit the
     // prompt and press Start. Visually distinct from PENDING so users see
     // "this is waiting on me", not "this is queued".
-    ready:         { bg: '#3b82f6', label: 'Ready',    icon: Play },
-    pending:       { bg: '#5f6368', label: 'Pending',  icon: Clock },
-    running:       { bg: '#f1c40f', label: 'Running',  icon: RefreshCw },
-    waiting_human: { bg: '#ff9800', label: 'Waiting',  icon: Pause },
-    blocked:       { bg: '#e91e63', label: 'Blocked',  icon: Ban },
-    completed:     { bg: '#2ecc71', label: 'Completed', icon: CheckCircle },
-    failed:        { bg: '#e74c3c', label: 'Failed',   icon: XCircle },
-    cancelled:     { bg: '#9aa0a6', label: 'Cancelled', icon: Ban },
+    ready:         { bg: '#3b82f6', label: 'Ready',     icon: Play },
+    pending:       { bg: '#5f6368', label: 'Queued',    icon: Clock },
+    running:       { bg: '#f1c40f', label: 'Running',   icon: RefreshCw },
+    // Single transient: Stop or Discard requested, daemon hasn't confirmed
+    // yet. Stop/Resume/Discard buttons disable while interrupting so the user
+    // can't double-click into a race. The terminal state lands on the daemon's
+    // trigger-complete (or the reconciler escalates after the threshold).
+    interrupting:  { bg: '#9aa0a6', label: 'Stopping…', icon: Pause },
     paused:        { bg: '#9aa0a6', label: 'Paused',    icon: Pause },
-    // P3: transient states — Stop / Resume was requested, daemon hasn't
-    // confirmed yet. UI is honest about "asked but not done"; Stop /
-    // Resume buttons disable while in a transient state so the user
-    // can't double-click into a race. The terminal state lands when the
-    // daemon's trigger-complete arrives (or the backend reconciler
-    // escalates after STUCK_TRANSIENT_THRESHOLD_S).
-    pausing:       { bg: '#9aa0a6', label: 'Pausing…',    icon: Pause },
-    cancelling:    { bg: '#9aa0a6', label: 'Cancelling…', icon: Ban },
-    resuming:      { bg: '#f1c40f', label: 'Resuming…',   icon: RefreshCw },
+    completed:     { bg: '#2ecc71', label: 'Completed', icon: CheckCircle },
+    failed:        { bg: '#e74c3c', label: 'Failed',    icon: XCircle },
+    cancelled:     { bg: '#9aa0a6', label: 'Cancelled', icon: Ban },
 };
 
-// Treat these as "stop in flight" — buttons disable, no auto-resume.
-export const TRANSIENT_RUN_STATUSES = new Set(['pausing', 'cancelling', 'resuming']);
+// "Stop in flight" — buttons disable, no auto-resume.
+export const TRANSIENT_RUN_STATUSES = new Set(['interrupting']);
 
 export function RunDetail() {
     const { runId } = useParams();
@@ -216,6 +213,9 @@ export function RunDetail() {
                 {/* Run controls — pause / resume / stop. Pause is best-effort
                     for CLI runtimes (SIGSTOP); openclaw HTTP runs ignore
                     pause. Stop is terminal. */}
+                {/* Stop = pause + preserve session, always resumable (the
+                    canonical Stop from docs/run-state-machine.md). Best-effort
+                    for CLI runtimes; openclaw HTTP runs complete naturally. */}
                 {!isReady && run.status === 'running' && (
                     <button
                         onClick={async () => {
@@ -223,13 +223,13 @@ export function RunDetail() {
                                 await api.forge.pauseRun(runId);
                                 await load();
                             } catch (err) {
-                                alert('Pause failed: ' + (err.message || err));
+                                alert('Stop failed: ' + (err.message || err));
                             }
                         }}
                         className="btn btn-ghost text-yellow-500 hover:bg-yellow-500/10"
-                        title="Pause (best-effort — long pauses may hit API timeouts)"
+                        title="Stop — pauses the run; you can resume it later"
                     >
-                        <Pause className="w-4 h-4" /> Pause
+                        <Pause className="w-4 h-4" /> Stop
                     </button>
                 )}
                 {!isReady && run.status === 'paused' && (
@@ -248,21 +248,24 @@ export function RunDetail() {
                         <Play className="w-4 h-4" /> Resume
                     </button>
                 )}
-                {!isReady && isActive && (
+                {/* Discard = terminal cancel (the old "Stop"). Throws the run
+                    away; not resumable. Secondary to Stop. Hidden while
+                    interrupting so a second click can't race the daemon. */}
+                {!isReady && isActive && run.status !== 'interrupting' && (
                     <button
                         onClick={async () => {
-                            if (!window.confirm('Stop this run? The agent will be killed; this cannot be undone.')) return;
+                            if (!window.confirm('Discard this run? The agent is killed and the run is thrown away — this cannot be undone.')) return;
                             try {
                                 await api.forge.cancelRun(runId);
                                 await load();
                             } catch (err) {
-                                alert('Stop failed: ' + (err.message || err));
+                                alert('Discard failed: ' + (err.message || err));
                             }
                         }}
                         className="btn btn-ghost text-red-400 hover:text-red-500 hover:bg-red-500/10"
-                        title="Stop this run (terminal — cannot be resumed)"
+                        title="Discard this run (terminal — cannot be resumed)"
                     >
-                        <Ban className="w-4 h-4" /> Stop
+                        <Ban className="w-4 h-4" /> Discard
                     </button>
                 )}
                 {/* Restart: explicit re-run of a terminal Run. Schedules a
