@@ -1,5 +1,8 @@
-"""AP-120: chatting into a task whose last run FAILED schedules a fresh
-run (a retry) instead of a bare chat turn, and tells the user.
+"""Chat into a failed-run task is just a chat turn — NO auto-retry.
+
+The old AP-120 auto-retry (chat into a failed run → schedule a fresh
+task.scheduled run) turned plain comments/chats into runs marked is_work=True.
+Removed: a failed run is retried only via the explicit Retry button.
 """
 
 from __future__ import annotations
@@ -63,7 +66,11 @@ def _add_run(agent_id, task_id, *, status, outcome=None):
     return rid
 
 
-def test_chat_into_failed_run_schedules_new_run():
+def test_chat_into_failed_run_does_not_auto_retry():
+    """A message into a task whose last run FAILED must NOT auto-schedule a
+    retry run. Auto-retry turned plain comments/chats into task.scheduled runs
+    (stamped is_work=True), so a talk-only reply looked like work. Retrying a
+    failed run is an explicit action now; chat is just a chat turn."""
     agent_id, task_id = _mk_agent_task()
     _add_run(agent_id, task_id, status=RunStatus.FAILED,
              outcome=RunOutcome.FAILED)
@@ -73,22 +80,13 @@ def test_chat_into_failed_run_schedules_new_run():
         calls.append({"task": task_id, "ctx": extra_context})
         return {"ok": True, "run_id": "new-run-1"}
 
-    with patch.object(forge_services, "schedule_task_run", fake_schedule):
+    with patch.object(forge_services, "schedule_task_run", fake_schedule), \
+         patch("backend.forge.services._dispatch_coro", lambda c: None):
         result = forge_services.send_runtime_message(
-            agent_id, content="please retry, fix the import",
-            scope_key=f"task:{task_id}")
+            agent_id, content="please reply", scope_key=f"task:{task_id}")
 
-    assert result.get("retried_run_id") == "new-run-1"
-    assert len(calls) == 1
-    assert "fix the import" in calls[0]["ctx"]
-
-    # A SYSTEM message tells the user a new run started.
-    with forge_services._session() as db:
-        sys_msgs = (db.query(AgentMessage)
-                      .filter(AgentMessage.scope_key == f"task:{task_id}",
-                              AgentMessage.role == MessageRole.SYSTEM)
-                      .all())
-    assert any("new run" in m.content.lower() for m in sys_msgs)
+    assert calls == [], "must not auto-schedule a retry run"
+    assert "retried_run_id" not in result
 
 
 def test_in_flight_run_blocks_retry():

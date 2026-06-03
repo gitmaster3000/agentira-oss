@@ -3935,47 +3935,11 @@ def send_runtime_message(
                 db.commit()
                 _broadcast_status(paused.id, RunStatus.RUNNING)
 
-    # AP-120: chatting into a task whose latest run FAILED schedules a
-    # fresh run (a retry) carrying this message as a follow-up, instead
-    # of a bare chat turn. The user is told via a SYSTEM message. This
-    # is a deliberate user action, so it's allowed even though the task
-    # already has runs (the Conductor's no-rerun guard doesn't apply).
-    if scope_key and scope_key.startswith("task:") and not resumed_run_id:
-        task_id = scope_key.split(":", 1)[1]
-        with _session() as db:
-            in_flight = (db.query(Run)
-                           .filter(Run.task_id == task_id,
-                                   Run.agent_id == agent_id,
-                                   Run.status.in_([RunStatus.PENDING,
-                                                   RunStatus.RUNNING,
-                                                   RunStatus.PAUSED]))
-                           .count())
-            latest = (db.query(Run)
-                        .filter(Run.task_id == task_id,
-                                Run.agent_id == agent_id)
-                        .order_by(Run.created_at.desc())
-                        .first())
-            retry = (in_flight == 0 and latest is not None
-                     and (latest.status == RunStatus.FAILED
-                          or latest.outcome == RunOutcome.FAILED))
-        if retry:
-            result = schedule_task_run(task_id=task_id, agent_id=agent_id,
-                                       extra_context=content)
-            new_run_id = (result.get("run_id")
-                          if isinstance(result, dict) else None)
-            with _session() as db:
-                db.add(AgentMessage(
-                    agent_id=agent_id, run_id=new_run_id, scope_key=scope_key,
-                    role=MessageRole.USER, content=content,
-                ))
-                db.add(AgentMessage(
-                    agent_id=agent_id, run_id=new_run_id, scope_key=scope_key,
-                    role=MessageRole.SYSTEM,
-                    content="Started a new run — the previous run failed.",
-                ))
-                db.commit()
-            return {"ok": True, "retried_run_id": new_run_id,
-                    "note": "previous run failed — started a new run"}
+    # A message into a task whose last run failed is just a chat turn — we do
+    # NOT auto-schedule a retry run. Auto-retry turned plain comments/chats into
+    # full task.scheduled runs (and the explicit-run is_work=True stamp made a
+    # talk-only reply look like work). Retrying a failed run is now an explicit
+    # action (the Retry button on the run). Chat falls through to a chat turn.
 
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
