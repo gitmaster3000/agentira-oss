@@ -1462,9 +1462,17 @@ def get_board(project_id: str) -> dict:
         board: dict[str, list[dict]] = {s.name: [] for s in statuses}
 
         tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.updated_at.desc()).all()
-        counts = _batch_attachment_counts(db, [t.id for t in tasks])
+        ids = [t.id for t in tasks]
+        counts = _batch_attachment_counts(db, ids)
+        active = _active_run_agents(db, ids)  # so the board card glow lights up
         for t in tasks:
-            board[t.status.name].append(_task_to_dict(t, attachments_count=counts.get(t.id, 0)))
+            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
+            info = active.get(t.id)
+            d["agent_active"] = info is not None
+            if info:
+                d["active_agent_id"] = info["agent_id"]
+                d["active_agent_name"] = info["agent_name"]
+            board[t.status.name].append(d)
 
         return {
             "project": _project_to_dict(project),
