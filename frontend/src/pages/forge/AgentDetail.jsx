@@ -491,6 +491,10 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // working so the Stop button stays visible the whole time the agent
     // is busy — not just during the brief send-API window.
     const [scopeActiveRun, setScopeActiveRun] = useState(null);
+    // AP-182: the most recent run in this scope that produced durable work
+    // (is_work). Rendered as an inline Run card so the chat-vs-work line is
+    // visible right here — work emerged into a Run; chit-chat stayed chat.
+    const [scopeWorkRun, setScopeWorkRun] = useState(null);
     // ADR 009 / E2: daemon-reported "a turn is live for this scope" — keeps
     // Stop available for ANY in-flight turn (incl. run-less chats, and across
     // a backend restart), replacing the 10-minute staleness guess.
@@ -688,6 +692,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     useEffect(() => {
         if (!activeScope || !activeScope.startsWith('task:')) {
             setScopeActiveRun(null);
+            setScopeWorkRun(null);
             return;
         }
         const taskId = activeScope.slice(5);
@@ -697,10 +702,17 @@ function ChatTab({ agentId, agent, initialScope = null }) {
             try {
                 const runs = await api.forge.listTaskRuns(taskId);
                 if (!alive) return;
-                const active = (runs || []).find(r => r.agent_id === agentId && ACTIVE.has(r.status));
-                setScopeActiveRun(active || null);
+                const mine = (runs || []).filter(r => r.agent_id === agentId);
+                setScopeActiveRun(mine.find(r => ACTIVE.has(r.status)) || null);
+                // Latest work run (is_work is set at completion) — drives the
+                // inline Run card. Newest first.
+                const work = mine
+                    .filter(r => r.is_work)
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                setScopeWorkRun(work[0] || null);
             } catch {
                 setScopeActiveRun(null);
+                setScopeWorkRun(null);
             }
         };
         tick();
@@ -1253,6 +1265,20 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                         <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
                         Resumed paused run {String(resumedNotice.runId).slice(0, 8)}
                     </div>
+                )}
+                {scopeWorkRun && (
+                    <Link
+                        to={`/forge/runs/${scopeWorkRun.id}`}
+                        className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg border border-border bg-bg-secondary hover:bg-bg-tertiary text-xs no-underline"
+                        title="This conversation produced a Run — open it"
+                    >
+                        <span className="px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary font-medium">Run</span>
+                        <span className="text-text-secondary capitalize">{scopeWorkRun.outcome || scopeWorkRun.status}</span>
+                        {scopeWorkRun.diff_stat && (
+                            <span className="text-text-tertiary truncate">· {scopeWorkRun.diff_stat}</span>
+                        )}
+                        <span className="ml-auto text-text-tertiary shrink-0">View →</span>
+                    </Link>
                 )}
                 {queued.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1">
