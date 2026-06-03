@@ -3495,32 +3495,6 @@ def _maybe_auto_retry(run_id: str, error: str) -> bool:
     return True
 
 
-def _flush_queued_message(agent_id: str, *, scope_key: str = "",
-                          run_id: str | None = None) -> None:
-    """Dispatch the oldest queued message for a conversation whose turn just
-    reached a terminal state (completed / failed / cancelled). FIFO, one per
-    terminal event — the dispatched turn's own completion flushes the next.
-    Queued messages exist only for task scopes, so when scope_key isn't given
-    we derive it from the run's task. Best-effort; never fails completion."""
-    try:
-        from backend.forge import msg_queue
-        scope = scope_key
-        if not scope and run_id:
-            with _session() as db:
-                r = db.query(Run).filter(Run.id == run_id).first()
-                if r and r.task_id:
-                    scope = f"task:{r.task_id}"
-        if not scope:
-            return
-        nxt = msg_queue.dequeue_oldest(agent_id=agent_id, scope_key=scope)
-        if not nxt:
-            return
-        send_runtime_message(agent_id, content=nxt["content"], scope_key=scope,
-                             user_context=nxt.get("user_context"))
-    except Exception as exc:  # noqa: BLE001 — never fail completion on the queue
-        _dispatch_logger.warning("queued-message flush failed: %s", exc)
-
-
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
@@ -3611,7 +3585,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                 db.commit()
         _TRACE_SCOPE.pop(trace_id, None)
         # Discarded is terminal — a message queued behind this run still runs.
-        _flush_queued_message(agent_id, run_id=run_id)
+        from backend.forge import msg_queue as _mq
+        _mq.flush_next(agent_id, run_id=run_id)
         cleanup = _worktree_cleanup_hint(run_id)
         return {"ok": True, "trace_id": trace_id, "cancelled": True,
                 "logged": logger_msg + " [cancelled — no admin notify]",
@@ -3795,7 +3770,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     # Completed / failed is terminal and the conversation is now idle — flush
     # the next queued message (if any) as the following turn. PAUSED returns
     # earlier and skips this (the user resumes; the queue waits).
-    _flush_queued_message(agent_id, scope_key=scope, run_id=run_id)
+    from backend.forge import msg_queue as _mq
+    _mq.flush_next(agent_id, scope_key=scope, run_id=run_id)
 
     # AP-123: tell the daemon to tear down the per-run worktree on the
     # terminal completion path. PAUSED branches return earlier and skip
@@ -3888,7 +3864,7 @@ def send_runtime_message(
             # Chat-during-run: a message into a RUNNING turn is QUEUED, not
             # steered. The active turn runs to completion uninterrupted; the
             # queued message dispatches FIFO when the turn reaches a terminal
-            # state (see _flush_queued_message in complete_trigger). A
+            # state (msg_queue.flush_next, called from complete_trigger). A
             # conversation is single-threaded, so this preserves order without
             # interrupting work. Return early — no fresh turn dispatched now.
             active = (db.query(Run)

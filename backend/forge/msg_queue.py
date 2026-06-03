@@ -13,9 +13,12 @@ the old Run.pending_steer interrupt-and-fold mechanism.
 from __future__ import annotations
 
 import json
+import logging
 
 from backend.db import SessionLocal
-from backend.forge.models import QueuedMessage
+from backend.forge.models import QueuedMessage, Run
+
+logger = logging.getLogger("agentira.forge.msg_queue")
 
 
 def enqueue(*, agent_id: str, scope_key: str, content: str,
@@ -56,6 +59,36 @@ def dequeue_oldest(*, agent_id: str, scope_key: str) -> dict | None:
         db.delete(qm)
         db.commit()
         return out
+
+
+def flush_next(agent_id: str, *, scope_key: str = "",
+               run_id: str | None = None) -> bool:
+    """Dispatch the oldest queued message for a conversation whose turn just
+    reached a terminal state (completed / failed / cancelled). FIFO, one per
+    call — the dispatched turn's own completion flushes the next. Queued
+    messages exist only for task scopes, so when scope_key isn't given we
+    derive it from the run's task. Best-effort; never raises. Returns True if a
+    message was dispatched."""
+    try:
+        scope = scope_key
+        if not scope and run_id:
+            with SessionLocal() as db:
+                r = db.query(Run).filter(Run.id == run_id).first()
+                if r and r.task_id:
+                    scope = f"task:{r.task_id}"
+        if not scope:
+            return False
+        nxt = dequeue_oldest(agent_id=agent_id, scope_key=scope)
+        if not nxt:
+            return False
+        # Lazy import avoids a cycle with services (which calls us back).
+        from backend.forge.services import send_runtime_message
+        send_runtime_message(agent_id, content=nxt["content"], scope_key=scope,
+                             user_context=nxt.get("user_context"))
+        return True
+    except Exception as exc:  # noqa: BLE001 — never fail completion on the queue
+        logger.warning("queued-message flush failed: %s", exc)
+        return False
 
 
 def list_for_scope(*, agent_id: str, scope_key: str) -> list[dict]:
