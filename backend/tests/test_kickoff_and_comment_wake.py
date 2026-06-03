@@ -145,6 +145,33 @@ def test_mention_comment_wakes_agent():
         assert len(runs) == 1, "@mention must dispatch (reserve a run)"
 
 
+def test_mention_comment_does_not_revive_parked_run():
+    """A comment (even @mention) must NOT flip a parked needs_input/blocked
+    task.scheduled run back to RUNNING — it's a chat turn, not a run. It
+    dispatches a fresh chat turn instead, leaving the explicit run untouched."""
+    import uuid
+    from backend.forge.models import Run, RunStatus, RunOutcome
+    s = _make_agent_for_task()  # agent name "backend-agent"
+    pid = uuid.uuid4().hex[:12]
+    with forge_services._session() as db:
+        db.add(Run(id=pid, agent_id=s["agent_id"], task_id=s["task_id"],
+                   trigger_event="task.scheduled", status=RunStatus.COMPLETED,
+                   outcome=RunOutcome.NEEDS_INPUT, is_work=True))
+        db.commit()
+    with patch("backend.forge.services._dispatch_coro", lambda c: None):
+        core_services.add_comment(s["task_id"],
+                                  "@backend-agent the answer is 42", actor="system")
+    with forge_services._session() as db:
+        parked = db.query(Run).filter(Run.id == pid).first()
+        assert parked.status == RunStatus.COMPLETED \
+            and parked.outcome == RunOutcome.NEEDS_INPUT, \
+            "a comment must not revive the parked task.scheduled run"
+        chat_runs = (db.query(Run)
+                       .filter(Run.task_id == s["task_id"],
+                               Run.trigger_event == "chat").all())
+        assert len(chat_runs) == 1, "comment dispatches a fresh chat turn instead"
+
+
 def test_wake_on_comment_toggle_dispatches_plain_comment():
     """With the project toggle on, even a plain comment wakes the agent."""
     from backend.models import Project

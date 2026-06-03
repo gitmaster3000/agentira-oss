@@ -1189,10 +1189,15 @@ def _deliver_comment_to_agent(*, task_id: str, assignee_name: str,
         names = [agent.name, agent.runtime_agent_name, prof.name, assignee_name]
 
     if wake_on_comment or _comment_mentions_agent(comment, names):
+        # A comment is a chat turn — never revive/continue an explicit
+        # (task.scheduled) run. allow_resume=False keeps it from flipping a
+        # paused / needs_input run back to RUNNING (that made a comment look
+        # like it drove a "run with work").
         forge_services.send_runtime_message(
             agent_id,
             content=f"[Comment from {actor}] {comment}",
             scope_key=f"task:{task_id}",
+            allow_resume=False,
         )
     else:
         forge_services.record_task_comment(

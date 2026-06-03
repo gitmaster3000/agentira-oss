@@ -3843,6 +3843,7 @@ def send_runtime_message(
     run_id: str | None = None,
     user_context: dict | None = None,
     scope_key: str | None = None,
+    allow_resume: bool = True,
 ) -> dict:
     """Send a message to the agent via runtime adapter, log both sides.
 
@@ -3903,28 +3904,34 @@ def send_runtime_message(
             # the next turn (same run_id, so it continues the episode rather
             # than crystallizing a new run). resumed_run_id is threaded onto
             # the dispatch below so complete_trigger updates this run.
-            paused = (db.query(Run)
-                        .filter(Run.task_id == task_id,
-                                Run.agent_id == agent_id,
-                                Run.status == RunStatus.PAUSED)
-                        .order_by(Run.created_at.desc())
-                        .first())
-            if not paused:
-                parked = (db.query(Run)
+            #
+            # Skipped for comment-wakes (allow_resume=False): a task comment is
+            # a chat turn and must NEVER revive an explicit (task.scheduled) run
+            # — that made a plain comment look like it drove a "run with work".
+            paused = None
+            if allow_resume:
+                paused = (db.query(Run)
                             .filter(Run.task_id == task_id,
                                     Run.agent_id == agent_id,
-                                    Run.outcome.in_([RunOutcome.NEEDS_INPUT,
-                                                     RunOutcome.BLOCKED]))
+                                    Run.status == RunStatus.PAUSED)
                             .order_by(Run.created_at.desc())
                             .first())
-                if parked:
-                    newer = (db.query(Run)
-                               .filter(Run.task_id == task_id,
-                                       Run.agent_id == agent_id,
-                                       Run.created_at > parked.created_at)
-                               .count())
-                    if newer == 0:
-                        paused = parked  # revive the parked run
+                if not paused:
+                    parked = (db.query(Run)
+                                .filter(Run.task_id == task_id,
+                                        Run.agent_id == agent_id,
+                                        Run.outcome.in_([RunOutcome.NEEDS_INPUT,
+                                                         RunOutcome.BLOCKED]))
+                                .order_by(Run.created_at.desc())
+                                .first())
+                    if parked:
+                        newer = (db.query(Run)
+                                   .filter(Run.task_id == task_id,
+                                           Run.agent_id == agent_id,
+                                           Run.created_at > parked.created_at)
+                                   .count())
+                        if newer == 0:
+                            paused = parked  # revive the parked run
             if paused:
                 resumed_run_id = paused.id
                 # PAUSED/parked are confirmed-terminated (no live proc to
