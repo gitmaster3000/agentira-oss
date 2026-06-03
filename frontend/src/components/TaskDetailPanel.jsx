@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
+import { MentionInput } from './MentionInput';
 import {
     Trash2,
     X,
@@ -284,7 +285,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     };
 
     const handleComment = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (!comment.trim()) return;
         try {
             await api.addComment(task.id, { comment: comment });
@@ -880,14 +881,16 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     {user?.display_name?.[0]?.toUpperCase() || 'U'}
                                 </div>
                                 <form onSubmit={handleComment} className="flex-1">
-                                    <input
+                                    <MentionInput
                                         className="w-full bg-bg-app border border-border-subtle text-sm p-3 rounded-lg focus:outline-none focus:border-accent-primary transition-colors"
-                                        placeholder="Add a comment..."
+                                        placeholder="Add a comment… (@ to mention)"
                                         value={comment}
-                                        onChange={e => setComment(e.target.value)}
+                                        onChange={setComment}
+                                        onSubmit={handleComment}
+                                        projectId={task.project_id}
                                     />
                                     <div className="mt-2 text-[10px] text-text-tertiary">
-                                        Tip: Press <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">M</span> to focus comment box
+                                        Tip: Press <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">M</span> to focus · type <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">@</span> to mention an agent
                                     </div>
                                 </form>
                             </div>

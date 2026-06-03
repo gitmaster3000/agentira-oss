@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { MentionInput } from './MentionInput';
 import {
     Paperclip, Pencil, Trash2, X,
     GitBranch, GitCommit, GitPullRequest, ExternalLink, Copy, Check,
@@ -182,7 +183,7 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
     };
 
     const handleComment = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (!comment.trim()) return;
         try {
             await api.addComment(task.id, { comment: comment });
@@ -563,11 +564,14 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
 
                         <div className="p-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
                             <form onSubmit={handleComment}>
-                                <input
+                                <MentionInput
                                     className="input text-sm"
-                                    placeholder="Add a comment..."
+                                    placeholder="Add a comment… (@ to mention an agent)"
                                     value={comment}
-                                    onChange={e => setComment(e.target.value)}
+                                    onChange={setComment}
+                                    onSubmit={handleComment}
+                                    projectId={task.project_id}
+                                    menuAbove
                                 />
                             </form>
                         </div>
