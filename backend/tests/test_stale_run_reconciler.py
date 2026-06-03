@@ -1,9 +1,10 @@
-"""P2: stale-run reconciler — catches daemon-crash orphans.
+"""Stale-run reconciler — per-run heartbeat (AP-180).
 
-A daemon that dies mid-run leaves the Run row pinned at RUNNING/PENDING
-forever. `reconcile_stale_runs` sweeps and flips them to FAILED with a
-clear error when the agent's runtime has had no heartbeat for
-STALE_RUN_THRESHOLD_S.
+The daemon stamps Run.last_heartbeat_at for every run it reports as in flight.
+`reconcile_stale_runs` flips a non-terminal run to FAILED when that clock goes
+stale — catching BOTH a dead daemon (it stops reporting all its runs) AND a
+dead dispatch whose daemon is still alive (the run never reached the
+subprocess, so it's never reported, even though the runtime keeps heartbeating).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from backend.forge.reconciler import (
     reconcile_stale_runs,
 )
 from backend.forge.models import (
-    ForgeRuntime, Run, RunStatus, RunOutcome, RuntimeStatus,
+    ForgeRuntime, Run, RunStatus, RuntimeStatus,
 )
 from backend.models import Notification, Profile, Role
 
@@ -49,17 +50,18 @@ def test_db():
         yield TestSession
 
 
-def _make_run(TestSession, *, heartbeat_age_s: float | None,
+def _make_run(TestSession, *, run_heartbeat_age_s: float | None,
               status: RunStatus = RunStatus.RUNNING,
               created_age_s: float = 0.0) -> dict:
-    """Create an agent + run. `heartbeat_age_s=None` → runtime never
-    heartbeated; otherwise the runtime row's last_heartbeat is N seconds
-    in the past. `created_age_s` ages the Run row similarly."""
+    """Create an agent + run. The runtime is ALWAYS fresh (heartbeating now) —
+    so these tests exercise the per-RUN clock independently of daemon liveness.
+    `run_heartbeat_age_s=None` → the daemon never reported this run; otherwise
+    Run.last_heartbeat_at is N seconds in the past. `created_age_s` ages the
+    Run row (for the never-reported grace window)."""
     now = datetime.now(timezone.utc)
     db = TestSession()
-    hb = None if heartbeat_age_s is None else now - timedelta(seconds=heartbeat_age_s)
     rt = ForgeRuntime(daemon_id="d", provider="claude", binary_path="/tmp/c",
-                      status=RuntimeStatus.ONLINE, last_heartbeat=hb)
+                      status=RuntimeStatus.ONLINE, last_heartbeat=now)
     db.add(rt)
     db.commit()
     rt_id = rt.id
@@ -73,6 +75,8 @@ def _make_run(TestSession, *, heartbeat_age_s: float | None,
     with forge_services._session() as db:
         r = db.query(Run).filter(Run.id == run["id"]).first()
         r.status = status
+        r.last_heartbeat_at = (None if run_heartbeat_age_s is None
+                               else now - timedelta(seconds=run_heartbeat_age_s))
         if created_age_s:
             r.created_at = now - timedelta(seconds=created_age_s)
         db.commit()
@@ -93,27 +97,52 @@ def _admin_notes(TestSession) -> list[Notification]:
 
 # ── reconciles stale runs ────────────────────────────────────────────
 
-def test_reconciles_run_with_dead_daemon(test_db):
-    s = _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
+def test_reconciles_run_with_stale_heartbeat(test_db):
+    s = _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
     out = reconcile_stale_runs()
     assert len(out["reconciled"]) == 1
     assert out["reconciled"][0]["run_id"] == s["run_id"]
     r = forge_services.get_run(s["run_id"])
     assert r["status"] == "failed"
-    assert "daemon offline" in (r["error"] or "").lower()
+    assert "stopped reporting" in (r["error"] or "").lower()
     assert r["outcome"] == "failed"
 
 
+def test_dead_dispatch_while_daemon_alive_is_reconciled(test_db):
+    """The headline fix: the runtime is fresh (still heartbeating) but this
+    specific run was never reported in flight — a dispatch that died before
+    reaching the subprocess. The per-run clock catches it; the old
+    runtime-heartbeat check would have left the spinner up forever."""
+    s = _make_run(test_db, run_heartbeat_age_s=None,
+                  created_age_s=STALE_RUN_THRESHOLD_S + 30)
+    out = reconcile_stale_runs()
+    assert len(out["reconciled"]) == 1
+    assert forge_services.get_run(s["run_id"])["status"] == "failed"
+
+
+def test_heartbeat_stamps_run_clock_and_keeps_it_alive(test_db):
+    """A daemon heartbeat reporting a run in flight stamps its per-run clock,
+    so the reconciler leaves it alone even though it was created long ago."""
+    s = _make_run(test_db, run_heartbeat_age_s=None,
+                  created_age_s=STALE_RUN_THRESHOLD_S + 30)
+    forge_services.heartbeat_runtimes(
+        "d", ["claude"],
+        inflight=[{"scope_key": "task:x", "run_id": s["run_id"]}])
+    out = reconcile_stale_runs()
+    assert out["reconciled"] == []
+    assert forge_services.get_run(s["run_id"])["status"] == "running"
+
+
 def test_reconciler_notifies_admins(test_db):
-    s = _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
+    _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
     reconcile_stale_runs()
     notes = _admin_notes(test_db)
-    assert any("offline" in n.title.lower() and "reconciled" in n.title.lower()
+    assert any("heartbeat" in n.title.lower() and "reconciled" in n.title.lower()
                for n in notes), [n.title for n in notes]
 
 
 def test_reconciler_handles_pending_runs_too(test_db):
-    s = _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
+    s = _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
                   status=RunStatus.PENDING)
     out = reconcile_stale_runs()
     assert len(out["reconciled"]) == 1
@@ -122,36 +151,25 @@ def test_reconciler_handles_pending_runs_too(test_db):
 
 # ── leaves fresh runs alone ──────────────────────────────────────────
 
-def test_fresh_heartbeat_leaves_run_untouched(test_db):
-    """Daemon checked in recently — don't touch the run."""
-    s = _make_run(test_db, heartbeat_age_s=10)  # 10s ago
+def test_fresh_run_heartbeat_leaves_run_untouched(test_db):
+    """The daemon reported this run a moment ago — don't touch it."""
+    s = _make_run(test_db, run_heartbeat_age_s=10)  # reported 10s ago
     out = reconcile_stale_runs()
     assert out["reconciled"] == []
     assert forge_services.get_run(s["run_id"])["status"] == "running"
 
 
-def test_never_heartbeated_young_run_left_untouched(test_db):
-    """A run that JUST started against a runtime which hasn't sent its
-    first heartbeat yet must not be killed on the first sweep — the
-    boot window would otherwise blow away every fresh dispatch."""
-    s = _make_run(test_db, heartbeat_age_s=None, created_age_s=5)
+def test_never_reported_young_run_left_untouched(test_db):
+    """A run that JUST dispatched, before the daemon's first inflight report,
+    must not be killed on the first sweep — the boot window would otherwise
+    blow away every fresh dispatch."""
+    s = _make_run(test_db, run_heartbeat_age_s=None, created_age_s=5)
     out = reconcile_stale_runs()
     assert out["reconciled"] == []
 
 
-def test_never_heartbeated_old_run_reconciled(test_db):
-    """A run created longer ago than the threshold whose runtime has
-    never heartbeated → the daemon clearly isn't coming. Reconcile it."""
-    s = _make_run(test_db, heartbeat_age_s=None,
-                  created_age_s=STALE_RUN_THRESHOLD_S + 30)
-    out = reconcile_stale_runs()
-    assert len(out["reconciled"]) == 1
-
-
 def test_completed_runs_ignored(test_db):
-    """Reconciler scopes to non-terminal statuses. A long-finished run
-    must not be touched."""
-    s = _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
+    s = _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
                   status=RunStatus.COMPLETED)
     out = reconcile_stale_runs()
     assert out["reconciled"] == []
@@ -160,7 +178,7 @@ def test_completed_runs_ignored(test_db):
 
 def test_paused_runs_ignored(test_db):
     """PAUSED is a deliberate user state, not a stuck state."""
-    s = _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
+    s = _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30,
                   status=RunStatus.PAUSED)
     out = reconcile_stale_runs()
     assert out["reconciled"] == []
@@ -170,8 +188,7 @@ def test_paused_runs_ignored(test_db):
 # ── idempotent ───────────────────────────────────────────────────────
 
 def test_reconciler_is_idempotent(test_db):
-    """Running twice in a row finds nothing the second time."""
-    _make_run(test_db, heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
+    _make_run(test_db, run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
     first = reconcile_stale_runs()
     second = reconcile_stale_runs()
     assert len(first["reconciled"]) == 1

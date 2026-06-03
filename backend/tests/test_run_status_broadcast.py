@@ -146,7 +146,7 @@ def _setup(TestSession) -> dict:
 
 
 def test_pause_run_emits_broadcast(test_db, monkeypatch):
-    """pause_run must call _broadcast_status with the new PAUSING state."""
+    """pause_run must call _broadcast_status with the INTERRUPTING state."""
     s = _setup(test_db)
     calls = []
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def test_pause_run_emits_broadcast(test_db, monkeypatch):
         lambda rid, status, outcome=None: calls.append((rid, status, outcome)),
     )
     forge_services.pause_run(s["run_id"])
-    assert any(rid == s["run_id"] and status == RunStatus.PAUSING
+    assert any(rid == s["run_id"] and status == RunStatus.INTERRUPTING
                for rid, status, _ in calls), calls
 
 
@@ -169,7 +169,7 @@ def test_cancel_run_emits_broadcast(test_db, monkeypatch):
         lambda rid, status, outcome=None: calls.append((rid, status, outcome)),
     )
     forge_services.cancel_run(s["run_id"])
-    assert any(rid == s["run_id"] and status == RunStatus.CANCELLING
+    assert any(rid == s["run_id"] and status == RunStatus.INTERRUPTING
                for rid, status, _ in calls), calls
 
 

@@ -202,11 +202,17 @@ def conversation_scope_key(*, task_id: str | None = None,
 
 
 _TOOL_ENTRY_TRUNCATE = 4096   # ~4KB per tool entry
-# Total budget for a rebuilt task-scoped history preamble (gateway
-# runtimes / when a claude session is lost). 40KB (~10K tokens) was too
-# thin for a long task — a rebuilt run lost most of its context. 200KB
-# (~50K tokens) keeps real continuity while staying well inside context.
-_TASK_PREAMBLE_BYTE_CAP = 200 * 1024
+# Token budget for a rebuilt history preamble (gateway runtimes / when a
+# native session is lost). ~50K tokens keeps real continuity while staying
+# well inside the model context. One budgeted path for every scope — replaces
+# the old 200KB task byte-cap AND the separate 20-message chat cap.
+DEFAULT_CONTEXT_TOKENS = 50_000
+
+
+def _estimate_tokens(text: str) -> int:
+    """Cheap token estimate (~4 chars/token) — good enough to budget a history
+    preamble without pulling in a tokenizer dependency."""
+    return (len(text) + 3) // 4
 
 
 def _render_history_row(m: "AgentMessage") -> str | None:
@@ -234,59 +240,55 @@ def _render_history_row(m: "AgentMessage") -> str | None:
     return None
 
 
-def _prepend_history_for_prompt(*, agent_id: str, scope_key: str,
-                                current: str, limit: int = 20) -> str:
-    """For gateway runtimes that don't keep server-side conversation state,
-    rebuild a short history transcript and stitch it onto the prompt.
+def assemble_context(*, agent_id: str, scope_key: str, current: str,
+                     token_budget: int = DEFAULT_CONTEXT_TOKENS,
+                     native_resume_available: bool = False) -> str:
+    """Build the dispatch prompt — one path for every runtime/scope.
 
-    For task-scoped conversations (`task:<id>`), include TOOL events and
-    the latest Run.summary for the task, capped by total byte size. This
-    is the fallback path for runtimes without native --resume (e.g.
-    OpenClaw HTTP gateway) and for Claude when its session_id is lost.
-    Chat scopes keep the original ~20-message entry cap.
+    1. If the runtime carries history natively (a live `--resume` session),
+       return the prompt unchanged. Native resume is the optimization, not a
+       separate semantic — so when it's unavailable (gateway runtime, or a
+       lost claude session) we always fall back to the rebuild below.
+    2. Rebuild a transcript newest→oldest against a TOKEN budget, always
+       including TOOL events. When the budget is exceeded, older turns are
+       represented by the conversation's rolling summary (updated at turn
+       completion) instead of being silently dropped.
     """
-    is_task_scope = bool(scope_key) and scope_key.startswith("task:")
-    roles = [MessageRole.USER, MessageRole.ASSISTANT]
-    if is_task_scope:
-        roles.append(MessageRole.TOOL)
+    if native_resume_available:
+        return current
 
+    roles = [MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL]
+    rendered_rev: list[str] = []
+    used = 0
+    summary: str | None = None
     with _session() as db:
         q = (db.query(AgentMessage)
                .filter(AgentMessage.agent_id == agent_id,
                        AgentMessage.role.in_(roles)))
-        # Scope filter: only pull messages from this conversation. If
-        # scope_key is empty (legacy rows from before this column), they
-        # don't match and stay out, which is the safe default.
+        # Scope filter: only this conversation. Empty scope_key (legacy rows)
+        # matches nothing, which is the safe default.
         if scope_key:
             q = q.filter(AgentMessage.scope_key == scope_key)
+        # Walk newest→oldest, accumulate until the token budget, then reverse
+        # to chronological order.
+        for m in q.order_by(AgentMessage.created_at.desc()).all():
+            line = _render_history_row(m)
+            if line is None:
+                continue
+            cost = _estimate_tokens(line) + 1
+            if used + cost > token_budget and rendered_rev:
+                break  # older turns beyond the budget → carried by the summary
+            rendered_rev.append(line)
+            used += cost
+        rendered = list(reversed(rendered_rev))
 
-        if is_task_scope:
-            # Byte-capped: walk newest→oldest, accumulate until threshold,
-            # then reverse to chronological order.
-            newest_first = (q.order_by(AgentMessage.created_at.desc()).all())
-            rendered_rev: list[str] = []
-            size = 0
-            for m in newest_first:
-                line = _render_history_row(m)
-                if line is None:
-                    continue
-                size += len(line) + 1
-                if size > _TASK_PREAMBLE_BYTE_CAP and rendered_rev:
-                    break
-                rendered_rev.append(line)
-            rendered = list(reversed(rendered_rev))
-        else:
-            rows = (q.order_by(AgentMessage.created_at.desc())
-                      .limit(limit)
-                      .all())
-            rows.reverse()
-            rendered = [s for s in (_render_history_row(m) for m in rows)
-                        if s is not None]
-
-        run_summary: str | None = None
-        if is_task_scope:
-            # A task can have many runs across re-runs. Use the most
-            # recent finished run's summary as the carry-over context.
+        # Carry-over: the conversation's rolling summary (kept fresh at turn
+        # completion), falling back to the latest finished run's summary.
+        conv = (db.query(Conversation)
+                  .filter_by(agent_id=agent_id, scope_key=scope_key).first())
+        if conv and conv.rolling_summary:
+            summary = conv.rolling_summary.strip() or None
+        if summary is None and scope_key and scope_key.startswith("task:"):
             task_id = scope_key[len("task:"):]
             latest_run = (db.query(Run)
                           .filter(Run.agent_id == agent_id,
@@ -296,14 +298,14 @@ def _prepend_history_for_prompt(*, agent_id: str, scope_key: str,
                                     Run.created_at.desc())
                           .first())
             if latest_run and latest_run.summary:
-                run_summary = latest_run.summary.strip() or None
+                summary = latest_run.summary.strip() or None
 
-    if not rendered and not run_summary:
+    if not rendered and not summary:
         return current
     parts = ["<conversation history>"]
+    if summary:
+        parts.append(f"Earlier context (summary): {summary}")
     parts.extend(rendered)
-    if run_summary:
-        parts.append(f"Run summary: {run_summary}")
     parts.append("</conversation history>\n")
     parts.append(current)
     return "\n".join(parts)
@@ -342,10 +344,17 @@ def get_runtime_session(*, agent_id: str, scope_key: str) -> str:
 
 
 def upsert_conversation(*, agent_id: str, scope_key: str,
-                        runtime_session_id: str = "") -> None:
+                        runtime_session_id: str = "",
+                        rolling_summary: str | None = None,
+                        rolling_summary_through_run_id: str | None = None) -> None:
     """Create or update the conversation row. Idempotent — bumps
     last_used_at on every call; stores runtime_session_id if non-empty
-    (don't clobber a good handle with an empty one from a failed run)."""
+    (don't clobber a good handle with an empty one from a failed run).
+
+    `rolling_summary` is the carry-over context for assemble_context's
+    compaction — when given (a turn finished with a summary), it refreshes the
+    conversation's summary so older turns beyond the token budget stay
+    represented instead of silently dropped."""
     if not agent_id or not scope_key:
         return
     with _session() as db:
@@ -357,11 +366,16 @@ def upsert_conversation(*, agent_id: str, scope_key: str,
             conv.last_used_at = now
             if runtime_session_id:
                 conv.runtime_session_id = runtime_session_id
+            if rolling_summary:
+                conv.rolling_summary = rolling_summary
+                conv.rolling_summary_through_run_id = rolling_summary_through_run_id
         else:
             db.add(Conversation(
                 agent_id=agent_id,
                 scope_key=scope_key,
                 runtime_session_id=runtime_session_id or None,
+                rolling_summary=rolling_summary or None,
+                rolling_summary_through_run_id=rolling_summary_through_run_id,
                 last_used_at=now,
             ))
         db.commit()
@@ -593,6 +607,11 @@ def _run_to_dict(r: Run) -> dict:
         "project_name": r.project.name if r.project else None,
         "trigger_event": r.trigger_event,
         "status": r.status.value,
+        # is_work: this run produced durable work, so it surfaces as a "Run"
+        # in the UI. False = a pure-chat turn that the UI keeps as chat.
+        "is_work": bool(r.is_work),
+        # While INTERRUPTING: "pause" (Stop) or "discard" (Discard).
+        "interrupt_intent": r.interrupt_intent or None,
         "outcome": r.outcome.value if r.outcome else None,
         "summary": r.summary or "",
         "diff_stat": r.diff_stat or "",
@@ -786,6 +805,17 @@ def heartbeat_runtimes(daemon_id: str, providers: list[str],
         for rt in updated:
             rt.status = RuntimeStatus.ONLINE
             rt.last_heartbeat = now
+        # Stamp the per-run liveness clock for every run the daemon reports
+        # as in flight. The reconciler reads this to flip a non-terminal run
+        # to FAILED when the daemon stops reporting it — catching a dead
+        # dispatch even while the daemon itself is still heartbeating.
+        live_run_ids = [e.get("run_id") for e in (inflight or [])
+                        if e and e.get("run_id")]
+        if live_run_ids:
+            (db.query(Run)
+               .filter(Run.id.in_(live_run_ids))
+               .update({Run.last_heartbeat_at: now},
+                       synchronize_session=False))
         db.commit()
         return {"updated": len(updated)}
 
@@ -1305,13 +1335,12 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
             q = q.filter(Run.project_id == project_id)
         if status:
             q = q.filter(Run.status == status)
-        # AP-151: a chat.shadow run is a transient reservation, not a real
-        # run. It either gets deleted (no work) or promoted to "chat" (work
-        # crystallized) at complete_trigger. Never surface the un-promoted
-        # shadow in the global list — that's the "every comment becomes a
-        # run" pollution. The task-scoped lookup (list_runs_for_task) still
-        # sees it so the chat Stop button works while it's in flight.
-        q = q.filter(Run.trigger_event != "chat.shadow")
+        # Only runs that produced durable work surface in the Runs list. A
+        # pure-chat turn is a run row with is_work=False that the UI keeps as
+        # chat — that's the "every comment becomes a run" pollution fix. The
+        # task-scoped lookup (list_runs_for_task) is unfiltered so the chat
+        # Stop button can find an in-flight (is_work=False) run.
+        q = q.filter(Run.is_work.is_(True))
         runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
         return [_run_to_dict(r) for r in runs]
 
@@ -2237,15 +2266,16 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         if not runtime:
             return {"error": "Runtime not found"}
 
-        # AP-151 — Shadow run reservation for run-less task chat turns. When a
-        # chat lands in `task:T` without an explicit run_id (no Run button
-        # click, no D-routing resume), reserve a Run row + a log_dir + an
-        # AGENTIRA_RUN_ID env var BEFORE dispatch — so the agent can call
-        # `register_run_artifact`, the daemon can tee stdout/stderr to a
-        # run-keyed dir, and post-mortem diagnostics route correctly. If the
-        # turn does no work, `complete_trigger` deletes the row at the end so
-        # the runs list isn't polluted. This is the "eager infrastructure,
-        # lazy visibility" fix for the lazy-run feature-incompleteness gap.
+        # Reserve a Run row for run-less task chat turns. When a chat lands in
+        # `task:T` without an explicit run_id (no Run button click, no
+        # D-routing resume), reserve a Run row + a log_dir + an AGENTIRA_RUN_ID
+        # env var BEFORE dispatch — so the agent can call `register_run_artifact`,
+        # the daemon can tee stdout/stderr to a run-keyed dir, and post-mortem
+        # diagnostics route correctly. The run starts is_work=False;
+        # `complete_trigger` flips it to is_work=True iff the turn produced
+        # durable work, which is what surfaces it in the Runs list. A talk-only
+        # turn stays is_work=False and the UI keeps it as chat. The row is never
+        # deleted — messages keep their run_id and the transcript is intact.
         if (run_id is None and kind == "chat" and scope_key
                 and scope_key.startswith("task:")):
             from backend.models import Task as _Task
@@ -2262,7 +2292,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                 # be inserted with all fields set in one shot. We need the
                 # real run_id for the log path though — so insert, flush,
                 # then patch log_dir.
-                run_id = _runs.create_shadow_in_session(
+                run_id = _runs.create_chat_run_in_session(
                     db,
                     agent_id=a.id,
                     task_id=_shadow_task_id,
@@ -2279,7 +2309,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                 )
             else:
                 # Task lookup failed — reset trackers; fall through to a
-                # normal chat dispatch with no shadow.
+                # normal chat dispatch with no reserved run.
                 _shadow_task_id = ""
 
         # Persist the user message tagged with trace_id (and run_id when present
@@ -2646,10 +2676,9 @@ def dispatch_pending_run(*, run_id: str,
         if not run:
             return {"error": "Run not found"}
         if resume:
-            # P3: resume_run flips PAUSED → RESUMING before calling us so
-            # the UI shows the transient state; accept both here. The
-            # daemon's first event / start_run flips RESUMING → RUNNING.
-            if run.status not in (RunStatus.PAUSED, RunStatus.RESUMING):
+            # resume_run flips PAUSED → PENDING before calling us (re-dispatch);
+            # accept both. The daemon's first event / start_run flips → RUNNING.
+            if run.status not in (RunStatus.PAUSED, RunStatus.PENDING):
                 return {"error": f"Run is {run.status.value}; "
                                   "only PAUSED runs can be resumed"}
         elif run.status not in (RunStatus.READY, RunStatus.PENDING):
@@ -3043,8 +3072,7 @@ def retry_run(run_id: str, *, actor: str = "system") -> dict:
         if not r.task_id:
             return {"error": "cannot restart a free-floating chat run"}
         if r.status in (RunStatus.PENDING, RunStatus.RUNNING,
-                        RunStatus.PAUSED, RunStatus.PAUSING,
-                        RunStatus.CANCELLING):
+                        RunStatus.PAUSED, RunStatus.INTERRUPTING):
             return {"error":
                     f"Run is {r.status.value}; stop or wait for it before restarting"}
         prior_outcome = (r.outcome.value if r.outcome else r.status.value)
@@ -3121,17 +3149,18 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
 def pause_run(run_id: str) -> dict:
     """Pause a run. The daemon terminates the CLI subprocess (SIGTERM) —
     a live claude process can't be safely frozen, SIGSTOP corrupts its
-    streaming sockets. P3: the run is parked at status=PAUSING with its
-    `stop_requested_at` stamped; the daemon's trigger-complete(paused=True)
-    is what flips it to terminal PAUSED with the session_id persisted.
-    `resume_run` relaunches it via `claude --resume`. Best-effort:
-    openclaw HTTP runs aren't pausable (the request completes naturally)."""
-    res = _signal_run(run_id, "pause", RunStatus.PAUSING)
+    streaming sockets. The run is parked at status=INTERRUPTING
+    (interrupt_intent="pause") with `stop_requested_at` stamped; the daemon's
+    trigger-complete(paused=True) is what flips it to terminal PAUSED with the
+    session_id persisted. `resume_run` relaunches it via `claude --resume`.
+    Best-effort: openclaw HTTP runs aren't pausable (the request completes)."""
+    res = _signal_run(run_id, "pause", RunStatus.INTERRUPTING)
     if res.get("ok"):
         with _session() as db:
             r = db.query(Run).filter(Run.id == run_id).first()
             if r:
                 r.stop_requested_at = datetime.now(timezone.utc)
+                r.interrupt_intent = "pause"
                 db.commit()
     return res
 
@@ -3144,15 +3173,16 @@ def resume_run(run_id: str) -> dict:
     from the captured session via `claude --resume` and continues. The
     run_id is reused — the run is one continuous record across the pause.
 
-    P3: the row flips PAUSED→RESUMING here; the daemon's first event post
-    (via start_run) flips it to RUNNING.
+    The row flips PAUSED→PENDING here (re-dispatch); the daemon's first event
+    post (via start_run) flips it to RUNNING.
     """
     with _session() as db:
         r = db.query(Run).filter(Run.id == run_id).first()
         if r and r.status == RunStatus.PAUSED:
-            r.status = RunStatus.RESUMING
+            r.status = RunStatus.PENDING
+            r.interrupt_intent = None
             db.commit()
-            _broadcast_status(run_id, RunStatus.RESUMING)
+            _broadcast_status(run_id, RunStatus.PENDING)
     return dispatch_pending_run(run_id=run_id, resume=True)
 
 
@@ -3163,6 +3193,14 @@ def scope_live(scope_key: str) -> dict:
     from backend.forge import live_inflight
     trace = live_inflight.lookup_trace(scope_key)
     return {"live": bool(trace), "trace_id": trace or ""}
+
+
+def list_queued_messages(*, agent_id: str, scope_key: str) -> list[dict]:
+    """Messages queued behind the active turn in this conversation (AP-179),
+    oldest first — the chat UI renders them as "queued" pills under the live
+    turn so the user sees exactly what runs next."""
+    from backend.forge import msg_queue
+    return msg_queue.list_for_scope(agent_id=agent_id, scope_key=scope_key)
 
 
 def stop_chat(*, agent_id: str, scope_key: str) -> dict:
@@ -3562,6 +3600,32 @@ def _maybe_auto_retry(run_id: str, error: str) -> bool:
     return True
 
 
+def _flush_queued_message(agent_id: str, *, scope_key: str = "",
+                          run_id: str | None = None) -> None:
+    """Dispatch the oldest queued message for a conversation whose turn just
+    reached a terminal state (completed / failed / cancelled). FIFO, one per
+    terminal event — the dispatched turn's own completion flushes the next.
+    Queued messages exist only for task scopes, so when scope_key isn't given
+    we derive it from the run's task. Best-effort; never fails completion."""
+    try:
+        from backend.forge import msg_queue
+        scope = scope_key
+        if not scope and run_id:
+            with _session() as db:
+                r = db.query(Run).filter(Run.id == run_id).first()
+                if r and r.task_id:
+                    scope = f"task:{r.task_id}"
+        if not scope:
+            return
+        nxt = msg_queue.dequeue_oldest(agent_id=agent_id, scope_key=scope)
+        if not nxt:
+            return
+        send_runtime_message(agent_id, content=nxt["content"], scope_key=scope,
+                             user_context=nxt.get("user_context"))
+    except Exception as exc:  # noqa: BLE001 — never fail completion on the queue
+        _dispatch_logger.warning("queued-message flush failed: %s", exc)
+
+
 def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                      success: bool, input_tokens: int = 0, output_tokens: int = 0,
                      error: str | None = None,
@@ -3626,9 +3690,10 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             if r:
                 r.status = RunStatus.CANCELLED
                 _broadcast_status(run_id, RunStatus.CANCELLED, r.outcome)
-                # P3: clear the audit timestamp so the reconciler stops
-                # treating CANCELLING as a stuck transient.
+                # Clear the audit timestamp/intent so the reconciler stops
+                # treating INTERRUPTING as a stuck transient.
                 r.stop_requested_at = None
+                r.interrupt_intent = None
                 r.finished_at = datetime.now(timezone.utc)
                 if r.outcome is None:
                     r.outcome = RunOutcome.FAILED  # for the verdict badge
@@ -3650,6 +3715,8 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     r.materialize_reason = materialize_reason
                 db.commit()
         _TRACE_SCOPE.pop(trace_id, None)
+        # Discarded is terminal — a message queued behind this run still runs.
+        _flush_queued_message(agent_id, run_id=run_id)
         cleanup = _worktree_cleanup_hint(run_id)
         return {"ok": True, "trace_id": trace_id, "cancelled": True,
                 "logged": logger_msg + " [cancelled — no admin notify]",
@@ -3675,11 +3742,11 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         if session_id and scope:
             upsert_conversation(agent_id=agent_id, scope_key=scope,
                                 runtime_session_id=session_id)
-        # P3: flip PAUSING → PAUSED unconditionally on the daemon's ack.
+        # Flip INTERRUPTING → PAUSED unconditionally on the daemon's ack.
         # Even if no session_id arrived (non-claude runtimes), the daemon
-        # confirmed the kill — that's the signal we were waiting for.
-        pending_steer = None
-        steer_task_id = None
+        # confirmed the kill — that's the signal we were waiting for. PAUSED
+        # is not terminal (the user resumes), so the message queue is NOT
+        # flushed here — a queued message waits until the run actually ends.
         if run_id:
             with _session() as db:
                 r = db.query(Run).filter(Run.id == run_id).first()
@@ -3688,32 +3755,12 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                         r.session_id = session_id
                     if materialize_reason:
                         r.materialize_reason = materialize_reason
-                    if r.status == RunStatus.PAUSING:
+                    if r.status == RunStatus.INTERRUPTING:
                         r.status = RunStatus.PAUSED
                         r.stop_requested_at = None
+                        r.interrupt_intent = None
                         _broadcast_status(run_id, RunStatus.PAUSED)
-                    # ADR 009 / D1: a message arrived while this run was
-                    # RUNNING and was parked here. Now that the pause is
-                    # confirmed (session_id captured), dispatch it as the
-                    # next turn — resuming THIS run via --resume.
-                    pending_steer = r.pending_steer
-                    steer_task_id = r.task_id
-                    if pending_steer:
-                        r.pending_steer = None
                     db.commit()
-        # The run's own task is the reliable scope source (the trace's
-        # _TRACE_SCOPE / messages may be gone after a backend restart).
-        steer_scope = scope or (f"task:{steer_task_id}" if steer_task_id else "")
-        if pending_steer and steer_scope:
-            try:
-                # Re-enter send_runtime_message: the run is now PAUSED, so it
-                # takes the resume branch and continues the episode with the
-                # user's steering message (same run_id).
-                send_runtime_message(agent_id, content=pending_steer,
-                                     scope_key=steer_scope)
-            except Exception as exc:  # noqa: BLE001
-                _dispatch_logger.warning(
-                    "pending-steer dispatch failed run=%s: %s", run_id, exc)
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
 
@@ -3775,51 +3822,34 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     # existed). Empty session_id won't clobber a previously-stored good one.
     scope = _TRACE_SCOPE.pop(trace_id, "")
     if scope:
+        # Refresh the conversation's rolling summary from the run's own
+        # finish_run summary (cheap, no LLM) so assemble_context can carry
+        # context past the token budget instead of dropping it.
+        roll = None
+        if run_id:
+            with _session() as db:
+                _r = db.query(Run).filter(Run.id == run_id).first()
+                if _r and _r.summary:
+                    roll = _r.summary.strip() or None
         upsert_conversation(
             agent_id=agent_id, scope_key=scope,
             runtime_session_id=session_id or "",
+            rolling_summary=roll,
+            rolling_summary_through_run_id=run_id if roll else None,
         )
 
-    # ADR 009 / AP-136 (legacy lazy crystallize). Task chat turns now get a
-    # shadow run reserved up-front in dispatch_trigger (AP-151), so for task
-    # scopes run_id is always set here and this branch is inert. The path
-    # remains for non-task scopes where `maybe_crystallize_chat_turn` is a
-    # no-op anyway (its first check returns None for any non-`task:` scope).
-    # Kept as a defensive belt+suspenders; harmless.
-    if (not run_id) and effective_success:
-        cz_scope = scope
-        if not cz_scope:
-            with _session() as db:
-                m = (db.query(AgentMessage)
-                       .filter(AgentMessage.trace_id == trace_id,
-                               AgentMessage.scope_key.isnot(None),
-                               AgentMessage.scope_key != "")
-                       .order_by(AgentMessage.created_at.desc())
-                       .first())
-                cz_scope = m.scope_key if m else ""
-        try:
-            from backend.forge import turns
-            turns.maybe_crystallize_chat_turn(
-                agent_id=agent_id, trace_id=trace_id, scope_key=cz_scope,
-                work_signal=work_signal, diff_stat=diff_stat, diff=diff,
-                input_tokens=input_tokens, output_tokens=output_tokens,
-            )
-        except Exception as exc:  # noqa: BLE001 — never fail completion
-            _dispatch_logger.warning("chat-turn crystallize failed trace=%s: %s",
-                                     trace_id, exc)
-
-    # AP-151 — Shadow-run delete-if-no-work. A Run was reserved at dispatch
-    # for run-less task chats so the agent could register artifacts and the
-    # daemon could capture logs/diagnostics. Now: if the turn produced no
-    # work (per the project's work-signal mode), no agent-declared outcome,
-    # and no artifacts → delete the row + NULL the trace's message rows so
-    # the runs list isn't polluted. The chat transcript stays intact (the
-    # messages keep their scope_key + trace_id; only their run_id link is
-    # severed). Trivial chat stays trivial; material chat keeps its run.
+    # Run emergence — decide whether this chat turn produced durable work.
+    # Every task-chat turn has a real Run row reserved at dispatch (is_work=
+    # False). Here we flip is_work=True iff the turn did work (per the
+    # project's work-signal mode), declared an outcome, or registered an
+    # artifact — at which point it surfaces in the Runs list as a "Run". A
+    # talk-only turn stays is_work=False: the row and its messages are kept
+    # (transcript intact), the UI just keeps it as chat. The row is never
+    # deleted — replaces the old shadow delete/promote dance.
     if run_id:
         with _session() as db:
             r = db.query(Run).filter(Run.id == run_id).first()
-            if r and r.trigger_event == "chat.shadow":
+            if r and r.trigger_event == "chat" and not r.is_work:
                 had_explicit_outcome = agent_declared_outcome is not None
                 arts = (r.artifacts_json or "").strip()
                 had_artifacts = bool(arts) and arts != "[]"
@@ -3829,25 +3859,11 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     did_work = _turns.turn_did_work(work_signal, mode)
                 except Exception:  # noqa: BLE001
                     did_work = bool((r.diff or "").strip())
-                if not (did_work or had_explicit_outcome or had_artifacts):
-                    db.query(AgentMessage).filter(
-                        AgentMessage.run_id == run_id
-                    ).update({"run_id": None}, synchronize_session=False)
-                    db.delete(r)
+                if did_work or had_explicit_outcome or had_artifacts:
+                    r.is_work = True
                     db.commit()
                     _dispatch_logger.info(
-                        "shadow run deleted trace=%s run=%s — no work crystallized",
-                        trace_id, run_id)
-                    run_id = None  # downstream sees a run-less chat turn
-                else:
-                    # The turn did material work → promote the shadow to a
-                    # real run so it surfaces in the runs list. Flipping the
-                    # trigger_event off "chat.shadow" both un-hides it in
-                    # list_runs and makes this cleanup branch idempotent.
-                    r.trigger_event = "chat"
-                    db.commit()
-                    _dispatch_logger.info(
-                        "shadow run promoted trace=%s run=%s — work crystallized",
+                        "chat turn produced work trace=%s run=%s — surfaced as a Run",
                         trace_id, run_id)
 
     # Failure surfacing — the daemon already logs server-side, but the
@@ -3897,6 +3913,11 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                          else f"⚠ Agent execution failed: {error[:600]}"),
             ))
             db.commit()
+
+    # Completed / failed is terminal and the conversation is now idle — flush
+    # the next queued message (if any) as the following turn. PAUSED returns
+    # earlier and skips this (the user resumes; the queue waits).
+    _flush_queued_message(agent_id, scope_key=scope, run_id=run_id)
 
     # AP-123: tell the daemon to tear down the per-run worktree on the
     # terminal completion path. PAUSED branches return earlier and skip
@@ -3973,46 +3994,38 @@ def send_runtime_message(
     if scope_key and scope_key.startswith("task:"):
         task_id = scope_key.split(":", 1)[1]
         with _session() as db:
-            # P3: a stop in flight wins. If the daemon hasn't confirmed
-            # PAUSING / CANCELLING yet, sending a message would race the
-            # kill (and on success would silently spawn a second proc).
-            # Refuse cleanly so the user retries once the dust settles.
+            # A stop in flight wins. If the daemon hasn't confirmed the
+            # INTERRUPTING kill yet, sending a message would race it (and on
+            # success would silently spawn a second proc). Refuse cleanly so
+            # the user retries once the dust settles.
             in_flight_stop = (db.query(Run)
                               .filter(Run.task_id == task_id,
                                       Run.agent_id == agent_id,
-                                      Run.status.in_([RunStatus.PAUSING,
-                                                      RunStatus.CANCELLING]))
+                                      Run.status == RunStatus.INTERRUPTING)
                               .first())
             if in_flight_stop:
                 return {"error": (f"Run is {in_flight_stop.status.value}; "
                                   "wait for the stop to confirm before "
                                   "sending another message.")}
-            # D1 (chat-during-run): a message into a RUNNING/RESUMING run
-            # interrupts-and-steers. We can't --resume a session whose id
-            # isn't finalized until the daemon confirms the kill, so park the
-            # message on the run, pause it (clean SIGTERM, session captured),
-            # and let complete_trigger's paused branch dispatch it as the next
-            # turn. Return early — no fresh chat turn.
+            # Chat-during-run: a message into a RUNNING turn is QUEUED, not
+            # steered. The active turn runs to completion uninterrupted; the
+            # queued message dispatches FIFO when the turn reaches a terminal
+            # state (see _flush_queued_message in complete_trigger). A
+            # conversation is single-threaded, so this preserves order without
+            # interrupting work. Return early — no fresh turn dispatched now.
             active = (db.query(Run)
                         .filter(Run.task_id == task_id,
                                 Run.agent_id == agent_id,
-                                Run.status.in_([RunStatus.RUNNING,
-                                                RunStatus.RESUMING]))
+                                Run.status == RunStatus.RUNNING)
                         .order_by(Run.created_at.desc())
                         .first())
             if active:
-                steer_run_id = active.id
-                active.pending_steer = content
-                db.add(AgentMessage(
-                    agent_id=agent_id, run_id=steer_run_id, scope_key=scope_key,
-                    role=MessageRole.SYSTEM,
-                    content=("⏸ Pausing the current run to fold in your "
-                             "message — it'll continue from where it left off."),
-                ))
-                db.commit()
-                pause_run(steer_run_id)
-                return {"ok": True, "steering_run_id": steer_run_id,
-                        "note": "paused the running run to fold in your message"}
+                from backend.forge import msg_queue
+                queued_id = msg_queue.enqueue(
+                    agent_id=agent_id, scope_key=scope_key,
+                    content=content, user_context=user_context)
+                return {"ok": True, "queued_id": queued_id,
+                        "note": "queued — the current turn is still running"}
 
             # PAUSED, or parked-by-outcome (needs_input / blocked) and still
             # the latest activity → resume THIS run with the user's message as
@@ -4197,15 +4210,16 @@ def send_runtime_message(
             rt = a.runtime
             caps = (json.loads(rt.capabilities) if (rt and rt.capabilities) else [])
             resume_id = ""
-            prompt_with_history = content
             if "resume" in caps:
                 resume_id = get_runtime_session(agent_id=a.id, scope_key=scope)
-            else:
-                # Gateway runtime — prepend recent history so the agent has
-                # context. Cap at ~20 messages to keep prompts bounded.
-                prompt_with_history = _prepend_history_for_prompt(
-                    agent_id=a.id, scope_key=scope, current=content,
-                )
+            # One context path: native resume short-circuits; otherwise rebuild
+            # a token-budgeted history. When the runtime claims resume but the
+            # session was lost (resume_id empty), we still fall back to rebuild
+            # instead of dropping the agent's context.
+            prompt_with_history = assemble_context(
+                agent_id=a.id, scope_key=scope, current=content,
+                native_resume_available=bool(resume_id),
+            )
 
             # Serialize chats per (agent, scope). Two claude subprocesses
             # sharing one cwd corrupt each other's index; the older one

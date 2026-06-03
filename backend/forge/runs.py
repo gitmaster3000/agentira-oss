@@ -51,7 +51,11 @@ def broadcast_status(run_id: str | None,
 def create(*, agent_id: str, task_id: str | None = None,
            project_id: str | None = None, trigger_event: str = "",
            model_used: str = "") -> dict:
-    """Create a PENDING Run. Used by the Run-button / cron / scheduled paths."""
+    """Create a PENDING Run. Used by the Run-button / cron / scheduled paths.
+
+    These are explicitly-started work episodes, so is_work=True — they surface
+    in the Runs list immediately (even while still running). Only chat-emergent
+    runs defer is_work until completion decides whether work happened."""
     from backend.forge.services import _run_to_dict
     with SessionLocal() as db:
         r = Run(
@@ -61,6 +65,7 @@ def create(*, agent_id: str, task_id: str | None = None,
             trigger_event=trigger_event,
             status=RunStatus.PENDING,
             model_used=model_used,
+            is_work=True,
         )
         db.add(r)
         db.commit()
@@ -68,26 +73,33 @@ def create(*, agent_id: str, task_id: str | None = None,
         return _run_to_dict(r)
 
 
-def create_shadow_in_session(db, *, agent_id: str, task_id: str,
-                             project_id: str | None,
-                             model_used: str,
-                             initial_prompt: str,
-                             worktree_path: str,
-                             worktree_branch: str,
-                             log_dir: str) -> str:
-    """AP-151 shadow Run for chat-triggered (run-less) turns.
+def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
+                               project_id: str | None,
+                               model_used: str,
+                               initial_prompt: str,
+                               worktree_path: str,
+                               worktree_branch: str,
+                               log_dir: str) -> str:
+    """Reserve a Run row for a task-chat turn at dispatch time.
 
     Caller owns the session and commit. Returns the new run_id.
 
-    Persists `initial_prompt` so post-mortem diagnostics on a stuck shadow
-    can show what the agent was asked to do — without it, a hung shadow
-    looks like a blank row.
+    Every task-chat turn gets a real run up-front so the agent can register
+    artifacts, the daemon can tee logs to a run-keyed dir, and the worktree is
+    isolated — BEFORE we know if the turn does work. It starts is_work=False;
+    `complete_trigger` sets is_work=True iff the turn produced durable work, at
+    which point it surfaces in the Runs list. A talk-only turn stays
+    is_work=False and the UI keeps it as chat. (Replaces the old shadow-run
+    reservation that was deleted/promoted at completion.)
+
+    Persists `initial_prompt` so post-mortem diagnostics on a stuck run can
+    show what the agent was asked to do — without it, a hung run is a blank row.
     """
-    shadow = Run(
+    run = Run(
         agent_id=agent_id,
         task_id=task_id,
         project_id=project_id or None,
-        trigger_event="chat.shadow",
+        trigger_event="chat",
         status=RunStatus.RUNNING,
         model_used=model_used,
         initial_prompt=initial_prompt or "",
@@ -95,10 +107,11 @@ def create_shadow_in_session(db, *, agent_id: str, task_id: str,
         worktree_branch=worktree_branch,
         log_dir=log_dir,
         started_at=_utc_now(),
+        is_work=False,
     )
-    db.add(shadow)
+    db.add(run)
     db.flush()
-    return shadow.id
+    return run.id
 
 
 # ── Lifecycle transitions ─────────────────────────────────────────────
@@ -158,7 +171,7 @@ def complete(run_id: str, *, input_tokens: int = 0,
 
 
 def cancel(run_id: str) -> dict:
-    """Active → CANCELLING (transient). Daemon ack flips to CANCELLED.
+    """Active → INTERRUPTING(discard). Daemon ack flips to CANCELLED.
 
     Returns immediately so the UI gets feedback without waiting on WS.
     """
@@ -170,7 +183,7 @@ def cancel(run_id: str) -> dict:
         if not run:
             return {"error": "Run not found"}
         if run.status in (RunStatus.COMPLETED, RunStatus.FAILED,
-                          RunStatus.CANCELLED, RunStatus.CANCELLING):
+                          RunStatus.CANCELLED, RunStatus.INTERRUPTING):
             return {"error": f"Run already {run.status.value}"}
         agent = db.get(Agent, run.agent_id)
         runtime_id = agent.runtime_id if agent else None
@@ -182,8 +195,9 @@ def cancel(run_id: str) -> dict:
                     .first())
         trace_id = last_msg.trace_id if last_msg else ""
 
-        run.status = RunStatus.CANCELLING
-        broadcast_status(run_id, RunStatus.CANCELLING)
+        run.status = RunStatus.INTERRUPTING
+        run.interrupt_intent = "discard"
+        broadcast_status(run_id, RunStatus.INTERRUPTING)
         run.stop_requested_at = _utc_now()
         run.error = "Cancelled by user."
         if run.agent and run.agent.status == AgentStatus.BUSY:

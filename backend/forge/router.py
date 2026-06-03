@@ -700,6 +700,13 @@ def agent_scope_live(agent_id: str, scope_key: str):
     return services.scope_live(scope_key)
 
 
+@router.get("/agents/{agent_id}/queued")
+def agent_queued_messages(agent_id: str, scope_key: str):
+    """AP-179: messages queued behind the active turn in this conversation,
+    for the chat UI's "queued" pills."""
+    return services.list_queued_messages(agent_id=agent_id, scope_key=scope_key)
+
+
 # ── ADR 008: chat controls (clear + stop) ──────────────────────────────
 
 @router.post("/agents/{agent_id}/conversations/clear")

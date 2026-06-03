@@ -1,14 +1,19 @@
-"""AP-106 (post-AP-93): history rebuild fidelity when native resume is
-unavailable. Applies to task-scoped chats — the scope shape AP-93
-introduced — and to any runtime that lacks --resume (OpenClaw, future
-gateways). When rebuilt, the preamble must include TOOL events and the
-most-recent Run.summary for the task, capped by total byte size. Chat
-scopes retain the original 20-entry cap and exclude tool events.
+"""Context assembly — one token-budgeted path (AP-181).
+
+assemble_context replaces the old two-path _prepend_history_for_prompt
+(task→200KB incl tools + latest Run.summary; chat→last-20 no tools):
+
+  - native resume available  → return the prompt unchanged (runtime carries it)
+  - otherwise                → rebuild newest→oldest against a TOKEN budget,
+    ALWAYS including tool events, for every scope
+  - over budget              → older turns are carried by the conversation's
+    rolling summary instead of being silently dropped
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -67,10 +72,27 @@ def _mk_run(agent_id: str, task_id: str, summary: str | None = None) -> str:
     return run_id
 
 
+# ── native resume short-circuits ─────────────────────────────────────────
+
+def test_native_resume_returns_prompt_unchanged():
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+    with forge_services._session() as db:
+        db.add(AgentMessage(agent_id=agent_id, role=MessageRole.USER,
+                            content="prior", scope_key=scope))
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="go",
+        native_resume_available=True,
+    )
+    assert out == "go", "native resume carries history — no rebuilt preamble"
+
+
+# ── rebuild includes tool events, for every scope ────────────────────────
+
 def test_rebuild_includes_tool_messages():
     agent_id, task_id = _mk_agent_task()
     scope = f"task:{task_id}"
-
     with forge_services._session() as db:
         db.add_all([
             AgentMessage(agent_id=agent_id, role=MessageRole.USER,
@@ -78,17 +100,14 @@ def test_rebuild_includes_tool_messages():
             AgentMessage(agent_id=agent_id, role=MessageRole.ASSISTANT,
                          content="On it.", scope_key=scope),
             AgentMessage(agent_id=agent_id, role=MessageRole.TOOL,
-                         scope_key=scope,
-                         tool_name="Bash", tool_input="git status"),
+                         scope_key=scope, tool_name="Bash",
+                         tool_input="git status"),
             AgentMessage(agent_id=agent_id, role=MessageRole.TOOL,
-                         scope_key=scope,
-                         tool_output="working tree clean"),
+                         scope_key=scope, tool_output="working tree clean"),
         ])
         db.commit()
-
-    out = forge_services._prepend_history_for_prompt(
-        agent_id=agent_id, scope_key=scope, current="next prompt",
-    )
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="next prompt")
     assert "User: run git status" in out
     assert "Assistant: On it." in out
     assert "Tool: Used Bash(git status)" in out
@@ -96,80 +115,77 @@ def test_rebuild_includes_tool_messages():
     assert out.endswith("next prompt")
 
 
-def test_rebuild_includes_latest_run_summary_when_scope_is_task():
+def test_chat_scope_now_includes_tools_too():
+    """The old chat path excluded tool events; the unified path includes them
+    for every scope."""
+    agent_id, _ = _mk_agent_task()
+    scope = "chat:default"
+    with forge_services._session() as db:
+        db.add_all([
+            AgentMessage(agent_id=agent_id, role=MessageRole.USER,
+                         content="hello", scope_key=scope),
+            AgentMessage(agent_id=agent_id, role=MessageRole.TOOL,
+                         scope_key=scope, tool_name="Bash", tool_input="ls"),
+        ])
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="x")
+    assert "Tool: Used Bash(ls)" in out
+
+
+# ── token budget (replaces 200KB byte-cap / 20-msg cap) ──────────────────
+
+def test_token_budget_drops_oldest_keeps_recent():
     agent_id, task_id = _mk_agent_task()
-    # Two runs on the same task; only the latest summary should appear.
-    _mk_run(agent_id, task_id, summary="Old attempt — went down a rabbit hole.")
+    scope = f"task:{task_id}"
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    big = "x" * 400  # ~100 tokens per line
+    with forge_services._session() as db:
+        for i in range(30):
+            db.add(AgentMessage(
+                agent_id=agent_id,
+                role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
+                content=f"m{i}:{big}", scope_key=scope,
+                created_at=base + timedelta(minutes=i),
+            ))
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="now", token_budget=300)
+    assert "m29:" in out, "most-recent turn kept"
+    assert "m0:" not in out, "oldest turn dropped by the token budget"
+
+
+# ── over-budget → rolling-summary compaction (no silent drop) ────────────
+
+def test_over_budget_carries_rolling_summary():
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+    forge_services.upsert_conversation(
+        agent_id=agent_id, scope_key=scope,
+        rolling_summary="Set up auth and the DB schema earlier.")
+    big = "y" * 400
+    with forge_services._session() as db:
+        for i in range(20):
+            db.add(AgentMessage(agent_id=agent_id, role=MessageRole.USER,
+                                content=f"q{i}:{big}", scope_key=scope))
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="cont", token_budget=300)
+    assert "Earlier context (summary): Set up auth and the DB schema earlier." in out
+    assert out.endswith("cont")
+
+
+def test_run_summary_used_when_no_rolling_summary():
+    agent_id, task_id = _mk_agent_task()
+    _mk_run(agent_id, task_id, summary="Old attempt — rabbit hole.")
     _mk_run(agent_id, task_id, summary="Fixed login redirect bug.")
     scope = f"task:{task_id}"
-
     with forge_services._session() as db:
         db.add(AgentMessage(agent_id=agent_id, role=MessageRole.USER,
                             content="hi", scope_key=scope))
         db.commit()
-
-    out = forge_services._prepend_history_for_prompt(
-        agent_id=agent_id, scope_key=scope, current="resume please",
-    )
-    assert "Run summary: Fixed login redirect bug." in out
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="resume please")
+    assert "Earlier context (summary): Fixed login redirect bug." in out
     assert "Old attempt" not in out
-    summary_idx = out.index("Run summary:")
-    close_idx = out.index("</conversation history>")
-    assert summary_idx < close_idx
-
-
-def test_rebuild_respects_byte_cap_for_task_scope():
-    agent_id, task_id = _mk_agent_task()
-    scope = f"task:{task_id}"
-
-    big = "x" * 5000
-    with forge_services._session() as db:
-        for i in range(50):
-            db.add(AgentMessage(
-                agent_id=agent_id,
-                role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
-                content=f"{i}:{big}", scope_key=scope,
-            ))
-        db.commit()
-
-    out = forge_services._prepend_history_for_prompt(
-        agent_id=agent_id, scope_key=scope, current="now",
-    )
-    preamble = out[: out.index("now")]
-    # ~250KB of message content, capped at the ~200KB preamble budget:
-    # bounded (not all 250KB) but still substantial.
-    assert 100 * 1024 < len(preamble) < 210 * 1024, len(preamble)
-    assert "<conversation history>" in preamble
-
-
-def test_rebuild_chat_scope_uses_smaller_cap():
-    agent_id, _ = _mk_agent_task()
-    scope = "chat:default"
-
-    # Explicit strictly-increasing created_at — _utcnow() can return the
-    # same value for rows inserted in a tight loop, making the 20-entry
-    # cap boundary non-deterministic. Pin the timestamps.
-    from datetime import datetime, timedelta, timezone
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    with forge_services._session() as db:
-        for i in range(50):
-            db.add(AgentMessage(
-                agent_id=agent_id,
-                role=MessageRole.USER if i % 2 == 0 else MessageRole.ASSISTANT,
-                content=f"msg-{i}", scope_key=scope,
-                created_at=base + timedelta(minutes=i),
-            ))
-        db.add(AgentMessage(agent_id=agent_id, role=MessageRole.TOOL,
-                            scope_key=scope,
-                            tool_name="Bash", tool_input="ls",
-                            created_at=base + timedelta(minutes=50)))
-        db.commit()
-
-    out = forge_services._prepend_history_for_prompt(
-        agent_id=agent_id, scope_key=scope, current="next",
-    )
-    assert "msg-49" in out
-    assert "msg-30" in out
-    assert "msg-29" not in out
-    assert "msg-0" not in out
-    assert "Tool: Used Bash" not in out
+    assert out.index("Earlier context") < out.index("</conversation history>")

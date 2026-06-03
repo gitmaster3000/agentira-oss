@@ -43,13 +43,13 @@ class RunStatus(str, enum.Enum):
     READY     = "ready"
     PENDING   = "pending"
     RUNNING   = "running"
-    # P3: transient states. The user clicked Stop / Resume; we've dispatched
-    # the WS frame and persisted intent, but the daemon hasn't confirmed
-    # yet. UI shows "Pausing…/Cancelling…/Resuming…". The terminal state
-    # arrives via the daemon's trigger-complete post (paused/cancelled).
-    PAUSING    = "pausing"
-    CANCELLING = "cancelling"
-    RESUMING   = "resuming"
+    # Single transient state: the user clicked Stop or Discard; we've sent the
+    # WS frame but the daemon hasn't acked yet. `Run.interrupt_intent`
+    # ("pause"|"discard") decides where it lands — PAUSED or CANCELLED. The
+    # daemon does the identical SIGTERM either way. UI shows "Stopping…".
+    # (Replaces the old pausing/cancelling/resuming trio. Resume is just
+    # paused → pending → running, so there is no separate resuming state.)
+    INTERRUPTING = "interrupting"
     PAUSED    = "paused"
     COMPLETED = "completed"
     FAILED    = "failed"
@@ -196,10 +196,25 @@ class Run(Base):
     # blob: {exit_code, stderr_tail, last_events_tail, captured_at}. Surfaced
     # via the get_run_diagnostics MCP tool for run-investigation flows.
     diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # P3: when did the user click Stop / Resume? Set the moment a transient
-    # state is entered; cleared on confirmation. The reconciler reads this
-    # to escalate "stuck PAUSING" rows (daemon dropped the frame).
+    # When did the user click Stop / Discard? Set the moment INTERRUPTING is
+    # entered; cleared on confirmation. The reconciler reads this to escalate
+    # a stuck INTERRUPTING row (daemon dropped the frame).
     stop_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Why we're INTERRUPTING: "pause" (Stop — preserve session, resumable) or
+    # "discard" (Discard — throw the run away). Decides the terminal state the
+    # daemon ack / reconciler resolves to (PAUSED vs CANCELLED). NULL otherwise.
+    interrupt_intent: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # is_work: did this run produce durable work (a diff / artifacts / an
+    # agent-declared outcome)? Set at completion from the work predicate.
+    # Only is_work runs surface in the Runs list / dashboard — a pure-chat
+    # turn is a run row with is_work=False that the UI never shows as a "Run".
+    # Replaces the old shadow create-then-delete/promote dance.
+    is_work: Mapped[bool] = mapped_column(default=False)
+    # Per-run liveness clock, refreshed from the daemon's inflight heartbeat
+    # report. The reconciler flips a non-terminal run to FAILED when this goes
+    # stale — even if the daemon itself is still alive (dead-dispatch case).
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     # AP-125: structured artifacts the agent produced during the run.
     # JSON list of {"url": str, "label": str, "kind": str}. Surfaces in
@@ -215,11 +230,6 @@ class Run(Base):
     # resume can re-enter. NULL on legacy rows — cleanup is a no-op.
     worktree_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     worktree_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # ADR 009 / AP-137 (chat-during-run): a message sent while this run was
-    # RUNNING is parked here, then dispatched as the next turn once the
-    # pause confirms (we can't --resume a session whose id isn't finalized
-    # until the daemon posts paused=True). Cleared when dispatched.
-    pending_steer: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Diagnostic flag from the daemon's materializer. "ok" when the
     # frame's repo_path resolved and the agent ran inside the repo;
     # "no_repo_path" when no repo was attached; "repo_path_not_found:..."
@@ -299,8 +309,35 @@ class Conversation(Base):
     agent_id: Mapped[str]          = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
     scope_key: Mapped[str]         = mapped_column(String(120), nullable=False)
     runtime_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Rolling compaction carry-over for context assembly. When the rebuilt
+    # history exceeds the token budget, older turns are folded into this
+    # summary instead of being silently dropped. `rolling_summary_through_run_id`
+    # is the high-water mark — runs/turns after it aren't yet folded in.
+    rolling_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rolling_summary_through_run_id: Mapped[str | None] = mapped_column(
+        String(12), nullable=True)
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     created_at: Mapped[datetime]   = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class QueuedMessage(Base):
+    """A user message sent while a turn was already running in this scope.
+
+    A conversation is single-threaded (one live turn at a time), so a message
+    typed mid-run is queued here instead of interrupting — it dispatches FIFO
+    when the active turn reaches a terminal state. Keyed by (agent_id,
+    scope_key) = the conversation, NOT the active run: a queued message must
+    survive even if that run is discarded. Rows are deleted as they dispatch.
+    (Replaces the old Run.pending_steer parking, which interrupted the run.)
+    """
+    __tablename__ = "forge_queued_messages"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    agent_id: Mapped[str]       = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    scope_key: Mapped[str]      = mapped_column(String(120), nullable=False, index=True)
+    content: Mapped[str]        = mapped_column(Text, default="")
+    user_context_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class WebhookLog(Base):
