@@ -312,6 +312,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         low: '#6b7280',
     };
 
+    // Only runs that produced durable work are shown as "Runs". An in-flight
+    // chat turn is internally a run row (is_work=False) for execution tracking,
+    // but it must NOT be presented as a Run — instead the "Agent is working"
+    // banner below makes the live execution visible regardless of is_work.
+    const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
+    const workRuns = taskRuns.filter(r => r.is_work);
+    const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
+
     return (
         <>
             {/* Panel */}
@@ -764,8 +772,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 <div className="flex items-center gap-2 text-text-primary">
                                     <Cpu className="w-4 h-4" />
                                     <h3 className="font-bold">Agent runs</h3>
-                                    {taskRuns.length > 0 && (
-                                        <span className="text-xs text-text-tertiary">{taskRuns.length}</span>
+                                    {workRuns.length > 0 && (
+                                        <span className="text-xs text-text-tertiary">{workRuns.length}</span>
                                     )}
                                 </div>
                                 <button
@@ -775,6 +783,23 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
                                 </button>
                             </div>
+
+                            {/* Mandatory "agent is working" signal — driven by ANY
+                                live execution (incl. an is_work=False chat turn),
+                                so the user always knows the agent is on it even
+                                though it isn't shown as a Run. */}
+                            {liveRun && (
+                                <div className="mb-4 flex items-center gap-2.5 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-600">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
+                                    </span>
+                                    <span>
+                                        {(liveRun.agent_name || 'Agent')} is working on this task…
+                                        {liveRun.status === 'interrupting' && ' (stopping)'}
+                                    </span>
+                                </div>
+                            )}
 
                             {pickingAgent && (
                                 <div className="mb-4 p-3 rounded-lg border border-border-subtle bg-bg-app/50">
@@ -822,9 +847,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             )}
 
-                            {taskRuns.length > 0 && (
+                            {workRuns.length > 0 && (
                                 <div className="space-y-1">
-                                    {taskRuns.slice(0, 5).map(r => (
+                                    {workRuns.slice(0, 5).map(r => (
                                         <button
                                             key={r.id}
                                             onClick={() => navigate(`/forge/runs/${r.id}`)}

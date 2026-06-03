@@ -49,11 +49,12 @@ export function TaskCard({ task, onUpdate, onDelete }) {
             draggable
             onDragStart={handleDragStart}
             onClick={(e) => { e.stopPropagation(); onUpdate(task); }}
-            className="card mb-3 cursor-pointer hover:bg-bg-hover transition-colors group relative"
+            className={`card mb-3 cursor-pointer hover:bg-bg-hover transition-colors group relative ${task.agent_active ? 'agent-active-glow' : ''}`}
             style={{
                 backgroundColor: 'var(--bg-card)',
-                borderLeft: `3px solid ${statusColor}`,
+                borderLeft: `3px solid ${task.agent_active ? '#38bdf8' : statusColor}`,
             }}
+            title={task.agent_active ? 'An agent is working on this task' : undefined}
         >
             {/* Delete button */}
             <button
