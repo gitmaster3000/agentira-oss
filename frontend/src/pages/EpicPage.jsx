@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Pencil, Trash2, ListTodo } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Pencil, Trash2, ListTodo } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Markdown } from '../components/Markdown';
+import { EditEpicModal } from '../components/EditEpicModal';
 import { setCurrentProjectId } from '../currentProject';
 
 const PRIORITY_DOTS = {
@@ -29,6 +30,7 @@ export function EpicPage() {
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [editing, setEditing] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -54,24 +56,6 @@ export function EpicPage() {
         return () => { cancelled = true; };
     }, [epicId]);
 
-    const handleRename = async () => {
-        const next = window.prompt(`Rename epic:`, epic.title);
-        if (!next || next === epic.title) return;
-        try {
-            const updated = await api.updateEpic(epicId, { title: next.trim() });
-            setEpic(updated);
-        } catch (err) { alert('Rename failed: ' + (err.message || err)); }
-    };
-
-    const handleEditDescription = async () => {
-        const next = window.prompt(`Description:`, epic.description || '');
-        if (next === null || next === epic.description) return;
-        try {
-            const updated = await api.updateEpic(epicId, { description: next });
-            setEpic(updated);
-        } catch (err) { alert('Update failed: ' + (err.message || err)); }
-    };
-
     const handleDelete = async () => {
         if (!window.confirm(`Delete epic "${epic.title}"? Tasks are detached, not deleted.`)) return;
         try {
@@ -92,11 +76,10 @@ export function EpicPage() {
     const inProgress = tasks.filter(t => t.status === 'in_progress' || t.status === 'review').length;
 
     return (
-        // AP-147: outer wrapper takes the available height AND scrolls; the
-        // inner div constrains width + adds padding. Without this split the
-        // page couldn't scroll when the description or task list was long.
-        <div className="flex-1 overflow-y-auto">
-            <div className="max-w-5xl mx-auto p-6 space-y-6">
+        // AP-183: the page fills available height and does NOT scroll as a whole;
+        // header, description and stats stay pinned and only the Tasks list scrolls.
+        <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="max-w-5xl w-full mx-auto p-6 flex flex-col gap-6 flex-1 min-h-0">
             <Breadcrumbs entity="epic" data={epic} />
             <div className="flex items-center gap-3">
                 <div className="flex-1 flex items-center gap-3 min-w-0">
@@ -107,11 +90,11 @@ export function EpicPage() {
                     <h1 className="text-2xl font-bold text-text-primary truncate">{epic.title}</h1>
                 </div>
                 <button
-                    onClick={handleRename}
-                    className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary"
-                    title="Rename"
+                    onClick={() => setEditing(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-bg-hover text-text-secondary text-sm font-medium"
+                    title="Edit epic"
                 >
-                    <Pencil className="w-4 h-4" />
+                    <Pencil className="w-4 h-4" /> Edit
                 </button>
                 <button
                     onClick={handleDelete}
@@ -123,22 +106,11 @@ export function EpicPage() {
             </div>
 
             <div className="card">
-                <div className="flex items-start justify-between gap-3">
-                    {/* AP-39: render description as GitHub-flavored markdown
-                        (tables, code, headings, lists) — not as plain text. */}
-                    <div className="flex-1 min-w-0">
-                        {epic.description
-                            ? <Markdown>{epic.description}</Markdown>
-                            : <span className="italic text-text-tertiary text-sm">No description.</span>}
-                    </div>
-                    <button
-                        onClick={handleEditDescription}
-                        className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-text-primary flex-shrink-0"
-                        title="Edit description"
-                    >
-                        <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                </div>
+                {/* AP-39: render description as GitHub-flavored markdown
+                    (tables, code, headings, lists) — not as plain text. */}
+                {epic.description
+                    ? <Markdown>{epic.description}</Markdown>
+                    : <span className="italic text-text-tertiary text-sm">No description.</span>}
             </div>
 
             <div className="grid grid-cols-3 gap-4">
@@ -147,14 +119,14 @@ export function EpicPage() {
                 <Stat label="Done" value={`${done} / ${total}`} color="#2ecc71" />
             </div>
 
-            <div className="card">
-                <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <div className="card flex flex-col flex-1 min-h-0">
+                <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 flex-shrink-0">
                     <ListTodo className="w-5 h-5" /> Tasks
                 </h2>
                 {tasks.length === 0 ? (
                     <p className="text-sm text-text-tertiary">No tasks attached to this epic yet.</p>
                 ) : (
-                    <div className="space-y-1">
+                    <div className="space-y-1 overflow-y-auto flex-1 min-h-0">
                         {tasks.map(t => (
                             <button
                                 key={t.id}
@@ -179,6 +151,14 @@ export function EpicPage() {
                 )}
             </div>
             </div>
+
+            {editing && (
+                <EditEpicModal
+                    epic={epic}
+                    onClose={() => setEditing(false)}
+                    onSaved={(updated) => setEpic(updated)}
+                />
+            )}
         </div>
     );
 }
