@@ -256,3 +256,53 @@
 .bg-bg-app { background-color: var(--bg-app); }
 .bg-bg-card { background-color: var(--bg-card); }
 .bg-bg-hover { background-color: var(--bg-hover); }
+
+/* AP-184: "agent is working" glow — a blue neon line running around a task
+   card's border while an agent is actively executing on that task. Driven by
+   `task.agent_active` from the backend (a run in pending/running/interrupting). */
+@property --agent-glow-angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+}
+@keyframes agent-glow-spin {
+    to { --agent-glow-angle: 360deg; }
+}
+@keyframes agent-glow-pulse {
+    0%, 100% { box-shadow: 0 0 5px 0 rgba(56, 189, 248, 0.30); }
+    50%      { box-shadow: 0 0 16px 2px rgba(56, 189, 248, 0.55); }
+}
+.agent-active-glow {
+    position: relative;
+    animation: agent-glow-pulse 2.8s ease-in-out infinite;
+}
+.agent-active-glow::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: conic-gradient(from var(--agent-glow-angle),
+        transparent 0deg,
+        rgba(56, 189, 248, 0) 190deg,
+        #38bdf8 280deg,
+        #7dd3fc 320deg,
+        #38bdf8 345deg,
+        transparent 360deg);
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: agent-glow-spin 2.5s linear infinite;
+    pointer-events: none;
+    z-index: 2;
+}
+/* Fallback for engines without @property: a steady neon ring (no sweep). */
+@supports not (background: conic-gradient(from var(--agent-glow-angle), #000, #000)) {
+    .agent-active-glow::before {
+        background: none;
+        box-shadow: inset 0 0 0 1.5px #38bdf8;
+        animation: none;
+    }
+}

@@ -363,6 +363,11 @@ export const api = {
         scopeLive: (agentId, scope_key) => request(
             `/forge/agents/${agentId}/scope-live?scope_key=${encodeURIComponent(scope_key)}`,
         ),
+        // AP-179: messages queued behind the active turn in this conversation,
+        // for the "queued" pills. Oldest first.
+        listQueued: (agentId, scope_key) => request(
+            `/forge/agents/${agentId}/queued?scope_key=${encodeURIComponent(scope_key)}`,
+        ),
         getConversation: (agentId, projectId, taskId) => {
             const params = new URLSearchParams();
             if (projectId) params.set('project_id', projectId);

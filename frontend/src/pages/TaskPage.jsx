@@ -4,6 +4,7 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Markdown } from '../components/Markdown';
+import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
@@ -152,7 +153,7 @@ export function TaskPage() {
     };
 
     const handleComment = async (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (!comment.trim()) return;
         try {
             await api.addComment(taskId, { comment });
@@ -206,11 +207,15 @@ export function TaskPage() {
                                     {user?.display_name?.[0]?.toUpperCase() || 'U'}
                                 </div>
                                 <form onSubmit={handleComment} className="flex-1">
-                                    <textarea
+                                    <MentionInput
+                                        multiline
+                                        rows={3}
                                         className="w-full bg-bg-card border border-border-subtle text-sm p-4 rounded-lg focus:outline-none focus:border-accent-primary transition-colors h-24 resize-none shadow-sm"
-                                        placeholder="Add a comment..."
+                                        placeholder="Add a comment… (@ to mention an agent)"
                                         value={comment}
-                                        onChange={e => setComment(e.target.value)}
+                                        onChange={setComment}
+                                        onSubmit={handleComment}
+                                        projectId={task?.project_id}
                                     />
                                     <div className="mt-2 flex justify-end">
                                         <button className="btn btn-primary">Add Comment</button>

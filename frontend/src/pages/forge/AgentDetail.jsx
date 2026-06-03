@@ -491,6 +491,10 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // working so the Stop button stays visible the whole time the agent
     // is busy — not just during the brief send-API window.
     const [scopeActiveRun, setScopeActiveRun] = useState(null);
+    // AP-182: the most recent run in this scope that produced durable work
+    // (is_work). Rendered as an inline Run card so the chat-vs-work line is
+    // visible right here — work emerged into a Run; chit-chat stayed chat.
+    const [scopeWorkRun, setScopeWorkRun] = useState(null);
     // ADR 009 / E2: daemon-reported "a turn is live for this scope" — keeps
     // Stop available for ANY in-flight turn (incl. run-less chats, and across
     // a backend restart), replacing the 10-minute staleness guess.
@@ -503,6 +507,9 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // doesn't terminate the user-message-with-no-reply state. Per-scope so
     // switching chats doesn't carry a stopped flag across.
     const [stoppedScopes, setStoppedScopes] = useState({});
+    // AP-179: messages the user queued behind the active turn (FIFO). Rendered
+    // as "queued" pills so it's clear what runs next.
+    const [queued, setQueued] = useState([]);
     // AP-93: 1Hz tick that drives the "thinking… Ns" elapsed counter.
     // Only running while the indicator is visible — see useEffect below.
     const [nowTick, setNowTick] = useState(() => Date.now());
@@ -672,13 +679,12 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // while the latest message is the user's (or a task run is going) —
     // i.e. the indicator is visible. Idle chats don't tick.
     useEffect(() => {
-        const _last = (messages || [])[messages.length - 1];
-        const _isUserLast = _last && _last.role === 'user';
-        const _hasRun = scopeActiveRun && scopeActiveRun.status === 'running';
-        if (!_isUserLast && !_hasRun) return;
+        const live = scopeActiveRun
+            && ['running', 'pending', 'interrupting'].includes(scopeActiveRun.status);
+        if (!live) return;
         const id = setInterval(() => setNowTick(Date.now()), 1000);
         return () => clearInterval(id);
-    }, [messages, scopeActiveRun]);
+    }, [scopeActiveRun]);
 
     // ADR 008 / AP-93: poll for an active run in this task scope so Stop
     // stays visible whenever the agent is actually working. Non-task
@@ -686,19 +692,27 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     useEffect(() => {
         if (!activeScope || !activeScope.startsWith('task:')) {
             setScopeActiveRun(null);
+            setScopeWorkRun(null);
             return;
         }
         const taskId = activeScope.slice(5);
-        const ACTIVE = new Set(['running', 'paused', 'pending']);
+        const ACTIVE = new Set(['running', 'paused', 'pending', 'interrupting']);
         let alive = true;
         const tick = async () => {
             try {
                 const runs = await api.forge.listTaskRuns(taskId);
                 if (!alive) return;
-                const active = (runs || []).find(r => r.agent_id === agentId && ACTIVE.has(r.status));
-                setScopeActiveRun(active || null);
+                const mine = (runs || []).filter(r => r.agent_id === agentId);
+                setScopeActiveRun(mine.find(r => ACTIVE.has(r.status)) || null);
+                // Latest work run (is_work is set at completion) — drives the
+                // inline Run card. Newest first.
+                const work = mine
+                    .filter(r => r.is_work)
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                setScopeWorkRun(work[0] || null);
             } catch {
                 setScopeActiveRun(null);
+                setScopeWorkRun(null);
             }
         };
         tick();
@@ -717,6 +731,22 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                 const r = await api.forge.scopeLive(agentId, activeScope);
                 if (alive) setScopeLive(!!(r && r.live));
             } catch { if (alive) setScopeLive(false); }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
+
+    // AP-179: poll the FIFO message queue for this conversation so the
+    // "queued" pills stay current while a turn is running.
+    useEffect(() => {
+        if (!activeScope || !activeScope.startsWith('task:')) { setQueued([]); return; }
+        let alive = true;
+        const tick = async () => {
+            try {
+                const q = await api.forge.listQueued(agentId, activeScope);
+                if (alive) setQueued(Array.isArray(q) ? q : []);
+            } catch { if (alive) setQueued([]); }
         };
         tick();
         const t = setInterval(tick, 3000);
@@ -892,35 +922,21 @@ function ChatTab({ agentId, agent, initialScope = null }) {
 
     if (loading) return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading chat...</div>;
 
-    // AP-93: agent-is-thinking signal. Latest message is the user's (no
-    // assistant followup yet) or, for task scopes, a Run is RUNNING.
-    // Drives both the inline "Thinking…" bubble and the Stop button.
-    const _lastMsg = (messages || [])[messages.length - 1];
-    const _lastIsUser = _lastMsg && _lastMsg.role === 'user';
-    const _runRunning = scopeActiveRun && scopeActiveRun.status === 'running';
-    // A user message with no reply means "thinking" — but only for a
-    // bounded window. A dispatch that died without ever reporting back
-    // (daemon crash, backend restart losing the in-flight trace) would
-    // otherwise leave the spinner up indefinitely. After 10 min with no
-    // reply and no RUNNING run, the turn is dead — stop pretending.
-    const _STALE_THINKING_MS = 10 * 60 * 1000;
-    const _userTurnAgeMs = _lastIsUser && _lastMsg?.created_at
-        ? nowTick - new Date(_lastMsg.created_at).getTime()
-        : 0;
-    const _userTurnLive = _lastIsUser && _userTurnAgeMs < _STALE_THINKING_MS;
-    // ADR 009 / E2: scopeLive (daemon-reported) is authoritative — keep Stop
-    // up whenever a turn is actually running, regardless of the heuristics.
-    // A user-pressed Stop in this scope overrides all three heuristics until
-    // the next send (see stoppedScopes).
+    // AP-182: agent-is-working signal — AUTHORITATIVE, not guessed. It's the
+    // live run status (pending/running/interrupting — every task-chat turn has
+    // a real run now) OR the daemon-reported live turn (scopeLive, every scope,
+    // 30s ageout, restart-proof). The old 10-minute message-age heuristic is
+    // gone: the reconciler fails a dead dispatch, so neither signal sticks.
+    const _liveStatuses = ['pending', 'running', 'interrupting'];
+    const _runLive = !!scopeActiveRun && _liveStatuses.includes(scopeActiveRun.status);
+    // A user-pressed Stop in this scope hides the indicator instantly until the
+    // next send (optimistic), independent of the poll cadence.
     const _stoppedHere = !!stoppedScopes[activeScope];
-    const agentThinking = !_stoppedHere && (_userTurnLive || _runRunning || scopeLive);
-    // Elapsed seconds since "thinking" started. Start time is the last
-    // user message's created_at (chat) or the run's started_at (task).
-    const _thinkStartMs = (() => {
-        if (_lastIsUser && _lastMsg?.created_at) return new Date(_lastMsg.created_at).getTime();
-        if (_runRunning && scopeActiveRun?.started_at) return new Date(scopeActiveRun.started_at).getTime();
-        return null;
-    })();
+    const agentThinking = !_stoppedHere && (_runLive || scopeLive);
+    // Elapsed seconds since the run started (task scopes); chat scopes just
+    // show the dots without a counter.
+    const _thinkStartMs = (_runLive && scopeActiveRun?.started_at)
+        ? new Date(scopeActiveRun.started_at).getTime() : null;
     const thinkingElapsedSec = _thinkStartMs
         ? Math.max(0, Math.floor((nowTick - _thinkStartMs) / 1000))
         : 0;
@@ -1248,6 +1264,34 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                     <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/20 text-green-400 text-xs">
                         <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
                         Resumed paused run {String(resumedNotice.runId).slice(0, 8)}
+                    </div>
+                )}
+                {scopeWorkRun && (
+                    <Link
+                        to={`/forge/runs/${scopeWorkRun.id}`}
+                        className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg border border-border bg-bg-secondary hover:bg-bg-tertiary text-xs no-underline"
+                        title="This conversation produced a Run — open it"
+                    >
+                        <span className="px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary font-medium">Run</span>
+                        <span className="text-text-secondary capitalize">{scopeWorkRun.outcome || scopeWorkRun.status}</span>
+                        {scopeWorkRun.diff_stat && (
+                            <span className="text-text-tertiary truncate">· {scopeWorkRun.diff_stat}</span>
+                        )}
+                        <span className="ml-auto text-text-tertiary shrink-0">View →</span>
+                    </Link>
+                )}
+                {queued.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1">
+                        <span className="text-xs text-text-tertiary">Queued · runs after the current turn:</span>
+                        {queued.map((q) => (
+                            <span
+                                key={q.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 text-xs"
+                                title="Queued — dispatches when the current turn finishes"
+                            >
+                                ⏳ <span className="truncate max-w-[200px]">{q.content}</span>
+                            </span>
+                        ))}
                     </div>
                 )}
                 <div className="flex items-center gap-2">
