@@ -52,8 +52,10 @@ def create(*, agent_id: str, task_id: str | None = None,
            project_id: str | None = None, trigger_event: str = "",
            model_used: str = "") -> dict:
     """Create a PENDING Run. Used by the Run-button / cron / scheduled paths."""
-    from backend.forge.services import _run_to_dict
+    from backend.forge.services import _run_to_dict, _notify_project_members
     with SessionLocal() as db:
+        agent = db.get(Agent, agent_id)
+        agent_name = agent.name if agent else "Agent"
         r = Run(
             agent_id=agent_id,
             task_id=task_id,
@@ -63,6 +65,14 @@ def create(*, agent_id: str, task_id: str | None = None,
             model_used=model_used,
         )
         db.add(r)
+        db.flush()
+        _notify_project_members(
+            db,
+            project_id=project_id,
+            type_="forge.run.created",
+            title=f"{agent_name} run created",
+            link=f"/forge/runs/{r.id}",
+        )
         db.commit()
         db.refresh(r)
         return _run_to_dict(r)
@@ -105,16 +115,25 @@ def create_shadow_in_session(db, *, agent_id: str, task_id: str,
 
 def start(run_id: str) -> dict | None:
     """PENDING → RUNNING. Marks the agent BUSY."""
-    from backend.forge.services import _run_to_dict
+    from backend.forge.services import _run_to_dict, _notify_project_members
     with SessionLocal() as db:
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return None
+        agent = db.get(Agent, r.agent_id) if r.agent_id else None
+        agent_name = agent.name if agent else "Agent"
         r.status = RunStatus.RUNNING
         r.started_at = _utc_now()
         broadcast_status(run_id, RunStatus.RUNNING)
-        if r.agent:
-            r.agent.status = AgentStatus.BUSY
+        if agent:
+            agent.status = AgentStatus.BUSY
+        _notify_project_members(
+            db,
+            project_id=r.project_id,
+            type_="forge.run.started",
+            title=f"{agent_name} run started",
+            link=f"/forge/runs/{run_id}",
+        )
         db.commit()
         db.refresh(r)
         return _run_to_dict(r)
@@ -124,11 +143,13 @@ def complete(run_id: str, *, input_tokens: int = 0,
              output_tokens: int = 0, cost_usd: float = 0.0,
              error: str | None = None) -> dict | None:
     """RUNNING → COMPLETED or FAILED. Updates agent stats; notifies on failure."""
-    from backend.forge.services import _run_to_dict, _notify_admins
+    from backend.forge.services import _run_to_dict, _notify_admins, _notify_project_members
     with SessionLocal() as db:
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return None
+        agent = db.get(Agent, r.agent_id) if r.agent_id else None
+        agent_name = agent.name if agent else "agent"
         now = _utc_now()
         r.status = RunStatus.FAILED if error else RunStatus.COMPLETED
         broadcast_status(run_id, r.status)
@@ -139,17 +160,31 @@ def complete(run_id: str, *, input_tokens: int = 0,
         r.error = error
         if r.started_at:
             r.duration_ms = int((now - _utc(r.started_at)).total_seconds() * 1000)
-        if r.agent:
-            r.agent.status = AgentStatus.ONLINE
-            r.agent.total_runs += 1
-            r.agent.total_cost_usd += cost_usd
+        if agent:
+            agent.status = AgentStatus.ONLINE
+            agent.total_runs += 1
+            agent.total_cost_usd += cost_usd
         if r.status == RunStatus.FAILED:
-            agent_name = r.agent.name if r.agent else "agent"
             short_err = (error or "unknown error")[:140]
             _notify_admins(
                 db,
                 type_="forge.run.failed",
                 title=f"{agent_name} run failed: {short_err}",
+                link=f"/forge/runs/{run_id}",
+            )
+            _notify_project_members(
+                db,
+                project_id=r.project_id,
+                type_="forge.run.failed",
+                title=f"{agent_name} run failed",
+                link=f"/forge/runs/{run_id}",
+            )
+        else:
+            _notify_project_members(
+                db,
+                project_id=r.project_id,
+                type_="forge.run.completed",
+                title=f"{agent_name} run completed",
                 link=f"/forge/runs/{run_id}",
             )
         db.commit()

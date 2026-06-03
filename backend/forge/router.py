@@ -404,6 +404,12 @@ def agent_heartbeat(agent_id: str, body: HeartbeatRequest):
 
 # ── Run endpoints ────────────────────────────────────────────────────────
 
+@router.get("/runs/active")
+def get_active_runs():
+    """Get active runs (READY, PENDING, RUNNING, CANCELLING) for status indicator."""
+    return services.get_active_runs()
+
+
 @router.get("/runs")
 def list_runs(agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, limit: int = 100, offset: int = 0):
