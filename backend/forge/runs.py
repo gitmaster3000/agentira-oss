@@ -114,6 +114,38 @@ def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
     return run.id
 
 
+# ── Run emergence ─────────────────────────────────────────────────────
+
+def mark_is_work_if_any(run_id: str, *, work_signal: dict | None,
+                        has_explicit_outcome: bool) -> bool:
+    """Flip a chat run's is_work=True iff the turn produced durable work: a
+    working-tree change (per the project's work-signal mode), an agent-declared
+    outcome, or a registered artifact. At that point the run surfaces in the
+    Runs list; a talk-only turn stays is_work=False and the UI keeps it as
+    chat. The row is never deleted — this replaces the old shadow
+    delete/promote dance. Only chat runs defer is_work (explicit runs are
+    is_work=True at creation). Idempotent. Returns the resulting is_work."""
+    from backend.forge import turns as _turns
+    with SessionLocal() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r or r.trigger_event != "chat":
+            return bool(r and r.is_work)
+        if r.is_work:
+            return True
+        arts = (r.artifacts_json or "").strip()
+        had_artifacts = bool(arts) and arts != "[]"
+        try:
+            mode = _turns.resolve_work_signal_mode(r.project_id)
+            did_work = _turns.turn_did_work(work_signal, mode)
+        except Exception:  # noqa: BLE001 — never fail completion on a setting read
+            did_work = bool((r.diff or "").strip())
+        if did_work or has_explicit_outcome or had_artifacts:
+            r.is_work = True
+            db.commit()
+            return True
+        return False
+
+
 # ── Lifecycle transitions ─────────────────────────────────────────────
 
 def start(run_id: str) -> dict | None:

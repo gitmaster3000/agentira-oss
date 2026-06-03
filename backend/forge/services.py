@@ -3733,33 +3733,16 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             rolling_summary_through_run_id=run_id if roll else None,
         )
 
-    # Run emergence — decide whether this chat turn produced durable work.
-    # Every task-chat turn has a real Run row reserved at dispatch (is_work=
-    # False). Here we flip is_work=True iff the turn did work (per the
-    # project's work-signal mode), declared an outcome, or registered an
-    # artifact — at which point it surfaces in the Runs list as a "Run". A
-    # talk-only turn stays is_work=False: the row and its messages are kept
-    # (transcript intact), the UI just keeps it as chat. The row is never
-    # deleted — replaces the old shadow delete/promote dance.
+    # Run emergence — a chat turn that produced durable work surfaces as a Run
+    # (is_work=True); a talk-only turn stays chat. Owned by the runs module.
     if run_id:
-        with _session() as db:
-            r = db.query(Run).filter(Run.id == run_id).first()
-            if r and r.trigger_event == "chat" and not r.is_work:
-                had_explicit_outcome = agent_declared_outcome is not None
-                arts = (r.artifacts_json or "").strip()
-                had_artifacts = bool(arts) and arts != "[]"
-                try:
-                    from backend.forge import turns as _turns
-                    mode = _turns.resolve_work_signal_mode(r.project_id)
-                    did_work = _turns.turn_did_work(work_signal, mode)
-                except Exception:  # noqa: BLE001
-                    did_work = bool((r.diff or "").strip())
-                if did_work or had_explicit_outcome or had_artifacts:
-                    r.is_work = True
-                    db.commit()
-                    _dispatch_logger.info(
-                        "chat turn produced work trace=%s run=%s — surfaced as a Run",
-                        trace_id, run_id)
+        from backend.forge import runs as _runs
+        if _runs.mark_is_work_if_any(
+                run_id, work_signal=work_signal,
+                has_explicit_outcome=agent_declared_outcome is not None):
+            _dispatch_logger.info(
+                "chat turn produced work trace=%s run=%s — surfaced as a Run",
+                trace_id, run_id)
 
     # Failure surfacing — the daemon already logs server-side, but the
     # human in the UI only sees what's in the chat thread. Drop a
