@@ -1172,8 +1172,19 @@ def add_project_repo(project_id: str, *, name: str,
     name = (name or "").strip()
     if not name:
         return {"error": "name is required"}
+    repo_path = (repo_path or "").strip()
     if not (repo_path or repo_url):
         return {"error": "repo_path or repo_url is required"}
+    # repo_path is a HOST path the daemon worktrees off — it must be
+    # absolute (or ~-anchored to the host home). A relative path (e.g. a
+    # dropped leading slash, "Users/me/proj") can't be resolved on the host:
+    # the daemon's worktree add silently no-ops and the agent is stranded
+    # with no repo. Reject at registration instead. (Do NOT expanduser here —
+    # the backend runs in docker where ~ is /root, not the host home.)
+    if repo_path and not (repo_path.startswith("/") or repo_path.startswith("~")):
+        return {"error": (
+            f"repo_path must be an absolute host path or ~-anchored "
+            f"(got {repo_path!r})")}
     with _session() as db:
         if not db.get(Project, project_id):
             return {"error": "Project not found"}
