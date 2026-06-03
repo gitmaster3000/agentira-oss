@@ -54,6 +54,8 @@ def create(*, agent_id: str, task_id: str | None = None,
     """Create a PENDING Run. Used by the Run-button / cron / scheduled paths."""
     from backend.forge.services import _run_to_dict, _notify_project_members
     with SessionLocal() as db:
+        agent = db.get(Agent, agent_id)
+        agent_name = agent.name if agent else "Agent"
         r = Run(
             agent_id=agent_id,
             task_id=task_id,
@@ -64,7 +66,6 @@ def create(*, agent_id: str, task_id: str | None = None,
         )
         db.add(r)
         db.flush()
-        agent_name = r.agent.name if r.agent else "Agent"
         _notify_project_members(
             db,
             project_id=project_id,
@@ -119,12 +120,13 @@ def start(run_id: str) -> dict | None:
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return None
+        agent = db.get(Agent, r.agent_id) if r.agent_id else None
+        agent_name = agent.name if agent else "Agent"
         r.status = RunStatus.RUNNING
         r.started_at = _utc_now()
         broadcast_status(run_id, RunStatus.RUNNING)
-        if r.agent:
-            r.agent.status = AgentStatus.BUSY
-        agent_name = r.agent.name if r.agent else "Agent"
+        if agent:
+            agent.status = AgentStatus.BUSY
         _notify_project_members(
             db,
             project_id=r.project_id,
@@ -146,6 +148,8 @@ def complete(run_id: str, *, input_tokens: int = 0,
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return None
+        agent = db.get(Agent, r.agent_id) if r.agent_id else None
+        agent_name = agent.name if agent else "agent"
         now = _utc_now()
         r.status = RunStatus.FAILED if error else RunStatus.COMPLETED
         broadcast_status(run_id, r.status)
@@ -156,11 +160,10 @@ def complete(run_id: str, *, input_tokens: int = 0,
         r.error = error
         if r.started_at:
             r.duration_ms = int((now - _utc(r.started_at)).total_seconds() * 1000)
-        if r.agent:
-            r.agent.status = AgentStatus.ONLINE
-            r.agent.total_runs += 1
-            r.agent.total_cost_usd += cost_usd
-        agent_name = r.agent.name if r.agent else "agent"
+        if agent:
+            agent.status = AgentStatus.ONLINE
+            agent.total_runs += 1
+            agent.total_cost_usd += cost_usd
         if r.status == RunStatus.FAILED:
             short_err = (error or "unknown error")[:140]
             _notify_admins(
