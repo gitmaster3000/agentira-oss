@@ -74,6 +74,9 @@ class ProjectUpdate(BaseModel):
     sandbox_mode: Optional[str] = None
     # AP-158: column-exit gate enforcement.
     gates_enabled: Optional[bool] = None
+    # AP-184: when on, any comment wakes the assigned agent (legacy). Off
+    # (default) = only @mention wakes; a plain comment is recorded as context.
+    wake_on_comment: Optional[bool] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -383,6 +386,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             work_signal=body.work_signal,
             sandbox_mode=body.sandbox_mode,
             gates_enabled=body.gates_enabled,
+            wake_on_comment=body.wake_on_comment,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))

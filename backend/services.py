@@ -100,7 +100,29 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
         "attachments_count": attachments_count,
+        # AP-184: is an agent actively executing on this task right now (a run
+        # in pending/running/interrupting)? Drives the "working" glow on the
+        # card. Set by list_tasks/get_task; default False.
+        "agent_active": False,
     }
+
+
+def _tasks_with_active_runs(db, task_ids: list[str]) -> set[str]:
+    """Task ids with a live agent execution (a run in pending/running/
+    interrupting). Batched so the board doesn't N+1. Forge is optional —
+    never break task listing if it's unavailable."""
+    if not task_ids:
+        return set()
+    try:
+        from backend.forge.models import Run, RunStatus
+        rows = (db.query(Run.task_id)
+                  .filter(Run.task_id.in_(task_ids),
+                          Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING,
+                                          RunStatus.INTERRUPTING]))
+                  .distinct().all())
+        return {r[0] for r in rows if r[0]}
+    except Exception:  # noqa: BLE001
+        return set()
 
 
 def resolve_task_repos(t: Task) -> list[str]:
@@ -158,6 +180,9 @@ def _project_to_dict(p: Project) -> dict:
         "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
         # AP-158: column-exit gates on/off for this project.
         "gates_enabled": bool(getattr(p, "gates_enabled", False)),
+        # AP-184: when on, ANY comment wakes the assigned agent (legacy). Off
+        # (default) = only @mention wakes; a plain comment is recorded as context.
+        "wake_on_comment": bool(getattr(p, "wake_on_comment", False)),
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -478,7 +503,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
                    work_signal: Optional[str] = None,
                    sandbox_mode: Optional[str] = None,
-                   gates_enabled: Optional[bool] = None) -> dict:
+                   gates_enabled: Optional[bool] = None,
+                   wake_on_comment: Optional[bool] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -504,6 +530,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                 p.sandbox_mode = normalized
         if gates_enabled is not None:
             p.gates_enabled = bool(gates_enabled)
+        if wake_on_comment is not None:
+            p.wake_on_comment = bool(wake_on_comment)
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -833,8 +861,15 @@ def list_tasks(
             q = q.filter(Task.priority == TaskPriority(priority))
             
         tasks = q.order_by(Task.updated_at.desc()).all()
-        counts = _batch_attachment_counts(db, [t.id for t in tasks])
-        return [_task_to_dict(t, attachments_count=counts.get(t.id, 0)) for t in tasks]
+        ids = [t.id for t in tasks]
+        counts = _batch_attachment_counts(db, ids)
+        active = _tasks_with_active_runs(db, ids)
+        out = []
+        for t in tasks:
+            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
+            d["agent_active"] = t.id in active
+            out.append(d)
+        return out
 
 
 def get_task(task_id: str) -> dict | None:
@@ -842,7 +877,9 @@ def get_task(task_id: str) -> dict | None:
         t = _resolve_task(db, task_id)
         if not t:
             return None
-        return _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
+        d = _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
+        d["agent_active"] = t.id in _tasks_with_active_runs(db, [t.id])
+        return d
 
 
 def update_task(
@@ -1058,6 +1095,8 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         if not task:
             raise ValueError(f"Task {task_id} not found")
         task_id = task.id
+        # Capture while the session is open (task detaches after the block).
+        _wake_on_comment = bool(getattr(task.project, "wake_on_comment", False))
 
         act = _log_activity(
             db, actor, "commented", comment,
@@ -1075,33 +1114,49 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         db.refresh(act)
         result = _activity_to_dict(act)
 
-    # Wake the assigned agent — comment lands in its task chat and triggers
-    # the ADR 009 D routing (running -> pause+steer, paused/parked -> resume,
-    # terminal -> fresh turn). Best-effort, never fails the comment write.
-    # Skip if the actor IS the assignee (avoids an agent's own comment
-    # re-dispatching itself).
+    # Deliver the comment to the assigned agent's task chat. A plain comment is
+    # RECORDED as context (no run); only an @mention of the agent — or the
+    # project's wake_on_comment toggle — wakes it immediately (AP-184). Skip if
+    # the actor IS the assignee (an agent's own comment must not re-dispatch).
     if task.assignee and task.assignee != actor:
         try:
-            _wake_assigned_agent_on_comment(
+            _deliver_comment_to_agent(
                 task_id=task_id, assignee_name=task.assignee,
                 actor=actor, comment=comment,
+                wake_on_comment=_wake_on_comment,
             )
         except Exception as exc:  # noqa: BLE001 — comment must succeed regardless
-            logger.warning("wake-on-comment failed task=%s: %s", task_id, exc)
+            logger.warning("comment-delivery failed task=%s: %s", task_id, exc)
 
     return result
 
 
-def _wake_assigned_agent_on_comment(*, task_id: str, assignee_name: str,
-                                    actor: str, comment: str) -> None:
-    """Comment -> assigned agent's task chat + dispatch (ADR 009 D).
+def _comment_mentions_agent(comment: str, names: list[str]) -> bool:
+    """True if the comment @mentions this agent — by any of its names/handles
+    (spaces stripped) or the generic ``@agent``."""
+    c = (comment or "").lower()
+    c_nospace = c.replace(" ", "")
+    if "@agent" in c_nospace:
+        return True
+    for n in names:
+        if not n:
+            continue
+        nl = n.lower()
+        if f"@{nl}" in c or f"@{nl.replace(' ', '')}" in c_nospace:
+            return True
+    return False
 
-    Find the Forge agent whose profile.name == assignee_name; if it has a
-    bound runtime, deliver the comment as a USER message into the task
-    scope via send_runtime_message — which auto-routes per the run state
-    (running pauses+steers, paused resumes, idle/terminal starts a turn).
-    Skips silently for non-agent assignees (humans) or agents without a
-    runtime (purely HTTP-executor agents).
+
+def _deliver_comment_to_agent(*, task_id: str, assignee_name: str,
+                              actor: str, comment: str,
+                              wake_on_comment: bool) -> None:
+    """Comment -> assigned agent's task chat (AP-184).
+
+    @mention (or the wake_on_comment toggle) → dispatch now via
+    send_runtime_message (auto-routes per run state). Otherwise → record the
+    comment into the task chat as context, no dispatch; the agent reads it when
+    it next starts work. Skips silently for non-agent assignees (humans) or
+    agents without a runtime (purely HTTP-executor agents).
     """
     from backend.forge.models import Agent as ForgeAgent
     from backend.forge import services as forge_services
@@ -1115,11 +1170,18 @@ def _wake_assigned_agent_on_comment(*, task_id: str, assignee_name: str,
         if not agent or not agent.runtime_id:
             return
         agent_id = agent.id
-    forge_services.send_runtime_message(
-        agent_id,
-        content=f"[Comment from {actor}] {comment}",
-        scope_key=f"task:{task_id}",
-    )
+        names = [agent.name, agent.runtime_agent_name, prof.name, assignee_name]
+
+    if wake_on_comment or _comment_mentions_agent(comment, names):
+        forge_services.send_runtime_message(
+            agent_id,
+            content=f"[Comment from {actor}] {comment}",
+            scope_key=f"task:{task_id}",
+        )
+    else:
+        forge_services.record_task_comment(
+            agent_id=agent_id, task_id=task_id, actor=actor, content=comment,
+        )
 
 
 def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:

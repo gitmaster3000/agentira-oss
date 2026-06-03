@@ -112,11 +112,11 @@ def _make_agent_for_task(s_name="backend-agent"):
             "project_id": project["id"]}
 
 
-def test_comment_dispatches_assigned_agent_into_task_scope():
-    """A human comment on a task with an assigned agent wakes the agent
-    via send_runtime_message into task:<task_id> — comment lands as a
-    USER message in the chat thread."""
+def test_plain_comment_records_without_running():
+    """A plain comment (no @mention) is RECORDED into the task chat as context
+    but must NOT start a run (AP-184)."""
     s = _make_agent_for_task()
+    from backend.forge.models import Run
     with patch("backend.forge.services._dispatch_coro", lambda c: None):
         core_services.add_comment(s["task_id"], "please use postgres", actor="system")
 
@@ -128,6 +128,37 @@ def test_comment_dispatches_assigned_agent_into_task_scope():
         assert msgs[0].role == MessageRole.USER
         assert "please use postgres" in msgs[0].content
         assert "Comment from system" in msgs[0].content
+        # The key assertion: recording a comment reserves NO run.
+        assert db.query(Run).count() == 0, "a plain comment must not start a run"
+
+
+def test_mention_comment_wakes_agent():
+    """A comment that @mentions the agent wakes it immediately — a run is
+    reserved (dispatched)."""
+    s = _make_agent_for_task()
+    from backend.forge.models import Run
+    with patch("backend.forge.services._dispatch_coro", lambda c: None):
+        core_services.add_comment(
+            s["task_id"], "@backend-agent please use postgres", actor="system")
+    with forge_services._session() as db:
+        runs = db.query(Run).filter(Run.task_id == s["task_id"]).all()
+        assert len(runs) == 1, "@mention must dispatch (reserve a run)"
+
+
+def test_wake_on_comment_toggle_dispatches_plain_comment():
+    """With the project toggle on, even a plain comment wakes the agent."""
+    from backend.models import Project
+    from backend.forge.models import Run
+    s = _make_agent_for_task()
+    with forge_services._session() as db:
+        proj = db.query(Project).filter(Project.id == s["project_id"]).first()
+        proj.wake_on_comment = True
+        db.commit()
+    with patch("backend.forge.services._dispatch_coro", lambda c: None):
+        core_services.add_comment(s["task_id"], "just a note", actor="system")
+    with forge_services._session() as db:
+        runs = db.query(Run).filter(Run.task_id == s["task_id"]).all()
+        assert len(runs) == 1, "toggle on → plain comment dispatches"
 
 
 def test_comment_from_assigned_agent_does_not_loop():

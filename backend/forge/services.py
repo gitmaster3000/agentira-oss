@@ -3090,6 +3090,23 @@ def scope_live(scope_key: str) -> dict:
     return {"live": bool(trace), "trace_id": trace or ""}
 
 
+def record_task_comment(*, agent_id: str, task_id: str, actor: str,
+                        content: str) -> None:
+    """Persist a human comment into the agent's task chat WITHOUT dispatching.
+
+    A plain comment should be visible to the agent as context on its next turn,
+    but it must NOT auto-start a run (AP-184). Stored as a USER message in the
+    task scope so assemble_context picks it up when the agent next runs."""
+    with _session() as db:
+        db.add(AgentMessage(
+            agent_id=agent_id,
+            scope_key=f"task:{task_id}",
+            role=MessageRole.USER,
+            content=f"[Comment from {actor}] {content}",
+        ))
+        db.commit()
+
+
 def list_queued_messages(*, agent_id: str, scope_key: str) -> list[dict]:
     """Messages queued behind the active turn in this conversation (AP-179),
     oldest first — the chat UI renders them as "queued" pills under the live
