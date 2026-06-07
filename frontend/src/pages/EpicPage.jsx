@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Pencil, Trash2, ListTodo } from 'lucide-react';
+import { Pencil, Trash2, ListTodo, Check, X } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Markdown } from '../components/Markdown';
-import { EditEpicModal } from '../components/EditEpicModal';
 import { setCurrentProjectId } from '../currentProject';
 
 const PRIORITY_DOTS = {
@@ -23,6 +22,11 @@ const STATUS_COLORS = {
     done:        '#2ecc71',
 };
 
+const EPIC_COLORS = [
+    '#7c4dff', '#00bcd4', '#2ecc71', '#f1c40f',
+    '#e67e22', '#e74c3c', '#3498db', '#9b59b6',
+];
+
 export function EpicPage() {
     const { epicId } = useParams();
     const navigate = useNavigate();
@@ -31,6 +35,8 @@ export function EpicPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [editing, setEditing] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [form, setForm] = useState({ title: '', description: '', color: '#7c4dff' });
 
     useEffect(() => {
         let cancelled = false;
@@ -55,6 +61,33 @@ export function EpicPage() {
         load();
         return () => { cancelled = true; };
     }, [epicId]);
+
+    const startEdit = () => {
+        setForm({
+            title: epic.title || '',
+            description: epic.description || '',
+            color: epic.color || '#7c4dff',
+        });
+        setEditing(true);
+    };
+
+    const handleSave = async () => {
+        if (!form.title.trim()) return;
+        setSaving(true);
+        try {
+            const updated = await api.updateEpic(epicId, {
+                title: form.title.trim(),
+                description: form.description,
+                color: form.color,
+            });
+            setEpic(updated);
+            setEditing(false);
+        } catch (err) {
+            alert('Update failed: ' + (err.message || err));
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const handleDelete = async () => {
         if (!window.confirm(`Delete epic "${epic.title}"? Tasks are detached, not deleted.`)) return;
@@ -81,36 +114,102 @@ export function EpicPage() {
         <div className="flex-1 flex flex-col overflow-hidden">
             <div className="max-w-5xl w-full mx-auto p-6 flex flex-col gap-6 flex-1 min-h-0">
             <Breadcrumbs entity="epic" data={epic} />
+
+            {/* AP-183: editing happens inline on the page (not a popup). The Edit
+                button swaps the title + description into editable fields with a
+                color picker, plus Save / Cancel actions. */}
             <div className="flex items-center gap-3">
-                <div className="flex-1 flex items-center gap-3 min-w-0">
-                    <span
-                        className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: epic.color || '#7c4dff' }}
+                <span
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: (editing ? form.color : epic.color) || '#7c4dff' }}
+                />
+                {editing ? (
+                    <input
+                        autoFocus
+                        className="input flex-1 min-w-0 text-2xl font-bold"
+                        value={form.title}
+                        onChange={e => setForm({ ...form, title: e.target.value })}
+                        placeholder="Epic title"
                     />
-                    <h1 className="text-2xl font-bold text-text-primary truncate">{epic.title}</h1>
-                </div>
-                <button
-                    onClick={() => setEditing(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-bg-hover text-text-secondary text-sm font-medium"
-                    title="Edit epic"
-                >
-                    <Pencil className="w-4 h-4" /> Edit
-                </button>
-                <button
-                    onClick={handleDelete}
-                    className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary hover:text-red-500"
-                    title="Delete epic (tasks detached)"
-                >
-                    <Trash2 className="w-4 h-4" />
-                </button>
+                ) : (
+                    <h1 className="text-2xl font-bold text-text-primary truncate flex-1 min-w-0">{epic.title}</h1>
+                )}
+
+                {editing ? (
+                    <>
+                        <button
+                            onClick={handleSave}
+                            disabled={saving || !form.title.trim()}
+                            className="btn-primary px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Save changes"
+                        >
+                            <Check className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                            onClick={() => setEditing(false)}
+                            disabled={saving}
+                            className="btn-ghost px-4 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
+                            title="Cancel"
+                        >
+                            <X className="w-4 h-4" /> Cancel
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button
+                            onClick={startEdit}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-bg-hover text-text-secondary text-sm font-medium"
+                            title="Edit epic"
+                        >
+                            <Pencil className="w-4 h-4" /> Edit
+                        </button>
+                        <button
+                            onClick={handleDelete}
+                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary hover:text-red-500"
+                            title="Delete epic (tasks detached)"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </>
+                )}
             </div>
 
             <div className="card">
-                {/* AP-39: render description as GitHub-flavored markdown
-                    (tables, code, headings, lists) — not as plain text. */}
-                {epic.description
-                    ? <Markdown>{epic.description}</Markdown>
-                    : <span className="italic text-text-tertiary text-sm">No description.</span>}
+                {editing ? (
+                    <div className="flex flex-col gap-4">
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase mb-2 text-text-tertiary tracking-wider">Description</label>
+                            <textarea
+                                className="input resize-none h-40 w-full"
+                                value={form.description}
+                                onChange={e => setForm({ ...form, description: e.target.value })}
+                                placeholder="High-level goal or theme... (markdown supported)"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase mb-2 text-text-tertiary tracking-wider">Color Theme</label>
+                            <div className="flex flex-wrap gap-2.5">
+                                {EPIC_COLORS.map(c => (
+                                    <button
+                                        key={c}
+                                        type="button"
+                                        onClick={() => setForm({ ...form, color: c })}
+                                        className={`w-8 h-8 rounded-full transition-transform hover:scale-110 active:scale-95 flex items-center justify-center ${form.color === c ? 'ring-2 ring-white ring-offset-2 ring-offset-bg-card' : ''}`}
+                                        style={{ backgroundColor: c }}
+                                    >
+                                        {form.color === c && <div className="w-1.5 h-1.5 rounded-full bg-white shadow-sm" />}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    /* AP-39: render description as GitHub-flavored markdown
+                       (tables, code, headings, lists) — not as plain text. */
+                    epic.description
+                        ? <Markdown>{epic.description}</Markdown>
+                        : <span className="italic text-text-tertiary text-sm">No description.</span>
+                )}
             </div>
 
             <div className="grid grid-cols-3 gap-4">
@@ -151,14 +250,6 @@ export function EpicPage() {
                 )}
             </div>
             </div>
-
-            {editing && (
-                <EditEpicModal
-                    epic={epic}
-                    onClose={() => setEditing(false)}
-                    onSaved={(updated) => setEpic(updated)}
-                />
-            )}
         </div>
     );
 }
