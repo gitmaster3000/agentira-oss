@@ -3278,10 +3278,12 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
             r.summary = summary
         db.commit()
 
-        # Post a comment back to the linked task so the human reading
-        # the task feed sees the agent's verdict + summary. Without
-        # this, finish_run was invisible from the task view.
-        if r.task_id:
+        # Post a comment back to the linked task so the human reading the task
+        # feed sees the agent's verdict + summary. ONLY for explicit runs —
+        # a chat turn (trigger="chat") must NOT post a "Run {outcome}" entry
+        # into the activity feed (that made a plain @mention comment look like
+        # it produced a run). The agent's reply already shows in the chat.
+        if r.task_id and r.trigger_event != "chat":
             try:
                 from backend.models import Task as _Task, Activity as _Activity, Profile as _Profile
                 task = db.get(_Task, r.task_id)

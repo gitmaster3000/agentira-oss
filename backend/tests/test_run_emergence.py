@@ -208,6 +208,30 @@ def test_turn_with_artifact_becomes_work():
         assert r is not None and r.is_work is True
 
 
+def test_finish_run_on_chat_run_posts_no_run_activity():
+    """A chat turn's finish_run must NOT post a 'Run {outcome}' activity comment
+    (that made an @mention comment look like it produced a run). An explicit
+    (task.scheduled) run still posts its verdict to the feed."""
+    from backend.models import Activity
+    s = _setup_agent_in_task()
+    chat_run_id, _ = _spawn_chat_run(s)
+    forge_services.finish_run(chat_run_id, outcome="blocked", summary="need info")
+
+    exp = forge_services.create_run(
+        agent_id=s["agent_id"], task_id=s["task_id"],
+        project_id=s["project_id"], trigger_event="task.scheduled")
+    forge_services.finish_run(exp["id"], outcome="blocked", summary="need info")
+
+    with forge_services._session() as db:
+        bodies = [a.detail or "" for a in
+                  db.query(Activity).filter(Activity.task_id == s["task_id"],
+                                            Activity.action == "commented").all()]
+    assert not any(chat_run_id[:8] in b for b in bodies), \
+        "a chat run's finish_run must not post a 'Run' activity"
+    assert any(exp["id"][:8] in b for b in bodies), \
+        "an explicit run's finish_run still posts its verdict"
+
+
 def test_turn_with_agent_outcome_becomes_work():
     s = _setup_agent_in_task()
     run_id, trace_id = _spawn_chat_run(s)
