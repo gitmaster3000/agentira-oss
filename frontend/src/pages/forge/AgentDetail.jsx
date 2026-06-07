@@ -11,6 +11,7 @@ import {
 import { api } from '../../api';
 import { ToolInput } from '../../components/AskUserQuestionCard';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
+import { mergeWindow, serverLoadedCount } from '../../lib/chatPagination';
 
 const STATUS_STYLES = {
     online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
@@ -563,33 +564,15 @@ function ChatTab({ agentId, agent, initialScope = null }) {
         : (agent?.default_project_id ? `chat:project:${agent.default_project_id}` : 'chat:default');
     const activeScope = selectedScope || screenScope;
 
-    const _byCreatedAt = (a, b) => {
-        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return ta - tb;
-    };
-    // Merge a fetched page into the current window: dedupe server rows by id
-    // (incoming wins, so edits/finalized rows refresh), keep local-only cards
-    // (e.g. /context output, optimistic sends) until a real row supersedes,
-    // and re-sort chronologically.
-    const _mergeWindow = (prev, incoming) => {
-        const byId = new Map();
-        for (const m of (prev || [])) {
-            if (!String(m.id).startsWith('local-')) byId.set(m.id, m);
-        }
-        for (const m of (incoming || [])) byId.set(m.id, m);
-        const locals = (prev || []).filter(m => String(m.id).startsWith('local-'));
-        return [...byId.values(), ...locals].sort(_byCreatedAt);
-    };
-
     // Live tail: newest PAGE_SIZE messages, merged into the window so older
-    // pages already loaded are retained.
+    // pages already loaded are retained. Merge/sort/offset logic is shared with
+    // the FloatingChat quick chat — see lib/chatPagination.
     const loadMessages = useCallback(async () => {
         try {
             const data = await api.forge.listMessages(agentId, {
                 limit: PAGE_SIZE, scope_key: activeScope,
             });
-            setMessages((prev) => _mergeWindow(prev, data));
+            setMessages((prev) => mergeWindow(prev, data));
         } catch (err) {
             console.error('Failed to load messages:', err);
         } finally {
@@ -602,8 +585,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
     // scroll so prepending doesn't jump the viewport.
     const loadOlder = useCallback(async () => {
         if (loadingOlderRef.current || reachedStartRef.current) return;
-        const serverLoaded = messagesRef.current
-            .filter(m => !String(m.id).startsWith('local-')).length;
+        const serverLoaded = serverLoadedCount(messagesRef.current);
         if (serverLoaded === 0) return;
         loadingOlderRef.current = true;
         setLoadingOlder(true);
@@ -615,7 +597,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
             if (older.length < PAGE_SIZE) reachedStartRef.current = true;
             const c = containerRef.current;
             const before = c ? c.scrollHeight : 0;
-            setMessages((prev) => _mergeWindow(prev, older));
+            setMessages((prev) => mergeWindow(prev, older));
             // Restore scroll position after the prepend so the user stays put.
             requestAnimationFrame(() => {
                 if (c) c.scrollTop += (c.scrollHeight - before);
@@ -972,7 +954,14 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                         <span className="font-medium">
                             {(conversations.find((c) => c.scope_key === activeScope)?.label) || _localScopeLabel(activeScope, agentProjects)}
                         </span>
-                        <span className="text-text-tertiary text-xs">({messages.length})</span>
+                        {/* Loaded-window / total-thread count. The total comes
+                            from the conversation row (whole thread); messages
+                            is only what's currently in the window. */}
+                        <span className="text-text-tertiary text-xs tabular-nums">
+                            {conversation?.message_count != null
+                                ? `(${messages.length}/${conversation.message_count})`
+                                : `(${messages.length})`}
+                        </span>
                         <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
                     </button>
                     {chatPickerOpen && (() => {
