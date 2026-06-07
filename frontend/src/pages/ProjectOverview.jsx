@@ -9,10 +9,13 @@
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-    Folder, GitBranch, Users, ListChecks, Activity, ChevronRight,
+    Folder, GitBranch, Users, Activity, ChevronRight,
     Settings as SettingsIcon, LayoutGrid, ListTodo, TrendingUp,
     Paperclip, Upload, FileText, Trash2, Download,
+    MessageSquare, Plus, ArrowRight, Pencil, ArrowUpRight,
 } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
@@ -23,6 +26,20 @@ function formatSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+function timeAgo(iso) {
+    if (!iso) return '';
+    // Activity timestamps are naive UTC; append Z so they parse as UTC.
+    const then = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+    const s = Math.floor((Date.now() - then.getTime()) / 1000);
+    if (isNaN(s)) return '';
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+    return then.toLocaleDateString();
 }
 
 
@@ -52,7 +69,7 @@ export function ProjectOverview() {
                     api.getProjectMembers(projectId).catch(() => []),
                     api.listProjectRepos(projectId).catch(() => []),
                     api.getBoard(projectId).catch(() => null),
-                    api.getProjectActivity(projectId, 8).catch(() => []),
+                    api.getProjectActivity(projectId, 20).catch(() => []),
                     api.listProjectAttachments(projectId).catch(() => []),
                 ]);
                 if (!alive) return;
@@ -81,6 +98,9 @@ export function ProjectOverview() {
     return (
         <div className="flex-1 overflow-y-auto">
             <div className="max-w-5xl mx-auto p-6 space-y-6">
+                {/* Recent activity — runs, comments, task changes (clickable) */}
+                <ActivityCard items={activity} projectId={projectId} />
+
                 {/* Quick links */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <QuickLink to={ROUTES.STUDIO_PROJECT_BOARD(projectId)}
@@ -113,8 +133,6 @@ export function ProjectOverview() {
                     attachments={attachments}
                     onChange={reloadAttachments}
                 />
-
-                <ActivityCard items={activity} />
             </div>
         </div>
     );
@@ -219,29 +237,108 @@ function MembersCard({ members }) {
 }
 
 
-function ActivityCard({ items }) {
+// Maps a raw activity `action` to an icon, accent color, and human label.
+const ACTION_META = {
+    commented:     { icon: MessageSquare, color: '#7c4dff', label: 'commented' },
+    'task.create': { icon: Plus,          color: '#2ecc71', label: 'created task' },
+    'task.move':   { icon: ArrowRight,    color: '#00bcd4', label: 'moved task' },
+    'task.update': { icon: Pencil,        color: '#f1c40f', label: 'updated task' },
+};
+
+function actionMeta(action) {
+    return ACTION_META[action] || { icon: Activity, color: '#9aa0a6', label: action || 'activity' };
+}
+
+
+// SPA-aware link: internal app paths route through react-router (no full
+// reload); external URLs open in a new tab. Used for links embedded in
+// activity details (e.g. run links like /forge/runs/<id> and PR URLs).
+function SmartLink({ href, children, ...rest }) {
+    const isInternal = typeof href === 'string' && href.startsWith('/');
+    if (isInternal) {
+        return (
+            <Link to={href} className="text-accent-primary hover:underline" {...rest}>
+                {children}
+            </Link>
+        );
+    }
     return (
-        <div className="card space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Activity className="w-4 h-4" /> Recent activity
+        <a href={href} target="_blank" rel="noopener noreferrer"
+            className="text-accent-primary hover:underline" {...rest}>
+            {children}
+        </a>
+    );
+}
+
+// Compact markdown for activity details — tight spacing, clickable links.
+const FEED_MD_COMPONENTS = {
+    a: ({ node, ...p }) => <SmartLink {...p} />,
+    p: (p) => <p className="text-sm text-text-secondary leading-snug my-0.5" {...p} />,
+    ul: (p) => <ul className="list-disc pl-5 my-1 text-sm text-text-secondary space-y-0.5" {...p} />,
+    ol: (p) => <ol className="list-decimal pl-5 my-1 text-sm text-text-secondary space-y-0.5" {...p} />,
+    li: (p) => <li className="text-sm text-text-secondary" {...p} />,
+    strong: (p) => <strong className="text-text-primary font-semibold" {...p} />,
+    em: (p) => <em className="italic" {...p} />,
+    code: (p) => <code className="px-1 py-0.5 rounded bg-bg-panel text-xs font-mono text-text-primary" {...p} />,
+    h1: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+    h2: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+    h3: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+};
+
+
+function ActivityRow({ entry, projectId }) {
+    const meta = actionMeta(entry.action);
+    const Icon = meta.icon;
+    const actor = entry.actor || 'system';
+    return (
+        <div className="flex gap-3 px-2 py-2.5 rounded-md hover:bg-bg-hover/50 transition-colors">
+            <div className="w-7 h-7 rounded-full bg-accent-subtle flex items-center justify-center text-xs font-bold text-accent-primary border border-accent-primary/20 flex-shrink-0">
+                {actor[0]?.toUpperCase() || 'S'}
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-semibold text-text-primary">{actor}</span>
+                    <span className="inline-flex items-center gap-1 text-text-secondary">
+                        <Icon className="w-3 h-3" style={{ color: meta.color }} />
+                        {meta.label}
+                    </span>
+                    <span className="text-text-tertiary">· {timeAgo(entry.created_at)}</span>
+                    {entry.task_id && (
+                        <Link
+                            to={ROUTES.STUDIO_TASK(entry.task_id)}
+                            className="ml-auto inline-flex items-center gap-0.5 text-text-tertiary hover:text-accent-primary transition-colors"
+                            title="Open task"
+                        >
+                            #{String(entry.task_id).slice(0, 8)}
+                            <ArrowUpRight className="w-3 h-3" />
+                        </Link>
+                    )}
+                </div>
+                {entry.detail && (
+                    <div className="mt-1 max-h-44 overflow-y-auto">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={FEED_MD_COMPONENTS}>
+                            {String(entry.detail)}
+                        </ReactMarkdown>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+
+function ActivityCard({ items, projectId }) {
+    return (
+        <div className="card space-y-1">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-primary mb-1">
+                <Activity className="w-4 h-4 text-accent-primary" /> Recent activity
             </div>
             {items.length === 0 ? (
-                <div className="text-xs text-text-tertiary">Nothing yet.</div>
+                <div className="text-xs text-text-tertiary py-2">Nothing yet.</div>
             ) : (
-                <div className="space-y-1.5">
+                <div className="divide-y divide-border-subtle/60">
                     {items.map((a, i) => (
-                        <div key={a.id || i} className="text-xs text-text-secondary flex gap-2">
-                            <span className="text-text-tertiary whitespace-nowrap">
-                                {a.actor || 'system'}
-                            </span>
-                            <span className="text-text-tertiary">·</span>
-                            <span>{a.action}</span>
-                            {a.detail && (
-                                <span className="text-text-tertiary truncate">
-                                    — {a.detail.slice(0, 80)}
-                                </span>
-                            )}
-                        </div>
+                        <ActivityRow key={a.id || i} entry={a} projectId={projectId} />
                     ))}
                 </div>
             )}
