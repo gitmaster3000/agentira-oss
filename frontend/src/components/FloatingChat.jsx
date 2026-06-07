@@ -2,10 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, X, Send, Loader, GripVertical, Ban } from 'lucide-react';
 import { api } from '../api';
 import { AskUserQuestionCard } from './AskUserQuestionCard';
+import { mergeWindow, serverLoadedCount } from '../lib/chatPagination';
 
 // Each agent's floating-chat thread is its own workspace-wide conversation.
 const CHAT_SCOPE = 'chat:default';
 const POLL_MS = 3000;
+// Windowed loading: poll the newest PAGE_SIZE as the live tail; fetch older
+// pages on scroll-up. Without this the dock fetched a flat 100 and could never
+// reach anything older — and re-fetching the whole list each poll fought the
+// user's scroll position.
+const PAGE_SIZE = 50;
+const PREFETCH_PX = 120;          // start loading older this far from the top
 const PANEL_W = 380;
 const PANEL_H = 520;
 const BTN = 52;                  // collapsed-button diameter, px
@@ -42,8 +49,17 @@ export function FloatingChat() {
     const [stopped, setStopped] = useState(false);
     // One shared anchor (top-left) for both the button and the panel.
     const [pos, setPos] = useState(null);
+    // Total messages in this conversation (from the backend), shown alongside
+    // the loaded-window count so the header reflects the whole thread, not
+    // just what's currently in view.
+    const [total, setTotal] = useState(null);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
+    const containerRef = useRef(null);
+    const messagesRef = useRef([]);        // latest window, for stale-free offset reads
+    const loadingOlderRef = useRef(false);
+    const reachedStartRef = useRef(false);  // older fetch returned < PAGE → no more
+    const lastIdRef = useRef(null);         // newest message id we've auto-scrolled to
 
     // ── load the saved anchor / default to the bottom-right corner ──────
     useEffect(() => {
@@ -109,28 +125,86 @@ export function FloatingChat() {
         });
     }, [open, guideId, unavailable]);
 
+    // Keep a ref of the live window so loadOlder computes the offset without a
+    // stale closure.
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+    // Live tail: newest PAGE_SIZE, merged into the window so older pages the
+    // user already scrolled back to are retained instead of replaced.
     const loadMessages = useCallback(async () => {
         if (!selectedId) return;
         try {
             const data = await api.forge.listMessages(selectedId, {
-                limit: 100, scope_key: CHAT_SCOPE,
+                limit: PAGE_SIZE, scope_key: CHAT_SCOPE,
             });
-            if (Array.isArray(data)) setMessages(data);
+            if (Array.isArray(data)) setMessages((prev) => mergeWindow(prev, data));
         } catch { /* transient */ }
+    }, [selectedId]);
+
+    // Total message count for this conversation (the whole thread, not just the
+    // loaded window) — pulled from the conversations list by scope.
+    const loadTotal = useCallback(async () => {
+        if (!selectedId) return;
+        try {
+            const convs = await api.forge.listConversations(selectedId);
+            const row = Array.isArray(convs)
+                ? convs.find((c) => c.scope_key === CHAT_SCOPE) : null;
+            setTotal(row ? row.message_count : null);
+        } catch { /* transient */ }
+    }, [selectedId]);
+
+    // Older page: fetched on scroll-up. offset = server rows already loaded
+    // (backend pages backward from newest). Anchors scroll so the prepend
+    // doesn't jump the viewport.
+    const loadOlder = useCallback(async () => {
+        if (!selectedId || loadingOlderRef.current || reachedStartRef.current) return;
+        const offset = serverLoadedCount(messagesRef.current);
+        if (offset === 0) return;
+        loadingOlderRef.current = true;
+        try {
+            const older = await api.forge.listMessages(selectedId, {
+                limit: PAGE_SIZE, offset, scope_key: CHAT_SCOPE,
+            });
+            if (!older || older.length === 0) { reachedStartRef.current = true; return; }
+            if (older.length < PAGE_SIZE) reachedStartRef.current = true;
+            const c = containerRef.current;
+            const before = c ? c.scrollHeight : 0;
+            setMessages((prev) => mergeWindow(prev, older));
+            requestAnimationFrame(() => {
+                if (c) c.scrollTop += (c.scrollHeight - before);
+            });
+        } catch { /* transient */ }
+        finally { loadingOlderRef.current = false; }
     }, [selectedId]);
 
     // Poll the selected agent's thread while the panel is open.
     useEffect(() => {
         if (!open || !selectedId) return;
         setMessages([]);
+        reachedStartRef.current = false;
+        loadingOlderRef.current = false;
         loadMessages();
-        const t = setInterval(loadMessages, POLL_MS);
+        loadTotal();
+        const t = setInterval(() => { loadMessages(); loadTotal(); }, POLL_MS);
         return () => clearInterval(t);
-    }, [open, selectedId, loadMessages]);
+    }, [open, selectedId, loadMessages, loadTotal]);
 
+    // Prefetch older pages as the user nears the top — seamless scrollback.
+    const onScroll = useCallback(() => {
+        const c = containerRef.current;
+        if (c && c.scrollTop < PREFETCH_PX) loadOlder();
+    }, [loadOlder]);
+
+    // Auto-scroll to the newest message only when the NEWEST id actually
+    // changes (a real new turn). Keying off message count instead would yank
+    // the viewport to the bottom every time an older page is prepended.
+    const _lastId = messages.length ? messages[messages.length - 1].id : null;
     useEffect(() => {
-        if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages.length, open]);
+        if (open && _lastId !== lastIdRef.current) {
+            bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+        lastIdRef.current = _lastId;
+    }, [_lastId, open]);
 
     useEffect(() => {
         if (open) inputRef.current?.focus();
@@ -249,6 +323,15 @@ export function FloatingChat() {
                         </option>
                     ))}
                 </select>
+                {/* Loaded-window / total-thread message count. */}
+                {!unavailable && total != null && (
+                    <span
+                        className="text-[11px] text-text-tertiary flex-shrink-0 tabular-nums"
+                        title="Messages loaded / total in this chat"
+                    >
+                        {messages.length}/{total}
+                    </span>
+                )}
                 <button
                     onClick={() => setOpen(false)}
                     onMouseDown={(e) => e.stopPropagation()}
@@ -260,7 +343,16 @@ export function FloatingChat() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            <div
+                ref={containerRef}
+                onScroll={onScroll}
+                className="flex-1 overflow-y-auto px-3 py-3 space-y-2"
+            >
+                {!reachedStartRef.current && serverLoadedCount(messages) > 0 && (
+                    <div className="text-[11px] text-text-tertiary text-center py-1">
+                        Scroll up for older messages…
+                    </div>
+                )}
                 {unavailable && (
                     <div className="text-xs text-text-tertiary text-center py-6">
                         Chat isn't available right now.
