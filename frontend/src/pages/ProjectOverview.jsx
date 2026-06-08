@@ -12,13 +12,13 @@ import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-    Folder, GitBranch, Users, Activity, ChevronRight,
-    Settings as SettingsIcon, LayoutGrid, ListTodo, TrendingUp,
+    Folder, GitBranch, Users, Activity, ChevronDown,
     Paperclip, Upload, FileText, Trash2, Download,
     MessageSquare, Plus, ArrowRight, Pencil, ArrowUpRight,
 } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
 
 
 function formatSize(bytes) {
@@ -97,21 +97,13 @@ export function ProjectOverview() {
 
     return (
         <div className="flex-1 overflow-y-auto">
+            {/* Live activity strip — the same "what's running" panel as the
+                board, polling in-flight runs + the Conductor every 5s. */}
+            <ProjectActivityPanel projectId={projectId} />
+
             <div className="max-w-5xl mx-auto p-6 space-y-6">
                 {/* Recent activity — runs, comments, task changes (clickable) */}
                 <ActivityCard items={activity} projectId={projectId} />
-
-                {/* Quick links */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_BOARD(projectId)}
-                        icon={LayoutGrid} label="Board" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_BACKLOG(projectId)}
-                        icon={ListTodo} label="Backlog" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_ROADMAP(projectId)}
-                        icon={TrendingUp} label="Roadmap" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_SETTINGS(projectId)}
-                        icon={SettingsIcon} label="Settings" />
-                </div>
 
                 {/* Status counts */}
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -125,7 +117,7 @@ export function ProjectOverview() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <ReposCard repos={repos} projectId={projectId} />
-                    <MembersCard members={members} />
+                    <TeamCard members={members} />
                 </div>
 
                 <AttachmentsCard
@@ -135,20 +127,6 @@ export function ProjectOverview() {
                 />
             </div>
         </div>
-    );
-}
-
-
-function QuickLink({ to, icon: Icon, label }) {
-    return (
-        <Link to={to}
-            className="card flex items-center gap-3 hover:bg-bg-hover transition-colors">
-            <div className="w-8 h-8 rounded-lg bg-accent-subtle flex items-center justify-center">
-                <Icon className="w-4 h-4 text-accent-primary" />
-            </div>
-            <div className="text-sm font-medium text-text-primary">{label}</div>
-            <ChevronRight className="w-4 h-4 text-text-tertiary ml-auto" />
-        </Link>
     );
 }
 
@@ -208,27 +186,94 @@ function ReposCard({ repos, projectId }) {
 }
 
 
-function MembersCard({ members }) {
+// UI-only role/responsibility profiles. The platform doesn't yet expose a
+// per-member "what they do" field, so we infer a function from the member's
+// name/role and show a short responsibility blurb. Placeholder copy — to be
+// replaced once the backend exposes real role definitions.
+const ROLE_PROFILES = [
+    { match: /front.?end|^fe\b|web|ui/i,        function: 'Frontend',      blurb: 'Builds and refines the product UI — pages, components, and client-side behavior.' },
+    { match: /back.?end|^be\b|api|server/i,     function: 'Backend',       blurb: 'Owns API endpoints, data models, and server-side business logic.' },
+    { match: /implement|engineer|dev|coder/i,   function: 'Implementer',   blurb: 'Picks up scoped tasks and turns them into working, tested code.' },
+    { match: /plan(ner)?|pm|product/i,          function: 'Planner',       blurb: 'Breaks goals into tasks, sets priorities, and shapes the backlog.' },
+    { match: /review|qa|critic/i,               function: 'Reviewer',      blurb: 'Reviews changes for correctness and quality before they merge.' },
+    { match: /test|qe/i,                        function: 'Test',          blurb: 'Writes and runs tests; verifies behavior and guards against regressions.' },
+    { match: /admin|owner|lead/i,               function: 'Admin',         blurb: 'Manages the project, members, and overall workflow.' },
+    { match: /bot|agent|conductor/i,            function: 'Automation',    blurb: 'Automated agent that runs scheduled or triggered work.' },
+];
+
+const FUNCTION_COLORS = {
+    Frontend: '#00bcd4', Backend: '#7c4dff', Implementer: '#2ecc71',
+    Planner: '#f1c40f', Reviewer: '#ff9800', Test: '#e91e63',
+    Admin: '#e74c3c', Automation: '#9aa0a6', Contributor: '#9aa0a6',
+};
+
+function memberProfile(m) {
+    const key = `${m.name || ''} ${m.display_name || ''} ${m.role || ''}`;
+    const found = ROLE_PROFILES.find((p) => p.match.test(key));
+    return found || {
+        function: 'Contributor',
+        blurb: 'Contributes to the project. Responsibilities to be defined.',
+    };
+}
+
+
+function TeamMemberRow({ member }) {
+    const [open, setOpen] = useState(false);
+    const profile = memberProfile(member);
+    const color = FUNCTION_COLORS[profile.function] || FUNCTION_COLORS.Contributor;
+    const name = member.display_name || member.name || '?';
+    return (
+        <div className="rounded-md bg-bg-hover/60 overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-bg-hover transition-colors"
+            >
+                <div className="w-7 h-7 rounded-full bg-accent-subtle text-accent-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {name[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                    <div className="text-sm text-text-primary truncate">{name}</div>
+                    <div className="text-[11px] text-text-tertiary truncate">@{member.name}</div>
+                </div>
+                <span
+                    className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{ backgroundColor: color + '22', color }}
+                >
+                    {profile.function}
+                </span>
+                <ChevronDown
+                    className={`w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+                />
+            </button>
+            {open && (
+                <div className="px-3 pb-2.5 pt-0.5 text-xs text-text-secondary leading-relaxed border-t border-border-subtle/60">
+                    {profile.blurb}
+                    {member.role && (
+                        <div className="mt-1 text-text-tertiary">
+                            Access role: <span className="text-text-secondary">{member.role}</span>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+function TeamCard({ members }) {
     return (
         <div className="card space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Users className="w-4 h-4" /> Members
+                <Users className="w-4 h-4" /> Team &amp; roles
                 <span className="text-text-tertiary text-xs">{members.length}</span>
             </div>
             {members.length === 0 ? (
                 <div className="text-xs text-text-tertiary">No members yet.</div>
             ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-1.5">
                     {members.map((m) => (
-                        <div key={m.id || m.name}
-                            className="flex items-center gap-2 px-2 py-1 rounded bg-bg-hover">
-                            <div className="w-6 h-6 rounded-full bg-accent-subtle text-accent-primary flex items-center justify-center text-xs font-bold">
-                                {(m.display_name || m.name || '?')[0]?.toUpperCase()}
-                            </div>
-                            <span className="text-sm text-text-primary">
-                                {m.display_name || m.name}
-                            </span>
-                        </div>
+                        <TeamMemberRow key={m.id || m.name} member={m} />
                     ))}
                 </div>
             )}
