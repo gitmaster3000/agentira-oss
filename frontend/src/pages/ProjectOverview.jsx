@@ -1,9 +1,21 @@
 /**
  * Project Overview — the landing page for a project.
  *
- * Renders a one-screen snapshot: description, repos, member list, task
- * counts by status, recent activity tail, and quick links to the
- * board / backlog / roadmap. Pulls from existing /api/projects/{id}/...
+ * Top-to-bottom, the page is a one-screen snapshot:
+ *   1. Live activity strip — the board's <ProjectActivityPanel>, polling
+ *      in-flight runs + the Conductor every 5s (shared with the board).
+ *   2. Recent activity feed — runs / comments / task changes rendered as
+ *      markdown with clickable links: internal app links (e.g. run links
+ *      /forge/runs/<id>) navigate in-app via react-router, external URLs
+ *      (PRs) open in a new tab. Each row also links to its task.
+ *   3. Task counts by status.
+ *   4. Repos + Team & roles (members expand to show an inferred function
+ *      and a short responsibility blurb — UI-only until the backend
+ *      exposes real role data).
+ *   5. Project attachments (drag-and-drop upload, list, download, delete).
+ *
+ * Navigation lives in the left sidebar; the page intentionally does not
+ * duplicate it. Pulls from existing /api/projects/{id}/... + /forge
  * endpoints; no new backend.
  */
 
