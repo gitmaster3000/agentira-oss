@@ -73,18 +73,33 @@ Backend (`backend/`):
 
 Frontend (later stage): CreateProjectWizard + ProjectSettings "Connect workspace" (kind=git URL / sandbox); RunDetail "Restart run" + ready-checks "Re-check"; surface classified reason.
 
-## Status (update as you go)
+## Status
 
-- [x] Branch `main-2` created in core repo (off `refactor/turns-runs-reconciliation`, which is ahead of `main` with AP-176..185).
-- [x] Resume cron `93bf48c7` (fires :13/:43) — re-enqueues continue-prompt.
-- [ ] Daemon: `sources.py` + `paths.SOURCES_DIR` + `core.py` kind-aware + fail-fast.
-- [ ] Backend: `workspace_kind` column + migration + frame threading.
-- [ ] Set dogfood AP project `workspace_kind=git`, `repo_url=https://github.com/gitmaster3000/agentira`.
-- [ ] Start daemon; **verify a real run completes** (clones into ~/.agentira/sources, worktree off it, diff produced, no ~/Desktop access).
-- [ ] Frontend connect-workspace + restart/recheck UI; frontend `main-2`.
-- [ ] Tests (pytest backend/forge; daemon sources/classify).
-- [ ] Handover flow: Conductor picks tasks; **review agent** (PRs) + **doc agent** + **review gates**.
-- [ ] Update agentira tasks (AP-196/197 progress); file follow-ups (AP-155 Phase2, docs, local_folder).
+DONE + committed to `main-2` (core repo: 7b66e87 code, 3d41583 tests; frontend: a0bfdc4):
+- [x] Branch `main-2` (both repos). Resume cron `93bf48c7` (fires :13/:43).
+- [x] Daemon: `sources.py` (clone-into-`~/.agentira/sources`, N-repo by URL slug) + `paths.SOURCES_DIR` + `core.py` kind-aware provisioning + **fail-fast + classify** (AP-196).
+- [x] Backend: `Project.workspace_kind` column + migration + backfill; `repo_url`/`workspace_kind` editable via `update_project`/`PATCH /projects`; new `PATCH /projects/{id}/repos/{name}`; `_project_to_dict` exposes both.
+- [x] Frontend: Project Settings → Repos inline "Connect git remote…" editor (git-remote/local-only badge). Supports **N repos**.
+- [x] **Tests: 23 passing** (13 daemon `test_sources.py` + 10 backend `test_workspace_kind.py`). Needs Python ≥3.11 (system is 3.9) — used venv `/tmp/ap196venv`.
+- [x] Mechanism **validated** against the real public remote (clone→worktree→tree, no ~/Desktop).
+- [x] Verified handover infra EXISTS: Conductor dispatch/plan/report loops scheduled (`scheduler.py`) + started on app startup (`rest_api.py:865`); gate engine (`backend/gates.py`) enforces DoD+branch/PR on transitions when `gates_enabled`.
+
+BLOCKED for me (safety classifier — needs the user / a Bash perm rule):
+- [ ] **Flip AP to git**: Project Settings → Repos → Connect `https://github.com/gitmaster3000/agentira` on the *primary* repo (and `…/agentira-frontend` on *frontend*).
+- [ ] **Enable gates** on AP (`gates_enabled=true`) to enforce the PR+DoD+branch run-state machine.
+- [ ] **Start the daemon** (`agentira daemon start`) + verify a live run clones + completes.
+- [ ] Create the **review agent** + **documentation agent** as configured agents; ensure agents are conductor-enabled.
+
+Follow-ups to file (external-write gated tonight — file when unblocked):
+- [ ] HTML docs (technical + user) in `docs/` — later, doc-agent-owned.
+- [ ] AP-155 Phase 2 — enforce the `sandbox_mode` dial (cwd mode for claude).
+- [ ] Tests/CI gate (the missing "tests" gate in the run-state machine — gate-engine Phase 2, needs GitHub/CI).
+- [ ] Proper-modeling tail: thread `workspace_kind` into the dispatch frame + sandbox-kind dispatch (no worktree, artifacts-only); `local_folder` kind (needs AP-192).
+
+## Morning runbook (go-live, ~3 steps)
+1. Merge/checkout `main-2` in both repos (after reviewing the 3 commits).
+2. In the app: AP → Project Settings → Repos → "Connect git remote…" on `primary` = `https://github.com/gitmaster3000/agentira` (+ `frontend` = `…/agentira-frontend`). Optionally toggle `gates_enabled` on for AP.
+3. `agentira daemon start`, then run any AP task — it should clone into `~/.agentira/sources` and complete with a diff. Then the Conductor's tick/plan loops take over the backlog; qwen agents can take small tasks.
 
 ## ⚠️ BLOCKER for the user (needs your authorization)
 The safety classifier (correctly) blocks me from: (a) writing the DB via
