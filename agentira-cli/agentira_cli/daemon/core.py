@@ -352,6 +352,12 @@ class AgentiraDaemon:
         )
         worktree_source_url = frame.get("worktree_source_url", "") or ""
         worktree_branch = frame.get("worktree_branch", "") or ""
+        # AP-197: workspace kind decides how the worktree source is resolved.
+        # git → clone the remote into ~/.agentira/sources (default when a URL is
+        # present); local_folder → use the on-host source path as-is; sandbox →
+        # no worktree at all. Absent/empty falls back to URL-presence inference
+        # so older backends still get the safe clone path.
+        workspace_kind = (frame.get("workspace_kind", "") or "").strip().lower()
         conventions_md = frame.get("conventions_md", "") or ""
         mcp_config_json = frame.get("mcp_config_json", "") or ""
         mcp_strict = bool(frame.get("mcp_strict", False))
@@ -378,7 +384,12 @@ class AgentiraDaemon:
         # exists (with subdirs); if a worktree source is provided, ensure
         # the worktree at repo_path is created off the source.
         worktree_reason = ""   # folded into materialize_reason below
+        provision_error = ""   # AP-196: set → fail fast, do not spawn a stub
         if repo_path:
+            from agentira_cli.daemon.sources import (
+                ensure_source_clone, classify_provision_error,
+                SourceProvisionError,
+            )
             try:
                 _os.makedirs(repo_path, exist_ok=True)
                 for sub in ("repos", "memory", "notes", ".agentira"):
@@ -391,16 +402,57 @@ class AgentiraDaemon:
                         sub,
                     )
                     _os.makedirs(sub_path, exist_ok=True)
-                if worktree_source_path and worktree_branch:
-                    worktree_reason = await asyncio.to_thread(
-                        _ensure_worktree,
-                        source=worktree_source_path,
-                        target=repo_path,
-                        branch=worktree_branch,
-                    )
-            except Exception as exc:  # noqa: BLE001 — log + continue
-                logger.warning("worktree provisioning failed trace=%s: %s", trace_id, exc)
-                worktree_reason = f"worktree_error:{exc!r}"[:200]
+                if worktree_branch and (worktree_source_url or worktree_source_path):
+                    # AP-197: resolve the worktree SOURCE. For a git workspace
+                    # (remote URL present, not an explicit local_folder) the
+                    # daemon clones the remote into ~/.agentira/sources and
+                    # branches the worktree off that clone — it never touches
+                    # the user's repo_path, so macOS TCC on ~/Desktop can't bite.
+                    effective_source = worktree_source_path
+                    if worktree_source_url and workspace_kind != "local_folder":
+                        try:
+                            effective_source, clone_reason = await asyncio.to_thread(
+                                ensure_source_clone, worktree_source_url,
+                            )
+                            if clone_reason == "cloned":
+                                logger.info(
+                                    "cloned workspace %s -> %s trace=%s",
+                                    worktree_source_url, effective_source, trace_id,
+                                )
+                        except SourceProvisionError as exc:
+                            provision_error = classify_provision_error(
+                                exc, source=worktree_source_url)
+                    if not provision_error:
+                        worktree_reason = await asyncio.to_thread(
+                            _ensure_worktree,
+                            source=effective_source,
+                            target=repo_path,
+                            branch=worktree_branch,
+                        )
+                        # A missing source means no real working tree — fail the
+                        # run instead of dispatching the agent into a stub.
+                        if worktree_reason.startswith("worktree_source_not_found"):
+                            provision_error = (
+                                "the workspace source is not available on the "
+                                f"daemon host: {effective_source}"
+                            )
+                            worktree_reason = ""
+            except Exception as exc:  # noqa: BLE001 — classify + fail fast
+                provision_error = classify_provision_error(
+                    exc, source=(worktree_source_url or repo_path))
+
+        # AP-196: a worktree we needed but couldn't materialize is fatal. Mark
+        # the run failed with the classified cause instead of dispatching the
+        # agent into an empty stub (which used to look frozen, or worse report
+        # "succeeded" with no diff).
+        if provision_error:
+            logger.warning(
+                "provisioning failed trace=%s: %s", trace_id, provision_error)
+            await self._post_setup_failure(
+                trace_id=trace_id, run_id=run_id, agent_id=agent_id,
+                reason=provision_error,
+            )
+            return
         env_extra = frame.get("env_extra", {}) or {}
         if not isinstance(env_extra, dict):
             env_extra = {}

@@ -181,6 +181,9 @@ def _project_to_dict(p: Project) -> dict:
         "name": p.name,
         "description": p.description,
         "repo_path": p.repo_path or "",
+        "repo_url": getattr(p, "repo_url", None) or "",
+        # AP-197: how the daemon provisions the working copy ("" = inferred).
+        "workspace_kind": getattr(p, "workspace_kind", None) or "",
         "conventions_md": p.conventions_md or "",
         # ADR 009 / AP-136: run-crystallization work-signal mode ("" = default).
         "work_signal": getattr(p, "work_signal", None) or "",
@@ -512,7 +515,9 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    work_signal: Optional[str] = None,
                    sandbox_mode: Optional[str] = None,
                    gates_enabled: Optional[bool] = None,
-                   wake_on_comment: Optional[bool] = None) -> dict:
+                   wake_on_comment: Optional[bool] = None,
+                   repo_url: Optional[str] = None,
+                   workspace_kind: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -523,6 +528,15 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.description = description
         if repo_path is not None:
             p.repo_path = repo_path
+        if repo_url is not None:
+            # AP-197: empty string clears the remote.
+            p.repo_url = repo_url.strip() or None
+        if workspace_kind is not None:
+            # AP-197: empty string re-enables inference. Validate against the
+            # known kinds; ignore junk so a bad value can't wedge dispatch.
+            wk = workspace_kind.strip().lower() or None
+            if wk in (None, "git", "sandbox", "local_folder"):
+                p.workspace_kind = wk
         if conventions_md is not None:
             p.conventions_md = conventions_md
         if work_signal is not None:
@@ -1241,6 +1255,41 @@ def list_project_repos(project_id: str) -> list[dict]:
                             ProjectRepo.created_at.asc())
                   .all())
         return [_project_repo_to_dict(r) for r in rows]
+
+
+def update_project_repo(project_id: str, repo_name: str, *,
+                        repo_url: Optional[str] = None,
+                        repo_path: Optional[str] = None,
+                        default_branch: Optional[str] = None) -> dict:
+    """AP-197: update an existing project repo (e.g. connect a remote URL).
+
+    This is the multi-repo equivalent of editing `Project.repo_url` — needed so
+    a project can be pointed at a git remote so the daemon clones it instead of
+    worktree-ing off a (possibly TCC-blocked) local path. Returns the updated
+    row dict, or `{"error": ...}`.
+    """
+    from backend.models import ProjectRepo
+    with _session() as db:
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id,
+                         ProjectRepo.name == repo_name)
+                 .first())
+        if not row:
+            return {"error": f"Repo '{repo_name}' not found on project"}
+        if repo_url is not None:
+            row.repo_url = repo_url.strip() or None
+        if repo_path is not None:
+            rp = repo_path.strip()
+            if rp and not (rp.startswith("/") or rp.startswith("~")):
+                return {"error": (
+                    f"repo_path must be an absolute host path or ~-anchored "
+                    f"(got {rp!r})")}
+            row.repo_path = rp or None
+        if default_branch is not None:
+            row.default_branch = default_branch.strip() or "main"
+        db.commit()
+        db.refresh(row)
+        return _project_repo_to_dict(row)
 
 
 def add_project_repo(project_id: str, *, name: str,

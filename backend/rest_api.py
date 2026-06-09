@@ -66,6 +66,8 @@ class ProjectUpdate(BaseModel):
     description: Optional[str] = None
     repo_path: Optional[str] = None
     repo_url: Optional[str] = None
+    # AP-197: "git" | "sandbox" | "local_folder" ("" = infer from repo fields).
+    workspace_kind: Optional[str] = None
     conventions_md: Optional[str] = None
     # ADR 009 / AP-136: run-crystallization work-signal mode.
     work_signal: Optional[str] = None
@@ -382,6 +384,8 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             name=body.name,
             description=body.description,
             repo_path=body.repo_path,
+            repo_url=body.repo_url,
+            workspace_kind=body.workspace_kind,
             conventions_md=body.conventions_md,
             work_signal=body.work_signal,
             sandbox_mode=body.sandbox_mode,
@@ -513,6 +517,27 @@ def api_add_project_repo(project_id: str, body: ProjectRepoCreate):
     )
     if "error" in res:
         raise HTTPException(400, res["error"])
+    return res
+
+
+class ProjectRepoUpdate(BaseModel):
+    # AP-197: connect/update a repo's remote so the daemon clones it.
+    repo_url: Optional[str] = None
+    repo_path: Optional[str] = None
+    default_branch: Optional[str] = None
+
+
+@projects.patch("/{project_id}/repos/{repo_name}")
+def api_update_project_repo(project_id: str, repo_name: str,
+                            body: ProjectRepoUpdate):
+    res = services.update_project_repo(
+        project_id, repo_name,
+        repo_url=body.repo_url, repo_path=body.repo_path,
+        default_branch=body.default_branch,
+    )
+    if "error" in res:
+        code = 404 if "not found" in res["error"] else 400
+        raise HTTPException(code, res["error"])
     return res
 
 

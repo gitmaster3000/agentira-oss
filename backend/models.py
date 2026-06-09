@@ -233,6 +233,14 @@ class Project(Base):
     # conventions_md: runtime-agnostic markdown materialized to .agentira/CONVENTIONS.md.
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    # AP-197: how the daemon provisions this project's working copy.
+    #   "git"          — clone repo_url into ~/.agentira/sources and worktree
+    #                    off that clone (daemon owns the copy; never touches the
+    #                    user's protected folders like ~/Desktop).
+    #   "sandbox"      — no repo; a plain working dir, deliverables = artifacts.
+    #   "local_folder" — use repo_path on the host as-is (power-user; deferred).
+    # NULL → inferred (repo_url → git, repo_path-only → local_folder, else sandbox).
+    workspace_kind: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
     conventions_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # AP-4: provenance + registry for projects spawned from a template.
     # template_name is the source template's `name` field — also drives
@@ -241,6 +249,8 @@ class Project(Base):
     # template registered (used later by the gate engine).
     template_name: Mapped[str | None] = mapped_column(String(120), nullable=True, default=None)
     ac_check_types_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # CLEANUP(AP-190): remove. No crystallization → no work-signal mode. The
+    # daemon's git facts become observed run metadata, not a per-turn gate.
     # ADR 009 / AP-136: work-signal mode deciding when a standalone chat turn
     # crystallizes into a run — "working_tree" (default; any tracked change or
     # new untracked file), "tracked", or "committed". NULL = workspace default.

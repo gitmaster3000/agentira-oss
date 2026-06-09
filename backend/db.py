@@ -316,6 +316,21 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "sandbox_mode", "VARCHAR(20)")
             # AP-158: per-project gate-engine toggle.
             added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
+            # AP-197: workspace kind (git | sandbox | local_folder). NULL =
+            # inferred at dispatch. Backfilled below from existing repo fields.
+            if _ensure_column(conn, "projects", "workspace_kind", "VARCHAR(20)"):
+                added = True
+                conn.execute(text(
+                    "UPDATE projects SET workspace_kind='git' "
+                    "WHERE workspace_kind IS NULL "
+                    "AND repo_url IS NOT NULL AND repo_url<>''"))
+                conn.execute(text(
+                    "UPDATE projects SET workspace_kind='local_folder' "
+                    "WHERE workspace_kind IS NULL "
+                    "AND repo_path IS NOT NULL AND repo_path<>''"))
+                conn.execute(text(
+                    "UPDATE projects SET workspace_kind='sandbox' "
+                    "WHERE workspace_kind IS NULL"))
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         # AP-154: tasks gain repos_json — JSON list when a task touches more
         # than one of the project's repos. NULL stays back-compat with
