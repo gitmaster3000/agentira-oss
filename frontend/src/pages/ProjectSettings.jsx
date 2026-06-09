@@ -14,6 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import {
     Folder, GitBranch, Save, Plus, Trash2, Star, Settings as SettingsIcon,
+    Link2, Pencil, Check, X,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -250,12 +251,33 @@ function ReposTab({ projectId }) {
         }
     };
 
+    const update = async (name, data) => {
+        setBusy(name);
+        setMsg('');
+        try {
+            await api.updateProjectRepo(projectId, name, data);
+            await reload();
+        } catch (err) {
+            setMsg('Update failed: ' + (err.message || err));
+        } finally {
+            setBusy('');
+        }
+    };
+
     return (
         <div className="space-y-4">
             <p className="text-xs text-text-secondary">
                 Attach git repos so tasks can target the right codebase.
                 The primary repo is the default when a task doesn't specify
                 a <code className="text-text-primary">repo_name</code>.
+            </p>
+            <p className="text-xs text-text-tertiary">
+                Set a <strong className="text-text-secondary">git remote URL</strong> on
+                a repo and the daemon clones it into its own workspace
+                (<code className="text-text-primary">~/.agentira/sources</code>) — it
+                never touches your local folders. This is required for repos under
+                Desktop / Documents / Downloads, which macOS blocks the daemon from
+                reading.
             </p>
 
             {repos.length === 0 ? (
@@ -267,6 +289,7 @@ function ReposTab({ projectId }) {
                     {repos.map((r) => (
                         <RepoRow key={r.id || r.name} repo={r}
                             onRemove={() => remove(r.name)}
+                            onUpdate={(data) => update(r.name, data)}
                             busy={busy === r.name} />
                     ))}
                 </div>
@@ -284,7 +307,18 @@ function ReposTab({ projectId }) {
 }
 
 
-function RepoRow({ repo, onRemove, busy }) {
+function RepoRow({ repo, onRemove, onUpdate, busy }) {
+    const [editing, setEditing] = useState(false);
+    const [url, setUrl] = useState(repo.repo_url || '');
+
+    const commit = () => {
+        const next = url.trim();
+        setEditing(false);
+        if (next === (repo.repo_url || '')) return;   // no-op
+        onUpdate({ repo_url: next });
+    };
+    const cancel = () => { setUrl(repo.repo_url || ''); setEditing(false); };
+
     return (
         <div className="card flex items-center gap-3">
             <Folder className="w-4 h-4 text-text-secondary flex-shrink-0" />
@@ -296,10 +330,39 @@ function RepoRow({ repo, onRemove, busy }) {
                             <Star className="w-3 h-3" /> primary
                         </span>
                     )}
+                    {repo.repo_url ? (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-green-500/15 text-green-500 flex items-center gap-1"
+                            title="Daemon clones this remote into its own workspace">
+                            <Link2 className="w-3 h-3" /> git remote
+                        </span>
+                    ) : (
+                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary"
+                            title="No remote — daemon worktrees off the local path (blocked under Desktop/Documents/Downloads)">
+                            local only
+                        </span>
+                    )}
                 </div>
-                <div className="text-xs text-text-tertiary font-mono truncate">
-                    {repo.repo_path || repo.repo_url}
-                </div>
+                {repo.repo_path && (
+                    <div className="text-xs text-text-tertiary font-mono truncate">{repo.repo_path}</div>
+                )}
+                {/* AP-197: inline-editable git remote URL */}
+                {editing ? (
+                    <div className="flex items-center gap-1 mt-1">
+                        <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
+                            placeholder="https://github.com/org/repo"
+                            className="input text-xs py-1 px-2 flex-1 font-mono" />
+                        <button onClick={commit} className="p-0.5 text-green-500" title="Save"><Check className="w-3.5 h-3.5" /></button>
+                        <button onClick={cancel} className="p-0.5 text-text-tertiary" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                ) : (
+                    <button onClick={() => setEditing(true)}
+                        className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary mt-0.5 font-mono truncate max-w-full"
+                        title="Set the git remote so the daemon clones it">
+                        <Pencil className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{repo.repo_url || 'Connect git remote…'}</span>
+                    </button>
+                )}
                 {repo.default_branch && repo.default_branch !== 'main' && (
                     <div className="text-[10px] text-text-tertiary mt-0.5">
                         default branch: {repo.default_branch}

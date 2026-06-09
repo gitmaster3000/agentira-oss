@@ -93,6 +93,12 @@ export const api = {
         `/projects/${id}/repos/${encodeURIComponent(name)}`,
         { method: 'DELETE' },
     ),
+    // AP-197: connect/update a repo's remote so the daemon clones it into its
+    // own workspace instead of worktree-ing off a local (possibly TCC-blocked) path.
+    updateProjectRepo: (id, name, data) => request(
+        `/projects/${id}/repos/${encodeURIComponent(name)}`,
+        { method: 'PATCH', body: JSON.stringify(data) },
+    ),
 
     // Members
     getProjectMembers: (projectId) => request(`/projects/${projectId}/members`),
