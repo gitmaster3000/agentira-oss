@@ -30,6 +30,12 @@ logger = logging.getLogger("agentira.daemon.executor")
 _BATCH_INTERVAL = 0.5  # seconds between event flushes
 _CRASH_TAIL_EVENTS = 8  # how many trailing stream events to keep for diagnostics
 
+# HTTP gateway (OpenClaw/Ollama) chat-completions timeout. Local models on a
+# laptop can take minutes to produce a full agentic turn, so the old hardcoded
+# 120s tripped legitimate qwen runs as "timed out". Env-overridable for slower
+# hardware / larger models.
+_GATEWAY_TIMEOUT_S = int(os.environ.get("AGENTIRA_GATEWAY_TIMEOUT", "600"))
+
 
 def _derive_allowed_tools(mcp_config_json: Optional[str], provider: str) -> tuple[str, ...]:
     """AP-83 Path A — assemble the explicit tool allowlist for this dispatch.
@@ -425,7 +431,7 @@ async def run_gateway(
         result.session_id = session_key
     try:
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=_GATEWAY_TIMEOUT_S) as resp:
             data = json.loads(resp.read())
         choices = data.get("choices") or []
         content = ""
