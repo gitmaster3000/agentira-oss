@@ -1322,7 +1322,7 @@ def list_run_events(run_id: str, *, actor: str = "system",
         _assert_run_access(db, r, actor)
         q = (db.query(AgentMessage)
                .filter(AgentMessage.run_id == run_id)
-               .order_by(AgentMessage.created_at.asc()))
+               .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc()))
         total = q.count()
         rows = q.offset(offset).limit(limit).all()
         events = []
@@ -1502,7 +1502,19 @@ def list_messages(agent_id: str, *, run_id: str | None = None,
             q = q.filter(AgentMessage.run_id == run_id)
         if scope_key:
             q = q.filter(AgentMessage.scope_key == scope_key)
-        msgs = q.order_by(AgentMessage.created_at.asc()).offset(offset).limit(limit).all()
+        # Return the NEWEST `limit` messages (then re-ascend for display).
+        # Ordering ASC + limit froze long threads on their oldest N: once a
+        # scope passed `limit` messages, new turns landed beyond the window
+        # and never appeared in the chat view (they were only visible in
+        # run-detail, which queries by run_id). offset pages backwards into
+        # history.
+        # id is a secondary, total-order tiebreaker: messages persisted in the
+        # same instant (tool-step bursts share created_at) would otherwise sort
+        # non-deterministically, so offset paging skipped/duplicated rows at
+        # page boundaries — the "non-continuous" scroll in the chat views.
+        msgs = (q.order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+                 .offset(offset).limit(limit).all())
+        msgs.reverse()
         return [_message_to_dict(m) for m in msgs]
 
 
