@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -52,6 +53,23 @@ STALE_RUN_SILENCE_MINUTES = 20
 # Identity of the Conductor agent.
 CONDUCTOR_NAME = "Conductor"
 
+# Prompts are configuration, not code (AP-152/157): every Conductor prompt —
+# the agent system prompt and the per-turn planning/report templates — lives
+# as Markdown under `templates/`, OUTSIDE this module. Code only loads the
+# file and fills in the dynamic facts. From backend/forge/conductor.py the
+# repo-root `templates/` dir is three parents up.
+_TEMPLATES_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
+
+
+def _load_prompt(relpath: str) -> str:
+    """Read a prompt template (Markdown) from `templates/<relpath>`.
+
+    Prompts are config — never inline a prompt string in Python. Raises if
+    the file is missing; the templates ship with the repo, so absence is a
+    packaging bug we want loud, not a silent in-code fallback prompt.
+    """
+    return (_TEMPLATES_DIR / relpath).read_text(encoding="utf-8")
+
 # Last tick result — observability for the UI / status endpoint.
 _LAST_TICK: dict | None = None
 
@@ -69,43 +87,15 @@ CONDUCTOR_DEFAULT_MODEL = "claude-sonnet-4-5"
 
 # The Conductor's role. code + LLM, split deliberately: the scripts
 # (survey/find_free_agents/next_tasks/dispatch — exposed as MCP tools)
-# gather facts and act for free; the LLM is spent only on judgment.
-CONDUCTOR_SYSTEM_PROMPT = """\
-You are the Conductor — the orchestrator for this Agentira workspace.
-Your job: keep task queues moving and runs healthy across every project.
+# gather facts and act for free; the LLM is spent only on judgment. The
+# prompt prose itself is config, loaded from templates/ — never inline here.
+def _conductor_system_prompt() -> str:
+    """The Conductor's default system prompt, loaded from config.
 
-A deterministic queue tick dispatches assigned todo work to free agents
-for free (no tokens, not you). You are invoked for the three jobs that
-need judgment:
-
-QUEUE PLANNING: you are given the unassigned todo tasks and the
-available agents. Assign each task to the best-fit agent in the same
-project (skill fit + load balance) by calling mcp__agentira__update_task
-with the agent's exact name as `assignee`. Only touch the tasks you're
-given. Be terse — just make the update_task calls.
-
-DAILY REPORT: compile the digest, review progress, surface blockers and
-stuck runs, recommend priorities. Output it as a self-contained HTML
-fragment exactly as the prompt specifies — the dashboard renders it as a
-formatted executive report.
-
-PROJECT KICKOFF: when assigned a "Plan this project" task in a new
-project, read the project description and any attachments (list_attachments,
-download_attachment). Pick the tools/tech stack with a brief justification
-for each choice. Register a one-page plan covering architecture, milestones,
-and risks as a real artifact via
-mcp__agentira__register_run_artifact(kind="report", label="Project plan").
-Break the work into 3–8 concrete child tasks via mcp__agentira__create_task,
-each with a clear DoD. Then mcp__agentira__finish_run(outcome="succeeded").
-If the brief is too vague to plan from, finish_run(outcome="needs_input")
-with a specific question — a follow-up comment on this task will resume
-you (you'll see it in the chat).
-
-Rules of economy — you cost tokens, the scripts do not:
-- The facts you need are already in the prompt. Don't re-derive them.
-- Spend reasoning only on judgment: best-fit assignment, what matters
-  most, whether a run is stuck.
-- Be terse. No preamble, no recap."""
+    Seed default only — once a Conductor profile exists the DB/Agent
+    Settings UI is the source of truth (set-if-empty, see AP-152).
+    """
+    return _load_prompt("conductor/system_prompt.md")
 
 
 def get_or_create_conductor() -> dict:
@@ -148,7 +138,7 @@ def get_or_create_conductor() -> dict:
         # agent's prompt from the moment it exists — Agent Settings UI is
         # the source of truth.
         if not prof.system_prompt:
-            prof.system_prompt = CONDUCTOR_SYSTEM_PROMPT
+            prof.system_prompt = _conductor_system_prompt()
         if not prof.model:
             prof.model = CONDUCTOR_DEFAULT_MODEL
         if rt_id and not prof.runtime_id:
@@ -457,63 +447,37 @@ def gather_report_facts() -> dict:
 
 
 def _compose_report_prompt(facts: dict) -> str:
-    """Render the gathered facts into the Conductor's report prompt."""
-    import json as _json
-    lines = ["DAILY REPORT.", ""]
+    """Fill the daily-report template (config) with the gathered facts.
+
+    Code only serialises the facts into rows; all instruction prose —
+    including the HTML structure spec — lives in
+    templates/conductor/daily_report.md (prompts-are-config).
+    """
     projects = facts.get("projects") or []
     if projects:
-        lines.append("## Per-project activity (last 24h)")
-        for p in projects:
-            c = p["counts"]
-            lines.append(
-                f"- {p['project']}: {c.get('done', 0)} done, "
-                f"{c.get('blocked', 0)} blocked, "
-                f"{c.get('needs_input', 0)} needs-input, "
-                f"{c.get('failed', 0)} failed, "
-                f"{c.get('in_flight', 0)} in-flight "
-                f"(${p['stats'].get('cost_usd', 0)})"
-            )
+        proj_rows = "\n".join(
+            f"- {p['project']}: {p['counts'].get('done', 0)} done, "
+            f"{p['counts'].get('blocked', 0)} blocked, "
+            f"{p['counts'].get('needs_input', 0)} needs-input, "
+            f"{p['counts'].get('failed', 0)} failed, "
+            f"{p['counts'].get('in_flight', 0)} in-flight "
+            f"(${p['stats'].get('cost_usd', 0)})"
+            for p in projects
+        )
     else:
-        lines.append("## Per-project activity (last 24h)\n- No run activity.")
+        proj_rows = "- No run activity."
     agents = (facts.get("survey") or {}).get("agents") or []
-    lines.append("")
-    lines.append("## Worker agents")
     if agents:
-        for a in agents:
-            nxt = a.get("next_task")
-            lines.append(
-                f"- {a['name']}: {a['in_flight']}/{a['capacity']} in-flight; "
-                f"next: {nxt['title'] if nxt else 'nothing queued'}"
-            )
+        agent_rows = "\n".join(
+            f"- {a['name']}: {a['in_flight']}/{a['capacity']} in-flight; "
+            f"next: {a['next_task']['title'] if a.get('next_task') else 'nothing queued'}"
+            for a in agents
+        )
     else:
-        lines.append("- No conductor-enabled worker agents.")
-    lines.append("")
-    lines.append(
-        "Write the daily report for the workspace owner as an executive "
-        "briefing. Output a SINGLE self-contained HTML fragment and nothing "
-        "else — no preamble, no markdown, no code fences, no <html>/<head>/"
-        "<body> wrapper. Begin your reply with `<section` and end it with "
-        "`</section>`.\n"
-        "\n"
-        "Structure the report exactly like this:\n"
-        "  <section class=\"daily-report\"> wrapping everything.\n"
-        "  1. An <h1> title and a one-line <p class=\"subtitle\"> with the date.\n"
-        "  2. A <div class=\"kpis\"> row of stat cards — one <div class=\"kpi\"> "
-        "per headline metric (tasks done, blocked, failed, in-flight, total "
-        "cost). Each card: <div class=\"kpi-value\">N</div>"
-        "<div class=\"kpi-label\">…</div>.\n"
-        "  3. <h2>Wins</h2> — what got done overnight, as a <ul>.\n"
-        "  4. <h2>Blocked &amp; needs input</h2> — each item and what unblocks "
-        "it.\n"
-        "  5. <h2>Failing / needs attention</h2>.\n"
-        "  6. <h2>Today's priorities</h2> — an ordered <ol> of 2-3 items.\n"
-        "\n"
-        "Use only these tags: section, div, h1, h2, p, ul, ol, li, strong, "
-        "em, span, table, thead, tbody, tr, th, td. Use the class names above "
-        "so the dashboard can style it. Do NOT add inline styles or scripts. "
-        "Lead with the most important thing; be concise and factual."
-    )
-    return "\n".join(lines)
+        agent_rows = "- No conductor-enabled worker agents."
+    return (_load_prompt("conductor/daily_report.md")
+            .replace("{{PROJECTS}}", proj_rows)
+            .replace("{{AGENTS}}", agent_rows))
 
 
 def run_daily_report() -> dict:
@@ -616,33 +580,25 @@ def gather_planning_facts() -> dict:
 
 
 def _compose_planning_prompt(facts: dict) -> str:
-    lines = ["QUEUE PLANNING.", ""]
-    lines.append("## Agents available for auto-dispatch")
-    for a in facts["agents"]:
-        lines.append(
-            f"- {a['name']} — project {a['project_id']} — "
-            f"{a['in_flight']}/{a['capacity']} in flight"
-        )
-    lines.append("")
-    lines.append("## Unassigned todo tasks (need an owner)")
-    for t in facts["unassigned_tasks"]:
-        lines.append(
-            f"- task_id={t['id']} [{t.get('key') or '?'}] "
-            f"({t.get('priority') or 'medium'}) — {t['title']} "
-            f"— project {t['project_id']}"
-        )
-    lines.append("")
-    lines.append(
-        "Assign each unassigned task to the best-fit agent IN THE SAME "
-        "PROJECT. Balance load — don't pile everything on one agent; "
-        "weigh in_flight vs capacity. For each task you assign, call "
-        "mcp__agentira__update_task with task_id and assignee set to the "
-        "agent's exact name (optionally also set priority). Only touch the "
-        "tasks listed above — do not reassign anything else. If a task has "
-        "no suitable agent in its project, leave it. Be terse; just make "
-        "the update_task calls."
-    )
-    return "\n".join(lines)
+    """Fill the planning-turn template (config) with the gathered facts.
+
+    Code only serialises the facts into rows; all instruction prose lives
+    in templates/conductor/planning_turn.md (prompts-are-config).
+    """
+    agents = "\n".join(
+        f"- {a['name']} — project {a['project_id']} — "
+        f"{a['in_flight']}/{a['capacity']} in flight"
+        for a in facts["agents"]
+    ) or "- (none)"
+    tasks = "\n".join(
+        f"- task_id={t['id']} [{t.get('key') or '?'}] "
+        f"({t.get('priority') or 'medium'}) — {t['title']} "
+        f"— project {t['project_id']}"
+        for t in facts["unassigned_tasks"]
+    ) or "- (none)"
+    return (_load_prompt("conductor/planning_turn.md")
+            .replace("{{AGENTS}}", agents)
+            .replace("{{TASKS}}", tasks))
 
 
 def run_planning_turn() -> dict:
