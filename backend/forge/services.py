@@ -2442,7 +2442,14 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
         "1. **Commit your changes** in the worktree you're in. The Run page's\n"
         "   Changes tab reads from `git diff` — if you didn't commit, the\n"
         "   page shows nothing and the work looks lost.\n"
-        "2. **Register at least one artifact** via\n"
+        "2. **Check off the Definition of Done.** For every DoD item you\n"
+        "   actually completed, call mcp__agentira__update_task with the full\n"
+        "   dod_items list and `checked: true` on the items you finished. The\n"
+        "   board's review gate requires all DoD items checked before the task\n"
+        "   can advance to review — leave unfinished items unchecked and say so\n"
+        "   in your summary. Do NOT check an item you didn't truly complete; a\n"
+        "   reviewer verifies your work next.\n"
+        "3. **Register at least one artifact** via\n"
         "   mcp__agentira__register_run_artifact for the deliverable —\n"
         "   the PR URL (kind=\"pr\"), a generated report (kind=\"report\"),\n"
         "   a deployed preview (kind=\"url\"), or a key file (kind=\"file\").\n"
@@ -2514,6 +2521,19 @@ def prepare_task_run(*, task_id: str, agent_id: str,
             r.worktree_path = worktree_path
             r.worktree_branch = worktree_branch
             r.log_dir = log_dir
+            # Mirror the per-task branch onto the Task row so the run-state
+            # gate (_has_branch_or_pr) and the UI can see it — the run carries
+            # worktree_branch but the gate reads task.branch. Git tasks only;
+            # sandbox tasks have no real branch. Set-if-empty so a human/PR
+            # link isn't clobbered.
+            if task_id and worktree_branch:
+                from backend.models import Task as _Task, Project as _Project
+                task_row = db.get(_Task, task_id)
+                if task_row and not (task_row.branch or "").strip():
+                    proj = (db.get(_Project, task_row.project_id)
+                            if task_row.project_id else None)
+                    if _resolve_workspace_kind(proj) != "sandbox":
+                        task_row.branch = worktree_branch
             db.commit()
             db.refresh(r)
             return _run_to_dict(r)
