@@ -425,6 +425,59 @@ def run_tick() -> dict:
     return _LAST_TICK
 
 
+def tick_agent(agent_id: str) -> dict:
+    """Event-driven scheduling: dispatch THIS agent's next assigned todo task
+    the moment it frees up (terminal run), instead of waiting for the next
+    poll. The agent loop becomes free → pull next → busy → free with no idle
+    gap between ticks; the periodic run_tick stays as the reconciliation
+    safety net (missed events, daemon drops, restarts).
+
+    Same guards as run_tick, scoped to one agent: master switch, conductor-
+    enabled + project-bound profile, capacity (the per-agent counting
+    semaphore: in-flight < max_concurrent_runs), assigned-only picker.
+    Token-free; never raises into the caller."""
+    try:
+        if not _conductor_active():
+            return {"dispatched": False, "reason": "conductor_disabled"}
+        with SessionLocal() as db:
+            agent = db.get(Agent, agent_id)
+            if not agent or not agent.runtime_id:
+                return {"dispatched": False, "reason": "no_agent_or_runtime"}
+            prof = (db.get(Profile, agent.profile_id)
+                    if agent.profile_id else None)
+            if (not prof or not prof.conductor_enabled
+                    or not prof.default_project_id):
+                return {"dispatched": False, "reason": "not_conductor_managed"}
+            cap = max(1, int(prof.max_concurrent_runs or 1))
+            if _agent_in_flight_count(db, agent_id) >= cap:
+                return {"dispatched": False, "reason": "at_capacity"}
+            task = pick_next_unblocked(
+                project_id=prof.default_project_id, agent_id=agent_id, db=db)
+            if not task:
+                return {"dispatched": False, "reason": "no_eligible_task"}
+            task_id = task.id
+            in_progress_id = _in_progress_status_id(db)
+
+        from backend.forge import services
+        result = services.schedule_task_run(task_id=task_id, agent_id=agent_id)
+        if isinstance(result, dict) and result.get("error"):
+            return {"dispatched": False, "reason": "dispatch_error",
+                    "error": result["error"]}
+        # Claim — same as run_tick: in_progress + a Run row each disqualify
+        # the task from ever being auto-picked again.
+        with SessionLocal() as db:
+            if in_progress_id:
+                db.query(Task).filter(Task.id == task_id).update(
+                    {"status_id": in_progress_id})
+                db.commit()
+        logger.info("tick_agent dispatched agent=%s task=%s", agent_id, task_id)
+        return {"dispatched": True, "task": task_id,
+                "run_id": result.get("run_id") if isinstance(result, dict) else None}
+    except Exception as exc:  # noqa: BLE001 — scheduling must not break callers
+        logger.exception("tick_agent failed for %s: %s", agent_id, exc)
+        return {"dispatched": False, "reason": "exception", "error": str(exc)}
+
+
 # ── Daily report — the Conductor's one scheduled LLM turn ────────────────
 #
 # The queue tick (above) is deterministic and token-free — that's by

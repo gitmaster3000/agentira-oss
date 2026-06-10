@@ -290,3 +290,55 @@ def test_run_tick_reports_reconciled():
         result = conductor.run_tick()
     assert "reconciled" in result
     assert len(result["reconciled"]) == 1
+
+
+# ── tick_agent: event-driven "agent freed" scheduling ────────────────────
+
+def test_tick_agent_dispatches_next_assigned_task():
+    agent_id, project_id, task_id = _mk_setup()
+    calls = []
+    def fake_schedule(*, task_id, agent_id):
+        calls.append((task_id, agent_id))
+        return {"run_id": "r1"}
+    with patch.object(forge_services, "schedule_task_run", fake_schedule):
+        out = conductor.tick_agent(agent_id)
+    assert out["dispatched"] is True
+    assert calls == [(task_id, agent_id)]
+    # claimed: task moved to in_progress
+    from backend.models import Task, Status
+    with forge_services._session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "in_progress"
+
+
+def test_tick_agent_respects_capacity():
+    """The per-agent counting semaphore: at cap -> no dispatch."""
+    agent_id, project_id, task_id = _mk_setup(max_concurrent=1)
+    from backend.forge.models import Run, RunStatus
+    with forge_services._session() as db:
+        db.add(Run(agent_id=agent_id, project_id=project_id,
+                   status=RunStatus.RUNNING))
+        db.commit()
+    out = conductor.tick_agent(agent_id)
+    assert out == {"dispatched": False, "reason": "at_capacity"}
+
+
+def test_tick_agent_noop_when_nothing_assigned():
+    agent_id, project_id, _ = _mk_setup(assignee="")
+    out = conductor.tick_agent(agent_id)
+    assert out == {"dispatched": False, "reason": "no_eligible_task"}
+
+
+def test_tick_agent_respects_master_switch():
+    agent_id, *_ = _mk_setup()
+    from backend.models import Profile
+    with forge_services._session() as db:
+        # The Conductor profile's conductor_active is the master switch.
+        prof = db.query(Profile).filter(Profile.name == "Conductor").first()
+        if prof is None:
+            conductor.get_or_create_conductor()
+            prof = db.query(Profile).filter(Profile.name == "Conductor").first()
+        prof.conductor_active = False
+        db.commit()
+    out = conductor.tick_agent(agent_id)
+    assert out == {"dispatched": False, "reason": "conductor_disabled"}

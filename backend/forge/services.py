@@ -3839,6 +3839,16 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
     from backend.forge import msg_queue as _mq
     _mq.flush_next(agent_id, scope_key=scope, run_id=run_id)
 
+    # Event-driven scheduling: this terminal completion just FREED the agent
+    # (its in-flight count dropped below cap). Pull its next assigned task
+    # immediately instead of leaving it idle until the next 60s Conductor
+    # poll — the poll remains the reconciliation safety net. Best-effort.
+    try:
+        from backend.forge import conductor as _conductor
+        _conductor.tick_agent(agent_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tick_agent after completion failed: %s", exc)
+
     # AP-123: tell the daemon to tear down the per-run worktree on the
     # terminal completion path. PAUSED branches return earlier and skip
     # this — they need the worktree intact for resume. Best-effort: the
