@@ -112,6 +112,38 @@ def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
         reason = "worktree_recreated_source_mismatch"
 
     os.makedirs(os.path.dirname(target), exist_ok=True)
+    # AP-236/237: clear any stale worktree that currently holds `branch`
+    # somewhere else. Happens when the same task switches layout (e.g.
+    # single-repo → multi-repo): an earlier run already registered the
+    # branch at a different path, and `git worktree add -B` refuses with
+    # "branch is already used by worktree at <path>". Force-remove the
+    # squatter so the new layout can claim it. The squatter's content is
+    # stale-by-definition; we own these dirs.
+    try:
+        wt_list = subprocess.run(
+            ["git", "-C", source, "worktree", "list", "--porcelain"],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        cur_path = None
+        for line in (wt_list.stdout or "").splitlines():
+            if line.startswith("worktree "):
+                cur_path = line.split(" ", 1)[1].strip()
+            elif line.startswith("branch "):
+                ref = line.split(" ", 1)[1].strip()
+                wanted = ref == f"refs/heads/{branch}"
+                if wanted and cur_path and os.path.normpath(cur_path) != os.path.normpath(target):
+                    logger.info("clearing stale worktree at %s (holds branch %s; new layout claims it)",
+                                cur_path, branch)
+                    subprocess.run(
+                        ["git", "-C", source, "worktree", "remove", "--force", cur_path],
+                        check=False, timeout=60,
+                    )
+                    # The dir itself may linger if `git worktree remove`
+                    # couldn't clean it — nuke any remaining content so the
+                    # new worktree can be added at our target.
+                    shutil.rmtree(cur_path, ignore_errors=True)
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("worktree-list scan failed (%s); continuing", exc)
     # `-B` so re-creating after a worktree prune doesn't trip on the
     # branch already existing.
     subprocess.run(

@@ -2436,6 +2436,19 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
     if dod_text:
         parts.append("\n## Definition of Done\n" + dod_text)
     parts.append("\nWork on this task.")
+    parts.append(
+        "\n## Before you start — check you're in the right repo\n"
+        "Your working directory is set up for this task. For multi-repo "
+        "projects, sibling subdirs (e.g. `primary/`, `frontend/`) each hold "
+        "a different repo of this project — work in the one(s) your task "
+        "actually concerns. If you're pinned to a single repo and the task "
+        "clearly belongs in a different one (e.g. you're in the backend but "
+        "the task is a UI bug), DO NOT wander or guess: call finish_run "
+        "with outcome=\"needs_input\" and a summary naming the correct repo "
+        "(e.g. \"this is a frontend task — please re-route to the `frontend` "
+        "repo\"). The Conductor will reassign and re-dispatch you to the "
+        "right repo."
+    )
     if extra_context:
         parts.append("\n## Follow-up from the user\n" + extra_context)
     parts.append(

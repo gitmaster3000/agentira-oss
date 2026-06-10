@@ -68,3 +68,27 @@ def test_resolve_workspace_kind_multirepo_smoke(tmp_path):
     class P:
         workspace_kind = "git"; repo_url = "https://x"; repo_path = None
     assert _resolve_workspace_kind(P()) == "git"
+
+
+def test_ensure_worktree_clears_stale_branch_holder(two_remotes, tmp_path):
+    """AP-237: if `branch` is registered at a STALE path, _ensure_worktree
+    force-removes it before claiming the branch at the new target. Models
+    a single-repo→multi-repo layout switch on the same task."""
+    from agentira_cli.daemon.core import _ensure_worktree
+    name, url = two_remotes[0]
+    branch = "agent/x/task/abc"
+    # First add at the "single-repo" path (the task root, no subdir).
+    legacy_path = tmp_path / "agents" / "x" / "task-abc"
+    legacy_path.mkdir(parents=True)
+    clone, _ = sources.ensure_source_clone(url)
+    _ensure_worktree(source=clone, target=str(legacy_path), branch=branch)
+    assert (legacy_path / ".git").exists()
+    # Now try to add the SAME branch at a multi-repo subdir target — without
+    # the stale-clear logic this would: fatal: 'agent/x/task/abc' is already
+    # used by worktree at ... With it, the squatter is removed and the new
+    # worktree claims the branch.
+    new_target = legacy_path / "primary"
+    _ensure_worktree(source=clone, target=str(new_target), branch=branch)
+    assert (new_target / ".git").exists()
+    # And the legacy path is gone.
+    assert not (legacy_path / ".git").exists() or legacy_path == new_target.parent
