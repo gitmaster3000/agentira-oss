@@ -2141,6 +2141,10 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      worktree_source_url: str = "",
                      worktree_branch: str = "",
                      workspace_kind: str = "",
+                     # AP-236: multi-repo. When non-empty, the daemon clones
+                     # each entry and worktree-adds it into <task_dir>/<name>/
+                     # instead of the single-source path. Single-repo passes [].
+                     worktree_repos: list[dict] | None = None,
                      log_dir: str = "") -> dict:
     """Single rail for invoking an agent.
 
@@ -2388,6 +2392,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
         workspace_kind=workspace_kind,
+        worktree_repos=(worktree_repos or []),
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=mcp_strict,
@@ -2723,11 +2728,29 @@ def dispatch_pending_run(*, run_id: str,
             else:
                 worktree_source_path = project.repo_path or ""
                 worktree_source_url = (getattr(project, "repo_url", None) or "")
+            # AP-236: when a multi-repo project leaves the task's repo_name
+            # unset, give the agent ALL the project's repos in its worktree
+            # (no routing, no wandering). Each repo materializes as a
+            # subdir <task_dir>/<repo_name>/ — its own git worktree on the
+            # task's branch. Single-repo projects (or tasks that pin one
+            # via repo_name) keep the legacy single-worktree layout.
+            worktree_repos: list[dict] = []
+            if not task_repo_name:
+                all_repos = _core_services.list_project_repos(project.id)
+                git_repos = [r for r in all_repos if (r.get("repo_url") or "").strip()]
+                if len(git_repos) > 1:
+                    for r in git_repos:
+                        worktree_repos.append({
+                            "name": r.get("name") or "repo",
+                            "source_url": r["repo_url"],
+                            "branch": worktree_branch,
+                        })
         else:
             repo_path = ensure_agent_home_dir(agent)            # template
             worktree_source_path = ""
             worktree_source_url = ""
             worktree_branch = ""
+            worktree_repos = []
 
         # AP-202: thread the resolved workspace kind so the daemon knows
         # git-vs-sandbox authoritatively (no URL-presence guessing). A sandbox
@@ -2801,6 +2824,7 @@ def dispatch_pending_run(*, run_id: str,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
         workspace_kind=workspace_kind,
+        worktree_repos=(worktree_repos or []),
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=agent_mcp_strict,
@@ -4182,6 +4206,7 @@ def send_runtime_message(
                 worktree_source_url=worktree_source_url,
                 worktree_branch=worktree_branch,
                 workspace_kind=workspace_kind,
+                worktree_repos=[],
                 conventions_md=conventions_md,
                 mcp_config_json=mcp_config_json,
                 mcp_strict=mcp_strict,

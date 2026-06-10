@@ -401,6 +401,16 @@ class AgentiraDaemon:
         # record a phantom branch, regardless of what the backend sent.
         if workspace_kind == "sandbox":
             worktree_source_path = worktree_source_url = worktree_branch = ""
+        # AP-236: multi-repo. When the backend hands the daemon a list of repos
+        # (project has >1 repo and the task didn't pin one), clone each and
+        # worktree-add it as a subdir under repo_path so the agent sees ALL the
+        # project's code side-by-side. Single-repo runs send [] and the
+        # legacy path below runs unchanged.
+        worktree_repos_frame = frame.get("worktree_repos") or []
+        if not isinstance(worktree_repos_frame, list):
+            worktree_repos_frame = []
+        if workspace_kind == "sandbox":
+            worktree_repos_frame = []
         conventions_md = frame.get("conventions_md", "") or ""
         mcp_config_json = frame.get("mcp_config_json", "") or ""
         mcp_strict = bool(frame.get("mcp_strict", False))
@@ -445,7 +455,46 @@ class AgentiraDaemon:
                         sub,
                     )
                     _os.makedirs(sub_path, exist_ok=True)
-                if worktree_branch and (worktree_source_url or worktree_source_path):
+                # AP-236 multi-repo: clone each repo and worktree-add it as a
+                # subdir of repo_path. The agent's cwd stays repo_path; it sees
+                # primary/, frontend/, etc. side-by-side. We do this FIRST and
+                # then fall through (the legacy single-repo block won't fire
+                # because we'll have provisioned everything we need).
+                if worktree_repos_frame:
+                    for r in worktree_repos_frame:
+                        if not isinstance(r, dict):
+                            continue
+                        name = (r.get("name") or "").strip() or "repo"
+                        url = (r.get("source_url") or "").strip()
+                        branch = (r.get("branch") or worktree_branch or "").strip()
+                        if not url or not branch:
+                            continue
+                        target = _os.path.join(repo_path, name)
+                        try:
+                            clone, clone_reason = await asyncio.to_thread(
+                                ensure_source_clone, url)
+                            if clone_reason == "cloned":
+                                logger.info(
+                                    "cloned workspace %s -> %s (multi-repo) trace=%s",
+                                    url, clone, trace_id)
+                            reason = await asyncio.to_thread(
+                                _ensure_worktree,
+                                source=clone, target=target, branch=branch,
+                            )
+                            if reason.startswith("worktree_source_not_found"):
+                                provision_error = (
+                                    "the workspace source is not available on the "
+                                    f"daemon host: {url}")
+                                break
+                        except SourceProvisionError as exc:
+                            provision_error = classify_provision_error(
+                                exc, source=url)
+                            break
+                    # Set a non-empty marker so single-repo block below skips.
+                    if not provision_error and not worktree_reason:
+                        worktree_reason = (
+                            f"multi-repo ({len(worktree_repos_frame)} repos)")
+                elif worktree_branch and (worktree_source_url or worktree_source_path):
                     # AP-197: resolve the worktree SOURCE. For a git workspace
                     # (remote URL present, not an explicit local_folder) the
                     # daemon clones the remote into ~/.agentira/sources and
