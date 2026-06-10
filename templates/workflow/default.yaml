@@ -52,9 +52,18 @@ columns:
         target_branch: main
         push: true
   - name: done
+    # Slice 3: a task arriving in done (branch merged) gets the documentation
+    # role dispatched on it — docs are written AFTER review passes, about what
+    # actually shipped. Skipped silently when the project has no doc agent.
+    on_enter:
+      dispatch_role: documentation
 
 roles:
   reviewer:
     match: ["review", "senior", "lead", "architect"]
     exclude_previous_assignee: true
+    fallback: none
+  documentation:
+    match: ["doc", "documentation", "writer"]
+    exclude_previous_assignee: false
     fallback: none

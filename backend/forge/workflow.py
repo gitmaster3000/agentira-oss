@@ -70,9 +70,16 @@ class OnSuccess(BaseModel):
     integrate: Optional[IntegrateSpec] = None
 
 
+class OnEnter(BaseModel):
+    """What happens when a task ARRIVES in a column via the driver (slice 3:
+    done -> dispatch the documentation role on the freshly merged task)."""
+    dispatch_role: Optional[str] = None
+
+
 class ColumnSpec(BaseModel):
     name: str
     on_success: Optional[OnSuccess] = None
+    on_enter: Optional[OnEnter] = None
 
     @validator("name")
     def name_not_empty(cls, v):  # noqa: N805
@@ -403,6 +410,34 @@ def complete_integration(*, task_id: str, run_id: str | None,
                     f"and pushed. Task advanced to **{target}**."),
         ))
         db.commit()
-        logger.info("workflow: %s integrated, advanced %s->%s",
-                    task.key or task.id, current, target)
-        return {"ok": True, "advanced": True, "to": target}
+        task_id_, task_key = task.id, (task.key or task.id)
+        project_id_ = task.project_id
+
+        # Slice 3: the target column's on_enter may dispatch a follow-up role
+        # — done dispatches `documentation` so docs are written AFTER review,
+        # about what actually merged. Skipped silently when the project has
+        # no matching agent (fallback: none).
+        doc_agent_id = doc_agent_name = None
+        target_col = flow.column(target)
+        enter = target_col.on_enter if target_col else None
+        if enter and enter.dispatch_role:
+            role = flow.roles.get(enter.dispatch_role)
+            if role is not None:
+                a = pick_role_agent(db, project_id=project_id_, role=role,
+                                    previous_agent_id=None)
+                if a is not None:
+                    doc_agent_id, doc_agent_name = a.id, a.name
+
+    result = {"ok": True, "advanced": True, "to": target}
+    if doc_agent_id:
+        from backend.forge import services
+        d = services.schedule_task_run(task_id=task_id_, agent_id=doc_agent_id)
+        if isinstance(d, dict) and d.get("error"):
+            logger.warning("workflow: docs dispatch failed %s -> %s: %s",
+                           task_key, doc_agent_name, d["error"])
+        else:
+            result["docs_run_id"] = d.get("run_id") if isinstance(d, dict) else None
+            result["docs_agent"] = doc_agent_name
+    logger.info("workflow: %s integrated, advanced %s->%s docs=%s",
+                task_key, current, target, doc_agent_name or "-")
+    return result

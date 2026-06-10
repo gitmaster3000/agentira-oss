@@ -268,3 +268,31 @@ def test_complete_integration_failure_stays_with_reason(db_session):
         from backend.models import Activity
         acts = db.query(Activity).filter(Activity.task_id == task_id).all()
         assert any("merge_conflict" in (a.detail or "") for a in acts)
+
+
+# ── Slice 3: documentation dispatched on arrival in done ─────────────────
+
+def test_integration_ok_dispatches_documentation_role(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        doc_id = _mk_agent(db, "Documentation Expert")
+        _bind(db, doc_id, pid)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "docs1"}) as mock_dispatch:
+        out = workflow.complete_integration(task_id=task_id, run_id=run_id,
+                                            ok=True, reason="merged")
+    assert out["advanced"] is True and out["to"] == "done"
+    assert out.get("docs_agent") == "Documentation Expert"
+    assert out.get("docs_run_id") == "docs1"
+    mock_dispatch.assert_called_once()
+
+
+def test_integration_ok_without_doc_agent_skips_docs(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    out = workflow.complete_integration(task_id=task_id, run_id=run_id,
+                                        ok=True, reason="merged")
+    assert out["advanced"] is True
+    assert "docs_agent" not in out          # silently skipped, task still done
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "done"
