@@ -205,15 +205,25 @@ def _in_progress_status_id(db) -> str | None:
     return row.id if row else None
 
 
+# Lower rank = dispatched first. Unknown/missing priority sorts as medium.
+_PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
+
 def pick_next_unblocked(*, project_id: str, agent_id: str, db=None) -> "Task | None":
-    """Return the next FRESH todo task for `agent_id` in `project_id`.
+    """Return the next FRESH todo task ASSIGNED to `agent_id` in `project_id`.
 
-    Eligible: status == 'todo', assignee is this agent or unassigned,
-    AND the task has NO run yet. The no-run rule is the runaway guard —
-    a task is auto-picked at most once; after that it has a run and is
-    permanently ineligible for auto-pickup.
+    Eligible: status == 'todo', assignee == this agent (exact name), AND the
+    task has NO run yet. The no-run rule is the runaway guard — a task is
+    auto-picked at most once; after that it has a run and is permanently
+    ineligible for auto-pickup.
 
-    FIFO by created_at. Caller owns the session if one is passed.
+    Assigned-only is deliberate (the "intelligent dispatch" contract): the LLM
+    planning turn owns *who* gets *what* via `update_task(assignee=…)`; this
+    deterministic tick only dispatches what the planner already assigned. It no
+    longer FIFO-grabs unassigned tasks — that front-ran the planner's judgment.
+
+    Ordered by priority (critical→low) then created_at, so an agent's highest-
+    priority assigned work goes first. Caller owns the session if one is passed.
     """
     own_session = db is None
     if own_session:
@@ -227,14 +237,22 @@ def pick_next_unblocked(*, project_id: str, agent_id: str, db=None) -> "Task | N
             return None
         # Tasks that already have a run — never auto-pick these again.
         tasks_with_runs = select(Run.task_id).where(Run.task_id.isnot(None))
-        q = (db.query(Task)
-               .filter(Task.project_id == project_id,
-                       Task.status_id == todo_id,
-                       Task.id.notin_(tasks_with_runs))
-               .filter((Task.assignee == agent.name) | (Task.assignee == "")
-                       | (Task.assignee.is_(None)))
-               .order_by(Task.created_at.asc()))
-        return q.first()
+        rows = (db.query(Task)
+                  .filter(Task.project_id == project_id,
+                          Task.status_id == todo_id,
+                          Task.id.notin_(tasks_with_runs),
+                          Task.assignee == agent.name)
+                  .order_by(Task.created_at.asc())
+                  .all())
+        if not rows:
+            return None
+        # Stable sort by priority; created_at order is preserved within a tier.
+        # Sorted in Python to stay agnostic of how the priority enum is stored.
+        def _rank(t):
+            p = t.priority.value if hasattr(t.priority, "value") else str(t.priority)
+            return _PRIORITY_RANK.get(p, 2)
+        rows.sort(key=_rank)
+        return rows[0]
     finally:
         if own_session:
             db.close()
@@ -280,6 +298,7 @@ def survey_workspace() -> dict:
                 "project_id": prof.default_project_id,
                 "in_flight": inflight, "capacity": cap,
                 "next_task": nxt,
+                "specialty": _agent_specialty(prof),
             })
     return {"agents": agents_view}
 
@@ -538,9 +557,22 @@ def get_last_plan() -> dict | None:
     return _LAST_PLAN
 
 
+def _agent_specialty(prof) -> str:
+    """A one-line specialty hint so the planner can skill-match. Prefer the
+    explicit personality; else the first non-empty line of the system prompt.
+    Capped so the planning facts stay token-cheap."""
+    txt = (getattr(prof, "personality", "") or "").strip()
+    if not txt:
+        sp = (getattr(prof, "system_prompt", "") or "").strip()
+        txt = next((ln.strip() for ln in sp.splitlines() if ln.strip()), "")
+    return txt[:200]
+
+
 def gather_planning_facts() -> dict:
     """Token-free snapshot for the planning turn: the conductor-enabled
-    agents and the UNASSIGNED, un-run todo tasks in their projects."""
+    agents (with specialty/model, so the planner can skill-match) and the
+    UNASSIGNED, un-run todo tasks (with description/priority) in their
+    projects."""
     with SessionLocal() as db:
         todo_id = _todo_status_id(db)
         profiles = (db.query(Profile)
@@ -558,6 +590,8 @@ def gather_planning_facts() -> dict:
                 "project_id": prof.default_project_id,
                 "in_flight": _agent_in_flight_count(db, a.id),
                 "capacity": max(1, int(prof.max_concurrent_runs or 1)),
+                "specialty": _agent_specialty(prof),
+                "model": prof.model or "",
             })
             project_ids.add(prof.default_project_id)
 
@@ -574,7 +608,10 @@ def gather_planning_facts() -> dict:
             for t in rows:
                 tasks.append({
                     "id": t.id, "key": t.key, "title": t.title,
-                    "project_id": t.project_id, "priority": t.priority,
+                    "project_id": t.project_id,
+                    "priority": t.priority.value if hasattr(t.priority, "value")
+                                else (t.priority or "medium"),
+                    "description": (t.description or "")[:300],
                 })
     return {"agents": agents, "unassigned_tasks": tasks}
 
@@ -586,14 +623,16 @@ def _compose_planning_prompt(facts: dict) -> str:
     in templates/conductor/planning_turn.md (prompts-are-config).
     """
     agents = "\n".join(
-        f"- {a['name']} — project {a['project_id']} — "
+        f"- {a['name']} ({a.get('model') or 'model?'}) — project {a['project_id']} — "
         f"{a['in_flight']}/{a['capacity']} in flight"
+        + (f"\n    specialty: {a['specialty']}" if a.get("specialty") else "")
         for a in facts["agents"]
     ) or "- (none)"
     tasks = "\n".join(
         f"- task_id={t['id']} [{t.get('key') or '?'}] "
         f"({t.get('priority') or 'medium'}) — {t['title']} "
         f"— project {t['project_id']}"
+        + (f"\n    {t['description']}" if t.get("description") else "")
         for t in facts["unassigned_tasks"]
     ) or "- (none)"
     return (_load_prompt("conductor/planning_turn.md")
