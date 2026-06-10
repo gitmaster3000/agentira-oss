@@ -23,6 +23,11 @@ from agentira_cli.transport.rest import AgentiraClient
 
 logger = logging.getLogger("agentira.daemon")
 
+# Max concurrent run executions on this daemon. The old hardcoded 3 capped the
+# whole fleet — 5 agents could never run at once. Env-overridable for bigger
+# machines / multi-task (one agent running several runs). Floor of 1.
+_MAX_CONCURRENT_RUNS = max(1, int(os.environ.get("AGENTIRA_MAX_CONCURRENT_RUNS", "8")))
+
 
 def _git_common_dir(path: str) -> "str | None":
     """Resolve the main `.git` dir that owns `path` (a repo or a worktree).
@@ -132,7 +137,7 @@ class AgentiraDaemon:
         self._running = False
         self._wake_event = threading.Event()
         self._task_queue: queue.Queue = queue.Queue()
-        self._active = threading.Semaphore(3)
+        self._active = threading.Semaphore(_MAX_CONCURRENT_RUNS)
         self.client = AgentiraClient(base_url=config.api_url, api_key=config.api_key)
         self._daemon_id = _load_or_create_daemon_id()
         self._registered: list[dict] = []
