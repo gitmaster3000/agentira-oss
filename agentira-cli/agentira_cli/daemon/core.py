@@ -363,6 +363,11 @@ class AgentiraDaemon:
         # no worktree at all. Absent/empty falls back to URL-presence inference
         # so older backends still get the safe clone path.
         workspace_kind = (frame.get("workspace_kind", "") or "").strip().lower()
+        # AP-202: sandbox = scratch workdir, never a git worktree. Blank the
+        # source/branch defensively so a stray field can't trigger a clone or
+        # record a phantom branch, regardless of what the backend sent.
+        if workspace_kind == "sandbox":
+            worktree_source_path = worktree_source_url = worktree_branch = ""
         conventions_md = frame.get("conventions_md", "") or ""
         mcp_config_json = frame.get("mcp_config_json", "") or ""
         mcp_strict = bool(frame.get("mcp_strict", False))

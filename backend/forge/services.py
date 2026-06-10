@@ -2106,6 +2106,26 @@ def sync_openclaw_agents() -> list[dict]:
         return [_agent_to_dict(a) for a in forge_agents]
 
 
+def _resolve_workspace_kind(project) -> str:
+    """Resolve a project's workspace kind: git | sandbox | local_folder.
+
+    The explicit `workspace_kind` column wins; otherwise infer from what the
+    project carries (repo_url → git, repo_path only → local_folder, neither →
+    sandbox), matching the db.py backfill. Threaded into the dispatch frame so
+    the daemon doesn't have to guess git-vs-sandbox from URL presence.
+    """
+    if project is None:
+        return "sandbox"
+    kind = (getattr(project, "workspace_kind", None) or "").strip().lower()
+    if kind in ("git", "sandbox", "local_folder"):
+        return kind
+    if getattr(project, "repo_url", None):
+        return "git"
+    if getattr(project, "repo_path", None):
+        return "local_folder"
+    return "sandbox"
+
+
 def dispatch_trigger(agent_id: str, prompt: str, *,
                      run_id: str | None = None, kind: str = "chat",
                      repo_path: str = "", conventions_md: str = "",
@@ -2120,6 +2140,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      worktree_source_path: str = "",
                      worktree_source_url: str = "",
                      worktree_branch: str = "",
+                     workspace_kind: str = "",
                      log_dir: str = "") -> dict:
     """Single rail for invoking an agent.
 
@@ -2366,6 +2387,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         worktree_source_path=worktree_source_path,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
+        workspace_kind=workspace_kind,
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=mcp_strict,
@@ -2687,6 +2709,16 @@ def dispatch_pending_run(*, run_id: str,
             worktree_source_url = ""
             worktree_branch = ""
 
+        # AP-202: thread the resolved workspace kind so the daemon knows
+        # git-vs-sandbox authoritatively (no URL-presence guessing). A sandbox
+        # run uses a scratch workdir, never a git worktree — blank the worktree
+        # fields so neither the daemon nor meta.json records a phantom branch.
+        workspace_kind = _resolve_workspace_kind(project)
+        if workspace_kind == "sandbox":
+            worktree_source_path = ""
+            worktree_source_url = ""
+            worktree_branch = ""
+
         # Agent toolkit — list of opt-in MCP server names.
         agent_mcp_servers: list[str] = []
         if agent.mcp_servers:
@@ -2748,6 +2780,7 @@ def dispatch_pending_run(*, run_id: str,
         worktree_source_path=worktree_source_path,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
+        workspace_kind=workspace_kind,
         conventions_md=conventions_md,
         mcp_config_json=mcp_config_json,
         mcp_strict=agent_mcp_strict,
@@ -4013,6 +4046,14 @@ def send_runtime_message(
                 worktree_source_url = ""
                 worktree_branch = ""
 
+            # AP-202: authoritative workspace kind in the frame; sandbox chats
+            # never get a git worktree.
+            workspace_kind = _resolve_workspace_kind(proj)
+            if workspace_kind == "sandbox":
+                worktree_source_path = ""
+                worktree_source_url = ""
+                worktree_branch = ""
+
             # Bake the AGENT's own api_key into the agentira MCP entry so
             # tool calls authenticate as the agent (visible in audit).
             home_path_for_memory = (
@@ -4096,6 +4137,7 @@ def send_runtime_message(
                 worktree_source_path=worktree_source_path,
                 worktree_source_url=worktree_source_url,
                 worktree_branch=worktree_branch,
+                workspace_kind=workspace_kind,
                 conventions_md=conventions_md,
                 mcp_config_json=mcp_config_json,
                 mcp_strict=mcp_strict,
