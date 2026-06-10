@@ -1,0 +1,53 @@
+# Default project workflow — SYSTEM config (ships with the product).
+#
+# Parsed with yaml.safe_load + a Pydantic schema (backend/forge/workflow.py).
+# The pipeline here (columns + on_success semantics) is system-owned and NOT
+# customer-editable: customers can view it, and override only the `roles`
+# section per project via Project.workflow_roles_json (who reviews, exclusion,
+# fallback) — they cannot rewire the flow itself.
+#
+# Semantics, interpreted by backend/forge/workflow.py (a Conductor helper —
+# token-free script, same code+LLM split as the queue tick):
+#
+#   columns:        the board columns in pipeline order.
+#   on_success:     what the driver does when a task's run finishes
+#                   `succeeded` while the task sits in that column:
+#                     advance_to:    move the task to this column (the move is
+#                                    still gate-checked via backend/gates.py —
+#                                    failing evidence blocks the advance).
+#                     assign_role:   pick the new assignee by role (see roles).
+#                     dispatch:      true → dispatch the new assignee's run
+#                                    immediately (the Conductor tick only
+#                                    dispatches `todo`, so hand-offs dispatch
+#                                    directly).
+#   roles:          how a role name maps to an agent at runtime (the ONLY
+#                   customer-overridable section):
+#                     match:   case-insensitive substrings matched against
+#                              agent names (first hit wins).
+#                     exclude_previous_assignee: true → the picked agent must
+#                              differ from the agent whose run just finished
+#                              (e.g. reviewer != implementer).
+#                     fallback: any | none — `any` picks the least-loaded
+#                              eligible agent when no name matches; `none`
+#                              leaves the task un-advanced (safer for review).
+
+columns:
+  - name: backlog
+  - name: todo
+  - name: in_progress
+    on_success:
+      advance_to: review
+      assign_role: reviewer
+      dispatch: true
+  - name: review
+    on_success:
+      advance_to: done
+      assign_role: null        # done is terminal for now; docs step = next slice
+      dispatch: false
+  - name: done
+
+roles:
+  reviewer:
+    match: ["review", "senior", "lead", "architect"]
+    exclude_previous_assignee: true
+    fallback: none

@@ -219,6 +219,10 @@ def _project_to_dict(p: Project) -> dict:
         # AP-184: when on, ANY comment wakes the assigned agent (legacy). Off
         # (default) = only @mention wakes; a plain comment is recorded as context.
         "wake_on_comment": bool(getattr(p, "wake_on_comment", False)),
+        # Workflow driver opt-in + the restricted customer override (role->agent
+        # mapping only; the flow itself is system config, view-only).
+        "workflow_enabled": bool(getattr(p, "workflow_enabled", False)),
+        "workflow_roles_json": getattr(p, "workflow_roles_json", None) or "",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -542,7 +546,9 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    gates_enabled: Optional[bool] = None,
                    wake_on_comment: Optional[bool] = None,
                    repo_url: Optional[str] = None,
-                   workspace_kind: Optional[str] = None) -> dict:
+                   workspace_kind: Optional[str] = None,
+                   workflow_enabled: Optional[bool] = None,
+                   workflow_roles_json: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -579,6 +585,25 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.gates_enabled = bool(gates_enabled)
         if wake_on_comment is not None:
             p.wake_on_comment = bool(wake_on_comment)
+        if workflow_enabled is not None:
+            p.workflow_enabled = bool(workflow_enabled)
+        if workflow_roles_json is not None:
+            # The restricted customer surface: role->agent mapping overrides
+            # only. Empty string clears. Validate via the workflow schema —
+            # reject junk so a bad override can't be persisted.
+            raw = workflow_roles_json.strip() or None
+            if raw is not None:
+                import json as _json
+                from backend.forge.workflow import RoleSpec
+                try:
+                    data = _json.loads(raw)
+                    if not isinstance(data, dict):
+                        raise ValueError("must be a JSON object")
+                    for role_name, spec in data.items():
+                        RoleSpec(**spec)  # validation only
+                except Exception as exc:
+                    raise ValueError(f"invalid workflow_roles_json: {exc}")
+            p.workflow_roles_json = raw
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)

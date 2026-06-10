@@ -54,8 +54,14 @@ def _mk_runtime(db) -> str:
 
 
 def _mk_setup(*, conductor_enabled: bool = True,
-              max_concurrent: int = 1) -> tuple[str, str, str]:
-    """Bootstrap one agent + project + todo task. Returns (agent_id, project_id, task_id)."""
+              max_concurrent: int = 1,
+              assignee: str = "bot1") -> tuple[str, str, str]:
+    """Bootstrap one agent + project + todo task. Returns (agent_id, project_id, task_id).
+
+    The task defaults to ASSIGNED to the agent — AP-203 made the tick
+    assigned-only (the LLM planner owns who gets what; the deterministic tick
+    only dispatches what was assigned). Pass assignee="" to model the
+    pre-planning state."""
     bot = core_services.create_service_account("bot1")
     proj = core_services.create_project("P1")
     from backend.models import Task, Status, Profile
@@ -73,19 +79,29 @@ def _mk_setup(*, conductor_enabled: bool = True,
         todo_status = db.query(Status).filter(Status.name == "todo").first()
         t = Task(id=uuid.uuid4().hex, project_id=proj["id"],
                  key="P1-1", title="Task 1", description="",
-                 status_id=todo_status.id, assignee="")
+                 status_id=todo_status.id, assignee=assignee)
         db.add(t)
         db.commit()
         return a.id, proj["id"], t.id
 
 
-def test_pick_next_returns_unassigned_todo():
+def test_pick_next_returns_assigned_todo():
     agent_id, project_id, task_id = _mk_setup()
     chosen = conductor.pick_next_unblocked(
         project_id=project_id, agent_id=agent_id,
     )
     assert chosen is not None
     assert chosen.id == task_id
+
+
+def test_pick_next_ignores_unassigned_todo():
+    """AP-203: the tick no longer FIFO-grabs unassigned tasks — they wait for
+    the LLM planning turn to assign an owner."""
+    agent_id, project_id, _ = _mk_setup(assignee="")
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is None
 
 
 def test_pick_next_returns_none_when_no_todo_exists():

@@ -331,6 +331,11 @@ def run_migrations():
                 conn.execute(text(
                     "UPDATE projects SET workspace_kind='sandbox' "
                     "WHERE workspace_kind IS NULL"))
+            # Workflow driver: per-project opt-in + the restricted customer
+            # override (role->agent mapping only; the flow is system config).
+            added |= _ensure_column(conn, "projects", "workflow_enabled",
+                                    "BOOLEAN DEFAULT 0 NOT NULL")
+            added |= _ensure_column(conn, "projects", "workflow_roles_json", "TEXT")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         # AP-154: tasks gain repos_json — JSON list when a task touches more
         # than one of the project's repos. NULL stays back-compat with

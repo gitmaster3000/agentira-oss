@@ -79,6 +79,10 @@ class ProjectUpdate(BaseModel):
     # AP-184: when on, any comment wakes the assigned agent (legacy). Off
     # (default) = only @mention wakes; a plain comment is recorded as context.
     wake_on_comment: Optional[bool] = None
+    # Workflow driver opt-in + the restricted role->agent override (the flow
+    # itself is system config; see templates/workflow/default.yaml).
+    workflow_enabled: Optional[bool] = None
+    workflow_roles_json: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -391,9 +395,31 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             sandbox_mode=body.sandbox_mode,
             gates_enabled=body.gates_enabled,
             wake_on_comment=body.wake_on_comment,
+            workflow_enabled=body.workflow_enabled,
+            workflow_roles_json=body.workflow_roles_json,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+@projects.get("/{project_id}/workflow")
+def api_get_project_workflow(project_id: str):
+    """The project's EFFECTIVE workflow — system flow + its role overrides.
+    Read-only transparency surface: customers see exactly how tasks will move
+    and who picks up each column; they edit only roles (via PATCH project's
+    workflow_roles_json), never the flow."""
+    from backend.db import SessionLocal
+    from backend.models import Project
+    from backend.forge import workflow as _workflow
+    with SessionLocal() as db:
+        p = db.get(Project, project_id)
+        if not p:
+            raise HTTPException(404, "Project not found")
+        flow = _workflow.effective_workflow(p)
+        return {
+            "workflow_enabled": bool(getattr(p, "workflow_enabled", False)),
+            "flow": flow.model_dump(),
+            "editable": ["workflow_enabled", "workflow_roles_json"],
+        }
 
 @projects.delete("/{project_id}")
 def api_delete_project(project_id: str):

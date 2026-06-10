@@ -270,6 +270,15 @@ class Project(Base):
     # a comment that @mentions the agent wakes it immediately. Avoids the
     # surprise of every comment auto-starting a run.
     wake_on_comment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Workflow driver (backend/forge/workflow.py): when True, a successful run
+    # advances the task per the system flow (templates/workflow/default.yaml)
+    # — e.g. in_progress -> review with a reviewer (!= implementer) dispatched.
+    # Default False: nothing changes for projects that don't opt in.
+    workflow_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # The ONLY customer-editable workflow surface: a JSON object overriding
+    # how roles resolve to agents ({"reviewer": {"match": [...], ...}}).
+    # Validated (Pydantic RoleSpec) on use; the flow itself is system config.
+    workflow_roles_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")

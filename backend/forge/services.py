@@ -3382,7 +3382,21 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                 print(f"[finish_run] notify-admins failed: {exc}")
 
         db.refresh(r)
-        return {"ok": True, "run": _run_to_dict(r)}
+        run_payload = _run_to_dict(r)
+
+    # Workflow driver: a successful run may hand the task to the next column's
+    # role-agent (e.g. in_progress -> review, reviewer != implementer). Config
+    # lives in templates/workflow/default.yaml + the project's role overrides;
+    # no-ops unless Project.workflow_enabled. Best-effort — the agent's
+    # finish_run never fails because the hand-off hiccupped.
+    if outcome_enum == RunOutcome.SUCCEEDED:
+        try:
+            from backend.forge import workflow as _workflow
+            _workflow.advance_after_run(run_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[finish_run] workflow advance failed: {exc}")
+
+    return {"ok": True, "run": run_payload}
 
 
 def list_runs_for_task(task_id: str) -> list[dict]:
