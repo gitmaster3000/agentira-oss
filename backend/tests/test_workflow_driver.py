@@ -173,16 +173,47 @@ def test_no_advance_without_distinct_reviewer(db_session):
 
 def test_gate_blocks_advance_when_dod_unchecked(db_session):
     """The driver respects the same evidence as a manual move — unchecked DoD
-    fails the in_progress->review gate (when gates are enabled)."""
+    fails the in_progress->review gate. AP-231: instead of stalling silently,
+    it bounces the task back to the same agent once (a corrective dispatch)."""
     pid, task_id, run_id, *_ = _setup_review_scenario(db_session, dod_checked=False)
     with db_session() as db:
         p = db.get(Project, pid)
         p.gates_enabled = True   # documents intent; gates.evaluate is direct
         db.commit()
-    out = workflow.advance_after_run(run_id)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "bounce1"}) as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
     assert out["advanced"] is False
     assert out["reason"] == "gate_failed"
     assert "dod_all_checked" in out["failures"]
+    # AP-231: bounced (one corrective re-dispatch), not silently stalled.
+    assert out.get("bounced") is True
+    assert out.get("bounce_run_id") == "bounce1"
+    mock_dispatch.assert_called_once()
+
+
+def test_bounce_exhausted_escalates_to_needs_attention(db_session):
+    """After the configured bounce budget (default 2 runs in window), the
+    task escalates to needs-attention instead of bouncing forever."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session, dod_checked=False)
+    # A PRIOR (older) run so this (task, agent) is already at max_attempts=2.
+    # Older than the advancing run so the idempotency guard doesn't trip.
+    from datetime import datetime, timezone, timedelta
+    with db_session() as db:
+        db.add(Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.FAILED, outcome=RunOutcome.FAILED,
+                   created_at=datetime.now(timezone.utc) - timedelta(minutes=5)))
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run") as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "gate_failed"
+    assert out.get("escalated") is True
+    assert out.get("bounced") is not True
+    mock_dispatch.assert_not_called()   # no more bounces — escalated
+    with db_session() as db:
+        from backend.models import Activity
+        acts = db.query(Activity).filter(Activity.task_id == task_id).all()
+        assert any("Needs attention" in (a.detail or "") for a in acts)
 
 
 def test_idempotent_no_double_handoff(db_session):

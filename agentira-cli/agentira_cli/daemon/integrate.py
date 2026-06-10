@@ -59,7 +59,12 @@ def integrate_branch(*, source_url: str, branch: str,
                 # movement — only checkout failure is fatal.
                 if prep[0] == "checkout":
                     return False, f"target_branch_unavailable: {r.stderr.strip()[:300]}"
-        r = _git(clone, "merge", "--no-ff", "--no-edit", branch)
+        # --no-ff makes a merge commit, which needs a committer identity. Don't
+        # rely on a global git config (absent on a fresh machine / in CI) — set
+        # an explicit Agentira identity for the merge.
+        r = _git(clone,
+                 "-c", "user.name=Agentira", "-c", "user.email=bot@agentira.local",
+                 "merge", "--no-ff", "--no-edit", branch)
         if r.returncode != 0:
             _git(clone, "merge", "--abort")
             err = (r.stdout + r.stderr).strip()[:300]

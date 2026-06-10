@@ -58,6 +58,17 @@ columns:
     on_enter:
       dispatch_role: documentation
 
+# AP-231 self-correction: a run that succeeds but fails the advance gate
+# (missing DoD/branch evidence) is re-dispatched to the same agent with a
+# corrective prompt, up to max_attempts total runs on the task within the
+# window, then escalated to needs-attention (the Conductor's progress
+# watchdog takes it from there). Set enabled:false to leave all recovery to
+# the Conductor.
+bounce:
+  enabled: true
+  max_attempts: 2        # original run + one corrective re-dispatch
+  window_minutes: 30
+
 roles:
   reviewer:
     match: ["review", "senior", "lead", "architect"]

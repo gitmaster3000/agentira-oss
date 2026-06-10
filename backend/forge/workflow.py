@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,19 @@ _DEFAULT_WORKFLOW_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "templates" / "workflow" / "default.yaml"
 )
+# Per-role hand-off prompts (config): templates/workflow/prompts/<role>.md is
+# prepended as hand-off instructions when the driver dispatches that role —
+# the reviewer gets a review job description, not the implementer contract.
+_PROMPTS_DIR = _DEFAULT_WORKFLOW_PATH.parent / "prompts"
+
+def _load_prompt_file(name: str) -> str:
+    """A workflow prompt template (config), or '' if absent. Used for the
+    AP-231 gate-bounce corrective message — a one-off signal on the existing
+    extra_context channel, NOT a standing context layer."""
+    try:
+        return (_PROMPTS_DIR / f"{name}.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 # ── Schema (standard parser + safety: yaml.safe_load → Pydantic) ─────────
@@ -101,9 +115,21 @@ class RoleSpec(BaseModel):
         return v
 
 
+class BounceSpec(BaseModel):
+    """AP-231 self-correction policy (config, not constants). When a run
+    succeeds but the advance gate fails, re-dispatch the same agent up to
+    `max_attempts` total runs (on this task, in the window) before escalating
+    to needs-attention. enabled=False disables the bounce entirely (the
+    Conductor's progress watchdog is then the only recovery)."""
+    enabled: bool = True
+    max_attempts: int = 2          # original run + one corrective bounce
+    window_minutes: int = 30
+
+
 class Workflow(BaseModel):
     columns: list[ColumnSpec]
     roles: dict[str, RoleSpec] = Field(default_factory=dict)
+    bounce: BounceSpec = Field(default_factory=BounceSpec)
 
     @validator("columns")
     def columns_not_empty(cls, v):  # noqa: N805
@@ -208,6 +234,81 @@ def pick_role_agent(db, *, project_id: str, role: RoleSpec,
     return None
 
 
+def _bounce_gate_failure(db, *, task, run, current: str, target: str,
+                         fails: list, policy: "BounceSpec") -> dict:
+    """AP-231: a run declared `succeeded` but the advance gate failed —
+    resolve the contradiction instead of stalling silently.
+
+    1. Post the missing evidence on the task feed (always — visibility).
+    2. Bounce: re-dispatch the same agent with a corrective prompt (config:
+       templates/workflow/prompts/gate_bounce.md) up to `policy.max_attempts`
+       total runs on this task in `policy.window_minutes`.
+    3. Once that budget is spent (or bounce disabled), escalate: needs-
+       attention comment + admin notification. The Conductor's progress
+       watchdog (planning turn) is the intelligent layer that picks it up
+       from there.
+
+    The Run history is the bounce ledger — no new state, restart-proof.
+    Returns a small dict merged into the driver's gate_failed result.
+    """
+    from backend.models import Activity
+    reasons = "\n".join(f"- **{f.name}** — {f.reason or 'evidence missing'}"
+                        for f in fails)
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=policy.window_minutes)
+    recent_runs = (db.query(Run)
+                     .filter(Run.task_id == task.id,
+                             Run.agent_id == run.agent_id,
+                             Run.created_at >= cutoff)
+                     .count())
+    task_id, task_key = task.id, (task.key or task.id)
+    agent_id = run.agent_id
+
+    if not policy.enabled or recent_runs >= policy.max_attempts:
+        db.add(Activity(
+            project_id=task.project_id, task_id=task.id, actor="workflow",
+            action="commented",
+            detail=(f"🚩 **Needs attention** — the run succeeded again but the "
+                    f"task still can't advance {current}→{target}:\n{reasons}\n\n"
+                    f"Automatic correction is exhausted; a human (or the "
+                    f"Conductor) should look at this task."),
+        ))
+        db.commit()
+        try:
+            from backend.forge.services import _notify_admins
+            _notify_admins(db, type_="workflow.needs_attention",
+                           title=f"{task_key} can't advance: "
+                                 f"{', '.join(f.name for f in fails)}",
+                           link=f"/projects/{task.project_id}/tasks/{task.id}")
+            db.commit()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        logger.warning("workflow: %s bounce exhausted — escalated", task_key)
+        return {"bounced": False, "escalated": True}
+
+    db.add(Activity(
+        project_id=task.project_id, task_id=task.id, actor="workflow",
+        action="commented",
+        detail=(f"↩️ **Bounced back to {task.assignee or 'the agent'}** — run "
+                f"succeeded but the {current}→{target} gate failed:\n{reasons}\n\n"
+                f"One corrective run dispatched to complete the evidence."),
+    ))
+    db.commit()
+
+    prompt = _load_prompt_file("gate_bounce").replace("{{FAILURES}}", reasons)
+    from backend.forge import services
+    d = services.schedule_task_run(task_id=task_id, agent_id=agent_id,
+                                   extra_context=prompt)
+    if isinstance(d, dict) and d.get("error"):
+        logger.warning("workflow: bounce dispatch failed %s: %s",
+                       task_key, d["error"])
+        return {"bounced": False, "bounce_error": d["error"]}
+    logger.info("workflow: %s bounced to %s run=%s", task_key, agent_id,
+                d.get("run_id") if isinstance(d, dict) else "?")
+    return {"bounced": True,
+            "bounce_run_id": d.get("run_id") if isinstance(d, dict) else None}
+
+
 # ── The driver ────────────────────────────────────────────────────────────
 
 def advance_after_run(run_id: str) -> dict:
@@ -252,8 +353,14 @@ def advance_after_run(run_id: str) -> dict:
                 logger.info("workflow: %s gate blocks %s->%s: %s",
                             task.key or task.id, current, target,
                             [f.name for f in fails])
+                # AP-231: "succeeded but can't advance" must self-correct, not
+                # silently stall. Surface the missing evidence + bounce the
+                # task back to the same agent ONCE; then escalate loudly.
+                bounce = _bounce_gate_failure(
+                    db, task=task, run=run, current=current, target=target,
+                    fails=fails, policy=flow.bounce)
                 return {"advanced": False, "reason": "gate_failed",
-                        "failures": [f.name for f in fails]}
+                        "failures": [f.name for f in fails], **bounce}
 
             target_status = db.query(Status).filter(Status.name == target).first()
             if not target_status:
