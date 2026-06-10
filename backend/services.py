@@ -54,11 +54,36 @@ def _parse_dod(raw: str | None) -> list | None:
         return []
 
 
+def _normalize_dod(items: list | None) -> list[dict] | None:
+    """Coerce DoD items to the canonical {text, checked} shape.
+
+    Accepts a plain string (-> unchecked item) or a dict (text/label +
+    checked). A robust gate: a stray string from a caller must never be
+    persisted raw nor crash a read. Used on both write and read paths, so
+    legacy malformed rows heal on the next read without a migration.
+    """
+    if not items:
+        return None
+    out: list[dict] = []
+    for it in items:
+        if isinstance(it, str):
+            out.append({"text": it, "checked": False})
+        elif isinstance(it, dict):
+            out.append({
+                "text": it.get("text") or it.get("label") or "",
+                "checked": bool(it.get("checked")),
+            })
+        # anything else (None, numbers) is not a valid DoD item — drop it
+    return out or None
+
+
 def _dod_progress(dod: list | None) -> dict | None:
     if not dod:
         return None
     total = len(dod)
-    checked = sum(1 for item in dod if item.get("checked"))
+    # Defensive: a non-dict item (legacy/malformed row) counts as unchecked
+    # rather than crashing the whole task list.
+    checked = sum(1 for item in dod if isinstance(item, dict) and item.get("checked"))
     return {"total": total, "checked": checked}
 
 
@@ -71,7 +96,7 @@ def _resolve_task(db: Session, task_ref: str) -> Task | None:
 
 
 def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
-    dod = _parse_dod(t.dod_items)
+    dod = _normalize_dod(_parse_dod(t.dod_items))
     return {
         "id": t.id,
         "key": t.key or t.id,
@@ -810,7 +835,7 @@ def create_task(
             tags=",".join(tags) if tags else "",
             start_date=start_dt,
             due_date=due_dt,
-            dod_items=json.dumps(dod_items) if dod_items else None,
+            dod_items=json.dumps(_normalize_dod(dod_items)) if dod_items else None,
             epic_id=epic_id if epic_id and epic_id.strip() else None,
         )
         db.add(task)
@@ -981,12 +1006,13 @@ def update_task(
             task.tags = ",".join(tags)
 
         if dod_items is not None:
-            old_dod = _parse_dod(task.dod_items) or []
-            task.dod_items = json.dumps(dod_items)
+            old_dod = _normalize_dod(_parse_dod(task.dod_items)) or []
+            new_dod = _normalize_dod(dod_items) or []
+            task.dod_items = json.dumps(new_dod) if new_dod else None
             old_checked = sum(1 for i in old_dod if i.get("checked"))
-            new_checked = sum(1 for i in dod_items if i.get("checked"))
-            if old_checked != new_checked or len(old_dod) != len(dod_items):
-                changes.append(f"DOD {new_checked}/{len(dod_items)} checked")
+            new_checked = sum(1 for i in new_dod if i.get("checked"))
+            if old_checked != new_checked or len(old_dod) != len(new_dod):
+                changes.append(f"DOD {new_checked}/{len(new_dod)} checked")
 
         if branch is not None and branch != (task.branch or ""):
             diff["branch"] = {"from": task.branch or "", "to": branch}
