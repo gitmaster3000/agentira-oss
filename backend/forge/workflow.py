@@ -52,11 +52,22 @@ _DEFAULT_WORKFLOW_PATH = (
 
 # ── Schema (standard parser + safety: yaml.safe_load → Pydantic) ─────────
 
+class IntegrateSpec(BaseModel):
+    """Branch-integration policy (workflow slice 2). POLICY lives here in
+    config; the ACTION is deterministic daemon code (daemon/integrate.py —
+    merge --no-ff in the shared clone, push origin)."""
+    target_branch: str = "main"
+    push: bool = True
+
+
 class OnSuccess(BaseModel):
     """What the driver does when a run succeeds in a column."""
     advance_to: str
     assign_role: Optional[str] = None
     dispatch: bool = False
+    # When set, the advance is two-phase: the daemon merges the task branch
+    # per this policy first; the task only advances when the merge succeeds.
+    integrate: Optional[IntegrateSpec] = None
 
 
 class ColumnSpec(BaseModel):
@@ -220,9 +231,16 @@ def advance_after_run(run_id: str) -> dict:
                 return {"advanced": False, "reason": f"no_on_success_for_{current}"}
             target = spec.advance_to
 
-            # The driver respects the same evidence a manual move would.
+            # The driver respects the same evidence a manual move would —
+            # except the PR-proxy gates when the flow integrates the branch
+            # itself: gates exist to stop FAKED progress, and a system-performed
+            # merge (verified by the daemon, conflict-aborted) is strictly
+            # stronger evidence than a pr_url string. DoD gates still apply.
             fails = gates.failures(
                 gates.evaluate(task, from_status=current, to_status=target))
+            if spec.integrate is not None:
+                fails = [f for f in fails
+                         if f.name not in ("pr_url_set", "has_branch_or_pr")]
             if fails:
                 logger.info("workflow: %s gate blocks %s->%s: %s",
                             task.key or task.id, current, target,
@@ -233,6 +251,36 @@ def advance_after_run(run_id: str) -> dict:
             target_status = db.query(Status).filter(Status.name == target).first()
             if not target_status:
                 return {"advanced": False, "reason": f"unknown_column_{target}"}
+
+            # Two-phase advance (slice 2): when the column's policy says
+            # `integrate`, the task branch must merge into the target branch
+            # FIRST. The daemon owns the shared clone, so the merge happens
+            # there; the advance completes in complete_integration() when the
+            # daemon reports back. Conflict/push failure -> the task stays put
+            # with a classified reason.
+            if spec.integrate is not None:
+                branch = (run.worktree_branch or task.branch or "").strip()
+                agent = db.get(Agent, run.agent_id) if run.agent_id else None
+                runtime_id = agent.runtime_id if agent else None
+                source_url = _task_source_url(db, task)
+                if not branch or not runtime_id or not source_url:
+                    return {"advanced": False, "reason": "integration_missing_info",
+                            "branch": branch, "runtime": bool(runtime_id),
+                            "source_url": bool(source_url)}
+                ispec = spec.integrate
+                task_id_, run_id_ = task.id, run.id
+                # Send outside the session via the captured app loop.
+                from backend.forge.services import _dispatch_coro
+                from backend.forge.ws_dispatch import hub
+                _dispatch_coro(hub.dispatch_integrate(
+                    runtime_id=runtime_id, task_id=task_id_, run_id=run_id_,
+                    source_url=source_url, branch=branch,
+                    target_branch=ispec.target_branch, push=ispec.push,
+                ))
+                logger.info("workflow: %s integration requested (%s -> %s)",
+                            task.key or task.id, branch, ispec.target_branch)
+                return {"advanced": False, "integration_requested": True,
+                        "branch": branch, "target": ispec.target_branch}
 
             next_agent = None
             if spec.assign_role:
@@ -281,3 +329,80 @@ def advance_after_run(run_id: str) -> dict:
         logger.exception("workflow.advance_after_run failed for %s: %s",
                          run_id, exc)
         return {"advanced": False, "reason": "exception", "error": str(exc)}
+
+
+def _task_source_url(db, task) -> str:
+    """The git remote the task's branch lives in (mirrors dispatch's repo
+    resolution: task.repo_name -> project repo row -> project.repo_url)."""
+    from backend import services as core_services
+    try:
+        chosen = core_services.resolve_project_repo(
+            task.project_id, getattr(task, "repo_name", None))
+        if chosen and chosen.get("repo_url"):
+            return chosen["repo_url"]
+    except Exception:  # noqa: BLE001 — fall through to the project field
+        pass
+    project = db.get(Project, task.project_id)
+    return (getattr(project, "repo_url", None) or "") if project else ""
+
+
+def complete_integration(*, task_id: str, run_id: str | None,
+                         ok: bool, reason: str = "") -> dict:
+    """Finish a two-phase advance after the daemon reports the merge result.
+
+    ok    -> advance the task to the column configured by its current
+             column's on_success (no gate re-check: a system-performed merge
+             is stronger evidence than the pr_url proxy the manual gate uses,
+             and gates exist to stop FAKED progress — this isn't fakeable).
+    !ok   -> leave the task where it is, surface the classified reason on the
+             task feed, and notify admins (human-in-the-loop).
+    """
+    from backend.models import Activity
+    with SessionLocal() as db:
+        task = db.get(Task, task_id)
+        if not task:
+            return {"ok": False, "error": "task_not_found"}
+        project = db.get(Project, task.project_id) if task.project_id else None
+        flow = effective_workflow(project) if project else system_workflow()
+        current = _status_name(db, task.status_id)
+        col = flow.column(current) if current else None
+        spec = col.on_success if col else None
+
+        if not ok:
+            db.add(Activity(
+                project_id=task.project_id, task_id=task.id, actor="workflow",
+                action="commented",
+                detail=(f"⛔ **Integration failed** — task stays in {current}.\n\n"
+                        f"`{reason}`\n\nFix the branch (rebase/resolve) and "
+                        f"re-run review to retry the merge."),
+            ))
+            db.commit()
+            try:
+                from backend.forge.services import _notify_admins
+                _notify_admins(db, type_="workflow.integration_failed",
+                               title=f"Merge failed for {task.key or task.id}: "
+                                     f"{reason[:120]}",
+                               link=f"/projects/{task.project_id}/tasks/{task.id}")
+                db.commit()
+            except Exception:  # noqa: BLE001 — best-effort notification
+                pass
+            logger.warning("workflow: integration failed task=%s: %s",
+                           task.key or task.id, reason)
+            return {"ok": True, "advanced": False, "reason": reason}
+
+        target = spec.advance_to if spec else "done"
+        target_status = db.query(Status).filter(Status.name == target).first()
+        if not target_status:
+            return {"ok": False, "error": f"unknown_column_{target}"}
+        task.status_id = target_status.id
+        db.add(Activity(
+            project_id=task.project_id, task_id=task.id, actor="workflow",
+            action="commented",
+            detail=(f"✅ **Integrated** — branch merged into "
+                    f"{(spec.integrate.target_branch if spec and spec.integrate else 'main')} "
+                    f"and pushed. Task advanced to **{target}**."),
+        ))
+        db.commit()
+        logger.info("workflow: %s integrated, advanced %s->%s",
+                    task.key or task.id, current, target)
+        return {"ok": True, "advanced": True, "to": target}

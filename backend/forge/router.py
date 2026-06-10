@@ -236,6 +236,26 @@ def runtime_heartbeat(body: RuntimeHeartbeatRequest):
     )
 
 
+class IntegrationResult(BaseModel):
+    daemon_id: str = ""
+    task_id: str
+    run_id: Optional[str] = None
+    ok: bool
+    reason: str = ""
+
+
+@daemon_router.post("/integration-result")
+def daemon_integration_result(body: IntegrationResult):
+    """Workflow slice 2: the daemon reports the merge outcome; the driver
+    finishes the two-phase advance (done) or surfaces the classified
+    failure on the task without advancing."""
+    from backend.forge import workflow as _workflow
+    return _workflow.complete_integration(
+        task_id=body.task_id, run_id=body.run_id,
+        ok=body.ok, reason=body.reason,
+    )
+
+
 @daemon_router.post("/agents/{agent_id}/trigger-events")
 def daemon_append_trigger_events(agent_id: str, body: DaemonTriggerEvents):
     return services.append_trigger_events(

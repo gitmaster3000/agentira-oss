@@ -44,6 +44,13 @@ columns:
       advance_to: done
       assign_role: null        # done is terminal for now; docs step = next slice
       dispatch: false
+      # Two-phase advance: the reviewer's approval triggers a deterministic
+      # daemon-side merge of the task branch into the target; the task only
+      # reaches done when the merge (and push) succeed. Conflict -> the task
+      # stays in review with a classified reason for the implementer.
+      integrate:
+        target_branch: main
+        push: true
   - name: done
 
 roles:

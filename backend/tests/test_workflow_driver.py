@@ -204,3 +204,67 @@ def test_failed_run_never_advances(db_session):
         db.commit()
     out = workflow.advance_after_run(run_id)
     assert out["advanced"] is False
+
+
+# ── Slice 2: two-phase integration (review -> done via daemon merge) ─────
+
+def _setup_review_success(db_session):
+    """A succeeded REVIEWER run on a task sitting in `review`."""
+    with db_session() as db:
+        proj = core_services.create_project("P")
+        pid = proj["id"]
+        p = db.get(Project, pid)
+        p.workflow_enabled = True
+        p.repo_url = "file:///tmp/fake-remote.git"
+        db.commit()
+        reviewer_id = _mk_agent(db, "senior reviewer")
+        _bind(db, reviewer_id, pid)
+        t = Task(project_id=pid, title="Build feature",
+                 status_id=_status_id(db, "review"),
+                 priority=TaskPriority.HIGH, assignee="senior reviewer",
+                 creator="system", branch="agent/x/task/y",
+                 dod_items=json.dumps([{"text": "d", "checked": True}]))
+        db.add(t); db.commit()
+        run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                  worktree_branch="agent/x/task/y")
+        db.add(run); db.commit()
+        return pid, t.id, run.id
+
+
+def test_review_success_requests_integration_not_advance(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    sent = []
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: (sent.append(coro), coro.close())):
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert out["advanced"] is False
+    assert len(sent) == 1
+    with db_session() as db:   # not advanced yet — two-phase
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"
+
+
+def test_complete_integration_ok_advances_to_done(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    out = workflow.complete_integration(task_id=task_id, run_id=run_id,
+                                        ok=True, reason="merged")
+    assert out["advanced"] is True and out["to"] == "done"
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "done"
+
+
+def test_complete_integration_failure_stays_with_reason(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    out = workflow.complete_integration(
+        task_id=task_id, run_id=run_id, ok=False,
+        reason="merge_conflict: same.txt")
+    assert out["advanced"] is False
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"   # stays put
+        from backend.models import Activity
+        acts = db.query(Activity).filter(Activity.task_id == task_id).all()
+        assert any("merge_conflict" in (a.detail or "") for a in acts)

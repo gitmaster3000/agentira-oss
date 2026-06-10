@@ -171,6 +171,38 @@ class WsHub:
             logger.info("Dispatched %s trace=%s run=%s → daemon=%s",
                         signal, trace_id or "-", run_id or "-", conn.daemon_id[:8])
 
+    async def dispatch_integrate(self, *, runtime_id: str, task_id: str,
+                                 run_id: str = "", source_url: str,
+                                 branch: str, target_branch: str = "main",
+                                 push: bool = True) -> bool:
+        """Workflow slice 2: ask the daemon owning runtime_id to merge an
+        approved task branch into the target branch in its shared clone.
+        Returns False when no daemon is online (caller surfaces the miss
+        instead of letting the integration vanish silently)."""
+        import uuid
+        event_id = f"integrate-{task_id or uuid.uuid4()}"
+        payload = {
+            "type": "integrate",
+            "task_id": task_id,
+            "run_id": run_id,
+            "runtime_id": runtime_id,
+            "source_url": source_url,
+            "branch": branch,
+            "target_branch": target_branch,
+            "push": push,
+        }
+        async with self._lock:
+            targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
+        if not targets:
+            logger.warning("Integrate dropped: no daemon online for runtime=%s task=%s",
+                           runtime_id[:8] if runtime_id else "-", task_id)
+            return False
+        for conn in targets:
+            await conn.send(event_id, payload)
+            logger.info("Dispatched integrate task=%s branch=%s → daemon=%s",
+                        task_id, branch, conn.daemon_id[:8])
+        return True
+
     async def dispatch_cancel(self, *, runtime_id: str, trace_id: str = "",
                               run_id: str = "", scope_key: str = "") -> None:
         """Send a cancel frame to whatever daemon owns runtime_id.

@@ -215,6 +215,8 @@ class AgentiraDaemon:
                     self._cancel(frame)
                 elif ftype in ("pause", "resume"):
                     self._signal_proc(frame, ftype)
+                elif ftype == "integrate":
+                    self._integrate(frame)
                 else:
                     self._dispatch_task(frame)
 
@@ -300,6 +302,37 @@ class AgentiraDaemon:
             )
         except Exception as exc:  # noqa: BLE001 — best-effort
             logger.warning("post_trigger_complete (setup failure) failed: %s", exc)
+
+    def _integrate(self, frame: dict) -> None:
+        """Merge an approved task branch into the target branch (workflow
+        slice 2). Deterministic, lock-guarded — see daemon/integrate.py. The
+        result is POSTed back so the backend driver advances (or blocks) the
+        task. Runs in its own thread; a merge must never stall the WS loop."""
+        def _run():
+            from agentira_cli.daemon.integrate import integrate_branch
+            ok, reason = False, "unknown"
+            try:
+                ok, reason = integrate_branch(
+                    source_url=frame.get("source_url", "") or "",
+                    branch=frame.get("branch", "") or "",
+                    target_branch=frame.get("target_branch", "") or "main",
+                    push=bool(frame.get("push", True)),
+                )
+            except Exception as exc:  # noqa: BLE001 — report, don't die
+                reason = f"integrate_exception: {exc}"
+            try:
+                self.client.post_integration_result(
+                    daemon_id=self._daemon_id,
+                    task_id=frame.get("task_id", "") or "",
+                    run_id=frame.get("run_id", "") or "",
+                    ok=ok, reason=reason,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("integration result post failed: %s", exc)
+            logger.info("integrate task=%s branch=%s ok=%s reason=%s",
+                        frame.get("task_id", ""), frame.get("branch", ""),
+                        ok, reason)
+        threading.Thread(target=_run, daemon=True).start()
 
     def _dispatch_task(self, frame: dict) -> None:
         """Spawn a daemon thread to execute the task described by frame."""

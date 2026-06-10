@@ -62,6 +62,20 @@ class AgentiraClient:
             "events": events,
         })
 
+    def post_integration_result(self, *, daemon_id: str, task_id: str,
+                                run_id: str = "", ok: bool,
+                                reason: str = "") -> dict:
+        """Report a workflow-integration merge result (slice 2). The backend
+        driver advances the task to done (ok) or surfaces the classified
+        failure (conflict/push) without advancing."""
+        return self._post("/api/forge/daemon/integration-result", {
+            "daemon_id": daemon_id,
+            "task_id": task_id,
+            "run_id": run_id or None,
+            "ok": ok,
+            "reason": reason,
+        })
+
     def post_trigger_complete(self, agent_id: str, *, daemon_id: str,
                               trace_id: str, run_id: str = "",
                               success: bool, input_tokens: int = 0,
