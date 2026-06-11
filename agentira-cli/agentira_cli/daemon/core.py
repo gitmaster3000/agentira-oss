@@ -393,6 +393,12 @@ class AgentiraDaemon:
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "") or ""
         agent_id = frame.get("agent_id", "")
+        # AP-240: tighten cross-agent FS isolation the moment we know which
+        # agent we're dispatching. Idempotent; never raises. Container
+        # Phase 2 will subsume this — until then, this is what stops agent
+        # B from `cat`-ing agent A's worktree.
+        from agentira_cli.daemon.isolation import lockdown_agent_home
+        lockdown_agent_home(agent_id)
         task_id = frame.get("env_extra", {}).get("AGENTIRA_TASK_ID", "") if isinstance(frame.get("env_extra"), dict) else ""
         prompt = frame.get("prompt", "")
         provider = frame.get("provider", "")
