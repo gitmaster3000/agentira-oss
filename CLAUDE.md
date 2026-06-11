@@ -9,6 +9,15 @@
 - Minimal changes. No unnecessary refactors, comments, or abstractions.
 - Test after changes: `cd frontend && npx vite build` for UI, `pytest tests/` for backend.
 - Follow existing patterns in the codebase.
+- **Think before writing code.** Read the surrounding module, name the contract you're targeting, list assumptions. Don't start typing until the shape is clear.
+- **Modular by default. Classes only when polymorphism or state make them earn their place.** Functions for everything else.
+- **Maintain docs as code changes.** When you change behavior, update `/docs/`, the relevant ADR, or the runbook in the same PR. A behavior change without a doc update is half-shipped.
+
+## Data Access
+- **No direct DB calls in services.** `services.py` / `forge/services.py` / `forge/conductor.py` / any orchestration module must NOT use `db.query(...)`, `db.add(...)`, `db.commit(...)` inline. Every read or write goes through a per-domain data-access function (e.g. `backend/forge/repos/runs.py`, `tasks_repo.py`). Services compose; repos own the SQL.
+- Why: inline `db.query` leaks ORM internals into business logic, hides N+1 traps, makes the layer untestable without a real DB, and quietly breaks when the schema moves. The repo layer is where transactions, eager-loads, and dialect quirks live.
+- Existing direct-DB code is legacy. **New code uses repos. When you touch legacy code, migrate the queries you touched** (not the whole file — surgical migration).
+- Repo functions take a session (`db`) or open their own via `SessionLocal()` — never both shapes in one repo. Pick one per module and stay consistent.
 
 ## Architecture
 - Single DB, modular code boundaries (`backend/forge/` is self-contained).
