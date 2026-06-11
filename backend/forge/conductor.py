@@ -729,3 +729,224 @@ def run_planning_turn() -> dict:
         logger.exception("Planning turn dispatch failed: %s", exc)
         _LAST_PLAN = {"error": str(exc)}
     return _LAST_PLAN
+
+
+# ── AP-232: Conductor progress watchdog ──────────────────────────────────
+#
+# Deterministic sweeps catch the failure classes we already know how to
+# name (zombie runs, gate failures, hand-off misses — AP-119, AP-231,
+# AP-208). The watchdog covers the residue: a task quietly stuck without
+# a terminal-failed signal, an agent looping without output, work parked
+# in review for hours. Same code+LLM split as the planning turn — facts
+# are gathered token-free here; the judgment is one LLM call on the
+# planning cadence (templates/conductor/progress_check.md).
+
+# A task in `in_progress` or `review` whose latest run has shown no
+# activity for this long is "stalled" — surface it to the Conductor for
+# judgment (re-dispatch / reassign / escalate). The threshold deliberately
+# floors at the run-staleness reaper window (STALE_RUN_SILENCE_MINUTES=20)
+# so we never flag a run that the reconciler is about to mark FAILED on
+# its own — the watchdog is for the cases reconciliation can't classify.
+STALLED_NO_ACTIVITY_MINUTES = 30
+
+# Most recent progress-check turn result — observability for /status.
+_LAST_PROGRESS_CHECK: dict | None = None
+
+
+def get_last_progress_check() -> dict | None:
+    return _LAST_PROGRESS_CHECK
+
+
+def _review_status_id(db) -> str | None:
+    row = db.query(Status).filter(Status.name == "review").first()
+    return row.id if row else None
+
+
+def _aware_utc(ts: datetime) -> datetime:
+    """SQLite stores `DateTime(timezone=True)` as naive — normalise to
+    tz-aware UTC so cross-backend comparisons never crash."""
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=timezone.utc)
+
+
+def _run_last_activity(run: Run) -> datetime:
+    """The latest timestamp on a run that proves "something happened."
+
+    Falls through last_heartbeat_at → finished_at → started_at → created_at
+    so a quiet-but-not-yet-finished run, a completed run, and a freshly-
+    dispatched-but-never-started run all yield a real timestamp.
+    """
+    for ts in (run.last_heartbeat_at, run.finished_at, run.started_at,
+               run.created_at):
+        if ts is not None:
+            return _aware_utc(ts)
+    # Safe sentinel — a run with no timestamps at all is degenerate, but the
+    # watchdog must not crash; treat it as "just appeared".
+    return datetime.now(timezone.utc)
+
+
+def gather_progress_facts(
+        *, stale_minutes: int = STALLED_NO_ACTIVITY_MINUTES) -> dict:
+    """Token-free snapshot of tasks the deterministic layers couldn't move.
+
+    Looks at every task in `in_progress` or `review` across projects with
+    a conductor-enabled agent (so we don't scan unrelated workspaces) and
+    flags it as `stalled` when either:
+
+      1. The latest run terminated with outcome=FAILED — last attempt
+         died; auto-recovery never picked it up.
+      2. The latest run has shown no activity for `stale_minutes` —
+         either non-terminal-but-quiet (likely hung) or terminal-but-
+         the-workflow-driver-never-advanced-the-task.
+
+    Each item carries enough context for the Conductor's LLM judgment
+    (assignee, priority, stalled_reason, minutes_idle, last error / outcome)
+    without re-reading the whole run history. Tasks with no runs at all are
+    deliberately NOT included — `in_progress`-without-a-run is the planning
+    turn's responsibility, not progress monitoring.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)
+    stalled: list[dict] = []
+    with SessionLocal() as db:
+        ip_id = _in_progress_status_id(db)
+        review_id = _review_status_id(db)
+        active_status_ids = [s for s in (ip_id, review_id) if s]
+        if not active_status_ids:
+            return {"stalled_tasks": [], "threshold_minutes": stale_minutes}
+
+        # Limit to projects the Conductor manages (same scoping as planning).
+        managed_project_ids = {
+            p.default_project_id
+            for p in db.query(Profile)
+                       .filter(Profile.conductor_enabled == True)  # noqa: E712
+                       .filter(Profile.default_project_id.isnot(None))
+                       .all()}
+        if not managed_project_ids:
+            return {"stalled_tasks": [], "threshold_minutes": stale_minutes}
+
+        rows = (db.query(Task)
+                  .filter(Task.project_id.in_(managed_project_ids),
+                          Task.status_id.in_(active_status_ids))
+                  .all())
+
+        # Status id → name (one query, lookup map — avoids N+1).
+        status_map = {s.id: s.name
+                      for s in db.query(Status)
+                                 .filter(Status.id.in_(active_status_ids))
+                                 .all()}
+
+        now = datetime.now(timezone.utc)
+        for t in rows:
+            run = (db.query(Run)
+                     .filter(Run.task_id == t.id)
+                     .order_by(Run.created_at.desc())
+                     .first())
+            if run is None:
+                continue   # task without a run is planning's concern
+            last_activity = _run_last_activity(run)
+            outcome = run.outcome.value if run.outcome and hasattr(
+                run.outcome, "value") else (run.outcome or None)
+            run_status = run.status.value if hasattr(
+                run.status, "value") else str(run.status or "")
+            failed = (outcome == "failed"
+                      or run_status in ("FAILED", "CANCELLED"))
+            quiet = last_activity < cutoff
+            if not failed and not quiet:
+                continue
+            if failed and quiet:
+                reason = "last_run_failed_and_idle"
+            elif failed:
+                reason = "last_run_failed"
+            else:
+                reason = "no_activity"
+            stalled.append({
+                "task_id": t.id,
+                "key": t.key,
+                "title": t.title,
+                "project_id": t.project_id,
+                "status": status_map.get(t.status_id, "?"),
+                "priority": (t.priority.value if hasattr(t.priority, "value")
+                             else (t.priority or "medium")),
+                "assignee": t.assignee or "",
+                "stalled_reason": reason,
+                "minutes_idle": int((now - last_activity).total_seconds() // 60),
+                "last_run": {
+                    "id": run.id,
+                    "status": run_status,
+                    "outcome": outcome,
+                    "error": (run.error or "")[:300],
+                    "summary": (run.summary or "")[:300],
+                },
+            })
+    # Newest stalls first — the Conductor sees the freshest hangs.
+    stalled.sort(key=lambda r: r["minutes_idle"])
+    return {"stalled_tasks": stalled, "threshold_minutes": stale_minutes}
+
+
+def _compose_progress_check_prompt(facts: dict) -> str:
+    """Fill the progress-check template (config) with the stalled-task list.
+
+    Same pattern as the planning prompt: code serialises facts into rows,
+    prose lives in templates/conductor/progress_check.md.
+    """
+    lines = []
+    for s in facts["stalled_tasks"]:
+        last = s["last_run"]
+        tail = ""
+        if last.get("error"):
+            tail = f"\n    last error: {last['error']}"
+        elif last.get("summary"):
+            tail = f"\n    last summary: {last['summary']}"
+        lines.append(
+            f"- task_id={s['task_id']} [{s.get('key') or '?'}] "
+            f"({s.get('priority') or 'medium'}, {s['status']}) — "
+            f"{s['title']} — assignee={s['assignee'] or '(unassigned)'} "
+            f"— stalled_reason={s['stalled_reason']} "
+            f"— idle={s['minutes_idle']}m"
+            + tail)
+    stalled = "\n".join(lines) or "- (none)"
+    return (_load_prompt("conductor/progress_check.md")
+            .replace("{{STALLED}}", stalled)
+            .replace("{{THRESHOLD}}", str(facts["threshold_minutes"])))
+
+
+def run_progress_check_turn() -> dict:
+    """Dispatch one LLM judgment turn to the Conductor over the stalled list.
+
+    Skips (token-free) when there is nothing stalled or the Conductor has
+    no runtime. Same shape and dispatch path as `run_planning_turn` — the
+    progress check is meant to run on the same cadence (`plan_interval_minutes`)
+    as planning, so a single Conductor wake-up handles both judgments.
+    """
+    global _LAST_PROGRESS_CHECK
+    if not _conductor_active():
+        _LAST_PROGRESS_CHECK = {"skipped": "conductor_disabled"}
+        return _LAST_PROGRESS_CHECK
+    facts = gather_progress_facts()
+    if not facts["stalled_tasks"]:
+        _LAST_PROGRESS_CHECK = {"skipped": "nothing_stalled"}
+        return _LAST_PROGRESS_CHECK
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        if not prof:
+            _LAST_PROGRESS_CHECK = {"skipped": "no_conductor"}
+            return _LAST_PROGRESS_CHECK
+        if not prof.runtime_id:
+            _LAST_PROGRESS_CHECK = {"skipped": "no_runtime"}
+            return _LAST_PROGRESS_CHECK
+        conductor_id = prof.id
+
+    prompt = _compose_progress_check_prompt(facts)
+    try:
+        from backend.forge import services
+        services.send_runtime_message(
+            conductor_id, content=prompt, scope_key="chat:default")
+        _LAST_PROGRESS_CHECK = {
+            "ok": True, "at": datetime.now(timezone.utc).isoformat(),
+            "stalled": len(facts["stalled_tasks"]),
+            "threshold_minutes": facts["threshold_minutes"]}
+        logger.info("Conductor progress-check dispatched (%d stalled).",
+                    len(facts["stalled_tasks"]))
+    except Exception as exc:  # noqa: BLE001 — never break the caller
+        logger.exception("Progress-check dispatch failed: %s", exc)
+        _LAST_PROGRESS_CHECK = {"error": str(exc)}
+    return _LAST_PROGRESS_CHECK
