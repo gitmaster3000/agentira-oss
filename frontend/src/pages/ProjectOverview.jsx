@@ -107,36 +107,44 @@ export function ProjectOverview() {
 
     const statusCounts = countByStatus(board);
 
+    // Outer is a flex column so the live strip can pin at the top
+    // (shrink-0) while the rest of the page is the scrollable child.
+    // `h-full overflow-hidden` is required because the parent Outlet
+    // wrapper is plain block layout — `flex-1` alone wouldn't give the
+    // scroll container a constrained height and overflow-y-auto would
+    // never trigger (the page-scroll regression that motivated this).
     return (
-        <div className="flex-1 overflow-y-auto">
-            {/* Live activity strip — the same "what's running" panel as the
-                board, polling in-flight runs + the Conductor every 5s. */}
+        <div className="flex flex-col h-full overflow-hidden">
+            {/* Live activity strip — pinned at the top, same "what's running"
+                panel as the board, polling in-flight runs + Conductor every 5s. */}
             <ProjectActivityPanel projectId={projectId} />
 
-            <div className="max-w-5xl mx-auto p-6 space-y-6">
-                {/* Recent activity — runs, comments, task changes (clickable) */}
-                <ActivityCard items={activity} projectId={projectId} />
+            <div className="flex-1 overflow-y-auto">
+                <div className="max-w-5xl mx-auto p-6 space-y-6">
+                    {/* Recent activity — runs, comments, task changes (clickable) */}
+                    <ActivityCard items={activity} projectId={projectId} />
 
-                {/* Status counts */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    <Stat label="Backlog" value={statusCounts.backlog} />
-                    <Stat label="To do" value={statusCounts.todo} />
-                    <Stat label="In progress" value={statusCounts.in_progress}
-                        accent />
-                    <Stat label="Review" value={statusCounts.review} />
-                    <Stat label="Done" value={statusCounts.done} />
+                    {/* Status counts */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <Stat label="Backlog" value={statusCounts.backlog} />
+                        <Stat label="To do" value={statusCounts.todo} />
+                        <Stat label="In progress" value={statusCounts.in_progress}
+                            accent />
+                        <Stat label="Review" value={statusCounts.review} />
+                        <Stat label="Done" value={statusCounts.done} />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <ReposCard repos={repos} projectId={projectId} />
+                        <TeamCard members={members} />
+                    </div>
+
+                    <AttachmentsCard
+                        projectId={projectId}
+                        attachments={attachments}
+                        onChange={reloadAttachments}
+                    />
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <ReposCard repos={repos} projectId={projectId} />
-                    <TeamCard members={members} />
-                </div>
-
-                <AttachmentsCard
-                    projectId={projectId}
-                    attachments={attachments}
-                    onChange={reloadAttachments}
-                />
             </div>
         </div>
     );
@@ -372,7 +380,7 @@ function ActivityRow({ entry, projectId }) {
                     )}
                 </div>
                 {entry.detail && (
-                    <div className="mt-1 max-h-44 overflow-y-auto">
+                    <div className="mt-1">
                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={FEED_MD_COMPONENTS}>
                             {String(entry.detail)}
                         </ReactMarkdown>
