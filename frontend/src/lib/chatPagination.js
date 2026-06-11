@@ -7,10 +7,22 @@
 
 // Chronological comparator. Missing timestamps sort oldest (treated as 0) so
 // optimistic local cards without a created_at don't get stranded.
+//
+// On an equal timestamp we still need a TOTAL order: tool-step bursts share a
+// created_at, and sorting by time alone left their order undefined, so a row
+// could swap places between renders/pages — the "non-continuous" chat scroll.
+// Tie-break (a) optimistic local-* cards after server-persisted rows, then
+// (b) by id, mirroring the backend's (created_at, id) ordering so client and
+// server agree.
 export function byCreatedAt(a, b) {
     const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
     const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-    return ta - tb;
+    if (ta !== tb) return ta - tb;
+    const la = String(a.id).startsWith('local-');
+    const lb = String(b.id).startsWith('local-');
+    if (la !== lb) return la ? 1 : -1;
+    const ia = String(a.id), ib = String(b.id);
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
 }
 
 // Number of server-persisted rows currently in the window (excludes optimistic
