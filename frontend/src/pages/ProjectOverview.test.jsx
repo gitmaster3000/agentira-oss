@@ -102,6 +102,16 @@ describe('ProjectOverview — recent activity feed', () => {
         expect(screen.queryByRole('link', { name: /^Board$/i })).toBeNull();
         expect(screen.queryByRole('link', { name: /^Roadmap$/i })).toBeNull();
     });
+
+    it('renders status counts as clickable navigation', async () => {
+        renderOverview();
+        // Backlog count → Backlog page
+        const backlogStat = await screen.findByRole('link', { name: /Backlog/i });
+        expect(backlogStat).toHaveAttribute('href', '/studio/project/P1/backlog');
+        // In progress count → Board
+        const inProgressStat = screen.getByRole('link', { name: /In progress/i });
+        expect(inProgressStat).toHaveAttribute('href', '/studio/project/P1/board');
+    });
 });
 
 describe('ProjectOverview — Team & roles', () => {
