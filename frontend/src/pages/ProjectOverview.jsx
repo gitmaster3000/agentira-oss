@@ -2,17 +2,19 @@
  * Project Overview — the landing page for a project.
  *
  * Top-to-bottom, the page is a one-screen snapshot:
- *   1. Live activity strip — the board's <ProjectActivityPanel>, polling
- *      in-flight runs + the Conductor every 5s (shared with the board).
- *   2. Recent activity feed — runs / comments / task changes rendered as
- *      markdown with clickable links: internal app links (e.g. run links
- *      /forge/runs/<id>) navigate in-app via react-router, external URLs
- *      (PRs) open in a new tab. Each row also links to its task.
- *   3. Task counts by status.
- *   4. Repos + Team & roles (members expand to show an inferred function
+ *   1. Task counts by status — clickable: Backlog → Backlog page, the
+ *      four board statuses (To do / In progress / Review / Done) → Board.
+ *   2. Activity (one container):
+ *        - Live strip: the board's <ProjectActivityPanel>, polling
+ *          in-flight runs + the Conductor every 5s.
+ *        - Recent feed: runs / comments / task changes rendered as
+ *          markdown with clickable links — internal app links (e.g.
+ *          /forge/runs/<id>) navigate in-app, external URLs open in a
+ *          new tab. Each row also links to its task.
+ *   3. Repos + Team & roles (members expand to show an inferred function
  *      and a short responsibility blurb — UI-only until the backend
  *      exposes real role data).
- *   5. Project attachments (drag-and-drop upload, list, download, delete).
+ *   4. Project attachments (drag-and-drop upload, list, download, delete).
  *
  * Navigation lives in the left sidebar; the page intentionally does not
  * duplicate it. Pulls from existing /api/projects/{id}/... + /forge
@@ -113,25 +115,33 @@ export function ProjectOverview() {
     // wrapper is plain block layout — `flex-1` alone wouldn't give the
     // scroll container a constrained height and overflow-y-auto would
     // never trigger (the page-scroll regression that motivated this).
+    const boardHref = ROUTES.STUDIO_PROJECT_BOARD(projectId);
+    const backlogHref = ROUTES.STUDIO_PROJECT_BACKLOG(projectId);
+
     return (
         <div className="flex flex-col h-full overflow-hidden">
-            {/* Live activity strip — pinned at the top, same "what's running"
-                panel as the board, polling in-flight runs + Conductor every 5s. */}
-            <ProjectActivityPanel projectId={projectId} />
-
             <div className="flex-1 overflow-y-auto">
                 <div className="max-w-5xl mx-auto p-6 space-y-6">
-                    {/* Recent activity — runs, comments, task changes (clickable) */}
-                    <ActivityCard items={activity} projectId={projectId} />
-
-                    {/* Status counts */}
+                    {/* Status counts — clickable: Backlog → Backlog page;
+                        the four board statuses → Board. Per admin feedback
+                        these were the "tabs"; making them navigate matches
+                        the role they were already trying to play. */}
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                        <Stat label="Backlog" value={statusCounts.backlog} />
-                        <Stat label="To do" value={statusCounts.todo} />
-                        <Stat label="In progress" value={statusCounts.in_progress}
-                            accent />
-                        <Stat label="Review" value={statusCounts.review} />
-                        <Stat label="Done" value={statusCounts.done} />
+                        <Stat label="Backlog" value={statusCounts.backlog} to={backlogHref} />
+                        <Stat label="To do" value={statusCounts.todo} to={boardHref} />
+                        <Stat label="In progress" value={statusCounts.in_progress} to={boardHref} accent />
+                        <Stat label="Review" value={statusCounts.review} to={boardHref} />
+                        <Stat label="Done" value={statusCounts.done} to={boardHref} />
+                    </div>
+
+                    {/* Activity — one container, live panel on top (in-flight
+                        runs + Conductor, 5s poll) and the clickable recent
+                        feed below. */}
+                    <div className="card p-0 overflow-hidden">
+                        <ProjectActivityPanel projectId={projectId} />
+                        <div className="p-4">
+                            <ActivityCard items={activity} projectId={projectId} bare />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -151,17 +161,28 @@ export function ProjectOverview() {
 }
 
 
-function Stat({ label, value, accent }) {
-    return (
-        <div className="card text-center">
+function Stat({ label, value, accent, to }) {
+    const inner = (
+        <>
             <div className={`text-2xl font-bold ${accent ? 'text-accent-primary' : 'text-text-primary'}`}>
                 {value}
             </div>
             <div className="text-xs text-text-tertiary uppercase tracking-wider mt-1">
                 {label}
             </div>
-        </div>
+        </>
     );
+    if (to) {
+        return (
+            <Link
+                to={to}
+                className="card text-center hover:bg-bg-hover hover:border-accent-primary/30 transition-colors block"
+            >
+                {inner}
+            </Link>
+        );
+    }
+    return <div className="card text-center">{inner}</div>;
 }
 
 
@@ -392,9 +413,12 @@ function ActivityRow({ entry, projectId }) {
 }
 
 
-function ActivityCard({ items, projectId }) {
+// `bare` — render without the .card wrapper so the parent container
+// (e.g. the unified Activity container on Overview) provides the shell.
+function ActivityCard({ items, projectId, bare = false }) {
+    const wrapperClass = bare ? 'space-y-1' : 'card space-y-1';
     return (
-        <div className="card space-y-1">
+        <div className={wrapperClass}>
             <div className="flex items-center gap-2 text-sm font-medium text-text-primary mb-1">
                 <Activity className="w-4 h-4 text-accent-primary" /> Recent activity
             </div>
