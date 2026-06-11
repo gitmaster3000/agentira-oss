@@ -32,6 +32,9 @@ export function RunsDashboard() {
             };
             if (filters.status) params.status = filters.status;
             if (filters.agent_id) params.agent_id = filters.agent_id;
+            // CLEANUP(AP-190): list becomes one row per (agent, task) — the
+            // work-view of each task's chat — not one row per turn. Label/row
+            // should key on the task, not the per-turn trigger_event below.
             const data = await api.forge.listRuns(params);
             setRuns(data);
         } catch (err) {
