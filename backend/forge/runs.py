@@ -73,6 +73,8 @@ def create(*, agent_id: str, task_id: str | None = None,
         return _run_to_dict(r)
 
 
+# CLEANUP(AP-190): becomes get-or-create THE run for (agent, task) — one run
+# per task chat, reused across turns — not a fresh row reserved every dispatch.
 def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
                                project_id: str | None,
                                model_used: str,
@@ -116,6 +118,8 @@ def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
 
 # ── Run emergence ─────────────────────────────────────────────────────
 
+# CLEANUP(AP-190): delete. No per-turn crystallization — a Run is one-per-task
+# (= the chat's work-view), not a row that flips visible when a turn "did work".
 def mark_is_work_if_any(run_id: str, *, work_signal: dict | None,
                         has_explicit_outcome: bool) -> bool:
     """Flip a chat run's is_work=True iff the turn produced durable work: a

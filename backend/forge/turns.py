@@ -17,6 +17,10 @@ import logging
 
 logger = logging.getLogger("agentira.forge.turns")
 
+# CLEANUP(AP-190): delete this entire module. The "did this turn do work?"
+# decision goes away — a Run is the work-view of a task's chat (1 task = 1
+# run), not a per-turn crystallization gated on git facts.
+
 WORK_SIGNAL_MODES = ("working_tree", "tracked", "committed")
 DEFAULT_WORK_SIGNAL = "working_tree"
 

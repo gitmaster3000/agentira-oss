@@ -502,8 +502,8 @@ def _run_to_dict(r: Run) -> dict:
         "project_name": r.project.name if r.project else None,
         "trigger_event": r.trigger_event,
         "status": r.status.value,
-        # is_work: this run produced durable work, so it surfaces as a "Run"
-        # in the UI. False = a pure-chat turn that the UI keeps as chat.
+        # CLEANUP(AP-190): drop is_work from the payload — frontend stops
+        # branching on it once a Run is just the task chat's work-view.
         "is_work": bool(r.is_work),
         # While INTERRUPTING: "pause" (Stop) or "discard" (Discard).
         "interrupt_intent": r.interrupt_intent or None,
@@ -1230,11 +1230,9 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
             q = q.filter(Run.project_id == project_id)
         if status:
             q = q.filter(Run.status == status)
-        # Only runs that produced durable work surface in the Runs list. A
-        # pure-chat turn is a run row with is_work=False that the UI keeps as
-        # chat — that's the "every comment becomes a run" pollution fix. The
-        # task-scoped lookup (list_runs_for_task) is unfiltered so the chat
-        # Stop button can find an in-flight (is_work=False) run.
+        # CLEANUP(AP-190): drop is_work entirely. The Runs list becomes one row
+        # per (agent, task) — the work-view of that task's chat — not a
+        # per-turn-filtered view. Group/dedupe by task instead of this filter.
         q = q.filter(Run.is_work.is_(True))
         runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
         return [_run_to_dict(r) for r in runs]
@@ -2196,6 +2194,9 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         # durable work, which is what surfaces it in the Runs list. A talk-only
         # turn stays is_work=False and the UI keeps it as chat. The row is never
         # deleted — messages keep their run_id and the transcript is intact.
+        # CLEANUP(AP-190): this "reserve a fresh run per chat turn" block
+        # becomes "get-or-create THE run for this (agent, task)". One run per
+        # task chat, reused across every turn — the run IS the chat's work-view.
         if (run_id is None and kind == "chat" and scope_key
                 and scope_key.startswith("task:")):
             from backend.models import Task as _Task
@@ -3831,6 +3832,9 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
             rolling_summary_through_run_id=run_id if roll else None,
         )
 
+    # CLEANUP(AP-190): delete this whole block. No run "emergence" — the run
+    # already exists as the task chat's work-view; work_signal becomes observed
+    # metadata on the run (diff/artifacts), never a visibility gate.
     # Run emergence — a chat turn that produced durable work surfaces as a Run
     # (is_work=True); a talk-only turn stays chat. Owned by the runs module.
     if run_id:

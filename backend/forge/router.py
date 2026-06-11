@@ -135,6 +135,9 @@ class DaemonTriggerComplete(BaseModel):
     # session id wasn't found locally. Backend clears the stale id from
     # forge_conversations so the next dispatch doesn't reuse it.
     session_lost: bool = False
+    # CLEANUP(AP-190): keep this field, but it stops gating run visibility —
+    # store as observed metadata on the run (diff/artifact facts), never a
+    # crystallization decision.
     # ADR 009 / AP-136: raw git work facts {tracked, untracked, committed}.
     # The backend maps these onto the project's work-signal setting to
     # decide whether a standalone (run-less) chat turn crystallizes into a
