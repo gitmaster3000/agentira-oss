@@ -14,6 +14,23 @@ describe('byCreatedAt', () => {
         const out = [{ id: 'b', created_at: at(2) }, { id: 'a' }].sort(byCreatedAt);
         expect(out.map((m) => m.id)).toEqual(['a', 'b']);
     });
+
+    it('breaks an equal-timestamp tie deterministically by id', () => {
+        // Same created_at (a tool-step burst). Order must be stable regardless
+        // of input order so the same rows can't swap between pages/renders.
+        const t = at(5);
+        const a = [{ id: 's3', created_at: t }, { id: 's1', created_at: t }, { id: 's2', created_at: t }];
+        const b = [{ id: 's2', created_at: t }, { id: 's3', created_at: t }, { id: 's1', created_at: t }];
+        expect(a.slice().sort(byCreatedAt).map((m) => m.id)).toEqual(['s1', 's2', 's3']);
+        expect(b.slice().sort(byCreatedAt).map((m) => m.id)).toEqual(['s1', 's2', 's3']);
+    });
+
+    it('keeps optimistic local-* cards after server rows on an equal timestamp', () => {
+        const t = at(5);
+        const out = [{ id: 'local-user-1', created_at: t }, { id: 's9', created_at: t }]
+            .sort(byCreatedAt);
+        expect(out.map((m) => m.id)).toEqual(['s9', 'local-user-1']);
+    });
 });
 
 describe('serverLoadedCount', () => {
