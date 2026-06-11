@@ -88,3 +88,27 @@ def test_no_source_or_branch_is_noop(two_repos):
     assert _ensure_worktree(source="", target=two_repos["target"], branch="b") == ""
     assert _ensure_worktree(source=two_repos["frontend"],
                             target=two_repos["target"], branch="") == ""
+
+
+def test_clears_non_worktree_leftover_before_add(two_repos):
+    """AP-237 follow-up: the dispatch loop calls makedirs(target) and writes
+    `.agentira/CONVENTIONS.md` BEFORE _ensure_worktree. A prior crash/abort
+    can leave the target dir populated (with .agentira/, AGENTS.md symlink,
+    etc.) but without a `.git` file — not a registered worktree. `git
+    worktree add` then refuses with 'fatal: <path> already exists'. The
+    cleanup must remove the non-worktree leftover and the add must succeed."""
+    target = two_repos["target"]
+    # Simulate the partial-materialization residue.
+    os.makedirs(os.path.join(target, ".agentira"), exist_ok=True)
+    with open(os.path.join(target, ".agentira", "CONVENTIONS.md"), "w") as f:
+        f.write("# project conventions\n")
+    os.symlink(".agentira/CONVENTIONS.md",
+               os.path.join(target, "AGENTS.md"))
+    assert not os.path.exists(os.path.join(target, ".git"))
+    reason = _ensure_worktree(
+        source=two_repos["frontend"], target=target, branch="agent/x/task/y",
+    )
+    assert reason == "ok"
+    # Worktree-add succeeded → target is a real worktree off frontend.
+    assert os.path.exists(os.path.join(target, ".git"))
+    assert os.path.exists(os.path.join(target, "FRONTEND_MARKER"))

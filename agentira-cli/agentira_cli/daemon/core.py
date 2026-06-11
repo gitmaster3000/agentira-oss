@@ -144,6 +144,17 @@ def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
                     shutil.rmtree(cur_path, ignore_errors=True)
     except (subprocess.SubprocessError, OSError) as exc:
         logger.warning("worktree-list scan failed (%s); continuing", exc)
+    # AP-237 follow-up: the target path may exist as a NON-worktree dir
+    # from a prior partially-completed materialization (the dispatch loop
+    # makedirs(target) + writes `.agentira/CONVENTIONS.md` BEFORE calling
+    # here, so a previous crash/abort leaves the dir non-empty without a
+    # `.git` file). `git worktree add` refuses with "fatal: '<path>'
+    # already exists". The squatter cleanup above only covers the branch
+    # case; this covers the directory case.
+    if os.path.exists(target) and not os.path.exists(os.path.join(target, ".git")):
+        logger.info("clearing non-worktree leftover at %s before worktree add",
+                    target)
+        shutil.rmtree(target, ignore_errors=True)
     # `-B` so re-creating after a worktree prune doesn't trip on the
     # branch already existing.
     subprocess.run(
