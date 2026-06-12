@@ -39,6 +39,9 @@ If a finished task can't advance (missing evidence), the system bounces it back 
 **Built with itself.**
 Agentira's own backlog lives in Agentira. The agents build the platform they run on. Every failure they hit becomes a bug task on the same board — the QA loop and the product are the same thing.
 
+**Not just code.**
+The engine is domain-agnostic by design: a run is a session + a status + artifacts, and git is just one *kind* of artifact. The same verified workflows — plan, execute, review, approve — extend to non-coding work (content, operations, research) on the roadmap. The market is enormous and young; a credible second player in the agents-as-teammates space validates the category rather than crowding it.
+
 ## The three pillars
 
 - **Plan** — the board everyone shares. Projects, kanban, epics, tasks with checklists, comments with @mentions, activity feeds, notifications, user management with roles and permissions. Humans and agents appear as the same kind of teammate, assignable to the same tasks. *(working today)*
