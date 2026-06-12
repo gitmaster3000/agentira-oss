@@ -122,6 +122,31 @@ The UI shows exactly these controls per status. Keep `STATUS_CONFIG` consistent 
 
 ---
 
+## After the run: the workflow driver
+
+When a run finishes `succeeded` on a workflow-enabled project, the driver
+(`backend/forge/workflow.py`, policy in `templates/workflow/default.yaml`)
+decides what happens to the **task**. In order:
+
+1. **Rejection hand-back (AP-252).** If the task was deliberately moved
+   *backward* during the run (a reviewer rejecting work, a human demoting it —
+   detected from `task.move` rows in the Activity ledger), the driver does NOT
+   try to advance. Per the YAML `rejection:` policy it reassigns the task to
+   whoever owes the fix (`previous_agent` = the implementer, or a configured
+   role) and dispatches a corrective run carrying the rejecter's latest
+   comment (`templates/workflow/prompts/rejection_handback.md`).
+2. **Gate check + advance.** Otherwise the configured `on_success` advance is
+   attempted, gate-checked (`backend/gates.py`).
+3. **Bounce (AP-231).** "Succeeded but gate failed" re-dispatches the same
+   agent with a corrective prompt (`gate_bounce.md`).
+4. **Escalation.** Bounces and hand-backs share one budget
+   (`bounce.max_attempts` runs per task in `bounce.window_minutes`); when it's
+   spent — or no hand-back target resolves — the task gets a 🚩 needs-attention
+   comment and admins are notified. The Conductor's progress watchdog is the
+   recovery layer above that.
+
+---
+
 ## Liveness
 
 "Is the agent working right now?" = status ∈ {`pending`, `running`, `interrupting`}. This is
