@@ -31,3 +31,8 @@ def test_contract_demands_push_and_verification():
     assert "git push -u origin" in p              # push, not just commit
     assert "git cat-file -t" in p                 # hash must be verified
     assert "git ls-remote origin" in p            # push must be verified
+
+
+def test_repo_check_block_is_config_too():
+    p = _build_task_prompt(_T())
+    assert "## Before you start — check you're in the right repo" in p

@@ -190,7 +190,7 @@ def test_resume_sends_continuation_nudge_not_task_prompt(test_db):
         _drive(lambda: forge_services.resume_run(run_id))
 
     dispatched = fake.calls[0]["prompt"]
-    assert dispatched == forge_services._RESUME_CONTINUATION_PROMPT
+    assert dispatched == forge_services._resume_continuation_prompt()
     assert "# Task:" not in dispatched
     # The stored task prompt is preserved, not overwritten by the nudge.
     assert forge_services.get_run(run_id)["initial_prompt"] == original_prompt

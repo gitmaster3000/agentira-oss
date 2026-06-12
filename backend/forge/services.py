@@ -2449,31 +2449,23 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
     if dod_text:
         parts.append("\n## Definition of Done\n" + dod_text)
     parts.append("\nWork on this task.")
-    parts.append(
-        "\n## Before you start — check you're in the right repo\n"
-        "Your working directory is set up for this task. For multi-repo "
-        "projects, sibling subdirs (e.g. `primary/`, `frontend/`) each hold "
-        "a different repo of this project — work in the one(s) your task "
-        "actually concerns. If you're pinned to a single repo and the task "
-        "clearly belongs in a different one (e.g. you're in the backend but "
-        "the task is a UI bug), DO NOT wander or guess: call finish_run "
-        "with outcome=\"needs_input\" and a summary naming the correct repo "
-        "(e.g. \"this is a frontend task — please re-route to the `frontend` "
-        "repo\"). The Conductor will reassign and re-dispatch you to the "
-        "right repo."
-    )
+    # All instructional prose is CONFIG (prompts-are-config, AP-230):
+    # templates/workflow/prompts/{repo_check,output_contract}.md. A missing
+    # file is a packaging bug — loud, no silent in-code fallback prompt.
+    from backend.forge.workflow import _load_prompt_file
+
+    def _required_block(name: str) -> str:
+        block = _load_prompt_file(name)
+        if not block:
+            raise RuntimeError(
+                f"templates/workflow/prompts/{name}.md missing — task prompt "
+                f"blocks are config and must ship with the repo")
+        return block
+
+    parts.append("\n" + _required_block("repo_check"))
     if extra_context:
         parts.append("\n## Follow-up from the user\n" + extra_context)
-    # The output contract is CONFIG (prompts-are-config, AP-230):
-    # templates/workflow/prompts/output_contract.md. Missing file = packaging
-    # bug — loud, no silent in-code fallback prompt.
-    from backend.forge.workflow import _load_prompt_file
-    contract = _load_prompt_file("output_contract")
-    if not contract:
-        raise RuntimeError(
-            "templates/workflow/prompts/output_contract.md missing — "
-            "the task output contract is config and must ship with the repo")
-    parts.append("\n" + contract)
+    parts.append("\n" + _required_block("output_contract"))
     return "\n".join(parts)
 
 
@@ -2590,11 +2582,15 @@ def _compute_worktree_paths(*, agent_id: str, project_id: str | None,
 # Sent as the prompt when a PAUSED run is resumed. claude --resume reloads
 # the full conversation, so this is just a nudge to continue — NOT the task
 # prompt (re-sending that would make the agent restart from scratch).
-_RESUME_CONTINUATION_PROMPT = (
-    "Continue this task from where you paused. Your prior progress is in "
-    "the conversation above — pick up where you left off and finish, then "
-    "call mcp__agentira__finish_run as instructed earlier."
-)
+# Config: templates/workflow/prompts/resume_continuation.md.
+def _resume_continuation_prompt() -> str:
+    from backend.forge.workflow import _load_prompt_file
+    nudge = _load_prompt_file("resume_continuation").strip()
+    if not nudge:
+        raise RuntimeError(
+            "templates/workflow/prompts/resume_continuation.md missing — "
+            "prompts are config and must ship with the repo")
+    return nudge
 
 
 def dispatch_pending_run(*, run_id: str,
@@ -2679,7 +2675,7 @@ def dispatch_pending_run(*, run_id: str,
             # user's new instruction), dispatch THAT as the next turn instead.
             # initial_prompt (the original task prompt) is left untouched; the
             # session is reloaded via --resume.
-            prompt = prompt_override or _RESUME_CONTINUATION_PROMPT
+            prompt = prompt_override or _resume_continuation_prompt()
         else:
             # Persist the (possibly edited) prompt and pick what we dispatch.
             if prompt_override is not None:
