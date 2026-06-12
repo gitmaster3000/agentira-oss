@@ -2464,39 +2464,16 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
     )
     if extra_context:
         parts.append("\n## Follow-up from the user\n" + extra_context)
-    parts.append(
-        "\n## Output contract — do NOT skip this\n"
-        "A task is only \"succeeded\" if there is something the human can\n"
-        "look at when they open the Run page. Before calling finish_run\n"
-        "with outcome=\"succeeded\":\n"
-        "\n"
-        "1. **Commit your changes** in the worktree you're in. The Run page's\n"
-        "   Changes tab reads from `git diff` — if you didn't commit, the\n"
-        "   page shows nothing and the work looks lost.\n"
-        "2. **Check off the Definition of Done.** For every DoD item you\n"
-        "   actually completed, call mcp__agentira__update_task with the full\n"
-        "   dod_items list and `checked: true` on the items you finished. The\n"
-        "   board's review gate requires all DoD items checked before the task\n"
-        "   can advance to review — leave unfinished items unchecked and say so\n"
-        "   in your summary. Do NOT check an item you didn't truly complete; a\n"
-        "   reviewer verifies your work next.\n"
-        "3. **Register at least one artifact** via\n"
-        "   mcp__agentira__register_run_artifact for the deliverable —\n"
-        "   the PR URL (kind=\"pr\"), a generated report (kind=\"report\"),\n"
-        "   a deployed preview (kind=\"url\"), or a key file (kind=\"file\").\n"
-        "   This is what shows up in the \"Here's what got built\" panel\n"
-        "   on the Run page. No artifact = the human can't tell what you did.\n"
-        "\n"
-        "If you didn't actually produce a deliverable, **do NOT pretend you\n"
-        "did**. Call finish_run with outcome=\"blocked\" (and a real\n"
-        "explanation in summary) or outcome=\"failed\" instead.\n"
-        "\nWhen you finish, call mcp__agentira__finish_run with:\n"
-        "  - run_id: \"{run_id}\"\n"
-        "  - outcome: one of \"succeeded\" | \"blocked\" | \"needs_input\" | \"failed\"\n"
-        "  - summary: one paragraph describing what changed (or what's blocking).\n"
-        "Use \"blocked\" when you can't proceed without external input "
-        "(missing credentials, ambiguous spec, broken dependency)."
-    )
+    # The output contract is CONFIG (prompts-are-config, AP-230):
+    # templates/workflow/prompts/output_contract.md. Missing file = packaging
+    # bug — loud, no silent in-code fallback prompt.
+    from backend.forge.workflow import _load_prompt_file
+    contract = _load_prompt_file("output_contract")
+    if not contract:
+        raise RuntimeError(
+            "templates/workflow/prompts/output_contract.md missing — "
+            "the task output contract is config and must ship with the repo")
+    parts.append("\n" + contract)
     return "\n".join(parts)
 
 
