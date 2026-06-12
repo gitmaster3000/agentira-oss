@@ -30,8 +30,8 @@ That's the whole idea: **you design your team's process once — who plans, who 
 **The system doesn't trust the agents. It verifies them.**
 An agent saying "done" means nothing here. Tasks can only advance when evidence exists: the checklist is actually checked, a real branch with real commits exists, review actually passed. We learned this the honest way — one of our own agents claimed a commit that didn't exist, twice. The reviewing agent caught it, rejected the work, and sent it back. That moment is the product: the pipeline polices itself.
 
-**The pipeline is the secret sauce — and it's configuration, not magic.**
-The flow (backlog → todo → in progress → review → done), who reviews, what evidence each step requires, what happens when something is rejected — all of it lives in readable configuration files, not buried in code. Customers will be able to re-map who does what without being able to break the engine.
+**One workflow per project — yours to shape.**
+Every project runs a single workflow: the pipeline that takes each task from idea to shipped (the default reads backlog → todo → in progress → review → done). It's configuration, not magic — and it's customizable: rename the columns to match how your team talks, re-map which role works each step, toggle gates on or off, tune the recovery policy. What customers can't do is break the engine underneath: verification always runs.
 
 **It recovers on its own.**
 If a finished task can't advance (missing evidence), the system bounces it back to the agent once with precise instructions. If a reviewer rejects work, it goes back to the implementer who owes the fix — with the reviewer's feedback attached. If a task stalls with no activity, a watchdog notices and an orchestrator agent (the "Conductor") decides: retry, reassign, or wake the human. Nothing is allowed to silently sit there.
