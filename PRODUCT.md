@@ -6,7 +6,9 @@
 
 ## What is this?
 
-Agentira is a **self-hosted software team made of AI agents** — with you as the only human on it.
+Agentira is a **software team made of AI agents** — with you as the only human on it.
+
+It runs wherever you want: the platform (board, agents, orchestration) can live in the cloud or on your own server; only a small **daemon** runs on the machine where your code actually lives. Your repositories never have to leave your computer for the team to work on them.
 
 You describe what you want built, the way you'd brief a team lead. A planning agent breaks it into tasks with clear "definition of done" checklists. Implementer agents pick the tasks up, write the code in their own isolated workspaces, and commit it. A *different* agent reviews the work — and rejects it if the evidence doesn't hold up. When review passes, the system itself merges the branch. A documentation agent writes up what shipped. You open your laptop in the morning, read the report, and approve the one thing only a human should approve: the final merge into your blessed branch.
 
