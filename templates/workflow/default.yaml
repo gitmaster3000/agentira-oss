@@ -69,6 +69,26 @@ bounce:
   max_attempts: 2        # original run + one corrective re-dispatch
   window_minutes: 30
 
+# AP-252 rejection hand-back: when a task is deliberately moved BACKWARD
+# during a run (a reviewer rejecting work, or a human demoting it), the driver
+# does not try to advance — it routes the task to whoever owes the fix.
+#   assign:   previous_agent → the last agent with a run on the task before
+#             the rejecting run (the implementer). Or any role name from
+#             `roles:` to route rejections to a fixed role instead.
+#   dispatch: true → dispatch the corrective run immediately, carrying the
+#             rejecter's latest task comment as context.
+#   prompt:   templates/workflow/prompts/<prompt>.md — the corrective
+#             instructions (config, customer-readable).
+# Hand-backs share the bounce budget above (max_attempts in window) so two
+# agents can never ping-pong forever; exhausted → needs-attention escalation.
+# enabled:false → the driver just skips the advance and leaves recovery to
+# the Conductor's progress watchdog.
+rejection:
+  enabled: true
+  assign: previous_agent
+  dispatch: true
+  prompt: rejection_handback
+
 roles:
   reviewer:
     match: ["review", "senior", "lead", "architect"]

@@ -126,10 +126,23 @@ class BounceSpec(BaseModel):
     window_minutes: int = 30
 
 
+class RejectionSpec(BaseModel):
+    """AP-252 rejection hand-back policy (config, not constants). When a task
+    is deliberately demoted during a run, route it to whoever owes the fix.
+    `assign`: 'previous_agent' (the implementer whose work was judged) or a
+    role name from `roles`. Hand-backs share the bounce budget (no ping-pong).
+    """
+    enabled: bool = True
+    assign: str = "previous_agent"
+    dispatch: bool = True
+    prompt: str = "rejection_handback"
+
+
 class Workflow(BaseModel):
     columns: list[ColumnSpec]
     roles: dict[str, RoleSpec] = Field(default_factory=dict)
     bounce: BounceSpec = Field(default_factory=BounceSpec)
+    rejection: RejectionSpec = Field(default_factory=RejectionSpec)
 
     @validator("columns")
     def columns_not_empty(cls, v):  # noqa: N805
@@ -309,6 +322,139 @@ def _bounce_gate_failure(db, *, task, run, current: str, target: str,
             "bounce_run_id": d.get("run_id") if isinstance(d, dict) else None}
 
 
+def _rejection_demotion(db, *, run: Run, task: Task,
+                        flow: Workflow) -> dict | None:
+    """AP-252: detect a deliberate BACKWARD move on the task during the run.
+
+    A reviewer that rejects work demotes the task (review→in_progress) and
+    unchecks DoD items — its run still finishes `succeeded` (the review WAS
+    successful). The driver must recognize that demotion as intentional and
+    NOT treat it as 'succeeded but can't advance' (which bounced a corrective
+    run to the reviewer — the wrong agent).
+
+    Evidence source: the Activity ledger (`task.move` rows carry a status
+    diff). Any move to an EARLIER column than it came from, logged after this
+    run started, is a deliberate demotion — by the run's agent or a human.
+    Returns {actor, from, to} or None.
+    """
+    from backend.forge.repos import activities as activities_repo
+    order = {c.name: i for i, c in enumerate(flow.columns)}
+    moves = activities_repo.task_moves_since(
+        db, task_id=task.id, since=run.created_at)
+    for m in moves:
+        try:
+            diff = json.loads(m.diff or "{}").get("status") or {}
+        except ValueError:
+            continue
+        src, dst = diff.get("from"), diff.get("to")
+        if src in order and dst in order and order[dst] < order[src]:
+            return {"actor": m.actor, "from": src, "to": dst}
+    return None
+
+
+def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
+                               demotion: dict) -> dict:
+    """AP-252: route a rejected task to whoever owes the fix.
+
+    POLICY lives in config (`rejection:` in the workflow YAML): who gets the
+    task back (`assign: previous_agent` or a role), whether a corrective run
+    dispatches, and which prompt template carries the rejecter's feedback.
+    This function is the deterministic ACTION. Budget-capped by the shared
+    bounce policy so two agents can't ping-pong forever; exhausted (or no
+    target resolvable) → needs-attention escalation.
+    """
+    from backend.forge.repos import activities as activities_repo
+    from backend.forge.repos import runs as runs_repo
+    policy = flow.rejection
+    budget = flow.bounce
+    task_key = task.key or task.id
+
+    if not policy.enabled:
+        logger.info("workflow: %s demoted during run — rejection handling "
+                    "disabled; leaving to the watchdog", task_key)
+        return {"advanced": False, "reason": "review_rejected",
+                "handed_back": False}
+
+    impl: Agent | None = None
+    if policy.assign == "previous_agent":
+        prior = runs_repo.prior_run_by_other_agent(
+            db, task_id=task.id, before=run.created_at,
+            not_agent_id=run.agent_id)
+        impl = db.get(Agent, prior.agent_id) if prior and prior.agent_id else None
+    else:
+        role = flow.roles.get(policy.assign)
+        if role is not None:
+            impl = pick_role_agent(db, project_id=task.project_id, role=role,
+                                   previous_agent_id=run.agent_id)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=budget.window_minutes)
+    impl_recent = (runs_repo.count_agent_runs_since(
+        db, task_id=task.id, agent_id=impl.id, since=cutoff) if impl else 0)
+
+    if impl is None or impl_recent >= budget.max_attempts:
+        why = (f"no agent resolvable for rejection target "
+               f"'{policy.assign}'" if impl is None
+               else "correction budget exhausted")
+        activities_repo.add_task_comment(
+            db, project_id=task.project_id, task_id=task.id,
+            detail=(f"🚩 **Needs attention** — review rejected this task "
+                    f"({demotion['from']}→{demotion['to']} by "
+                    f"{demotion['actor']}), but it can't be handed back "
+                    f"automatically: {why}. A human should look at this."))
+        db.commit()
+        try:
+            from backend.forge.services import _notify_admins
+            _notify_admins(db, type_="workflow.needs_attention",
+                           title=f"{task_key} rejected in review — {why}",
+                           link=f"/projects/{task.project_id}/tasks/{task.id}")
+            db.commit()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+        logger.warning("workflow: %s rejection hand-back escalated (%s)",
+                       task_key, why)
+        return {"advanced": False, "reason": "review_rejected",
+                "escalated": True}
+
+    # The reviewer's most recent comment is the corrective context.
+    review_note = activities_repo.latest_comment_by(
+        db, task_id=task.id, actor=demotion["actor"], since=run.created_at)
+    feedback = (review_note.detail if review_note
+                else "(no review comment found — re-read the task feed)")
+
+    task.assignee = impl.name
+    activities_repo.add_task_comment(
+        db, project_id=task.project_id, task_id=task.id,
+        detail=(f"↩️ **Review rejected — handed back to {impl.name}** "
+                f"({demotion['from']}→{demotion['to']} by {demotion['actor']}). "
+                f"Corrective run dispatched with the reviewer's feedback."))
+    db.commit()
+    task_id, impl_id, impl_name = task.id, impl.id, impl.name
+
+    if not policy.dispatch:
+        logger.info("workflow: %s rejected — reassigned to %s (no dispatch, "
+                    "per policy)", task_key, impl_name)
+        return {"advanced": False, "reason": "review_rejected",
+                "handed_back": True, "assignee": impl_name}
+
+    prompt = (_load_prompt_file(policy.prompt)
+              .replace("{{REVIEW}}", feedback))
+    from backend.forge import services
+    d = services.schedule_task_run(task_id=task_id, agent_id=impl_id,
+                                   extra_context=prompt)
+    if isinstance(d, dict) and d.get("error"):
+        logger.warning("workflow: rejection hand-back dispatch failed %s: %s",
+                       task_key, d["error"])
+        return {"advanced": False, "reason": "review_rejected",
+                "handed_back": False, "dispatch_error": d["error"]}
+    logger.info("workflow: %s rejected — handed back to %s run=%s",
+                task_key, impl_name,
+                d.get("run_id") if isinstance(d, dict) else "?")
+    return {"advanced": False, "reason": "review_rejected",
+            "handed_back": True, "assignee": impl_name,
+            "run_id": d.get("run_id") if isinstance(d, dict) else None}
+
+
 # ── The driver ────────────────────────────────────────────────────────────
 
 def advance_after_run(run_id: str) -> dict:
@@ -333,6 +479,17 @@ def advance_after_run(run_id: str) -> dict:
 
             flow = effective_workflow(project)
             current = _status_name(db, task.status_id)
+
+            # AP-252: a deliberate backward move during the run (reviewer
+            # rejection, human demotion) means "do NOT advance" — the gate
+            # failure that follows is intentional, not missing evidence. Hand
+            # the task back to the implementer instead of bouncing the
+            # reviewer.
+            demotion = _rejection_demotion(db, run=run, task=task, flow=flow)
+            if demotion:
+                return _hand_back_after_rejection(
+                    db, task=task, run=run, flow=flow, demotion=demotion)
+
             col = flow.column(current) if current else None
             spec = col.on_success if col else None
             if not spec:

@@ -41,6 +41,11 @@ def test_system_workflow_parses_and_pins_pipeline():
     reviewer = flow.roles["reviewer"]
     assert reviewer.exclude_previous_assignee is True   # reviewer != implementer
     assert reviewer.fallback == "none"
+    # AP-252: rejection hand-back is YAML policy, not code constants.
+    assert flow.rejection.enabled is True
+    assert flow.rejection.assign == "previous_agent"
+    assert flow.rejection.dispatch is True
+    assert flow.rejection.prompt == "rejection_handback"
 
 
 def test_customer_override_is_roles_only_and_validated():
@@ -235,6 +240,117 @@ def test_failed_run_never_advances(db_session):
         db.commit()
     out = workflow.advance_after_run(run_id)
     assert out["advanced"] is False
+
+
+# ── AP-252: reviewer rejection hands back to the implementer ─────────────
+
+def _setup_rejection_scenario(db_session, *, with_prior_impl_run=True):
+    """A reviewer run that succeeded AFTER demoting the task review→
+    in_progress (rejection). The exact SP-12 live sequence: DoD unchecked,
+    task back in in_progress, reviewer's run finishes succeeded."""
+    from datetime import datetime, timezone, timedelta
+    from backend.models import Activity
+    with db_session() as db:
+        proj = core_services.create_project("P")
+        pid = proj["id"]
+        p = db.get(Project, pid)
+        p.workflow_enabled = True
+        db.commit()
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        reviewer_id = _mk_agent(db, "senior reviewer")
+        _bind(db, reviewer_id, pid)
+        t = Task(project_id=pid, title="Build feature",
+                 status_id=_status_id(db, "in_progress"),   # demoted
+                 priority=TaskPriority.HIGH, assignee="senior reviewer",
+                 creator="system", branch="agent/x/task/y",
+                 dod_items=json.dumps([{"text": "d", "checked": False}]))
+        db.add(t); db.commit()
+        now = datetime.now(timezone.utc)
+        if with_prior_impl_run:
+            # The implementer's run — outside the bounce window so the
+            # hand-back budget isn't already spent.
+            db.add(Run(agent_id=impl_id, task_id=t.id, project_id=pid,
+                       status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                       created_at=now - timedelta(hours=2)))
+        run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                  created_at=now - timedelta(minutes=5))
+        db.add(run); db.commit()
+        # The rejection, logged during the reviewer's run.
+        db.add(Activity(project_id=pid, task_id=t.id, actor="senior reviewer",
+                        action="task.move", detail="review → in_progress",
+                        diff=json.dumps({"status": {"from": "review",
+                                                    "to": "in_progress"}})))
+        db.add(Activity(project_id=pid, task_id=t.id, actor="senior reviewer",
+                        action="commented",
+                        detail="Claimed commit d896cb2 does not exist."))
+        db.commit()
+        return pid, t.id, run.id, impl_id, reviewer_id
+
+
+def test_reviewer_rejection_hands_back_to_implementer(db_session):
+    """AP-252 regression: the corrective run goes to the IMPLEMENTER with the
+    reviewer's feedback — never bounced back to the reviewer."""
+    pid, task_id, run_id, impl_id, reviewer_id = \
+        _setup_rejection_scenario(db_session)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "fix1"}) as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "review_rejected"
+    assert out.get("handed_back") is True
+    assert out["assignee"] == "implementer-1"
+    kwargs = mock_dispatch.call_args.kwargs
+    assert kwargs["agent_id"] == impl_id            # NOT the reviewer
+    assert "d896cb2" in kwargs["extra_context"]     # feedback carried over
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert t.assignee == "implementer-1"
+        assert db.get(Status, t.status_id).name == "in_progress"  # stays put
+
+
+def test_rejection_without_prior_implementer_escalates(db_session):
+    """No implementer run to hand back to → needs-attention, not a bounce."""
+    pid, task_id, run_id, *_ = _setup_rejection_scenario(
+        db_session, with_prior_impl_run=False)
+    with patch("backend.forge.services.schedule_task_run") as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "review_rejected"
+    assert out.get("escalated") is True
+    mock_dispatch.assert_not_called()
+
+
+def test_rejection_policy_disabled_skips_handback(db_session):
+    """rejection.enabled=false (config) → driver skips the advance and leaves
+    recovery to the watchdog — no dispatch, no reassignment."""
+    pid, task_id, run_id, *_ = _setup_rejection_scenario(db_session)
+    flow = workflow.system_workflow()
+    flow.rejection.enabled = False
+    with patch.object(workflow, "effective_workflow", return_value=flow), \
+         patch("backend.forge.services.schedule_task_run") as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "review_rejected"
+    assert out.get("handed_back") is False
+    mock_dispatch.assert_not_called()
+
+
+def test_rejection_handback_budget_exhausted_escalates(db_session):
+    """Two implementer runs already inside the window → no ping-pong; the
+    task escalates to a human instead of looping implementer↔reviewer."""
+    from datetime import datetime, timezone, timedelta
+    pid, task_id, run_id, impl_id, _ = _setup_rejection_scenario(db_session)
+    with db_session() as db:
+        now = datetime.now(timezone.utc)
+        for mins in (20, 10):
+            db.add(Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                       status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                       created_at=now - timedelta(minutes=mins)))
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run") as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "review_rejected"
+    assert out.get("escalated") is True
+    mock_dispatch.assert_not_called()
 
 
 # ── Slice 2: two-phase integration (review -> done via daemon merge) ─────
