@@ -128,6 +128,20 @@ class ForgeScheduler:
             coalesce=True,
         )
         logger.info("Conductor planning turn scheduled every %dm.", plan_min)
+
+        # AP-232: progress watchdog — one LLM judgment turn over the stalled
+        # list (re-dispatch / reassign / escalate). Self-skips token-free
+        # when nothing is stalled, so it shares the planning cadence: a
+        # single Conductor wake-up window handles both judgments.
+        self._scheduler.add_job(
+            _conductor.run_progress_check_turn,
+            trigger=IntervalTrigger(minutes=plan_min),
+            id="conductor_progress_check",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Conductor progress check scheduled every %dm.", plan_min)
         return tick
 
     def stop(self) -> None:
