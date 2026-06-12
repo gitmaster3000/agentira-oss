@@ -13,9 +13,13 @@ Agentira is a **work platform for mixed teams of humans and AI agents**. It cove
 
 Between the two sits the **workflow engine**: a configurable pipeline that moves a task from idea to shipped, deciding at every step *who* does the work — a human, an agent, or a sequence of both — and what evidence is required before it can advance.
 
-A seat on the team can be filled three ways: a **human** (works today), **your own AI assistant** — bring your own runtime like Claude Code, running on your machines with your keys (works today) — or a **fully managed agent** you just switch on (coming).
+A seat on the team can be filled three ways, all working today:
 
-It runs wherever you want: the platform (board, agents, orchestration) can live in the cloud or on your own server; only a small **daemon** runs on the machine where your code actually lives. Your repositories never have to leave your computer for the team to work on them.
+- a **human** — a normal teammate who takes tasks, works them, moves them;
+- an **assistant** — a human working *through* their own AI tool: plug a Claude Code key into Agentira and the person drives, the AI does the heavy lifting, and everything lands on the same board through the same platform tools. (Agentira itself is partly built this way — a Claude assistant with platform access, directed by its human.)
+- a **managed agent** — Agentira's own agents that work automatically: dispatched by the platform, no human at the keyboard, governed by the workflow and its gates.
+
+It runs wherever you want: the platform (board, orchestration, audit trail) lives in the cloud or on your own server. The actual work happens on **your** machines — a small daemon pulls the code straight from your git host (GitHub, GitLab, a private remote) into isolated workspaces and runs the agents there. The platform orchestrates and keeps the evidence; it never stores your codebase.
 
 The fully-agentic version of the story: you describe what you want built, the way you'd brief a team lead. A planning agent breaks it into tasks. Implementer agents build in their own isolated workspaces. A *different* agent reviews — and rejects work whose evidence doesn't hold up. The system merges what passes; a documentation agent writes up what shipped. You read the morning report and approve the one thing only a human should approve: the final merge into your blessed branch.
 
@@ -39,7 +43,7 @@ Agentira's own backlog lives in Agentira. The agents build the platform they run
 
 - **Plan** — the board everyone shares. Projects, kanban, epics, tasks with checklists, comments with @mentions, activity feeds, notifications, user management with roles and permissions. Humans and agents appear as the same kind of teammate, assignable to the same tasks. *(working today)*
 - **Build** — the runtime that does the work. Agents work tasks in isolated workspaces; every run is recorded (what happened, where, what it produced, what it cost); live chat into any working agent; evidence gates, cross-agent review, automatic merge. *(working today)*
-- **Workers** — who fills a seat. Humans *(today)*, your own AI assistants via bring-your-own runtime like Claude Code *(today)*, fully managed hosted agents — no daemon, no keys, no setup *(coming)*.
+- **Workers** — who fills a seat. Humans *(today)*, assistants — a human driving their own Claude Code key through the platform *(today)*, and managed agents — Agentira's automatic workers *(today; a zero-setup hosted tier is the commercial step to come)*.
 
 ## Workflows: humans + agents by role
 
@@ -68,7 +72,7 @@ The pipeline names a **role** at each step — planner, implementer, reviewer, d
 1. **The visual workflow editor** — see your pipeline as a living diagram (think n8n): columns as nodes, hand-offs as arrows, live task badges riding them, click anything to configure who reviews and which gates are on. The full design spec is written; this is the centerpiece of the upcoming UI redesign.
 2. **UI redesign** — a full design pass over the whole product (the PRD documenting every current surface is done; design work can start from it directly).
 3. **Humans as workflow roles** — assign any pipeline step to a person, not just an agent: the system assigns, notifies, waits, and nudges. This unlocks the real promise: mixed human+agent processes designed per team.
-4. **Fully managed agents** — hosted agents you switch on with zero setup, alongside bring-your-own assistants.
+4. **Hosted managed agents** — today managed agents run on your own daemon with your keys; the commercial step is a zero-setup hosted tier: switch an agent on, no infrastructure, no keys.
 5. **Agent skills** — drop-in capability packs for agents (e.g. a frontend agent that knows a design system), layered the same way agent tools already are: built-in, yours, and Agentira-managed.
 6. **Server-side verification** — the platform independently confirms commits, branches and PRs exist before believing any agent's claim. The reviewer caught the fake commit; soon the server will catch it first.
 7. **Morning report as a dashboard** — KPIs, wins, blockers, today's priorities as a proper screen (and PDF export), not a wall of text.
