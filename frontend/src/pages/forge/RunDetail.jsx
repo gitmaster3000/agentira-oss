@@ -99,7 +99,10 @@ export function RunDetail() {
         // Same-origin proxy or env override. Falls back to ws/wss based
         // on the page protocol.
         const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const url = `${proto}://${window.location.host}/api/forge/ws/runs/${runId}`;
+        // Browsers can't set Authorization on a WS — pass the JWT as a query
+        // param so the server can authenticate + org-scope the subscription.
+        const tok = localStorage.getItem('agentira_token') || '';
+        const url = `${proto}://${window.location.host}/api/forge/ws/runs/${runId}?token=${encodeURIComponent(tok)}`;
         let ws;
         let stopped = false;
         try {
