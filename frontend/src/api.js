@@ -55,20 +55,24 @@ export const api = {
         return data;
     },
 
-    async signup(data) {
-        const result = await request('/signup', { method: 'POST', body: JSON.stringify(data) });
+    // Invites — invite-only signup.
+    getInvite: (code) => request(`/invites/${code}`),
+    async acceptInvite(code, data) {
+        const result = await request(`/invites/${code}/accept`, { method: 'POST', body: JSON.stringify(data) });
+        if (result.token) localStorage.setItem('agentira_token', result.token);
+        return result;
+    },
+    // Admin: create a member invite for the caller's org.
+    createInvite: (email) => request('/invites', { method: 'POST', body: JSON.stringify(email ? { email } : {}) }),
+
+    async googleAuth(idToken, invite) {
+        const result = await request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken, invite: invite || null }) });
         if (result.token) localStorage.setItem('agentira_token', result.token);
         return result;
     },
 
-    async googleAuth(idToken) {
-        const result = await request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken }) });
-        if (result.token) localStorage.setItem('agentira_token', result.token);
-        return result;
-    },
-
-    async githubAuth(code) {
-        const result = await request('/auth/github', { method: 'POST', body: JSON.stringify({ code }) });
+    async githubAuth(code, invite) {
+        const result = await request('/auth/github', { method: 'POST', body: JSON.stringify({ code, invite: invite || null }) });
         if (result.token) localStorage.setItem('agentira_token', result.token);
         return result;
     },

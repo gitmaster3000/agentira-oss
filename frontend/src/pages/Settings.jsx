@@ -132,6 +132,17 @@ export function Settings() {
         });
     }
 
+    async function handleInviteMember() {
+        try {
+            const inv = await api.createInvite();
+            const link = `${window.location.origin}/signup?invite=${inv.code}`;
+            try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
+            window.prompt("Member invite link (copied to clipboard) — share it:", link);
+        } catch (err) {
+            alert(err.message || "Failed to create invite");
+        }
+    }
+
     async function handleCopyKey() {
         if (!newBotKey) return;
         try {
@@ -436,9 +447,16 @@ export function Settings() {
                         {/* ── Admin: All Profiles ────────────────────────────────────── */}
                         {isAdmin && (
                             <section className="grid gap-3">
-                                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
-                                    <Shield className="w-4 h-4" /> All Profiles
-                                </h3>
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--text-tertiary)' }}>
+                                        <Shield className="w-4 h-4" /> All Profiles
+                                    </h3>
+                                    <button onClick={handleInviteMember}
+                                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:border-purple-500"
+                                        style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)', color: 'var(--accent-primary)' }}>
+                                        + Invite member
+                                    </button>
+                                </div>
                                 <div className="grid gap-2">
                                     {profiles.map(p => (
                                         <div key={p.id} className="flex items-center justify-between rounded-lg px-4 py-3 group border transition-colors hover:border-gray-600" style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
