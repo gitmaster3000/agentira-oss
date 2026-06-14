@@ -98,18 +98,22 @@ def _conductor_system_prompt() -> str:
     return _load_prompt("conductor/system_prompt.md")
 
 
-def get_or_create_conductor() -> dict:
-    """Return the Conductor agent, seeding it once if absent.
+def get_or_create_conductor(org_id: str | None = None) -> dict:
+    """Return the Conductor agent for an org, seeding it once if absent.
 
-    The Conductor is a real LLM Agent — it shows in the agent list and is
-    configured (model, runtime, prompt) like any other agent. Its
-    intelligence is split: deterministic scripts (this module, exposed as
-    MCP tools) gather facts and act token-free; the LLM is spent only on
-    judgment — prioritisation, sprint planning, run monitoring.
+    Per-org: each org has its own Conductor. `org_id` defaults to the current
+    request's org context; pass it explicitly when seeding a freshly-created
+    org. The Conductor is a real LLM Agent — shows in the agent list, is
+    configured (model, runtime, prompt) like any other agent.
     """
     import secrets
+    from backend.db import get_current_org
+    oid = org_id or get_current_org()
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        q = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME)
+        if oid:
+            q = q.filter(Profile.org_id == oid)
+        prof = q.first()
         if prof is None:
             role = db.query(Role).filter(Role.name == "bot").first()
             if role is None:
@@ -118,11 +122,12 @@ def get_or_create_conductor() -> dict:
                 name=CONDUCTOR_NAME, display_name="Conductor",
                 password_hash="", avatar_url="", webhook_url="",
                 role_id=role.id, api_key=secrets.token_hex(32),
+                org_id=oid,
             )
             db.add(prof)
             db.commit()
             db.refresh(prof)
-            logger.info("Seeded Conductor profile %s", prof.id)
+            logger.info("Seeded Conductor profile %s (org %s)", prof.id, oid)
 
         # Bind a Claude runtime if one is registered, so the Conductor can
         # actually take an LLM turn. If none yet, leave it null — the
@@ -150,6 +155,7 @@ def get_or_create_conductor() -> dict:
             agent = Agent(
                 id=prof.id, profile_id=prof.id, name=CONDUCTOR_NAME,
                 executor_type="http", model=prof.model, runtime_id=rt_id,
+                org_id=prof.org_id,
             )
             db.add(agent)
         elif rt_id and not agent.runtime_id:

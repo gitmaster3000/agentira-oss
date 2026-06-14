@@ -74,20 +74,26 @@ user wants work done, guide them to assign it to a worker agent (or to
 the Conductor for autonomous pickup). Be warm, brief, and concrete."""
 
 
-def get_or_create_concierge() -> dict:
-    """Return the Agentira Guide agent, seeding it once if absent.
+def get_or_create_concierge(org_id: str | None = None) -> dict:
+    """Return the Agentira Guide agent for an org, seeding it once if absent.
 
-    Mirrors `conductor.get_or_create_conductor`: a real Agent row with a
-    bound Claude runtime so the floating chat can take an LLM turn. Marked
-    `is_system` so the UI protects it from deletion. A pre-rename
-    "Concierge" profile is renamed in place.
+    Per-org (each org gets its own). `org_id` defaults to the current request's
+    org context; pass it when seeding a freshly-created org. A real Agent row
+    with a bound Claude runtime so the floating chat can take an LLM turn.
+    Marked `is_system` so the UI protects it from deletion.
     """
+    from backend.db import get_current_org
+    oid = org_id or get_current_org()
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONCIERGE_NAME).first()
-        if prof is None:
-            # Rename a legacy "Concierge" profile rather than seed a dupe.
+        q = db.query(Profile).filter(Profile.name == CONCIERGE_NAME)
+        if oid:
+            q = q.filter(Profile.org_id == oid)
+        prof = q.first()
+        if prof is None and oid:
+            # Rename a legacy "Concierge" profile in this org rather than dupe.
             prof = (db.query(Profile)
-                      .filter(Profile.name.in_(_LEGACY_CONCIERGE_NAMES))
+                      .filter(Profile.name.in_(_LEGACY_CONCIERGE_NAMES),
+                              Profile.org_id == oid)
                       .first())
             if prof is not None:
                 prof.name = CONCIERGE_NAME
@@ -102,6 +108,7 @@ def get_or_create_concierge() -> dict:
                 name=CONCIERGE_NAME, display_name=CONCIERGE_NAME,
                 password_hash="", avatar_url="", webhook_url="",
                 role_id=role.id, api_key=secrets.token_hex(32),
+                org_id=oid,
             )
             db.add(prof)
             db.commit()
@@ -131,6 +138,7 @@ def get_or_create_concierge() -> dict:
             agent = Agent(
                 id=prof.id, profile_id=prof.id, name=CONCIERGE_NAME,
                 executor_type="http", model=prof.model, runtime_id=rt_id,
+                org_id=prof.org_id,
             )
             db.add(agent)
         else:

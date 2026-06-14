@@ -85,8 +85,8 @@ def get_template(name: str) -> dict[str, Any] | None:
     return None
 
 
-def seed_all() -> dict[str, list[str]]:
-    """Set-if-empty seed every template as a Profile.
+def seed_all(org_id: str | None = None) -> dict[str, list[str]]:
+    """Set-if-empty seed every template as a Profile, scoped to an org.
 
     Idempotent: on a second call, profiles that already exist are left
     alone (we don't even touch the field-level set-if-empty, since
@@ -103,6 +103,8 @@ def seed_all() -> dict[str, list[str]]:
         "already_present": [],
         "seeded_fields": [],
     }
+    from backend.db import get_current_org
+    oid = org_id or get_current_org()
     with SessionLocal() as db:
         bot_role = db.query(Role).filter(Role.name == "bot").first()
         if not bot_role:
@@ -111,7 +113,10 @@ def seed_all() -> dict[str, list[str]]:
 
         for t in discover():
             name = t["name"]
-            prof = db.query(Profile).filter(Profile.name == name).first()
+            q = db.query(Profile).filter(Profile.name == name)
+            if oid:
+                q = q.filter(Profile.org_id == oid)
+            prof = q.first()
             is_new = prof is None
             if is_new:
                 prof = Profile(
@@ -122,6 +127,7 @@ def seed_all() -> dict[str, list[str]]:
                     webhook_url="",
                     role_id=bot_role.id,
                     api_key=secrets.token_hex(32),
+                    org_id=oid,
                 )
                 db.add(prof)
                 db.flush()

@@ -1938,6 +1938,30 @@ def _create_org(db: Session, owner_display_name: str) -> Org:
     return org
 
 
+def seed_org_defaults(org_id: str) -> None:
+    """Seed a freshly-created org with its default agent team (Conductor,
+    Planner, Reviewer, Implementers, DevOps from templates) + the Agentira
+    Guide. Best-effort; never blocks org creation. Runs privileged so it can
+    write across RLS while stamping the explicit org_id.
+
+    Call this AFTER the org row is committed (the seeders use their own
+    sessions and must see the org for the FK)."""
+    from backend import agent_templates
+    from backend.forge.conductor import get_or_create_conductor
+    from backend.forge.concierge import get_or_create_concierge
+    with privileged():
+        try:
+            r = agent_templates.seed_all(org_id)
+            logger.info("org %s seeded agents: %s", org_id, r.get("created"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("seed_all failed for org %s: %s", org_id, exc)
+        for fn in (get_or_create_conductor, get_or_create_concierge):
+            try:
+                fn(org_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s failed for org %s: %s", fn.__name__, org_id, exc)
+
+
 # ── Invite-only signup ─────────────────────────────────────────────────────
 # Open self-serve signup is disabled. Accounts are created only by accepting an
 # invite code:
@@ -2029,10 +2053,12 @@ def accept_invite(code: str, *, name: str, password: str = "",
         if db.query(Profile).filter(Profile.name == name).first():
             raise ValueError(f"username '{name}' is taken")
 
+        new_org = False
         if inv.role == "admin":
             org = _create_org(db, display_name or name)
             org_id = org.id
             role_id = _get_role_id(db, "admin")
+            new_org = True
         else:
             if not inv.org_id:
                 raise ValueError("malformed member invite")
@@ -2057,7 +2083,10 @@ def accept_invite(code: str, *, name: str, password: str = "",
         db.refresh(profile)
         res = _profile_to_dict(profile)
         res["api_key"] = profile.api_key
-        return res
+    # Seed the new org's default agents (after commit, outside the session).
+    if new_org:
+        seed_org_defaults(org_id)
+    return res
 
 
 def authenticate_oauth(provider: str, provider_user_id: str, email: str | None = None,
@@ -2088,6 +2117,7 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
         if email:
             profile = db.query(Profile).filter(Profile.email == email).first()
 
+        new_org_id = None
         if not profile:
             # New user: require a valid invite.
             if not invite_code:
@@ -2100,6 +2130,7 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
             if inv.role == "admin":
                 org = _create_org(db, display_name or (email or "My"))
                 org_id, role_id = org.id, _get_role_id(db, "admin")
+                new_org_id = org.id
             else:
                 if not inv.org_id:
                     raise ValueError("malformed member invite")
@@ -2136,7 +2167,11 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
         ))
         db.commit()
         db.refresh(profile)
-        return _profile_to_dict(profile)
+        res = _profile_to_dict(profile)
+    # Seed the new org's default agents (after commit, outside the session).
+    if new_org_id:
+        seed_org_defaults(new_org_id)
+    return res
 
 
 def list_profiles(role: Optional[str] = None) -> list[dict]:
@@ -2513,13 +2548,13 @@ def bootstrap():
                                password_hash=passwords.hash_password("admin123")))
                 db.commit()
 
-    # AP-157: seed the default agent templates (Conductor + Planner +
-    # Implementers + Reviewer + DevOps). Set-if-empty so existing
-    # workspaces get filled in without clobbering user edits.
+    # AP-157: seed default agents into the system org. Real orgs get their own
+    # default agents at creation time via seed_org_defaults().
     try:
-        from backend import agent_templates
-        result = agent_templates.seed_all()
-        if result["created"]:
-            logger.info("agent templates seeded: %s", result["created"])
+        with privileged(), _session() as db:
+            sys_org = _ensure_system_org(db)
+            db.commit()
+            sys_org_id = sys_org.id
+        seed_org_defaults(sys_org_id)
     except Exception as exc:  # noqa: BLE001 — never fail bootstrap
-        logger.warning("agent template seed failed: %s", exc)
+        logger.warning("default agent seed failed: %s", exc)

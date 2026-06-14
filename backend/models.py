@@ -134,10 +134,15 @@ class Invite(Base):
 
 class Profile(Base):
     __tablename__ = "profiles"
+    # Name is unique PER ORG (not globally) so every org can have its own
+    # "Conductor", "Planner", etc. Human usernames are additionally kept
+    # globally unique in app code (signup/accept) so password login by username
+    # stays unambiguous.
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_profiles_org_name"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), default="")
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, default=None)

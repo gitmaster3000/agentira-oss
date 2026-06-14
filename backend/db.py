@@ -278,6 +278,35 @@ def _migrate_orgs(conn: Connection) -> None:
                         f"ALTER TABLE {t} ALTER COLUMN org_id SET NOT NULL"))
         conn.commit()
 
+    # 3b) profiles.name: global-unique → per-org-unique, so every org can have
+    #     its own "Conductor"/"Planner"/etc. Idempotent.
+    if is_pg and "profiles" in tables:
+        # Drop the old global unique on name (auto-named profiles_name_key),
+        # whatever it's called, then add the composite (org_id, name).
+        rows = conn.execute(text(
+            "SELECT con.conname FROM pg_constraint con "
+            "JOIN pg_class rel ON rel.oid = con.conrelid "
+            "WHERE rel.relname = 'profiles' AND con.contype = 'u'"
+        )).all()
+        for (conname,) in rows:
+            # Identify the single-column unique on `name` and drop it.
+            cols = conn.execute(text(
+                "SELECT a.attname FROM pg_constraint con "
+                "JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY(con.conkey) "
+                "WHERE con.conname = :c"), {"c": conname}).all()
+            colnames = {c[0] for c in cols}
+            if colnames == {"name"}:
+                conn.execute(text(f'ALTER TABLE profiles DROP CONSTRAINT "{conname}"'))
+        # Add the per-org unique if not present.
+        exists = conn.execute(text(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'uq_profiles_org_name'"
+        )).first()
+        if not exists:
+            conn.execute(text(
+                "ALTER TABLE profiles ADD CONSTRAINT uq_profiles_org_name "
+                "UNIQUE (org_id, name)"))
+        conn.commit()
+
     # 4) Apply RLS policies (Postgres only).
     if is_pg:
         _apply_rls(conn)
