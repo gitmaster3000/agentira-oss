@@ -1942,7 +1942,11 @@ def _create_org(db: Session, owner_display_name: str) -> Org:
 # Operator issues admin invites (scripts/create_invite.py); admins issue member
 # invites in-app (POST /api/invites).
 
-from datetime import timedelta  # noqa: E402
+from datetime import datetime as _dt, timezone as _tz, timedelta  # noqa: E402
+
+
+def _utcnow():
+    return _dt.now(_tz.utc)
 
 
 def create_invite(*, role: str, org_id: str | None, email: str | None = None,
