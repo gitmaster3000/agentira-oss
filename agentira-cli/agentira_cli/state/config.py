@@ -16,7 +16,10 @@ class DaemonConfig(BaseSettings):
     )
 
     # ── Server connection ────────────────────────────────────────────────
-    api_url: str = "http://127.0.0.1:8111"
+    # Defaults to the hosted Agentira backend. Override with
+    # AGENTIRA_DAEMON_API_URL (or `--api-url` on `daemon login`) for a local
+    # dev stack, e.g. http://127.0.0.1:8111.
+    api_url: str = "https://flowty-api-production.up.railway.app"
     api_key: str = ""  # optional daemon auth token
 
     # ── Runtime host ─────────────────────────────────────────────────────

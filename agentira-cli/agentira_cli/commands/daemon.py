@@ -56,15 +56,27 @@ def login(api_url: str = typer.Option(None, "--api-url",
 
     user_code = start["user_code"]
     device_code = start["device_code"]
-    verify = start.get("verification_uri") or f"{base}/cli-auth"
+    verify = start.get("verification_uri") or ""
+    if not verify.startswith("http"):
+        # The server didn't return an absolute frontend URL (FRONTEND_URL /
+        # CORS_ALLOW_ORIGINS unset on that backend). We can't reliably open a
+        # relative path — point the user at the right place explicitly.
+        typer.echo(f"Server at {base} didn't return a usable verification URL "
+                   f"(got '{verify or 'nothing'}').")
+        typer.echo("If you meant the hosted product, re-run with:")
+        typer.echo("  agentira daemon login --api-url https://flowty-api-production.up.railway.app")
+        raise typer.Exit(1)
     url = f"{verify}?user_code={user_code}"
     typer.echo("Opening your browser to authorize this daemon (sign in as an admin)…")
     typer.echo(f"  URL:  {url}")
     typer.echo(f"  Code: {user_code}")
+    opened = False
     try:
-        webbrowser.open(url)
+        opened = webbrowser.open(url)
     except Exception:  # noqa: BLE001
-        pass
+        opened = False
+    if not opened:
+        typer.echo("  (couldn't auto-open a browser — paste the URL above manually)")
 
     interval = int(start.get("interval", 2))
     deadline = time.time() + int(start.get("expires_in", 600))
