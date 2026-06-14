@@ -30,6 +30,36 @@ def get_db():
         db.close()
 
 
+def wait_for_db(*, attempts: int = 30, delay_seconds: float = 2.0) -> None:
+    """Block until the database accepts a connection (or give up).
+
+    On Railway the private network (`*.railway.internal`) isn't resolvable in
+    the first second or two of a container's life, so connecting at startup
+    races the network and fails with a DNS error. SQLite is always local, so
+    this is a no-op there. Retries with a fixed backoff before letting the
+    real error surface."""
+    if _is_sqlite:
+        return
+    import logging
+    import time
+    log = logging.getLogger("agentira.db")
+    last_exc: Exception | None = None
+    for i in range(1, attempts + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            if i > 1:
+                log.info("Database reachable after %d attempt(s).", i)
+            return
+        except Exception as exc:  # noqa: BLE001 — retry any connection failure
+            last_exc = exc
+            log.warning("Database not ready (attempt %d/%d): %s",
+                        i, attempts, exc.__class__.__name__)
+            time.sleep(delay_seconds)
+    raise RuntimeError(
+        f"Database unreachable after {attempts} attempts") from last_exc
+
+
 def init_db():
     """Create all tables."""
     from backend.models import Project, Task, Activity, Epic, OAuthAccount, ProjectRepo  # noqa: F401
