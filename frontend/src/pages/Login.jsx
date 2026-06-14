@@ -128,8 +128,7 @@ export function Login() {
                     </form>
 
                     <p className="text-body-sm text-text-tertiary text-center">
-                        Don't have an account?{' '}
-                        <Link to={ROUTES.SIGNUP} className="font-medium" style={{ color: 'var(--accent-primary)' }}>Sign Up</Link>
+                        Need access? Ask your workspace admin for an invite.
                     </p>
                 </div>
             </div>
