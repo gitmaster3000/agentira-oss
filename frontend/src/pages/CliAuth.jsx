@@ -5,13 +5,25 @@ import { api } from '../api';
 import { Pencil, Terminal } from 'lucide-react';
 
 export function CliAuth() {
-    const { user, loading, loginWithOAuth } = useAuth();
+    const { user, loading, loginWithOAuth, login, logout } = useAuth();
     const [params] = useSearchParams();
     const [code, setCode] = useState(params.get('user_code') || '');
     const [status, setStatus] = useState('idle'); // idle | working | done | error
     const [error, setError] = useState('');
     const [authConfig, setAuthConfig] = useState({ google: false, github: false });
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
     const googleBtnRef = useRef(null);
+
+    const handlePasswordLogin = async (e) => {
+        e.preventDefault();
+        setError('');
+        try {
+            await login(username, password); // updates context → re-renders signed in
+        } catch (err) {
+            setError('Invalid username or password');
+        }
+    };
 
     useEffect(() => {
         if (!user) api.getAuthConfig().then(setAuthConfig).catch(() => {});
@@ -80,9 +92,23 @@ export function CliAuth() {
                     Sign in as an admin to connect your daemon.
                 </p>
                 {error && <div className="p-3 text-body-sm text-red-400 bg-red-900/20 border border-red-800 rounded-md">{error}</div>}
-                {authConfig.google
-                    ? <div ref={googleBtnRef} className="flex justify-center" />
-                    : <p className="text-body-sm text-text-tertiary text-center">Google sign-in unavailable.</p>}
+
+                {authConfig.google && <div ref={googleBtnRef} className="flex justify-center" />}
+
+                {authConfig.google && (
+                    <div className="relative">
+                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t" style={{ borderColor: 'var(--border-subtle)' }} /></div>
+                        <div className="relative flex justify-center text-label-sm"><span className="px-3 text-text-tertiary" style={{ backgroundColor: 'var(--bg-card)' }}>or</span></div>
+                    </div>
+                )}
+
+                <form onSubmit={handlePasswordLogin} className="space-y-3">
+                    <input value={username} onChange={(e) => setUsername(e.target.value)}
+                        className="input" placeholder="Username" autoComplete="username" autoFocus />
+                    <input value={password} onChange={(e) => setPassword(e.target.value)}
+                        type="password" className="input" placeholder="Password" autoComplete="current-password" />
+                    <button type="submit" className="btn btn-primary w-full justify-center text-body-md">Sign in</button>
+                </form>
             </Shell>
         );
     }
@@ -91,8 +117,19 @@ export function CliAuth() {
 
     return (
         <Shell>
+            <div className="flex items-center justify-between rounded-lg px-3 py-2 text-body-sm border"
+                style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--border-subtle)' }}>
+                <span className="text-text-secondary truncate">
+                    Signed in as <span className="text-text-primary">{user.display_name || user.name}</span>
+                    <span className="text-text-tertiary"> · {user.role?.name || user.role}</span>
+                </span>
+                <button onClick={logout} className="text-label-sm font-medium shrink-0 ml-2" style={{ color: 'var(--accent-primary)' }}>
+                    Switch account
+                </button>
+            </div>
+
             <p className="text-body-sm text-text-tertiary text-center">
-                Connect a runtime daemon to <span className="text-text-secondary">{user.display_name || user.name}</span>’s workspace.
+                Connect a runtime daemon to this workspace.
             </p>
 
             {!isAdmin && (
