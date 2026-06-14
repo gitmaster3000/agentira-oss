@@ -19,24 +19,31 @@ from backend import agent_notifier
 
 import logging
 import os
-import hashlib
 import secrets
+
+from backend import passwords
 
 logger = logging.getLogger("agentira.services")
 
 def _hash_password(password: str) -> str:
-    """Simple SHA-256 hash for basic auth."""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password for storage (bcrypt — AP-194)."""
+    return passwords.hash_password(password)
 
 def authenticate_user(username: str, password: str) -> dict | None:
-    """Verify credentials and return profile dict."""
+    """Verify credentials and return profile dict.
+
+    Transparently migrates legacy unsalted SHA-256 hashes to bcrypt on a
+    successful login (AP-194), so the old scheme drains without a reset."""
     with _session() as db:
         p = db.query(Profile).filter(Profile.name == username).first()
         if not p:
             return None
-        if p.password_hash == _hash_password(password):
-            return _profile_to_dict(p)
-    return None
+        if not passwords.verify_password(password, p.password_hash or ""):
+            return None
+        if passwords.needs_rehash(p.password_hash or ""):
+            p.password_hash = passwords.hash_password(password)
+            db.commit()
+        return _profile_to_dict(p)
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -2296,18 +2303,31 @@ def bootstrap():
     with _session() as db:
         _seed_defaults(db)
 
-        # Ensure admin user exists with password
+        # Ensure an admin user exists. AP-194: no hardcoded prod credential.
+        # Prod: bootstrap only from AGENTIRA_ADMIN_PASSWORD (fail loud if
+        # unset — the operator must choose a real password). Dev: a clearly
+        # labelled convenience admin so local setup still works out of the box.
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if not db.query(Profile).filter(Profile.name == "admin").first():
-            print("Creating default admin user (password: admin123)")
-            p = Profile(
-                name="admin",
-                display_name="Admin User",
-                role_id=admin_role.id,
-                password_hash=_hash_password("admin123")
-            )
-            db.add(p)
-            db.commit()
+            is_prod = os.getenv("RAILWAY_ENVIRONMENT") is not None
+            admin_password = os.getenv("AGENTIRA_ADMIN_PASSWORD")
+            if admin_password:
+                db.add(Profile(name="admin", display_name="Admin User",
+                               role_id=admin_role.id,
+                               password_hash=passwords.hash_password(admin_password)))
+                db.commit()
+                logger.info("Created admin user from AGENTIRA_ADMIN_PASSWORD")
+            elif is_prod:
+                logger.error(
+                    "No admin user and AGENTIRA_ADMIN_PASSWORD is unset in "
+                    "production — set it and restart to bootstrap the admin.")
+            else:
+                logger.warning("Creating DEV admin user (password: admin123) "
+                               "— set AGENTIRA_ADMIN_PASSWORD for real deploys")
+                db.add(Profile(name="admin", display_name="Admin User",
+                               role_id=admin_role.id,
+                               password_hash=passwords.hash_password("admin123")))
+                db.commit()
 
     # AP-157: seed the default agent templates (Conductor + Planner +
     # Implementers + Reviewer + DevOps). Set-if-empty so existing

@@ -8,6 +8,14 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 if not JWT_SECRET:
+    # AP-194: in production a per-process random secret silently invalidates
+    # every token on each restart — refuse to boot instead. Dev keeps the
+    # convenience fallback.
+    if os.getenv("RAILWAY_ENVIRONMENT") is not None:
+        raise RuntimeError(
+            "JWT_SECRET must be set in production. Generate one with "
+            "`python -c \"import secrets; print(secrets.token_hex(32))\"` and "
+            "set it in the environment.")
     import secrets
     JWT_SECRET = secrets.token_hex(32)
     print("WARNING: JWT_SECRET not set — using random secret (tokens won't survive restarts)")

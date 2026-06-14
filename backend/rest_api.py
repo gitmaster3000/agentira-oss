@@ -842,9 +842,27 @@ async def api_github_webhook(request: Request):
 
 app = FastAPI(title="AgentIRA", version="0.2.0", description="Lean task manager for AI agents")
 
+# AP-194: never wildcard-with-credentials. Prod origins come from
+# CORS_ALLOW_ORIGINS (comma-separated); dev falls back to localhost ports.
+_is_prod = os.getenv("RAILWAY_ENVIRONMENT") is not None
+_cors_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if _cors_env:
+    _allow_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+elif _is_prod:
+    _allow_origins = []  # locked down: set CORS_ALLOW_ORIGINS to open it
+    import logging as _logging
+    _logging.getLogger("agentira").warning(
+        "CORS_ALLOW_ORIGINS unset in production — cross-origin requests will "
+        "be blocked. Set it to your frontend origin(s).")
+else:
+    _allow_origins = [
+        "http://localhost:5173", "http://localhost:3111",
+        "http://localhost:3112", "http://localhost:3113",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True,
+    allow_origins=_allow_origins, allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
 

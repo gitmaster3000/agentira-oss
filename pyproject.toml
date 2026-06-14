@@ -16,6 +16,7 @@ dependencies = [
     "PyJWT>=2.8.0",
     "APScheduler>=3.10.0",
     "PyYAML>=6.0",
+    "bcrypt>=4.0.0",
 ]
 
 [project.optional-dependencies]
