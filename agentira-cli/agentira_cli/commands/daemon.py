@@ -23,10 +23,11 @@ app = typer.Typer(help="Manage the AgentIRA local daemon process.")
 
 def _post_json(url: str, body: dict) -> dict:
     import urllib.request
+    from agentira_cli.transport.tls import ssl_context
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=15, context=ssl_context()) as r:
         return json.loads(r.read().decode())
 
 

@@ -71,6 +71,11 @@ class DaemonWsClient:
 
         url = self._ws_url()
         headers = {"Authorization": f"Bearer {self._api_key}"}
+        # certifi-backed TLS for wss:// (macOS python builds lack root CAs).
+        ws_ssl = None
+        if url.startswith("wss://"):
+            from agentira_cli.transport.tls import ssl_context
+            ws_ssl = ssl_context()
 
         # Open with library-side ping/pong so the underlying socket is
         # actively probed every 20s. Without this, a half-closed TCP
@@ -81,6 +86,7 @@ class DaemonWsClient:
             additional_headers=headers,
             ping_interval=20,
             ping_timeout=10,
+            ssl=ws_ssl,
         ) as ws:
             # Send identity frame
             ws.send(json.dumps({

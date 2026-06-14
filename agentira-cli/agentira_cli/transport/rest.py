@@ -6,6 +6,10 @@ import json
 import urllib.parse
 import urllib.request
 
+from agentira_cli.transport.tls import ssl_context
+
+_TLS = ssl_context()
+
 
 class AgentiraClient:
     def __init__(self, base_url: str, api_key: str = "") -> None:
@@ -20,13 +24,13 @@ class AgentiraClient:
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         req = urllib.request.Request(url, headers=self._headers, method="GET")
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_TLS) as resp:
             return json.loads(resp.read())
 
     def _post(self, path: str, body: dict | None = None) -> object:
         data = json.dumps(body or {}).encode()
         req = urllib.request.Request(self.base_url + path, data=data, headers=self._headers, method="POST")
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_TLS) as resp:
             return json.loads(resp.read())
 
     # ── Runtime registration ─────────────────────────────────────────────
