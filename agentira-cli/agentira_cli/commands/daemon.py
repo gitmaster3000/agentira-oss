@@ -12,10 +12,93 @@ import typer
 
 from agentira_cli.state.config import DaemonConfig
 from agentira_cli.state.paths import (
-    DAEMON_ID_FILE, DAEMON_LOG_FILE, DAEMON_PID_FILE, ensure_home,
+    CREDENTIALS_FILE, DAEMON_ID_FILE, DAEMON_LOG_FILE, DAEMON_PID_FILE,
+    ensure_home,
 )
 
 app = typer.Typer(help="Manage the AgentIRA local daemon process.")
+
+
+# ── Browser-based admin login ────────────────────────────────────────────
+
+def _post_json(url: str, body: dict) -> dict:
+    import urllib.request
+    data = json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode())
+
+
+def load_credentials() -> dict | None:
+    """Token saved by `agentira daemon login`, if any."""
+    if CREDENTIALS_FILE.exists():
+        try:
+            return json.loads(CREDENTIALS_FILE.read_text())
+        except (ValueError, OSError):
+            return None
+    return None
+
+
+@app.command()
+def login(api_url: str = typer.Option(None, "--api-url",
+          help="Server API URL (defaults to AGENTIRA_DAEMON_API_URL/config).")):
+    """Connect this daemon by signing in as an ADMIN in your browser."""
+    import time
+    import webbrowser
+    ensure_home()
+    base = (api_url or DaemonConfig().api_url).rstrip("/")
+    try:
+        start = _post_json(f"{base}/api/auth/cli/start", {})
+    except Exception as e:  # noqa: BLE001
+        typer.echo(f"Could not reach server at {base}: {e}")
+        raise typer.Exit(1)
+
+    user_code = start["user_code"]
+    device_code = start["device_code"]
+    verify = start.get("verification_uri") or f"{base}/cli-auth"
+    url = f"{verify}?user_code={user_code}"
+    typer.echo("Opening your browser to authorize this daemon (sign in as an admin)…")
+    typer.echo(f"  URL:  {url}")
+    typer.echo(f"  Code: {user_code}")
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001
+        pass
+
+    interval = int(start.get("interval", 2))
+    deadline = time.time() + int(start.get("expires_in", 600))
+    token = None
+    typer.echo("Waiting for approval…")
+    while time.time() < deadline:
+        time.sleep(interval)
+        try:
+            r = _post_json(f"{base}/api/auth/cli/poll", {"device_code": device_code})
+        except Exception:  # noqa: BLE001 — keep polling on transient errors
+            continue
+        if r.get("status") == "approved" and r.get("token"):
+            token = r["token"]
+            break
+    if not token:
+        typer.echo("Login timed out. Run `agentira daemon login` again.")
+        raise typer.Exit(1)
+
+    CREDENTIALS_FILE.write_text(json.dumps({"api_url": base, "token": token}))
+    try:
+        os.chmod(CREDENTIALS_FILE, 0o600)
+    except OSError:
+        pass
+    typer.echo("✓ Daemon authorized. You can now run `agentira daemon start`.")
+
+
+@app.command()
+def logout():
+    """Remove stored daemon credentials."""
+    try:
+        CREDENTIALS_FILE.unlink()
+        typer.echo("Logged out.")
+    except FileNotFoundError:
+        typer.echo("Not logged in.")
 
 
 def _read_pid() -> int | None:
@@ -58,6 +141,17 @@ def _start_impl(*, dry_run: bool, foreground: bool, api_key: str | None) -> None
     config.dry_run = bool(dry_run)
     if api_key:
         config.api_key = api_key
+    elif not config.api_key:
+        # Fall back to the admin token from `agentira daemon login`.
+        creds = load_credentials()
+        if creds and creds.get("token"):
+            config.api_key = creds["token"]
+            if creds.get("api_url"):
+                config.api_url = creds["api_url"]
+    if not config.api_key:
+        typer.echo("Not authorized. Run `agentira daemon login` first "
+                   "(sign in as an admin).")
+        return
 
     if foreground:
         _run_daemon(config)

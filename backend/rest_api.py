@@ -304,6 +304,73 @@ def api_auth_config():
         "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
     }
 
+
+# ── Daemon browser login (device-code flow) ──────────────────────────────
+# `agentira daemon login` opens the browser; the admin approves in-app; the
+# daemon polls for the resulting admin token. Admin-only: a daemon runs with
+# an admin identity so its runtime registration is org-scoped. Sessions live
+# in-process (short-lived; single replica) — fine for current scale.
+import secrets as _secrets, time as _time  # noqa: E402
+
+_CLI_SESSIONS: dict = {}          # device_code -> {user_code, status, token, exp}
+_CLI_BY_USER_CODE: dict = {}      # user_code   -> device_code
+_CLI_TTL = 600                    # 10 minutes
+
+def _cli_gc():
+    now = _time.time()
+    for dc in [k for k, v in _CLI_SESSIONS.items() if v["exp"] < now]:
+        uc = _CLI_SESSIONS.pop(dc, {}).get("user_code")
+        _CLI_BY_USER_CODE.pop(uc, None)
+
+@auth.post("/auth/cli/start")
+def api_cli_start():
+    """Daemon → start a browser-login session."""
+    _cli_gc()
+    device_code = _secrets.token_urlsafe(32)
+    user_code = _secrets.token_hex(3).upper()  # 6 hex chars, human-typeable
+    _CLI_SESSIONS[device_code] = {"user_code": user_code, "status": "pending",
+                                  "token": None, "exp": _time.time() + _CLI_TTL}
+    _CLI_BY_USER_CODE[user_code] = device_code
+    frontend = (os.getenv("FRONTEND_URL", "") or
+                (os.getenv("CORS_ALLOW_ORIGINS", "").split(",")[0] if os.getenv("CORS_ALLOW_ORIGINS") else "")).rstrip("/")
+    return {
+        "device_code": device_code,
+        "user_code": user_code,
+        "verification_uri": f"{frontend}/cli-auth" if frontend else "/cli-auth",
+        "interval": 2,
+        "expires_in": _CLI_TTL,
+    }
+
+@auth.post("/auth/cli/poll")
+def api_cli_poll(body: dict):
+    """Daemon → poll until approved; returns the admin token once granted."""
+    _cli_gc()
+    s = _CLI_SESSIONS.get((body or {}).get("device_code", ""))
+    if not s:
+        raise HTTPException(404, "expired_or_unknown")
+    if s["status"] == "approved":
+        token = s["token"]
+        # one-time: invalidate after handing the token over
+        _CLI_BY_USER_CODE.pop(s["user_code"], None)
+        _CLI_SESSIONS.pop(body["device_code"], None)
+        return {"status": "approved", "token": token}
+    return {"status": s["status"]}
+
+@auth.post("/auth/cli/approve", dependencies=[Depends(require_admin)])
+def api_cli_approve(body: dict, payload: dict = Depends(get_current_user_payload)):
+    """Admin (in-app) → approve a daemon login, minting an admin token bound to
+    the admin's org."""
+    _cli_gc()
+    user_code = (body or {}).get("user_code", "").strip().upper()
+    dc = _CLI_BY_USER_CODE.get(user_code)
+    s = _CLI_SESSIONS.get(dc) if dc else None
+    if not s:
+        raise HTTPException(404, "Invalid or expired code")
+    s["status"] = "approved"
+    s["token"] = create_token(payload["sub"], payload["profile_id"],
+                              payload.get("role", "admin"), payload.get("org_id"))
+    return {"ok": True}
+
 @auth.get("/statuses")
 def api_list_statuses():
     return services.list_statuses()
@@ -924,7 +991,10 @@ for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachme
 # Forge product router (self-contained)
 from backend.forge.router import router as forge_router, daemon_router as forge_daemon_router
 app.include_router(forge_router, dependencies=[Depends(get_current_user)])
-app.include_router(forge_daemon_router)  # daemon-facing, no user JWT
+# Daemon endpoints now require an ADMIN JWT (obtained via `agentira daemon
+# login`). require_admin also pins the request org context, so runtime
+# registration / heartbeats are scoped to the admin's org.
+app.include_router(forge_daemon_router, dependencies=[Depends(require_admin)])
 
 
 # Legacy compat: /api/board/{project_id} → /api/projects/{project_id}/board

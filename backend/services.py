@@ -1883,10 +1883,14 @@ def delete_attachment(attachment_id: str) -> bool:
 # ── Profile operations ──────────────────────────────────────────────────
 
 def validate_api_key(api_key: str) -> dict:
-    """Validate API key and return profile dict. Use this for MCP authentication."""
+    """Validate API key and return profile dict. Use this for MCP authentication.
+
+    Cross-org lookup (we don't know the caller's org until we resolve the key),
+    so it runs privileged. The MCP middleware then pins the resolved org for
+    the rest of the request so RLS scopes tool calls."""
     if not api_key:
         raise ValueError("API key required")
-    with _session() as db:
+    with privileged(), _session() as db:
         p = db.query(Profile).filter(Profile.api_key == api_key).first()
         if not p:
             raise ValueError("Invalid API key")

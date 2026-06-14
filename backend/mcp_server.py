@@ -84,6 +84,7 @@ class ASGILoggingMiddleware:
 
         auth_header = headers.get("authorization", "")
         actor = "system"
+        actor_org = None
         is_authenticated = False
 
         if auth_header.startswith("Bearer "):
@@ -92,8 +93,9 @@ class ASGILoggingMiddleware:
                 profile_dict = services.validate_api_key(token)
                 if profile_dict:
                     actor = profile_dict.get("name", "unknown")
+                    actor_org = profile_dict.get("org_id")
                     is_authenticated = True
-                    logger.info(f"Resolved actor from token: {actor}")
+                    logger.info(f"Resolved actor from token: {actor} (org {actor_org})")
             except Exception as e:
                 logger.warning(f"Token validation failed: {e}")
 
@@ -117,6 +119,10 @@ class ASGILoggingMiddleware:
             logger.debug(f"Public access to: {path}")
 
         token_reset = actor_ctx.set(actor)
+        # Pin the org for the request so RLS scopes every tool call to the
+        # caller's org. None for unauthenticated/public paths.
+        from backend.db import set_current_org
+        set_current_org(actor_org)
         try:
             async def _logging_send(message):
                 if message["type"] == "http.response.start":
@@ -129,6 +135,7 @@ class ASGILoggingMiddleware:
             raise
         finally:
             actor_ctx.reset(token_reset)
+            set_current_org(None)
 
 
 # ── Tool Definitions ───────────────────────────────────────────────────────────
