@@ -16,7 +16,12 @@ export function Login() {
     const successMessage = location.state?.message;
     const googleBtnRef = useRef(null);
 
-    const from = location.state?.from?.pathname || ROUTES.STUDIO;
+    // Return to the exact page that sent us here, INCLUDING its query string
+    // (e.g. /cli-auth?user_code=… — dropping the search broke the daemon flow).
+    const _fromLoc = location.state?.from;
+    const from = _fromLoc
+        ? `${_fromLoc.pathname}${_fromLoc.search || ''}${_fromLoc.hash || ''}`
+        : ROUTES.STUDIO;
 
     useEffect(() => {
         api.getAuthConfig().then(setAuthConfig).catch(() => {});
