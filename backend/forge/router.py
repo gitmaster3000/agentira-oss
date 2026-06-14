@@ -223,7 +223,7 @@ class RuntimeHeartbeatRequest(BaseModel):
 
 # ── Runtime endpoints ─────────────────────────────────────────────────────
 
-@daemon_router.post("/runtimes/register", status_code=200)
+@daemon_router.post("/runtimes/register", status_code=200, dependencies=[Depends(require_admin)])
 def register_runtimes(body: RuntimeRegisterRequest):
     return services.register_runtimes(
         daemon_id=body.daemon_id,
@@ -232,7 +232,7 @@ def register_runtimes(body: RuntimeRegisterRequest):
     )
 
 
-@daemon_router.post("/runtimes/heartbeat")
+@daemon_router.post("/runtimes/heartbeat", dependencies=[Depends(require_admin)])
 def runtime_heartbeat(body: RuntimeHeartbeatRequest):
     return services.heartbeat_runtimes(
         daemon_id=body.daemon_id, providers=body.providers,
@@ -248,7 +248,7 @@ class IntegrationResult(BaseModel):
     reason: str = ""
 
 
-@daemon_router.post("/integration-result")
+@daemon_router.post("/integration-result", dependencies=[Depends(require_admin)])
 def daemon_integration_result(body: IntegrationResult):
     """Workflow slice 2: the daemon reports the merge outcome; the driver
     finishes the two-phase advance (done) or surfaces the classified
@@ -260,14 +260,14 @@ def daemon_integration_result(body: IntegrationResult):
     )
 
 
-@daemon_router.post("/agents/{agent_id}/trigger-events")
+@daemon_router.post("/agents/{agent_id}/trigger-events", dependencies=[Depends(require_admin)])
 def daemon_append_trigger_events(agent_id: str, body: DaemonTriggerEvents):
     return services.append_trigger_events(
         agent_id, trace_id=body.trace_id, run_id=body.run_id, events=body.events,
     )
 
 
-@daemon_router.post("/agents/{agent_id}/trigger-complete")
+@daemon_router.post("/agents/{agent_id}/trigger-complete", dependencies=[Depends(require_admin)])
 def daemon_complete_trigger(agent_id: str, body: DaemonTriggerComplete):
     return services.complete_trigger(
         agent_id,

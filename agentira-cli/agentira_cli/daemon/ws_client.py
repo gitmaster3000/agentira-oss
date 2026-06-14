@@ -86,6 +86,8 @@ class DaemonWsClient:
             ws.send(json.dumps({
                 "daemon_id": self._daemon_id,
                 "runtime_ids": self._runtime_ids,
+                # Fallback auth for proxies that strip the Authorization header.
+                "token": self._api_key,
             }))
 
             # ADR 009 / B5: the backend acks registration as the very first

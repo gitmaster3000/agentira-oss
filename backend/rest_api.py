@@ -939,8 +939,18 @@ webhooks = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 @webhooks.post("/github")
 async def api_github_webhook(request: Request):
-    body = await request.json()
-    results = services.process_github_webhook(body)
+    # This endpoint is public + runs unscoped, so it MUST verify GitHub's HMAC
+    # signature — otherwise anyone could inject commit/PR links into tasks.
+    import hmac as _hmac, hashlib as _hashlib, json as _json
+    secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    if not secret:
+        raise HTTPException(503, "GitHub webhook not configured")
+    raw = await request.body()
+    sig = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + _hmac.new(secret.encode(), raw, _hashlib.sha256).hexdigest()
+    if not (sig and _hmac.compare_digest(sig, expected)):
+        raise HTTPException(401, "Invalid signature")
+    results = services.process_github_webhook(_json.loads(raw))
     return {"linked": len(results), "items": results}
 
 
@@ -994,10 +1004,11 @@ for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachme
 # Forge product router (self-contained)
 from backend.forge.router import router as forge_router, daemon_router as forge_daemon_router
 app.include_router(forge_router, dependencies=[Depends(get_current_user)])
-# Daemon endpoints now require an ADMIN JWT (obtained via `agentira daemon
-# login`). require_admin also pins the request org context, so runtime
-# registration / heartbeats are scoped to the admin's org.
-app.include_router(forge_daemon_router, dependencies=[Depends(require_admin)])
+# Daemon HTTP endpoints require an ADMIN JWT (added per-route in the router so
+# the WebSocket routes — which auth via their first frame / ?token=, since a WS
+# can't carry HTTP deps — are not blocked here). require_admin also pins the
+# org context, so runtime registration/heartbeats are scoped to the admin's org.
+app.include_router(forge_daemon_router)
 
 
 # Legacy compat: /api/board/{project_id} → /api/projects/{project_id}/board

@@ -321,12 +321,26 @@ async def handle_client_run_ws(ws: "WebSocket", run_id: str) -> None:
     """
     from fastapi import WebSocketDisconnect
     await ws.accept()
+
+    # AUTH: browsers can't set Authorization on a WS, so the client passes its
+    # JWT as ?token=. Validate it and confirm the run belongs to the caller's
+    # org before subscribing — otherwise anyone could watch any run by id.
+    payload = _auth_ws_token(ws.query_params.get("token", ""))
+    if not payload:
+        await ws.close(code=4401)
+        return
+    from backend.db import set_current_org
+    set_current_org(payload["org_id"])
+    from backend.forge import services as _svc
+    if not _svc.get_run(run_id):   # org-scoped — None if foreign-org run_id
+        await ws.close(code=4403)
+        return
+
     q = await client_hub.subscribe(run_id, ws)
 
     # Initial snapshot so the client doesn't have to poll the REST
     # endpoint separately on connect.
     try:
-        from backend.forge import services as _svc
         run = _svc.get_run(run_id)
         if run:
             await ws.send_json({
@@ -358,6 +372,42 @@ async def handle_client_run_ws(ws: "WebSocket", run_id: str) -> None:
         await client_hub.unsubscribe(run_id, ws)
 
 
+def _auth_ws_token(token: str, *, require_admin: bool = False) -> dict | None:
+    """Validate a JWT presented over a WebSocket. Returns the payload (with
+    org_id) or None. WebSockets bypass the HTTP auth dependencies, so every
+    WS handler must call this explicitly."""
+    if not token:
+        return None
+    try:
+        from backend.jwt_auth import decode_token
+        payload = decode_token(token)
+    except Exception:  # noqa: BLE001 — any decode/expiry error → unauthenticated
+        return None
+    if not payload.get("org_id"):
+        return None
+    if require_admin and payload.get("role") != "admin":
+        return None
+    return payload
+
+
+def _runtimes_in_org(runtime_ids: list[str], org_id: str) -> list[str]:
+    """Subset of runtime_ids actually owned by org_id (defends against a daemon
+    claiming another org's runtime to receive its dispatch frames)."""
+    if not runtime_ids:
+        return []
+    from backend.db import privileged, SessionLocal
+    from backend.forge.models import ForgeRuntime
+    with privileged():
+        db = SessionLocal()
+        try:
+            rows = (db.query(ForgeRuntime.id)
+                    .filter(ForgeRuntime.id.in_(runtime_ids),
+                            ForgeRuntime.org_id == org_id).all())
+            return [r[0] for r in rows]
+        finally:
+            db.close()
+
+
 async def handle_daemon_ws(ws: "WebSocket") -> None:
     """WebSocket handler called from the router for /api/forge/daemon/ws."""
     from fastapi import WebSocketDisconnect
@@ -371,10 +421,28 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
         return
 
     daemon_id = init.get("daemon_id", "")
-    runtime_ids = init.get("runtime_ids", [])
+    claimed_runtime_ids = init.get("runtime_ids", [])
     if not daemon_id:
         await ws.close(code=4003)
         return
+
+    # AUTH: daemon must present an admin JWT (from `agentira daemon login`),
+    # via the Authorization header (preferred) or the init frame (fallback for
+    # proxies that strip WS headers).
+    hdr = ws.headers.get("authorization", "")
+    bearer = hdr[7:] if hdr.lower().startswith("bearer ") else ""
+    payload = _auth_ws_token(bearer or init.get("token", ""), require_admin=True)
+    if not payload:
+        logger.warning("daemon ws: rejected unauthenticated/non-admin connect")
+        await ws.close(code=4401)
+        return
+    org_id = payload["org_id"]
+    # Only register runtimes this org actually owns — never another org's.
+    runtime_ids = _runtimes_in_org(claimed_runtime_ids, org_id)
+    dropped = set(claimed_runtime_ids) - set(runtime_ids)
+    if dropped:
+        logger.warning("daemon ws: dropped %d unowned runtime_ids for org %s",
+                       len(dropped), org_id)
 
     conn = DaemonConnection(ws, daemon_id, runtime_ids)
     await hub.connect(conn)

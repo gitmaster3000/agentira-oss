@@ -1220,12 +1220,31 @@ def reset_agent_status(agent_id: str) -> dict | None:
 
 # ── Runs ─────────────────────────────────────────────────────────────────
 
+def _run_org_scope():
+    """A SQL filter limiting Run rows to the caller's org.
+
+    `forge_runs` itself has no RLS (run/message data is slated to move
+    daemon-side), so we ride on the RLS that IS enforced on `projects` and
+    `forge_agents`: on the scoped (request) engine those subqueries return only
+    the caller's org's ids, so a run is visible iff its project OR agent is in
+    that org. In privileged/background context (superuser engine, no org) the
+    subqueries return everything → no restriction, as intended for system loops.
+    """
+    from sqlalchemy import select, or_
+    from backend.models import Project
+    from backend.forge.models import Agent
+    return or_(
+        Run.project_id.in_(select(Project.id)),
+        Run.agent_id.in_(select(Agent.id)),
+    )
+
+
 def get_active_runs() -> dict:
     """Get count and list of active runs for status indicator."""
     with _session() as db:
         q = db.query(Run).filter(
             Run.status.in_([RunStatus.READY, RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCELLING])
-        ).filter(Run.trigger_event != "chat.shadow")
+        ).filter(Run.trigger_event != "chat.shadow").filter(_run_org_scope())
         runs = q.order_by(Run.created_at.desc()).all()
         return {
             "count": len(runs),
@@ -1246,14 +1265,14 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
         # CLEANUP(AP-190): drop is_work entirely. The Runs list becomes one row
         # per (agent, task) — the work-view of that task's chat — not a
         # per-turn-filtered view. Group/dedupe by task instead of this filter.
-        q = q.filter(Run.is_work.is_(True))
+        q = q.filter(Run.is_work.is_(True)).filter(_run_org_scope())
         runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
         return [_run_to_dict(r) for r in runs]
 
 
 def get_run(run_id: str) -> dict | None:
     with _session() as db:
-        r = db.query(Run).filter(Run.id == run_id).first()
+        r = db.query(Run).filter(Run.id == run_id).filter(_run_org_scope()).first()
         return _run_to_dict(r) if r else None
 
 
@@ -3496,6 +3515,7 @@ def list_runs_for_task(task_id: str) -> list[dict]:
     with _session() as db:
         runs = (db.query(Run)
                 .filter(Run.task_id == task_id)
+                .filter(_run_org_scope())
                 .order_by(Run.created_at.desc())
                 .all())
         return [_run_to_dict(r) for r in runs]
@@ -3970,9 +3990,14 @@ def _worktree_cleanup_hint(run_id: str | None) -> dict:
 
 
 def get_trigger_events(trace_id: str) -> list[dict]:
-    """Return all messages tagged with this trace_id, ordered by creation time."""
+    """Return all messages tagged with this trace_id, ordered by creation time.
+
+    Org-scoped: joins the (RLS-enforced) Agent so only messages whose agent is
+    in the caller's org are returned."""
+    from backend.forge.models import Agent
     with _session() as db:
         msgs = (db.query(AgentMessage)
+                .join(Agent, AgentMessage.agent_id == Agent.id)
                 .filter(AgentMessage.trace_id == trace_id)
                 .order_by(AgentMessage.created_at.asc())
                 .all())
@@ -3981,8 +4006,13 @@ def get_trigger_events(trace_id: str) -> list[dict]:
 
 def get_run_events(run_id: str) -> list[dict]:
     """Return messages tagged with this run_id (covers any number of triggers
-    that fired against the run), ordered by creation time."""
+    that fired against the run), ordered by creation time.
+
+    Org-scoped via the run's project/agent (see _run_org_scope)."""
     with _session() as db:
+        # Gate on run visibility first; returns [] for a foreign-org run_id.
+        if not db.query(Run.id).filter(Run.id == run_id, _run_org_scope()).first():
+            return []
         msgs = (db.query(AgentMessage)
                 .filter(AgentMessage.run_id == run_id)
                 .order_by(AgentMessage.created_at.asc())
