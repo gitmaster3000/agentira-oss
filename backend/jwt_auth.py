@@ -42,16 +42,35 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
 
-async def get_current_user(
+async def get_current_user_payload(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
-) -> str:
-    """FastAPI dependency — returns the actor (profile name) from JWT."""
+) -> dict:
+    """Decoded JWT payload — includes `sub`, `profile_id`, `role`."""
     if credentials is None:
         raise HTTPException(401, "Authentication required")
     try:
-        payload = decode_token(credentials.credentials)
-        return payload["sub"]
+        return decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
+
+
+async def get_current_user(
+    payload: dict = Depends(get_current_user_payload),
+) -> str:
+    """FastAPI dependency — returns the actor (profile name) from JWT."""
+    return payload["sub"]
+
+
+async def require_admin(
+    payload: dict = Depends(get_current_user_payload),
+) -> str:
+    """FastAPI dependency — 403 unless the JWT's role claim == 'admin'.
+
+    Role is taken from the token (set at login). A user whose role is
+    changed in the DB must re-login for the new role to take effect.
+    """
+    if payload.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    return payload["sub"]

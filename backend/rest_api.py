@@ -14,7 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
-from backend.jwt_auth import create_token, get_current_user
+from backend.jwt_auth import create_token, get_current_user, require_admin
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -293,7 +293,7 @@ def api_get_me(actor: str = Depends(get_current_user)):
 def api_list_profiles(role: Optional[str] = None):
     return services.list_profiles(role=role)
 
-@profiles.post("")
+@profiles.post("", dependencies=[Depends(require_admin)])
 def api_create_profile(body: ProfileCreate):
     try:
         return services.create_profile(body.name, body.display_name, body.role, body.avatar_url)
@@ -307,22 +307,23 @@ def api_get_profile(profile_id: str):
         raise HTTPException(404, "Profile not found")
     return result
 
-@profiles.patch("/{profile_id}")
+@profiles.patch("/{profile_id}", dependencies=[Depends(require_admin)])
 def api_update_profile(profile_id: str, body: ProfileUpdate):
     try:
         return services.update_profile(profile_id, display_name=body.display_name, role=body.role, avatar_url=body.avatar_url, webhook_url=body.webhook_url)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
-@profiles.delete("/{profile_id}")
+@profiles.delete("/{profile_id}", dependencies=[Depends(require_admin)])
 def api_delete_profile(profile_id: str):
     if not services.delete_profile(profile_id):
         raise HTTPException(404, "Profile not found")
     return {"ok": True}
 
-# Service accounts = profiles with role=bot
+# Service accounts = profiles with role=bot. Admin-only: api_key is sensitive
+# and the surface is workspace-global (no per-owner concept in the schema).
 svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"],
-                         dependencies=[Depends(get_current_user)])
+                         dependencies=[Depends(require_admin)])
 
 @svc_accounts.get("")
 def api_list_service_accounts():
