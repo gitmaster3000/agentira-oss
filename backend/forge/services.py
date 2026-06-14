@@ -1220,6 +1220,19 @@ def reset_agent_status(agent_id: str) -> dict | None:
 
 # ── Runs ─────────────────────────────────────────────────────────────────
 
+def get_active_runs() -> dict:
+    """Get count and list of active runs for status indicator."""
+    with _session() as db:
+        q = db.query(Run).filter(
+            Run.status.in_([RunStatus.READY, RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCELLING])
+        ).filter(Run.trigger_event != "chat.shadow")
+        runs = q.order_by(Run.created_at.desc()).all()
+        return {
+            "count": len(runs),
+            "runs": [_run_to_dict(r) for r in runs]
+        }
+
+
 def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[dict]:
     with _session() as db:
@@ -1429,6 +1442,34 @@ def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
             title=title[:255],
             link=link[:255],
         ))
+
+
+def _notify_project_members(db, *, project_id: str | None, type_: str,
+                            title: str, link: str) -> None:
+    """Insert a Notification row for every member of the project.
+
+    Used to notify users about run state changes.
+    Caller is responsible for committing the session.
+    """
+    from backend.models import Notification, ProjectMember
+    if not project_id:
+        return
+    members = (
+        db.query(Profile)
+        .join(ProjectMember, Profile.id == ProjectMember.profile_id)
+        .filter(ProjectMember.project_id == project_id)
+        .all()
+    )
+    for prof in members:
+        db.add(Notification(
+            profile_id=prof.id,
+            type=type_,
+            title=title[:255],
+            link=link[:255],
+        ))
+    from backend.notifications import broker
+    for prof in members:
+        broker.notify(prof.id)
 
 
 # ── Stats ────────────────────────────────────────────────────────────────
@@ -2534,6 +2575,14 @@ def prepare_task_run(*, task_id: str, agent_id: str,
                             if task_row.project_id else None)
                     if _resolve_workspace_kind(proj) != "sandbox":
                         task_row.branch = worktree_branch
+            agent_name = r.agent.name if r.agent else "Agent"
+            _notify_project_members(
+                db,
+                project_id=r.project_id,
+                type_="forge.run.ready",
+                title=f"{agent_name} run ready to start",
+                link=f"/forge/runs/{run_id}",
+            )
             db.commit()
             db.refresh(r)
             return _run_to_dict(r)
