@@ -34,11 +34,23 @@ If you forked from this repo, you're done. Otherwise push your local clones.
 4. Settings → Variables — paste:
    ```
    JWT_SECRET=<run: openssl rand -hex 32>
+   AGENTIRA_ADMIN_PASSWORD=<run: openssl rand -base64 18>
    AGENTIRA_DB_URL=${{Postgres.DATABASE_URL}}
    RAILWAY_ENVIRONMENT=production
    PORT=8080
    ```
    The `${{Postgres.DATABASE_URL}}` syntax is Railway's variable reference — it auto-wires the Postgres add-on.
+
+   **`AGENTIRA_ADMIN_PASSWORD` is required** (AP-194). In production the backend
+   will not seed a default admin without it — public signup only grants the
+   `member` role, so without this var the workspace would have no administrator.
+   On first boot the backend creates user `admin` with this password; store it
+   in a password manager and rotate from the UI later.
+
+   Optional — `CORS_ALLOW_ORIGINS=https://<your-frontend-domain>`. The frontend
+   reaches the API same-origin through the nginx proxy, so the app works without
+   it. Set it only if something calls the backend cross-origin directly; in
+   production, left unset, cross-origin requests are blocked by design.
 5. (Optional, for sign-in via Google/GitHub):
    ```
    GOOGLE_CLIENT_ID=<from console.cloud.google.com>
@@ -81,7 +93,7 @@ Settings → Networking → Custom Domain on the frontend service. Railway shows
 
 ### 7. Sign in
 
-Visit your frontend domain → Sign Up → fill in a username + password. You're the workspace's first admin. The Conductor and the five default agents (Planner, Backend Implementer, Frontend Implementer, Reviewer, DevOps) are already seeded.
+Visit your frontend domain → log in as **`admin`** with the `AGENTIRA_ADMIN_PASSWORD` you set. That account holds the admin role. (Public **Sign Up** creates `member`-role users, not admins — use it for teammates, then promote them from the UI.) The Conductor and the five default agents (Planner, Backend Implementer, Frontend Implementer, Reviewer, DevOps) are already seeded.
 
 ## Attachments persistence (important)
 
@@ -121,6 +133,8 @@ Railway pricing as of 2026: Hobby plan ~$5/mo includes credits enough for a smal
 |---|---|
 | Frontend 502 on `/api/*` | nginx.conf `proxy_pass` doesn't match backend's service name |
 | Backend exits with "JWT_SECRET required" | Missing env var — set it |
+| Can log in but no admin powers / can't see admin pages | Signup grants `member`, not admin. Log in as `admin` (AGENTIRA_ADMIN_PASSWORD) and promote your user |
+| Logs say "AGENTIRA_ADMIN_PASSWORD is unset in production" | Set it and redeploy — no admin was created |
 | Backend exits with "could not connect to server" | `AGENTIRA_DB_URL` not wired to Postgres add-on |
 | Sign-in works but agents missing | Backend hasn't bootstrapped — check logs for "agent templates seeded" |
 | Attachments disappear after redeploy | No Volume mounted on `/app/data` |

@@ -20,4 +20,7 @@ RUN mkdir -p data
 
 EXPOSE 8111
 
-CMD ["python", "run.py"]
+# Seed the DB (idempotent: tables + migrations + default roles/statuses/admin
+# + agent templates) before serving, so a fresh Postgres on Railway is usable
+# on first boot. Mirrors the dev compose command.
+CMD ["sh", "-c", "python scripts/bootstrap_db.py && python run.py"]
