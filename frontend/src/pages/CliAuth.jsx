@@ -22,7 +22,7 @@ export function CliAuth() {
     const approve = async () => {
         setError(''); setStatus('working');
         try {
-            await api.approveCliLogin(code.trim().toUpperCase());
+            await api.approveCliLogin(code.trim());
             setStatus('done');
         } catch (err) {
             setError(err.message || 'Failed to authorize'); setStatus('error');
@@ -64,7 +64,7 @@ export function CliAuth() {
                             <div>
                                 <label className="text-label-md text-text-secondary mb-1 block">Device code</label>
                                 <input value={code} onChange={(e) => setCode(e.target.value)}
-                                    className="input tracking-widest text-center uppercase" placeholder="ABC123" autoFocus />
+                                    className="input text-center" placeholder="paste the code from your terminal" autoFocus />
                             </div>
                             <button onClick={approve} disabled={!isAdmin || !code.trim() || status === 'working'}
                                 className="btn btn-primary w-full justify-center text-body-md">
