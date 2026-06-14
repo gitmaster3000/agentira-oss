@@ -268,17 +268,18 @@ async def api_auth_github(body: GitHubAuthRequest):
         )
         gh_user = user_resp.json()
 
-        # Get primary email if not public
-        email = gh_user.get("email")
-        if not email:
-            emails_resp = await client.get(
-                "https://api.github.com/user/emails",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            for e in emails_resp.json():
-                if e.get("primary"):
-                    email = e["email"]
-                    break
+        # Get primary email — only trust a VERIFIED one. An unverified email
+        # would let an attacker set a victim's address and link into their
+        # account/org (account takeover).
+        email = None
+        emails_resp = await client.get(
+            "https://api.github.com/user/emails",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        for e in emails_resp.json():
+            if e.get("primary") and e.get("verified"):
+                email = e["email"]
+                break
 
     try:
         user = services.authenticate_oauth(
@@ -327,7 +328,9 @@ def api_cli_start():
     """Daemon → start a browser-login session."""
     _cli_gc()
     device_code = _secrets.token_urlsafe(32)
-    user_code = _secrets.token_hex(3).upper()  # 6 hex chars, human-typeable
+    # Pre-filled in the verification URL, so it can be high-entropy (not a
+    # 6-char code an attacker could brute-force against a pending session).
+    user_code = _secrets.token_urlsafe(16)
     _CLI_SESSIONS[device_code] = {"user_code": user_code, "status": "pending",
                                   "token": None, "exp": _time.time() + _CLI_TTL}
     _CLI_BY_USER_CODE[user_code] = device_code
@@ -361,7 +364,7 @@ def api_cli_approve(body: dict, payload: dict = Depends(get_current_user_payload
     """Admin (in-app) → approve a daemon login, minting an admin token bound to
     the admin's org."""
     _cli_gc()
-    user_code = (body or {}).get("user_code", "").strip().upper()
+    user_code = (body or {}).get("user_code", "").strip()
     dc = _CLI_BY_USER_CODE.get(user_code)
     s = _CLI_SESSIONS.get(dc) if dc else None
     if not s:
