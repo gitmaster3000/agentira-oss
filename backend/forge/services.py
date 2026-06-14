@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import json
+import functools
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -309,6 +310,20 @@ _TRACE_SCOPE: dict[str, str] = {}
 
 def _session() -> Session:
     return SessionLocal()
+
+
+@functools.lru_cache(maxsize=1)
+def _platform_guardrails() -> str:
+    """The platform operating rules baked into every agent's system prompt at
+    dispatch (tool awareness + guardrails). Stored as config — prompts are
+    never inlined in code. Cached; returns "" if the file is missing."""
+    from pathlib import Path
+    p = (Path(__file__).resolve().parent.parent.parent
+         / "templates" / "system" / "agent_guardrails.md")
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -2401,13 +2416,20 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                 awareness_lines.append("You have no prior runs on record (this may be your first dispatch).")
         except Exception:
             pass
-        awareness_lines.append("Use the agentira MCP tools (get_me, get_my_involvement, list_projects, get_task, list_tasks, add_comment, finish_run, etc.) to look up anything else you need before claiming you don't know.")
         awareness_preamble = "\n".join(awareness_lines)
 
+        # Platform guardrails + tool policy — authoritative, baked into every
+        # dispatch ahead of the persona. Text is config (templates/system/),
+        # never inlined here.
+        guardrails = _platform_guardrails()
+
+        # Order: guardrails (policy) → awareness (this-run context) → persona
+        # (tone/specialty). Persona last for voice; guardrails say they win on
+        # any policy conflict.
+        blocks = [b for b in (guardrails, awareness_preamble) if b]
         if persona_prompt:
-            system_prompt = awareness_preamble + "\n\n---\n\n" + persona_prompt
-        else:
-            system_prompt = awareness_preamble
+            blocks.append(persona_prompt)
+        system_prompt = "\n\n---\n\n".join(blocks)
 
     # If this trigger belongs to a Run (cron, scheduled task, shadow, …), flip
     # the run state to RUNNING before dispatching. complete_trigger will close
@@ -4319,8 +4341,10 @@ def send_runtime_message(
         recent.reverse()
 
         messages = []
-        if a.system_prompt:
-            messages.append({"role": "system", "content": a.system_prompt})
+        _sys = "\n\n---\n\n".join(
+            p for p in (_platform_guardrails(), a.system_prompt or "") if p)
+        if _sys:
+            messages.append({"role": "system", "content": _sys})
         for m in recent:
             messages.append({"role": m.role.value, "content": m.content})
 
