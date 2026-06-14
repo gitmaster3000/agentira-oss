@@ -2055,6 +2055,17 @@ def delete_profile(profile_id: str) -> bool:
         p = db.get(Profile, profile_id)
         if not p:
             return False
+        # Clean up child rows that FK to this profile. SQLite ignores FKs by
+        # default so the naive `db.delete(p)` worked there; Postgres rejects it.
+        db.query(ProfilePermission).filter_by(profile_id=profile_id).delete()
+        db.query(OAuthAccount).filter_by(profile_id=profile_id).delete()
+        db.query(ProjectMember).filter_by(profile_id=profile_id).delete()
+        db.query(Notification).filter_by(profile_id=profile_id).delete()
+        # forge_agents.profile_id is nullable — null it so the agent definition
+        # outlives its associated user account.
+        from backend.forge.models import Agent as _ForgeAgent
+        db.query(_ForgeAgent).filter_by(profile_id=profile_id).update(
+            {"profile_id": None}, synchronize_session=False)
         db.delete(p)
         db.commit()
         return True
