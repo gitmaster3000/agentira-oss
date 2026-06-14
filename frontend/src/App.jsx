@@ -12,6 +12,7 @@ import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { GitHubCallback } from './pages/GitHubCallback';
+import { CliAuth } from './pages/CliAuth';
 import { Settings } from './pages/Settings';
 import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
@@ -65,6 +66,7 @@ export default function App() {
                     <Route path={ROUTES.LOGIN} element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
                     <Route path={ROUTES.SIGNUP} element={<RedirectIfAuth><Signup /></RedirectIfAuth>} />
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
+                    <Route path="/cli-auth" element={<CliAuth />} />
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>

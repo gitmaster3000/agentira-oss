@@ -65,6 +65,9 @@ export const api = {
     // Admin: create a member invite for the caller's org.
     createInvite: (email) => request('/invites', { method: 'POST', body: JSON.stringify(email ? { email } : {}) }),
 
+    // Admin: approve a daemon browser-login (device code).
+    approveCliLogin: (userCode) => request('/auth/cli/approve', { method: 'POST', body: JSON.stringify({ user_code: userCode }) }),
+
     async googleAuth(idToken, invite) {
         const result = await request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken, invite: invite || null }) });
         if (result.token) localStorage.setItem('agentira_token', result.token);
