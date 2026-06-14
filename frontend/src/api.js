@@ -4,6 +4,22 @@ function getToken() {
     return localStorage.getItem('agentira_token') || '';
 }
 
+// Turn any API error shape into a readable string. FastAPI 422s return
+// `detail` as a LIST of {loc,msg,type} objects — stringifying that gave the
+// dreaded "[object Object]". Handle string, list, and object detail shapes.
+function extractError(err, status) {
+    const d = err?.detail ?? err?.message;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) {
+        return d.map(e => {
+            const field = Array.isArray(e?.loc) ? e.loc[e.loc.length - 1] : '';
+            return field ? `${field}: ${e.msg}` : (e?.msg || JSON.stringify(e));
+        }).join('; ');
+    }
+    if (d && typeof d === 'object') return d.msg || JSON.stringify(d);
+    return `Request failed (${status})`;
+}
+
 export async function request(endpoint, options = {}) {
     const token = getToken();
     const headers = {
@@ -30,7 +46,7 @@ export async function request(endpoint, options = {}) {
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.error(`API Error on ${endpoint}:`, err);
-        throw new Error(err.detail || err.message || `API request failed (${res.status})`);
+        throw new Error(extractError(err, res.status));
     }
 
     return res.json();
