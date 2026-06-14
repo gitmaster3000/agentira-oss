@@ -2459,9 +2459,10 @@ def _seed_defaults(db: Session) -> None:
 def _ensure_system_org(db: Session) -> Org:
     """The org the bootstrap/seed admin lives in. Stable id so reboots are
     idempotent."""
-    org = db.get(Org, "org00systemorg")
+    # id columns are VARCHAR(12) — keep this id exactly 12 chars.
+    org = db.get(Org, "orgsystem000")
     if not org:
-        org = Org(id="org00systemorg", name="System Org")
+        org = Org(id="orgsystem000", name="System Org")
         db.add(org)
         db.flush()
     return org

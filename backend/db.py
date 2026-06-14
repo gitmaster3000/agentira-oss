@@ -216,7 +216,8 @@ _ORG_SCOPED_TABLES = [
 
 # Default org id used to backfill pre-tenancy rows so org_id can go NOT NULL.
 # A deliberate split (per real owner) is done by scripts/setup_rls.py.
-_DEFAULT_ORG_ID = "org000default"
+# NOTE: id columns are VARCHAR(12) — keep this exactly 12 chars.
+_DEFAULT_ORG_ID = "orgdefault00"
 _APP_ROLE = "agentira_app"
 
 
