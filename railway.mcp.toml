@@ -1,0 +1,6 @@
+[build]
+dockerfilePath = "Dockerfile.mcp"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
