@@ -1,21 +1,38 @@
 /**
  * Project Overview — the landing page for a project.
  *
- * Renders a one-screen snapshot: description, repos, member list, task
- * counts by status, recent activity tail, and quick links to the
- * board / backlog / roadmap. Pulls from existing /api/projects/{id}/...
+ * Top-to-bottom, the page is a one-screen snapshot:
+ *   1. Task counts by status — clickable: Backlog → Backlog page, the
+ *      four board statuses (To do / In progress / Review / Done) → Board.
+ *   2. Activity (one container):
+ *        - Live strip: the board's <ProjectActivityPanel>, polling
+ *          in-flight runs + the Conductor every 5s.
+ *        - Recent feed: runs / comments / task changes rendered as
+ *          markdown with clickable links — internal app links (e.g.
+ *          /forge/runs/<id>) navigate in-app, external URLs open in a
+ *          new tab. Each row also links to its task.
+ *   3. Repos + Team & roles (members expand to show an inferred function
+ *      and a short responsibility blurb — UI-only until the backend
+ *      exposes real role data).
+ *   4. Project attachments (drag-and-drop upload, list, download, delete).
+ *
+ * Navigation lives in the left sidebar; the page intentionally does not
+ * duplicate it. Pulls from existing /api/projects/{id}/... + /forge
  * endpoints; no new backend.
  */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
-    Folder, GitBranch, Users, ListChecks, Activity, ChevronRight,
-    Settings as SettingsIcon, LayoutGrid, ListTodo, TrendingUp,
+    Folder, GitBranch, Users, Activity, ChevronDown,
     Paperclip, Upload, FileText, Trash2, Download,
+    MessageSquare, Plus, ArrowRight, Pencil, ArrowUpRight,
 } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
 
 
 function formatSize(bytes) {
@@ -23,6 +40,20 @@ function formatSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+
+function timeAgo(iso) {
+    if (!iso) return '';
+    // Activity timestamps are naive UTC; append Z so they parse as UTC.
+    const then = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z');
+    const s = Math.floor((Date.now() - then.getTime()) / 1000);
+    if (isNaN(s)) return '';
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    if (s < 604800) return `${Math.floor(s / 86400)}d ago`;
+    return then.toLocaleDateString();
 }
 
 
@@ -52,7 +83,7 @@ export function ProjectOverview() {
                     api.getProjectMembers(projectId).catch(() => []),
                     api.listProjectRepos(projectId).catch(() => []),
                     api.getBoard(projectId).catch(() => null),
-                    api.getProjectActivity(projectId, 8).catch(() => []),
+                    api.getProjectActivity(projectId, 20).catch(() => []),
                     api.listProjectAttachments(projectId).catch(() => []),
                 ]);
                 if (!alive) return;
@@ -78,74 +109,80 @@ export function ProjectOverview() {
 
     const statusCounts = countByStatus(board);
 
+    // Outer is a flex column so the live strip can pin at the top
+    // (shrink-0) while the rest of the page is the scrollable child.
+    // `h-full overflow-hidden` is required because the parent Outlet
+    // wrapper is plain block layout — `flex-1` alone wouldn't give the
+    // scroll container a constrained height and overflow-y-auto would
+    // never trigger (the page-scroll regression that motivated this).
+    const boardHref = ROUTES.STUDIO_PROJECT_BOARD(projectId);
+    const backlogHref = ROUTES.STUDIO_PROJECT_BACKLOG(projectId);
+
     return (
-        <div className="flex-1 overflow-y-auto">
-            <div className="max-w-5xl mx-auto p-6 space-y-6">
-                {/* Quick links */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_BOARD(projectId)}
-                        icon={LayoutGrid} label="Board" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_BACKLOG(projectId)}
-                        icon={ListTodo} label="Backlog" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_ROADMAP(projectId)}
-                        icon={TrendingUp} label="Roadmap" />
-                    <QuickLink to={ROUTES.STUDIO_PROJECT_SETTINGS(projectId)}
-                        icon={SettingsIcon} label="Settings" />
+        <div className="flex flex-col h-full overflow-hidden">
+            <div className="flex-1 overflow-y-auto">
+                <div className="max-w-5xl mx-auto p-6 space-y-6">
+                    {/* Status counts — clickable: Backlog → Backlog page;
+                        the four board statuses → Board. Per admin feedback
+                        these were the "tabs"; making them navigate matches
+                        the role they were already trying to play. */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        <Stat label="Backlog" value={statusCounts.backlog} to={backlogHref} />
+                        <Stat label="To do" value={statusCounts.todo} to={boardHref} />
+                        <Stat label="In progress" value={statusCounts.in_progress} to={boardHref} accent />
+                        <Stat label="Review" value={statusCounts.review} to={boardHref} />
+                        <Stat label="Done" value={statusCounts.done} to={boardHref} />
+                    </div>
+
+                    {/* Activity — one container, live panel on top (in-flight
+                        runs + Conductor, 5s poll) and the clickable recent
+                        feed below. */}
+                    <div className="card p-0 overflow-hidden">
+                        <ProjectActivityPanel projectId={projectId} />
+                        <div className="p-4">
+                            <ActivityCard items={activity} projectId={projectId} bare />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <ReposCard repos={repos} projectId={projectId} />
+                        <TeamCard members={members} />
+                    </div>
+
+                    <AttachmentsCard
+                        projectId={projectId}
+                        attachments={attachments}
+                        onChange={reloadAttachments}
+                    />
                 </div>
-
-                {/* Status counts */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    <Stat label="Backlog" value={statusCounts.backlog} />
-                    <Stat label="To do" value={statusCounts.todo} />
-                    <Stat label="In progress" value={statusCounts.in_progress}
-                        accent />
-                    <Stat label="Review" value={statusCounts.review} />
-                    <Stat label="Done" value={statusCounts.done} />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <ReposCard repos={repos} projectId={projectId} />
-                    <MembersCard members={members} />
-                </div>
-
-                <AttachmentsCard
-                    projectId={projectId}
-                    attachments={attachments}
-                    onChange={reloadAttachments}
-                />
-
-                <ActivityCard items={activity} />
             </div>
         </div>
     );
 }
 
 
-function QuickLink({ to, icon: Icon, label }) {
-    return (
-        <Link to={to}
-            className="card flex items-center gap-3 hover:bg-bg-hover transition-colors">
-            <div className="w-8 h-8 rounded-lg bg-accent-subtle flex items-center justify-center">
-                <Icon className="w-4 h-4 text-accent-primary" />
-            </div>
-            <div className="text-sm font-medium text-text-primary">{label}</div>
-            <ChevronRight className="w-4 h-4 text-text-tertiary ml-auto" />
-        </Link>
-    );
-}
-
-
-function Stat({ label, value, accent }) {
-    return (
-        <div className="card text-center">
+function Stat({ label, value, accent, to }) {
+    const inner = (
+        <>
             <div className={`text-2xl font-bold ${accent ? 'text-accent-primary' : 'text-text-primary'}`}>
                 {value}
             </div>
             <div className="text-xs text-text-tertiary uppercase tracking-wider mt-1">
                 {label}
             </div>
-        </div>
+        </>
     );
+    if (to) {
+        return (
+            <Link
+                to={to}
+                className="card text-center hover:bg-bg-hover hover:border-accent-primary/30 transition-colors block"
+            >
+                {inner}
+            </Link>
+        );
+    }
+    return <div className="card text-center">{inner}</div>;
 }
 
 
@@ -190,27 +227,94 @@ function ReposCard({ repos, projectId }) {
 }
 
 
-function MembersCard({ members }) {
+// UI-only role/responsibility profiles. The platform doesn't yet expose a
+// per-member "what they do" field, so we infer a function from the member's
+// name/role and show a short responsibility blurb. Placeholder copy — to be
+// replaced once the backend exposes real role definitions.
+const ROLE_PROFILES = [
+    { match: /front.?end|^fe\b|web|ui/i,        function: 'Frontend',      blurb: 'Builds and refines the product UI — pages, components, and client-side behavior.' },
+    { match: /back.?end|^be\b|api|server/i,     function: 'Backend',       blurb: 'Owns API endpoints, data models, and server-side business logic.' },
+    { match: /implement|engineer|dev|coder/i,   function: 'Implementer',   blurb: 'Picks up scoped tasks and turns them into working, tested code.' },
+    { match: /plan(ner)?|pm|product/i,          function: 'Planner',       blurb: 'Breaks goals into tasks, sets priorities, and shapes the backlog.' },
+    { match: /review|qa|critic/i,               function: 'Reviewer',      blurb: 'Reviews changes for correctness and quality before they merge.' },
+    { match: /test|qe/i,                        function: 'Test',          blurb: 'Writes and runs tests; verifies behavior and guards against regressions.' },
+    { match: /admin|owner|lead/i,               function: 'Admin',         blurb: 'Manages the project, members, and overall workflow.' },
+    { match: /bot|agent|conductor/i,            function: 'Automation',    blurb: 'Automated agent that runs scheduled or triggered work.' },
+];
+
+const FUNCTION_COLORS = {
+    Frontend: '#00bcd4', Backend: '#7c4dff', Implementer: '#2ecc71',
+    Planner: '#f1c40f', Reviewer: '#ff9800', Test: '#e91e63',
+    Admin: '#e74c3c', Automation: '#9aa0a6', Contributor: '#9aa0a6',
+};
+
+function memberProfile(m) {
+    const key = `${m.name || ''} ${m.display_name || ''} ${m.role || ''}`;
+    const found = ROLE_PROFILES.find((p) => p.match.test(key));
+    return found || {
+        function: 'Contributor',
+        blurb: 'Contributes to the project. Responsibilities to be defined.',
+    };
+}
+
+
+function TeamMemberRow({ member }) {
+    const [open, setOpen] = useState(false);
+    const profile = memberProfile(member);
+    const color = FUNCTION_COLORS[profile.function] || FUNCTION_COLORS.Contributor;
+    const name = member.display_name || member.name || '?';
+    return (
+        <div className="rounded-md bg-bg-hover/60 overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-bg-hover transition-colors"
+            >
+                <div className="w-7 h-7 rounded-full bg-accent-subtle text-accent-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {name[0]?.toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                    <div className="text-sm text-text-primary truncate">{name}</div>
+                    <div className="text-[11px] text-text-tertiary truncate">@{member.name}</div>
+                </div>
+                <span
+                    className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0"
+                    style={{ backgroundColor: color + '22', color }}
+                >
+                    {profile.function}
+                </span>
+                <ChevronDown
+                    className={`w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+                />
+            </button>
+            {open && (
+                <div className="px-3 pb-2.5 pt-0.5 text-xs text-text-secondary leading-relaxed border-t border-border-subtle/60">
+                    {profile.blurb}
+                    {member.role && (
+                        <div className="mt-1 text-text-tertiary">
+                            Access role: <span className="text-text-secondary">{member.role}</span>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+function TeamCard({ members }) {
     return (
         <div className="card space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Users className="w-4 h-4" /> Members
+                <Users className="w-4 h-4" /> Team &amp; roles
                 <span className="text-text-tertiary text-xs">{members.length}</span>
             </div>
             {members.length === 0 ? (
                 <div className="text-xs text-text-tertiary">No members yet.</div>
             ) : (
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-1.5">
                     {members.map((m) => (
-                        <div key={m.id || m.name}
-                            className="flex items-center gap-2 px-2 py-1 rounded bg-bg-hover">
-                            <div className="w-6 h-6 rounded-full bg-accent-subtle text-accent-primary flex items-center justify-center text-xs font-bold">
-                                {(m.display_name || m.name || '?')[0]?.toUpperCase()}
-                            </div>
-                            <span className="text-sm text-text-primary">
-                                {m.display_name || m.name}
-                            </span>
-                        </div>
+                        <TeamMemberRow key={m.id || m.name} member={m} />
                     ))}
                 </div>
             )}
@@ -219,29 +323,111 @@ function MembersCard({ members }) {
 }
 
 
-function ActivityCard({ items }) {
+// Maps a raw activity `action` to an icon, accent color, and human label.
+const ACTION_META = {
+    commented:     { icon: MessageSquare, color: '#7c4dff', label: 'commented' },
+    'task.create': { icon: Plus,          color: '#2ecc71', label: 'created task' },
+    'task.move':   { icon: ArrowRight,    color: '#00bcd4', label: 'moved task' },
+    'task.update': { icon: Pencil,        color: '#f1c40f', label: 'updated task' },
+};
+
+function actionMeta(action) {
+    return ACTION_META[action] || { icon: Activity, color: '#9aa0a6', label: action || 'activity' };
+}
+
+
+// SPA-aware link: internal app paths route through react-router (no full
+// reload); external URLs open in a new tab. Used for links embedded in
+// activity details (e.g. run links like /forge/runs/<id> and PR URLs).
+function SmartLink({ href, children, ...rest }) {
+    const isInternal = typeof href === 'string' && href.startsWith('/');
+    if (isInternal) {
+        return (
+            <Link to={href} className="text-accent-primary hover:underline" {...rest}>
+                {children}
+            </Link>
+        );
+    }
     return (
-        <div className="card space-y-2">
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Activity className="w-4 h-4" /> Recent activity
+        <a href={href} target="_blank" rel="noopener noreferrer"
+            className="text-accent-primary hover:underline" {...rest}>
+            {children}
+        </a>
+    );
+}
+
+// Compact markdown for activity details — tight spacing, clickable links.
+const FEED_MD_COMPONENTS = {
+    a: ({ node, ...p }) => <SmartLink {...p} />,
+    p: (p) => <p className="text-sm text-text-secondary leading-snug my-0.5" {...p} />,
+    ul: (p) => <ul className="list-disc pl-5 my-1 text-sm text-text-secondary space-y-0.5" {...p} />,
+    ol: (p) => <ol className="list-decimal pl-5 my-1 text-sm text-text-secondary space-y-0.5" {...p} />,
+    li: (p) => <li className="text-sm text-text-secondary" {...p} />,
+    strong: (p) => <strong className="text-text-primary font-semibold" {...p} />,
+    em: (p) => <em className="italic" {...p} />,
+    code: (p) => <code className="px-1 py-0.5 rounded bg-bg-panel text-xs font-mono text-text-primary" {...p} />,
+    h1: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+    h2: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+    h3: (p) => <p className="text-sm font-semibold text-text-primary my-0.5" {...p} />,
+};
+
+
+function ActivityRow({ entry, projectId }) {
+    const meta = actionMeta(entry.action);
+    const Icon = meta.icon;
+    const actor = entry.actor || 'system';
+    return (
+        <div className="flex gap-3 px-2 py-2.5 rounded-md hover:bg-bg-hover/50 transition-colors">
+            <div className="w-7 h-7 rounded-full bg-accent-subtle flex items-center justify-center text-xs font-bold text-accent-primary border border-accent-primary/20 flex-shrink-0">
+                {actor[0]?.toUpperCase() || 'S'}
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-semibold text-text-primary">{actor}</span>
+                    <span className="inline-flex items-center gap-1 text-text-secondary">
+                        <Icon className="w-3 h-3" style={{ color: meta.color }} />
+                        {meta.label}
+                    </span>
+                    <span className="text-text-tertiary">· {timeAgo(entry.created_at)}</span>
+                    {entry.task_id && (
+                        <Link
+                            to={ROUTES.STUDIO_TASK(entry.task_id)}
+                            className="ml-auto inline-flex items-center gap-0.5 text-text-tertiary hover:text-accent-primary transition-colors"
+                            title="Open task"
+                        >
+                            #{String(entry.task_id).slice(0, 8)}
+                            <ArrowUpRight className="w-3 h-3" />
+                        </Link>
+                    )}
+                </div>
+                {entry.detail && (
+                    <div className="mt-1">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={FEED_MD_COMPONENTS}>
+                            {String(entry.detail)}
+                        </ReactMarkdown>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+
+// `bare` — render without the .card wrapper so the parent container
+// (e.g. the unified Activity container on Overview) provides the shell.
+function ActivityCard({ items, projectId, bare = false }) {
+    const wrapperClass = bare ? 'space-y-1' : 'card space-y-1';
+    return (
+        <div className={wrapperClass}>
+            <div className="flex items-center gap-2 text-sm font-medium text-text-primary mb-1">
+                <Activity className="w-4 h-4 text-accent-primary" /> Recent activity
             </div>
             {items.length === 0 ? (
-                <div className="text-xs text-text-tertiary">Nothing yet.</div>
+                <div className="text-xs text-text-tertiary py-2">Nothing yet.</div>
             ) : (
-                <div className="space-y-1.5">
+                <div className="divide-y divide-border-subtle/60">
                     {items.map((a, i) => (
-                        <div key={a.id || i} className="text-xs text-text-secondary flex gap-2">
-                            <span className="text-text-tertiary whitespace-nowrap">
-                                {a.actor || 'system'}
-                            </span>
-                            <span className="text-text-tertiary">·</span>
-                            <span>{a.action}</span>
-                            {a.detail && (
-                                <span className="text-text-tertiary truncate">
-                                    — {a.detail.slice(0, 80)}
-                                </span>
-                            )}
-                        </div>
+                        <ActivityRow key={a.id || i} entry={a} projectId={projectId} />
                     ))}
                 </div>
             )}
