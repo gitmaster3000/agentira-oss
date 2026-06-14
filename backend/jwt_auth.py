@@ -26,12 +26,14 @@ JWT_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def create_token(profile_name: str, profile_id: str, role: str) -> str:
+def create_token(profile_name: str, profile_id: str, role: str,
+                 org_id: str | None = None) -> str:
     now = int(time.time())
     payload = {
         "sub": profile_name,
         "profile_id": profile_id,
         "role": role,
+        "org_id": org_id,
         "iat": now,
         "exp": now + JWT_EXPIRY_SECONDS,
     }
@@ -45,15 +47,26 @@ def decode_token(token: str) -> dict:
 async def get_current_user_payload(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> dict:
-    """Decoded JWT payload — includes `sub`, `profile_id`, `role`."""
+    """Decoded JWT payload — includes `sub`, `profile_id`, `role`, `org_id`.
+
+    Side effect: pins the request's org context so RLS / app-layer scoping
+    filter every query to the caller's org."""
     if credentials is None:
         raise HTTPException(401, "Authentication required")
     try:
-        return decode_token(credentials.credentials)
+        payload = decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "Invalid token")
+    # Tokens minted before multi-tenancy carry no org_id. Reject them so a
+    # stale session can't fall through to the unscoped (system) engine — the
+    # user simply re-logs in and gets an org-scoped token.
+    if not payload.get("org_id"):
+        raise HTTPException(401, "Session out of date — please sign in again.")
+    from backend.db import set_current_org
+    set_current_org(payload.get("org_id"))
+    return payload
 
 
 async def get_current_user(

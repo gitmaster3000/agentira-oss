@@ -1,10 +1,28 @@
-"""Database engine and session management."""
+"""Database engine and session management.
+
+Multi-tenancy (org isolation) is enforced at two layers:
+
+1. **Postgres RLS** (the real guarantee). Request-path sessions connect as a
+   non-superuser role (`agentira_app`) and run `SET LOCAL app.org = <org_id>`
+   at transaction start; RLS policies on every org-scoped table filter to that
+   org. Even a forgotten WHERE clause can't leak across orgs.
+2. **App-layer belt** (dev parity / defence-in-depth). A `before_flush` hook
+   stamps `org_id` on new rows, and a `do_orm_execute` hook adds a
+   `with_loader_criteria` org filter — so SQLite dev (which has no RLS) still
+   isolates, and inserts satisfy the RLS WITH CHECK.
+
+Login / signup / bootstrap need to see across orgs (to find a user before we
+know their org), so they run under `privileged()` — sessions then bind to the
+superuser engine, which bypasses RLS.
+"""
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session, with_loader_criteria
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -12,13 +30,130 @@ DATA_DIR.mkdir(exist_ok=True)
 DATABASE_URL = os.getenv("AGENTIRA_DB_URL", f"sqlite:///{DATA_DIR / 'agentira.db'}")
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 
+# Non-superuser app connection used for scoped (request-path) sessions so that
+# Postgres RLS actually applies. When unset (dev / SQLite) we fall back to the
+# privileged URL and rely on the app-layer belt only.
+APP_DATABASE_URL = os.getenv("AGENTIRA_APP_DB_URL", DATABASE_URL)
+_app_is_postgres = APP_DATABASE_URL.startswith("postgres")
+
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
+# Privileged engine — superuser; bypasses RLS. Used for bootstrap, migrations,
+# login and any explicitly-privileged cross-org work.
 engine = create_engine(DATABASE_URL, echo=False, connect_args=_connect_args)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+# Scoped engine — runs as the app role so RLS is enforced. Identical to the
+# privileged engine when AGENTIRA_APP_DB_URL is unset (dev).
+app_engine = (
+    engine if APP_DATABASE_URL == DATABASE_URL
+    else create_engine(APP_DATABASE_URL, echo=False)
+)
+
+
+# ── Tenancy context ────────────────────────────────────────────────────────
+# Set per-request from the JWT's org claim. `privileged` lifts org scoping for
+# cross-org operations (login, signup, bootstrap, migrations).
+
+_current_org: ContextVar[str | None] = ContextVar("current_org", default=None)
+_privileged: ContextVar[bool] = ContextVar("privileged", default=False)
+
+
+def set_current_org(org_id: str | None) -> None:
+    _current_org.set(org_id)
+
+
+def get_current_org() -> str | None:
+    return _current_org.get()
+
+
+@contextmanager
+def privileged():
+    """Run a block with org scoping lifted (binds sessions to the superuser
+    engine; RLS bypassed). For login, signup, bootstrap and admin cross-org
+    work only."""
+    token = _privileged.set(True)
+    try:
+        yield
+    finally:
+        _privileged.reset(token)
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def _org_scoped_classes() -> set:
+    """Mapped classes carrying an `org_id` column (the tenancy boundary)."""
+    classes = set()
+    for mapper in Base.registry.mappers:
+        cls = mapper.class_
+        if "org_id" in mapper.columns:
+            classes.add(cls)
+    return classes
+
+
+class RoutingSession(Session):
+    """Routes to the scoped (app-role, RLS-enforced) engine when there's a
+    request org context, else to the privileged (superuser) engine.
+
+    Rationale: request handlers always set an org (from the JWT), so they get
+    RLS. Background/system work (Conductor loops, daemon, bootstrap) has no org
+    context and runs privileged — it would otherwise see nothing under RLS.
+    `privileged()` forces the superuser engine explicitly (login/signup)."""
+
+    def get_bind(self, mapper=None, clause=None, **kw):
+        if _privileged.get() or _current_org.get() is None:
+            return engine
+        return app_engine
+
+
+SessionLocal = sessionmaker(
+    class_=RoutingSession, autoflush=False, autocommit=False,
+)
+
+
+@event.listens_for(SessionLocal, "after_begin")
+def _set_rls_org(session, transaction, connection):
+    """At transaction start on a scoped Postgres connection, pin app.org so
+    RLS policies resolve to the current org. No-op when privileged, on SQLite,
+    or when no org is set (privileged/auth context)."""
+    if _privileged.get():
+        return
+    if connection.dialect.name != "postgresql":
+        return
+    org = _current_org.get()
+    # set_config(..., true) => LOCAL to this transaction; auto-resets on commit
+    # so pooled connections never leak one org's setting into another.
+    connection.execute(text("SELECT set_config('app.org', :o, true)"),
+                        {"o": org or ""})
+
+
+@event.listens_for(SessionLocal, "do_orm_execute")
+def _org_filter(orm_execute_state):
+    """App-layer org filter for SELECTs (dev parity with RLS). Skipped when
+    privileged or when no org context is set."""
+    if _privileged.get() or not orm_execute_state.is_select:
+        return
+    org = _current_org.get()
+    if org is None:
+        return
+    for cls in _org_scoped_classes():
+        orm_execute_state.statement = orm_execute_state.statement.options(
+            with_loader_criteria(cls, lambda c: c.org_id == org,
+                                 include_aliases=True)
+        )
+
+
+@event.listens_for(SessionLocal, "before_flush")
+def _stamp_org(session, flush_context, instances):
+    """Stamp org_id on new org-scoped rows from the current context so RLS
+    WITH CHECK passes and callers don't have to set it everywhere."""
+    if _privileged.get():
+        return
+    org = _current_org.get()
+    if org is None:
+        return
+    for obj in session.new:
+        if hasattr(obj, "org_id") and getattr(obj, "org_id", None) is None:
+            obj.org_id = org
 
 
 def get_db():
@@ -62,10 +197,124 @@ def wait_for_db(*, attempts: int = 30, delay_seconds: float = 2.0) -> None:
 
 def init_db():
     """Create all tables."""
-    from backend.models import Project, Task, Activity, Epic, OAuthAccount, ProjectRepo  # noqa: F401
+    from backend.models import (  # noqa: F401
+        Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
+    )
     from backend.forge.models import Agent, Run, ForgeRuntime  # noqa: F401
     Base.metadata.create_all(bind=engine)
     run_migrations()
+
+
+# Tables carrying org_id — the tenancy boundary. Order doesn't matter for the
+# column-add/backfill; RLS is applied to each independently.
+_ORG_SCOPED_TABLES = [
+    "profiles", "oauth_accounts", "project_members", "notifications",
+    "projects", "project_repos", "epics", "tasks", "task_commits",
+    "activities", "attachments", "profile_permissions",
+    "forge_agents", "forge_runtimes",
+]
+
+# Default org id used to backfill pre-tenancy rows so org_id can go NOT NULL.
+# A deliberate split (per real owner) is done by scripts/setup_rls.py.
+_DEFAULT_ORG_ID = "org000default"
+_APP_ROLE = "agentira_app"
+
+
+def _migrate_orgs(conn: Connection) -> None:
+    """Add org_id to scoped tables, backfill a default org, enforce NOT NULL,
+    then apply Postgres RLS. Idempotent; safe on every boot.
+
+    Only meaningful on Postgres — SQLite dev relies on the app-layer belt and
+    skips RLS entirely."""
+    tables = _list_tables(conn)
+    if "orgs" not in tables:
+        return  # create_all hasn't made the table yet (shouldn't happen)
+
+    is_pg = _dialect_name() == "postgresql"
+
+    # 1) Add org_id column (nullable for now) to each scoped table.
+    added_any = False
+    for t in _ORG_SCOPED_TABLES:
+        if t in tables:
+            added_any |= _ensure_column(conn, t, "org_id", "VARCHAR(12)")
+    if added_any:
+        conn.commit()
+
+    # 2) Ensure a default org exists, then backfill any NULL org_id to it so
+    #    the NOT NULL constraint can hold. New deploys (org_id already set via
+    #    create_all on fresh tables) skip the backfill.
+    needs_backfill = any(
+        conn.execute(text(f"SELECT 1 FROM {t} WHERE org_id IS NULL LIMIT 1")).first()
+        for t in _ORG_SCOPED_TABLES if t in tables
+    )
+    if needs_backfill:
+        exists = conn.execute(text("SELECT 1 FROM orgs WHERE id = :i"),
+                              {"i": _DEFAULT_ORG_ID}).first()
+        if not exists:
+            conn.execute(text(
+                "INSERT INTO orgs (id, name, created_at) "
+                "VALUES (:i, 'Default Org', CURRENT_TIMESTAMP)"
+            ), {"i": _DEFAULT_ORG_ID})
+        for t in _ORG_SCOPED_TABLES:
+            if t in tables:
+                conn.execute(text(
+                    f"UPDATE {t} SET org_id = :o WHERE org_id IS NULL"
+                ), {"o": _DEFAULT_ORG_ID})
+        conn.commit()
+
+    # 3) Enforce NOT NULL (Postgres only; SQLite can't ALTER COLUMN and the
+    #    belt + fresh-table schema cover it there).
+    if is_pg:
+        for t in _ORG_SCOPED_TABLES:
+            if t in tables and not _column_is_not_null(conn, t, "org_id"):
+                # Guard: only flip when no NULLs remain.
+                has_null = conn.execute(text(
+                    f"SELECT 1 FROM {t} WHERE org_id IS NULL LIMIT 1")).first()
+                if not has_null:
+                    conn.execute(text(
+                        f"ALTER TABLE {t} ALTER COLUMN org_id SET NOT NULL"))
+        conn.commit()
+
+    # 4) Apply RLS policies (Postgres only).
+    if is_pg:
+        _apply_rls(conn)
+
+
+def _apply_rls(conn: Connection) -> None:
+    """Enable + FORCE row-level security on each scoped table with an org
+    isolation policy keyed on the per-transaction `app.org` GUC. Idempotent.
+
+    The app role (`agentira_app`) is granted table CRUD if it exists — its
+    creation + the AGENTIRA_APP_DB_URL wiring is done once by
+    scripts/setup_rls.py (needs a password we don't bake into code)."""
+    role_exists = conn.execute(text(
+        "SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": _APP_ROLE}).first()
+
+    for t in _ORG_SCOPED_TABLES:
+        conn.execute(text(f"ALTER TABLE {t} ENABLE ROW LEVEL SECURITY"))
+        # FORCE so even the table owner is subject (defence-in-depth; the app
+        # role isn't owner anyway).
+        conn.execute(text(f"ALTER TABLE {t} FORCE ROW LEVEL SECURITY"))
+        # Drop+recreate the policy so edits to the predicate take on redeploy.
+        conn.execute(text(f"DROP POLICY IF EXISTS org_iso ON {t}"))
+        conn.execute(text(
+            f"CREATE POLICY org_iso ON {t} "
+            f"USING (org_id = current_setting('app.org', true)) "
+            f"WITH CHECK (org_id = current_setting('app.org', true))"
+        ))
+        if role_exists:
+            conn.execute(text(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO {_APP_ROLE}"))
+    if role_exists:
+        # Global (non-scoped) tables the app must still read/write.
+        for t in ("orgs", "invites", "roles", "permissions", "role_permissions",
+                  "statuses", "forge_runs", "forge_messages",
+                  "forge_conversations", "forge_queued_messages",
+                  "forge_webhook_logs"):
+            if t in _list_tables(conn):
+                conn.execute(text(
+                    f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO {_APP_ROLE}"))
+    conn.commit()
 
 
 # ── Dialect-aware helpers ────────────────────────────────────────────────
@@ -508,6 +757,9 @@ def run_migrations():
             else:
                 _sqlite_rebuild_forge_agents_profile_id_nullable(conn)
                 conn.commit()
+
+        # Multi-tenancy: org_id columns + backfill + Postgres RLS.
+        _migrate_orgs(conn)
 
 
 def _sqlite_rebuild_attachments_task_id_nullable(conn: Connection) -> None:

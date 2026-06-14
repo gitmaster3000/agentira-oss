@@ -14,7 +14,8 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
-from backend.jwt_auth import create_token, get_current_user, require_admin
+from backend.jwt_auth import (create_token, get_current_user, require_admin,
+                              get_current_user_payload)
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -29,9 +30,11 @@ class ProfileSignup(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
+    invite: str | None = None
 
 class GitHubAuthRequest(BaseModel):
     code: str
+    invite: str | None = None
 
 class ProfileCreate(BaseModel):
     name: str
@@ -164,7 +167,7 @@ def _make_token(user: dict) -> str:
     role = user.get("role", "member")
     if isinstance(role, dict):
         role = role.get("name", "member")
-    return create_token(user["name"], user["id"], role)
+    return create_token(user["name"], user["id"], role, user.get("org_id"))
 
 
 # ── Auth Router (PUBLIC — no JWT required) ───────────────────────────────
@@ -180,10 +183,34 @@ def api_login(body: LoginRequest):
 
 @auth.post("/signup")
 def api_signup(body: ProfileSignup):
+    # Open self-serve signup is disabled — accounts are invite-only.
+    raise HTTPException(403, "Signup is invite-only. Ask your admin for an invite link.")
+
+
+# ── Invites ──────────────────────────────────────────────────────────────
+
+@auth.get("/invites/{code}")
+def api_get_invite(code: str):
+    """Public: describe an invite so the signup page can render it."""
+    inv = services.get_invite(code)
+    if not inv:
+        raise HTTPException(404, "Invite not found")
+    if inv["accepted"]:
+        raise HTTPException(410, "Invite already used")
+    if inv["expired"]:
+        raise HTTPException(410, "Invite expired")
+    return inv
+
+
+@auth.post("/invites/{code}/accept")
+def api_accept_invite(code: str, body: ProfileSignup):
+    """Public: accept an invite, creating the account."""
     try:
-        user = services.signup(body.name, body.display_name, body.password)
+        user = services.accept_invite(
+            code, name=body.name, password=body.password,
+            display_name=body.display_name or "")
         return {"user": user, "token": _make_token(user)}
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(400, str(e))
 
 
@@ -200,13 +227,17 @@ def api_auth_google(body: GoogleAuthRequest):
     except Exception:
         raise HTTPException(401, "Invalid Google token")
 
-    user = services.authenticate_oauth(
-        provider="google",
-        provider_user_id=info["sub"],
-        email=info.get("email"),
-        display_name=info.get("name", ""),
-        avatar_url=info.get("picture", ""),
-    )
+    try:
+        user = services.authenticate_oauth(
+            provider="google",
+            provider_user_id=info["sub"],
+            email=info.get("email"),
+            display_name=info.get("name", ""),
+            avatar_url=info.get("picture", ""),
+            invite_code=body.invite,
+        )
+    except ValueError as e:
+        raise HTTPException(403, str(e))
     return {"user": user, "token": _make_token(user)}
 
 
@@ -249,13 +280,17 @@ async def api_auth_github(body: GitHubAuthRequest):
                     email = e["email"]
                     break
 
-    user = services.authenticate_oauth(
-        provider="github",
-        provider_user_id=str(gh_user["id"]),
-        email=email,
-        display_name=gh_user.get("name") or gh_user.get("login", ""),
-        avatar_url=gh_user.get("avatar_url", ""),
-    )
+    try:
+        user = services.authenticate_oauth(
+            provider="github",
+            provider_user_id=str(gh_user["id"]),
+            email=email,
+            display_name=gh_user.get("name") or gh_user.get("login", ""),
+            avatar_url=gh_user.get("avatar_url", ""),
+            invite_code=body.invite,
+        )
+    except ValueError as e:
+        raise HTTPException(403, str(e))
     return {"user": user, "token": _make_token(user)}
 
 
@@ -867,8 +902,23 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# Admin-only: issue member invites for the caller's own org.
+admin_invites = APIRouter(prefix="/api/invites", tags=["invites"],
+                          dependencies=[Depends(require_admin)])
+
+@admin_invites.post("")
+def api_create_member_invite(body: dict = None,
+                             payload: dict = Depends(get_current_user_payload)):
+    body = body or {}
+    try:
+        return services.create_invite(
+            role="member", org_id=payload.get("org_id"),
+            email=body.get("email"), invited_by=payload.get("sub"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
 # Register all routers
-for r in [auth, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router]:
+for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router]:
     app.include_router(r)
 
 # Forge product router (self-contained)

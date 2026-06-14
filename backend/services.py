@@ -7,11 +7,11 @@ from __future__ import annotations
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from backend.db import SessionLocal, init_db
+from backend.db import SessionLocal, init_db, privileged, set_current_org
 from backend.models import (
     Project, Task, Activity, TaskPriority, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
-    ProjectMember, Notification, TaskCommit, Epic, OAuthAccount
+    ProjectMember, Notification, TaskCommit, Epic, OAuthAccount, Org
 )
 from backend.auth import has_permission
 from backend.notifications import broker
@@ -34,7 +34,8 @@ def authenticate_user(username: str, password: str) -> dict | None:
 
     Transparently migrates legacy unsalted SHA-256 hashes to bcrypt on a
     successful login (AP-194), so the old scheme drains without a reset."""
-    with _session() as db:
+    # Login is cross-org: we don't know the user's org until we find them.
+    with privileged(), _session() as db:
         p = db.query(Profile).filter(Profile.name == username).first()
         if not p:
             return None
@@ -268,6 +269,7 @@ def _profile_to_dict(p: Profile) -> dict:
         kind = "user"
     return {
         "id": p.id,
+        "org_id": p.org_id,
         "name": p.name,
         "display_name": p.display_name or p.name,
         "role": role_name,
@@ -1922,21 +1924,149 @@ def create_service_account(name: str, display_name: str = "", role: str = "bot")
     return create_profile(name, display_name, role=role)
 
 
-def signup(name: str, display_name: str = "", password: str = "") -> dict:
-    """Public signup procedure. Defaults to 'member' role. Returns profile + api_key."""
-    return create_profile(name, display_name, role="member", password=password)
+def _create_org(db: Session, owner_display_name: str) -> Org:
+    """Create a fresh org for a new signup. Caller must be in a privileged
+    session (org context is None during signup)."""
+    label = (owner_display_name or "My").strip()
+    org = Org(name=f"{label}'s Org")
+    db.add(org)
+    db.flush()  # assign org.id
+    return org
+
+
+# ── Invite-only signup ─────────────────────────────────────────────────────
+# Open self-serve signup is disabled. Accounts are created only by accepting an
+# invite code:
+#   - admin invite  (org_id NULL, role=admin)  → creates a new org + admin
+#   - member invite (org_id set,  role=member) → joins that org (capped)
+# Operator issues admin invites (scripts/create_invite.py); admins issue member
+# invites in-app (POST /api/invites).
+
+from datetime import timedelta  # noqa: E402
+
+
+def create_invite(*, role: str, org_id: str | None, email: str | None = None,
+                  invited_by: str | None = None, ttl_days: int = 14) -> dict:
+    """Create an invite code. Admin invites (role='admin') carry no org;
+    member invites must carry the inviter's org_id and are capped by
+    Org.max_members."""
+    from backend.models import Invite
+    role = role if role in ("admin", "member") else "member"
+    with privileged(), _session() as db:
+        if role == "member":
+            if not org_id:
+                raise ValueError("member invite requires org_id")
+            _assert_member_capacity(db, org_id)
+        code = secrets.token_urlsafe(24)
+        inv = Invite(
+            code=code, role=role, org_id=org_id, email=email,
+            invited_by=invited_by,
+            expires_at=_utcnow() + timedelta(days=ttl_days),
+        )
+        db.add(inv)
+        db.commit()
+        return {"code": code, "role": role, "org_id": org_id,
+                "expires_at": inv.expires_at.isoformat()}
+
+
+def get_invite(code: str) -> dict | None:
+    """Public: describe an invite for the signup page (no secrets)."""
+    from backend.models import Invite
+    with privileged(), _session() as db:
+        inv = db.query(Invite).filter(Invite.code == code).first()
+        if not inv:
+            return None
+        org_name = None
+        if inv.org_id:
+            org = db.get(Org, inv.org_id)
+            org_name = org.name if org else None
+        return {
+            "role": inv.role,
+            "email": inv.email,
+            "org_id": inv.org_id,
+            "org_name": org_name,
+            "accepted": inv.accepted_at is not None,
+            "expired": bool(inv.expires_at and inv.expires_at < _utcnow()),
+        }
+
+
+def _assert_member_capacity(db: Session, org_id: str) -> None:
+    """Raise if the org is already at its member cap (non-bot profiles beyond
+    the founding admin)."""
+    org = db.get(Org, org_id)
+    if not org:
+        raise ValueError("org not found")
+    bot_role_id = _get_role_id(db, "bot")
+    non_bot = (db.query(Profile)
+               .filter(Profile.org_id == org_id, Profile.role_id != bot_role_id)
+               .count())
+    # founding admin doesn't count against the member cap
+    if max(non_bot - 1, 0) >= org.max_members:
+        raise ValueError(f"org member limit ({org.max_members}) reached")
+
+
+def accept_invite(code: str, *, name: str, password: str = "",
+                  display_name: str = "") -> dict:
+    """Accept an invite by code, creating the profile (and org for admin
+    invites). Returns profile + api_key. Privileged: no org context yet."""
+    from backend.models import Invite
+    with privileged(), _session() as db:
+        inv = db.query(Invite).filter(Invite.code == code).first()
+        if not inv:
+            raise ValueError("invalid invite")
+        if inv.accepted_at is not None:
+            raise ValueError("invite already used")
+        if inv.expires_at and inv.expires_at < _utcnow():
+            raise ValueError("invite expired")
+        if db.query(Profile).filter(Profile.name == name).first():
+            raise ValueError(f"username '{name}' is taken")
+
+        if inv.role == "admin":
+            org = _create_org(db, display_name or name)
+            org_id = org.id
+            role_id = _get_role_id(db, "admin")
+        else:
+            if not inv.org_id:
+                raise ValueError("malformed member invite")
+            _assert_member_capacity(db, inv.org_id)
+            org_id = inv.org_id
+            role_id = _get_role_id(db, "member")
+
+        profile = Profile(
+            org_id=org_id,
+            name=name,
+            display_name=display_name or name,
+            email=inv.email,
+            role_id=role_id,
+            password_hash=_hash_password(password) if password else "",
+            api_key=secrets.token_hex(32),
+        )
+        db.add(profile)
+        db.flush()
+        inv.accepted_at = _utcnow()
+        inv.accepted_profile_id = profile.id
+        db.commit()
+        db.refresh(profile)
+        res = _profile_to_dict(profile)
+        res["api_key"] = profile.api_key
+        return res
 
 
 def authenticate_oauth(provider: str, provider_user_id: str, email: str | None = None,
-                       display_name: str = "", avatar_url: str = "") -> dict:
-    """Log in or auto-register a user via OAuth provider.
+                       display_name: str = "", avatar_url: str = "",
+                       invite_code: str | None = None) -> dict:
+    """Log in via OAuth — invite-only registration.
 
-    Looks up OAuthAccount by (provider, provider_user_id).
-    If found → return existing profile.
-    If not → create a new profile and link the OAuth account.
+    - Existing OAuth link or matching email → log in.
+    - New user WITH a valid invite_code → accept the invite (joins the org, or
+      creates a new org for an admin invite) and link the OAuth account.
+    - New user with no invite → rejected.
+
+    Runs privileged: lookups are cross-org and registration predates RLS scope.
     """
-    with _session() as db:
-        # Check for existing OAuth link
+    from backend.models import Invite
+    with privileged(), _session() as db:
+        # Existing OAuth link → log in.
         link = (db.query(OAuthAccount)
                 .filter(OAuthAccount.provider == provider,
                         OAuthAccount.provider_user_id == provider_user_id)
@@ -1945,15 +2075,29 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
             profile = db.query(Profile).get(link.profile_id)
             return _profile_to_dict(profile)
 
-        # Check if a profile with this email already exists (link it)
+        # Existing profile by email → link this provider and log in.
         profile = None
         if email:
             profile = db.query(Profile).filter(Profile.email == email).first()
 
         if not profile:
-            # Create new profile
-            role_id = _get_role_id(db, "member")
-            # Generate a unique username from email or display name
+            # New user: require a valid invite.
+            if not invite_code:
+                raise ValueError("No account for this login. Ask your admin for an invite.")
+            inv = db.query(Invite).filter(Invite.code == invite_code).first()
+            if not inv or inv.accepted_at is not None or (
+                    inv.expires_at and inv.expires_at < _utcnow()):
+                raise ValueError("invalid or expired invite")
+
+            if inv.role == "admin":
+                org = _create_org(db, display_name or (email or "My"))
+                org_id, role_id = org.id, _get_role_id(db, "admin")
+            else:
+                if not inv.org_id:
+                    raise ValueError("malformed member invite")
+                _assert_member_capacity(db, inv.org_id)
+                org_id, role_id = inv.org_id, _get_role_id(db, "member")
+
             base_name = (email.split("@")[0] if email else display_name.lower().replace(" ", "_"))[:60]
             name = base_name
             suffix = 1
@@ -1962,6 +2106,7 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
                 suffix += 1
 
             profile = Profile(
+                org_id=org_id,
                 name=name,
                 display_name=display_name or name,
                 email=email,
@@ -1971,9 +2116,12 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
             )
             db.add(profile)
             db.flush()
+            inv.accepted_at = _utcnow()
+            inv.accepted_profile_id = profile.id
 
-        # Create OAuth link
+        # Link the OAuth account (inherits the profile's org).
         db.add(OAuthAccount(
+            org_id=profile.org_id,
             profile_id=profile.id,
             provider=provider,
             provider_user_id=provider_user_id,
@@ -2308,10 +2456,24 @@ def _seed_defaults(db: Session) -> None:
     db.commit()
 
 
+def _ensure_system_org(db: Session) -> Org:
+    """The org the bootstrap/seed admin lives in. Stable id so reboots are
+    idempotent."""
+    org = db.get(Org, "org00systemorg")
+    if not org:
+        org = Org(id="org00systemorg", name="System Org")
+        db.add(org)
+        db.flush()
+    return org
+
+
 def bootstrap():
-    """Initialize DB tables and seed defaults."""
+    """Initialize DB tables and seed defaults.
+
+    Privileged throughout: seeding predates any request org-context, and the
+    seed admin's profile insert must bypass RLS WITH CHECK."""
     init_db()
-    with _session() as db:
+    with privileged(), _session() as db:
         _seed_defaults(db)
 
         # Ensure an admin user exists. AP-194: no hardcoded prod credential.
@@ -2323,8 +2485,9 @@ def bootstrap():
             is_prod = os.getenv("RAILWAY_ENVIRONMENT") is not None
             admin_password = os.getenv("AGENTIRA_ADMIN_PASSWORD")
             if admin_password:
+                sys_org = _ensure_system_org(db)
                 db.add(Profile(name="admin", display_name="Admin User",
-                               role_id=admin_role.id,
+                               org_id=sys_org.id, role_id=admin_role.id,
                                password_hash=passwords.hash_password(admin_password)))
                 db.commit()
                 logger.info("Created admin user from AGENTIRA_ADMIN_PASSWORD")
@@ -2335,8 +2498,9 @@ def bootstrap():
             else:
                 logger.warning("Creating DEV admin user (password: admin123) "
                                "— set AGENTIRA_ADMIN_PASSWORD for real deploys")
+                sys_org = _ensure_system_org(db)
                 db.add(Profile(name="admin", display_name="Admin User",
-                               role_id=admin_role.id,
+                               org_id=sys_org.id, role_id=admin_role.id,
                                password_hash=passwords.hash_password("admin123")))
                 db.commit()
 

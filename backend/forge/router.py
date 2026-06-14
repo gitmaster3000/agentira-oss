@@ -3,11 +3,12 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi import APIRouter, HTTPException, WebSocket, Depends
 
 from pydantic import BaseModel, Field
 
 from backend.forge import services
+from backend.jwt_auth import require_admin
 
 router = APIRouter(prefix="/api/forge", tags=["forge"])
 
@@ -319,7 +320,7 @@ def list_agents(status: Optional[str] = None):
     return services.list_agents(status=status)
 
 
-@router.post("/agents", status_code=201)
+@router.post("/agents", status_code=201, dependencies=[Depends(require_admin)])
 def create_agent(body: AgentCreate):
     return services.create_agent(
         profile_id=body.profile_id,
@@ -368,7 +369,7 @@ def dispatch_preview(agent_id: str, project_id: Optional[str] = None):
     return services.dispatch_preview(agent_id, project_id=project_id)
 
 
-@router.patch("/agents/{agent_id}")
+@router.patch("/agents/{agent_id}", dependencies=[Depends(require_admin)])
 def update_agent(agent_id: str, body: AgentUpdate):
     fields = body.model_dump(exclude_none=True)
     try:
@@ -391,7 +392,7 @@ def update_agent(agent_id: str, body: AgentUpdate):
     return result
 
 
-@router.delete("/agents/{agent_id}")
+@router.delete("/agents/{agent_id}", dependencies=[Depends(require_admin)])
 def delete_agent(agent_id: str):
     try:
         deleted = services.delete_agent(agent_id)

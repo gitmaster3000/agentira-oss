@@ -84,6 +84,7 @@ class ForgeRuntime(Base):
     __table_args__ = (UniqueConstraint("daemon_id", "provider"),)
 
     id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str]         = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     daemon_id: Mapped[str]      = mapped_column(String(64), nullable=False)
     device_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     provider: Mapped[str]       = mapped_column(String(40), nullable=False)
@@ -112,6 +113,7 @@ class Agent(Base):
     __tablename__ = "forge_agents"
 
     id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str]         = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     profile_id: Mapped[str | None] = mapped_column(ForeignKey("profiles.id"), nullable=True)
     name: Mapped[str]           = mapped_column(String(120), nullable=False)
     executor_type: Mapped[str]  = mapped_column(String(30), default="http")

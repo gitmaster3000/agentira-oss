@@ -71,6 +71,7 @@ class ProfilePermission(Base):
     __table_args__ = (UniqueConstraint("profile_id", "permission_id"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
     permission_id: Mapped[str] = mapped_column(ForeignKey("permissions.id"), nullable=False)
 
@@ -86,12 +87,56 @@ class Status(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
 
 
+# ── Tenancy ──────────────────────────────────────────────────────────────
+# An Org is the multi-tenancy boundary. Every signup creates a new org and
+# the new profile becomes its admin. All scoped tables carry org_id; Postgres
+# RLS policies (configured in scripts/apply_rls.py) enforce isolation even
+# when application code forgets a WHERE clause.
+
+class Org(Base):
+    __tablename__ = "orgs"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Per-org caps (tunable later). Members = non-bot profiles beyond the
+    # founding admin; agents = bot profiles.
+    max_members: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    max_agents: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Invite(Base):
+    """Invite code for invite-only signup.
+
+    - Admin invite: org_id NULL, role='admin' → accepting creates a NEW org
+      and the invitee becomes its admin (operator-issued).
+    - Member invite: org_id set, role='member' → accepting creates a profile
+      in that org (admin-issued, capped by Org.max_members).
+
+    NOT org-scoped: an admin invite has no org yet, and accept happens before
+    the invitee has an org context. Lookups are by unguessable `code`.
+    """
+    __tablename__ = "invites"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("orgs.id"), nullable=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    invited_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    accepted_profile_id: Mapped[str | None] = mapped_column(String(12), nullable=True)
+
+
 # ── Core ─────────────────────────────────────────────────────────────────
 
 class Profile(Base):
     __tablename__ = "profiles"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(120), default="")
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
@@ -182,6 +227,7 @@ class OAuthAccount(Base):
     __table_args__ = (UniqueConstraint("provider", "provider_user_id"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String(30), nullable=False)        # "google", "github"
     provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)  # sub / github user id
@@ -196,6 +242,7 @@ class ProjectMember(Base):
     __table_args__ = (UniqueConstraint("project_id", "profile_id"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
 
@@ -207,6 +254,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)  # project.member.add, task.assign
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -221,6 +269,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     key_prefix: Mapped[str] = mapped_column(String(10), nullable=False, default="PROJ")
@@ -306,6 +355,7 @@ class ProjectRepo(Base):
     __table_args__ = (UniqueConstraint("project_id", "name"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. "backend", "frontend"
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -319,6 +369,7 @@ class Epic(Base):
     __tablename__ = "epics"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
@@ -336,6 +387,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     key: Mapped[str] = mapped_column(String(20), nullable=True, unique=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
@@ -377,6 +429,7 @@ class Activity(Base):
     __tablename__ = "activities"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     
@@ -394,6 +447,7 @@ class Attachment(Base):
     __tablename__ = "attachments"
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     # AP-152: task_id XOR project_id — a row attaches to exactly one of them.
     # Both columns are nullable at the DB level; the XOR invariant is
     # enforced in `backend.attachments.add`.
@@ -417,6 +471,7 @@ class TaskCommit(Base):
     __tablename__ = "task_commits"
 
     id: Mapped[str]          = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str]      = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     task_id: Mapped[str]     = mapped_column(ForeignKey("tasks.id"), nullable=False)
     sha: Mapped[str]         = mapped_column(String(40), nullable=False)
     message: Mapped[str]     = mapped_column(Text, default="")
