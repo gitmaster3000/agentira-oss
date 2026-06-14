@@ -252,9 +252,11 @@ def _migrate_orgs(conn: Connection) -> None:
         exists = conn.execute(text("SELECT 1 FROM orgs WHERE id = :i"),
                               {"i": _DEFAULT_ORG_ID}).first()
         if not exists:
+            # max_members/max_agents are NOT NULL with only a Python-side
+            # default, so a raw INSERT must set them explicitly.
             conn.execute(text(
-                "INSERT INTO orgs (id, name, created_at) "
-                "VALUES (:i, 'Default Org', CURRENT_TIMESTAMP)"
+                "INSERT INTO orgs (id, name, max_members, max_agents, created_at) "
+                "VALUES (:i, 'Default Org', 5, 5, CURRENT_TIMESTAMP)"
             ), {"i": _DEFAULT_ORG_ID})
         for t in _ORG_SCOPED_TABLES:
             if t in tables:
