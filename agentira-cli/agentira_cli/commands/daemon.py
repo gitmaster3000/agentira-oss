@@ -12,11 +12,58 @@ import typer
 
 from agentira_cli.state.config import DaemonConfig
 from agentira_cli.state.paths import (
-    CREDENTIALS_FILE, DAEMON_ID_FILE, DAEMON_LOG_FILE, DAEMON_PID_FILE,
-    ensure_home,
+    CREDENTIALS_FILE, DAEMON_ID_FILE, DAEMON_LOG_FILE, DAEMON_META_FILE,
+    DAEMON_PID_FILE, HOME, ensure_home,
 )
 
 app = typer.Typer(help="Manage the AgentIRA local daemon process.")
+
+# Isolated state dir for the test daemon, so its pid/creds/logs never collide
+# with the prod daemon. Overridable; the backend URL + key are NOT hardcoded —
+# they come from the environment (see the callback below).
+_TEST_HOME = os.environ.get("AGENTIRA_TEST_HOME", "~/.agentira-test")
+
+
+@app.callback()
+def _daemon_main(
+    ctx: typer.Context,
+    test: bool = typer.Option(
+        False, "--test",
+        help="Target an isolated TEST daemon (AGENTIRA_HOME=~/.agentira-test). "
+             "Reads the backend connection from AGENTIRA_DAEMON_API_URL and "
+             "AGENTIRA_DAEMON_API_KEY in your environment — set those to point "
+             "at your local stack. e.g. `agentira daemon --test start`.",
+    ),
+) -> None:
+    """Manage the AgentIRA local daemon (use --test for an isolated test daemon)."""
+    if not test or os.environ.get("AGENTIRA_HOME"):
+        return
+    # start/restart actually connect and register runtimes, so they need the
+    # backend URL + dev key. We never hardcode those (especially the key) —
+    # read them from the env, and if they're unset, say exactly what to set
+    # rather than silently pointing at the wrong place.
+    if ctx.invoked_subcommand in ("start", "restart"):
+        missing = [v for v in ("AGENTIRA_DAEMON_API_URL", "AGENTIRA_DAEMON_API_KEY")
+                   if not os.environ.get(v)]
+        if missing:
+            typer.secho(
+                "--test needs your local backend connection in the environment, "
+                "but these are unset:\n  " + "\n  ".join(missing) + "\n\n"
+                "Set them to point at your local stack, e.g.:\n"
+                "  export AGENTIRA_DAEMON_API_URL=http://localhost:8111\n"
+                "  export AGENTIRA_DAEMON_API_KEY=<dev key>   "
+                "# matches AGENTIRA_DEV_API_KEY on the backend\n\n"
+                "Then re-run. Tip: wrap them in an `agentira-test` shell alias.",
+                fg="yellow", err=True,
+            )
+            raise typer.Exit(1)
+    # HOME is resolved at import time, so re-exec with the test HOME so a fresh
+    # process picks it up. The AGENTIRA_HOME guard above + stripping --test
+    # prevent an exec loop. The URL/key flow through via the copied env.
+    env = os.environ.copy()
+    env["AGENTIRA_HOME"] = os.path.expanduser(_TEST_HOME)
+    argv = [a for a in sys.argv if a != "--test"]
+    os.execvpe(argv[0], argv, env)
 
 
 # ── Browser-based admin login ────────────────────────────────────────────
@@ -166,6 +213,11 @@ def _start_impl(*, dry_run: bool, foreground: bool, api_key: str | None) -> None
                    "(sign in as an admin).")
         return
 
+    # Record what this daemon is for, so `status` can show which one it is
+    # (e.g. local test vs prod) when several daemons coexist via AGENTIRA_HOME.
+    DAEMON_META_FILE.write_text(json.dumps({
+        "api_url": config.api_url, "dry_run": bool(config.dry_run)}))
+
     if foreground:
         _run_daemon(config)
         return
@@ -188,7 +240,8 @@ def _start_impl(*, dry_run: bool, foreground: bool, api_key: str | None) -> None
     finally:
         log.close()
     DAEMON_PID_FILE.write_text(str(proc.pid))
-    typer.echo(f"Daemon started (PID {proc.pid}). Logs: {DAEMON_LOG_FILE}")
+    typer.echo(f"Daemon started (PID {proc.pid}) — home {HOME}")
+    typer.echo(f"  backend {config.api_url}  ·  logs {DAEMON_LOG_FILE}")
 
 
 def _stop_impl() -> bool:
@@ -235,9 +288,9 @@ def stop() -> None:
     """Stop the running daemon."""
     stopped = _stop_impl()
     if stopped:
-        typer.echo("Stopped.")
+        typer.echo(f"Stopped daemon at {HOME}.")
     else:
-        typer.echo("Daemon is not running.")
+        typer.echo(f"No daemon running at {HOME}.")
 
 
 @app.command("restart")
@@ -282,13 +335,22 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
     # If pid file is stale (points at a dead pid), say so explicitly.
     stale_pid_file = bool(pid and not running)
 
-    # Probe the backend for WS connection state.
+    meta = {}
+    try:
+        meta = json.loads(DAEMON_META_FILE.read_text())
+    except Exception:
+        meta = {}
+
+    # Probe the daemon's OWN backend (recorded in meta) for WS state.
     ws_connected: bool | None = None
     if running and daemon_id:
-        config = DaemonConfig()
-        ws_connected = _probe_ws_connected(config.api_url, daemon_id)
+        backend = meta.get("api_url") or DaemonConfig().api_url
+        ws_connected = _probe_ws_connected(backend, daemon_id)
 
     data = {
+        "home": str(HOME),
+        "home_overridden": bool(os.environ.get("AGENTIRA_HOME")),
+        "backend": meta.get("api_url"),
         "running": running,
         "pid": pid if running else None,
         "stale_pid_file": stale_pid_file,
@@ -304,6 +366,10 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
         state = f"running (PID {pid})" if running else "stopped"
         if stale_pid_file:
             state = f"stopped (stale pid file points at dead PID {pid})"
+        home_note = "  (AGENTIRA_HOME)" if os.environ.get("AGENTIRA_HOME") else "  (default)"
+        typer.echo(f"Home:      {HOME}{home_note}")
+        if meta.get("api_url"):
+            typer.echo(f"Backend:   {meta['api_url']}")
         typer.echo(f"Status:    {state}")
         if daemon_id:
             typer.echo(f"Daemon ID: {daemon_id}")
@@ -312,7 +378,8 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
         elif running and ws_connected is False:
             typer.echo("WebSocket: DISCONNECTED (daemon running but backend has no active WS)")
         elif running and ws_connected is None:
-            typer.echo("WebSocket: unknown (backend unreachable)")
+            typer.echo("WebSocket: unconfirmed (status probe is unauthenticated; "
+                       "the daemon may well be connected — see `daemon logs`)")
         if dry_run_env:
             typer.echo("Mode:      DRY-RUN (env var set — triggers won't spawn subprocesses)")
         typer.echo(f"Log:       {DAEMON_LOG_FILE}")

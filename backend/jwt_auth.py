@@ -44,6 +44,39 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
 
+def _dev_bypass_payload(token: str) -> dict | None:
+    """Dev-only auth shortcut. When AGENTIRA_DEV_API_KEY is set and the bearer
+    token matches it, authenticate as the configured dev profile
+    (AGENTIRA_DEV_PROFILE, default 'admin') — its real org_id/role. Lets a local
+    test daemon connect with ONE static key: no browser login, no JWT minting.
+
+    GATING IS CONFIG, NOT CODE: provider-agnostic (Railway/AWS/GCP/bare docker
+    all look identical here). The bypass activates only when AGENTIRA_ENV is
+    explicitly 'dev'. The default is 'prod', so it is fail-safe OFF everywhere
+    unless a dev config opts in — even if AGENTIRA_DEV_API_KEY somehow leaks
+    into a prod environment, it does nothing without AGENTIRA_ENV=dev."""
+    if os.getenv("AGENTIRA_ENV", "prod").strip().lower() != "dev":
+        return None
+    dev_key = os.getenv("AGENTIRA_DEV_API_KEY", "")
+    if not dev_key or token != dev_key:
+        return None
+    profile_name = os.getenv("AGENTIRA_DEV_PROFILE", "admin")
+    from backend.db import privileged, SessionLocal
+    from backend.models import Profile, Role
+    with privileged(), SessionLocal() as db:
+        p = db.query(Profile).filter(Profile.name == profile_name).first()
+        if not p or not p.org_id:
+            return None
+        role = db.get(Role, p.role_id)
+        return {
+            "sub": p.name,
+            "profile_id": p.id,
+            "role": role.name if role else "admin",
+            "org_id": p.org_id,
+            "dev_bypass": True,
+        }
+
+
 async def get_current_user_payload(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> dict:
@@ -53,6 +86,12 @@ async def get_current_user_payload(
     filter every query to the caller's org."""
     if credentials is None:
         raise HTTPException(401, "Authentication required")
+    # Dev-only static-key bypass (no-op in prod / when AGENTIRA_DEV_API_KEY unset).
+    dev = _dev_bypass_payload(credentials.credentials)
+    if dev is not None:
+        from backend.db import set_current_org
+        set_current_org(dev["org_id"])
+        return dev
     try:
         payload = decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:

@@ -20,6 +20,15 @@ services:
       # PG-specific behavior in dev/preview. wait_for_db() + depends_on gate on a
       # healthy DB. /app/data (agentira-data volume) still holds attachments.
       - AGENTIRA_DB_URL=postgresql://agentira:agentira@postgres:5432/agentira
+      # Environment marker — provider-agnostic dev/prod switch (config, not
+      # code). Gates the daemon auth bypass below; prod configs leave it 'prod'
+      # (the code default), so the bypass is fail-safe OFF everywhere else.
+      - AGENTIRA_ENV=dev
+      # Dev-only daemon auth bypass (see backend/jwt_auth._dev_bypass_payload):
+      # a daemon presenting this key authenticates as the 'preview' profile —
+      # no browser login. Only honored when AGENTIRA_ENV=dev.
+      - AGENTIRA_DEV_API_KEY=dev-daemon-key-local-only
+      - AGENTIRA_DEV_PROFILE=preview
     depends_on:
       postgres:
         condition: service_healthy
