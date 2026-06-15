@@ -49,42 +49,69 @@ sets `AGENTIRA_ENV=dev` + an `AGENTIRA_DEV_API_KEY` (see
 `docker-compose.override.yml`). A daemon presenting that key authenticates as
 the `preview` profile — no browser login:
 
-Use the **`--test`** flag — it puts the daemon in its own isolated home
-(`~/.agentira-test`) so it never collides with your prod daemon. It reads the
-backend connection from your environment (it does **not** hardcode a URL or
-key); set those two vars once, then drive it with `--test`:
+**First, turn on developer mode** — the whole test/prod split is dev-only and
+hidden from customers (a shipped CLI has no `--test`/`--prod` and acts only on
+the one configured daemon). Set this once in your shell profile:
 
 ```bash
-export AGENTIRA_DAEMON_API_URL=http://localhost:8111
-export AGENTIRA_DAEMON_API_KEY=dev-daemon-key-local-only   # = AGENTIRA_DEV_API_KEY on the backend
-
-agentira daemon --test start
-agentira daemon --test status     # Home ~/.agentira-test · Backend http://localhost:8111
-agentira daemon --test logs -n 20
+export AGENTIRA_DEV_MODE=1
 ```
 
-Expect `Registered 3 runtime(s)` in the logs. If you run `--test start`
-without those two vars set, it stops and tells you exactly what to export — no
-silent wrong-backend.
+> `AGENTIRA_DEV_MODE` only changes local CLI ergonomics — it is **not** a
+> security boundary. The real gate is server-side (`AGENTIRA_ENV=dev` +
+> `AGENTIRA_DEV_API_KEY` on the backend), which prod never sets, so a daemon
+> can't reach prod even with this flag on.
 
-Prefer to not export globally? Wrap them in an alias:
+With dev mode on, **test is the default.** A bare `agentira daemon ...` targets
+an isolated test daemon (`~/.agentira-test`) — it can never touch prod by
+accident. Point it at your local stack with the **dev-scoped** vars (safe to
+keep permanently in your profile — they only feed the test daemon and never
+retarget prod):
 
 ```bash
-alias agentira-test='AGENTIRA_DAEMON_API_URL=http://localhost:8111 \
-  AGENTIRA_DAEMON_API_KEY=dev-daemon-key-local-only agentira daemon --test'
-# then:  agentira-test start  ·  agentira-test status  ·  agentira-test stop
+export AGENTIRA_TEST_API_URL=http://localhost:8111
+export AGENTIRA_TEST_API_KEY=dev-daemon-key-local-only   # = AGENTIRA_DEV_API_KEY on the backend
+
+agentira daemon start             # test by default (dev mode)
+agentira daemon status            # Home ~/.agentira-test · Backend http://localhost:8111
+agentira daemon logs -n 20
 ```
+
+Expect `Registered 3 runtime(s)` in the logs. If you run `start` without those
+two vars set, it stops and tells you exactly what to export — no silent
+wrong-backend. (`--test` is accepted too, as the explicit form of the default.)
+
+> **Why `AGENTIRA_TEST_*` and not `AGENTIRA_DAEMON_*`?** `DaemonConfig` reads
+> `AGENTIRA_DAEMON_API_URL` for *every* daemon, so exporting that would also
+> retarget your prod daemon. The `AGENTIRA_TEST_*` vars are mapped onto
+> `AGENTIRA_DAEMON_*` only inside the test re-exec, so `--prod` always stays on
+> its real backend.
 
 ### Managing the two daemons
 
 | Command | Acts on |
 |---|---|
-| `agentira daemon <cmd>` | your **prod** daemon (`~/.agentira`) |
-| `agentira daemon --test <cmd>` | the **test** daemon (`~/.agentira-test`) |
+| `agentira daemon <cmd>` *(or `--test`)* | the **test** daemon (`~/.agentira-test`) — **default** |
+| `agentira daemon --prod <cmd>` | your real **prod** daemon (`~/.agentira`) — explicit |
 
-`<cmd>` = `start` · `stop` · `restart` · `status` · `logs`. Independent
-processes — stopping one never touches the other, and every command prints its
+`<cmd>` = `start` · `stop` · `restart` · `status` · `logs`. Both are independent
+processes (stopping one never touches the other), and every command prints its
 **Home + Backend** so you always know which is which.
+
+**Prod is guarded.** Acting on prod requires the explicit `--prod` flag, and the
+state-changing commands (`start` / `stop` / `restart`) show what they're about
+to do and ask you to confirm first:
+
+```text
+⚠  PROD daemon — about to run a state-changing command.
+  Command:  daemon restart
+  Home:     ~/.agentira
+  Backend:  https://flowty-api-production.up.railway.app
+  Currently: running (PID 72527)
+Proceed against PROD? [y/N]:
+```
+
+`--prod status` / `--prod logs` are read-only and don't prompt.
 
 > **Why it's safe:** the bypass is honored only when `AGENTIRA_ENV=dev`. The
 > code default is `prod`, so it's fail-safe OFF on Railway / AWS / GCP / any
@@ -111,11 +138,12 @@ the **test daemon** pick it up and run it on your host. Follow
 ## 5. Stop / switch back
 
 ```bash
-agentira daemon --test stop   # stops ONLY the test daemon
+agentira daemon stop          # stops the test daemon (the default)
 ```
 
-Your prod daemon (default `~/.agentira`) is never touched — different state dir,
-different backend. Wipe local data with `docker compose down -v` and re-seed.
+Your prod daemon is never touched — different state dir, different backend, and
+it's reachable only via the explicit, confirmed `--prod`. Wipe local data with
+`docker compose down -v` and re-seed.
 
 ---
 
@@ -125,7 +153,7 @@ different backend. Wipe local data with `docker compose down -v` and re-seed.
 |---|---|
 | Don't touch prod data | Local Postgres + a sandbox `preview` org |
 | Google OAuth can't do localhost | Seeded **password** test user (`preview`) |
-| Daemon already runs prod | Second daemon via `--test` (`AGENTIRA_HOME=~/.agentira-test`) |
+| Daemon already runs prod | Test is the **default** (`~/.agentira-test`); prod needs explicit, confirmed `--prod` |
 | Browser login fiddly locally | Dev static-key bypass, gated by **`AGENTIRA_ENV=dev`** |
 | Dev vs prod must be portable | `AGENTIRA_ENV` config (default `prod`) — no host sniffing |
 | Catch Postgres-specific bugs | Local runs Postgres, same engine as prod |

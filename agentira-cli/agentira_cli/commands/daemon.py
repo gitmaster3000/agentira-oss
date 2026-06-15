@@ -24,45 +24,109 @@ app = typer.Typer(help="Manage the AgentIRA local daemon process.")
 _TEST_HOME = os.environ.get("AGENTIRA_TEST_HOME", "~/.agentira-test")
 
 
+_STATE_CHANGING = ("start", "stop", "restart")
+
+# Developer-only ergonomics (test daemon by default + confirm-before-prod) are
+# gated on this env var. Customers WON'T set it — there's no reason to — so for
+# them there is no test/prod concept: `agentira daemon <cmd>` simply acts on
+# their one configured daemon, and the --test/--prod flags are hidden.
+#
+# This flag is NOT a security boundary; it only changes LOCAL CLI ergonomics.
+# The real gate is server-side: the auth bypass lives on the backend
+# (AGENTIRA_ENV=dev + AGENTIRA_DEV_API_KEY), which prod/customer backends never
+# set — so a customer who flips this on just gets a test mode that can't
+# connect to anything, never any prod access. Config, not code: portable across
+# laptop / Railway / AWS, fail-safe OFF where unset.
+_DEV = os.getenv("AGENTIRA_DEV_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @app.callback()
 def _daemon_main(
     ctx: typer.Context,
     test: bool = typer.Option(
-        False, "--test",
-        help="Target an isolated TEST daemon (AGENTIRA_HOME=~/.agentira-test). "
-             "Reads the backend connection from AGENTIRA_DAEMON_API_URL and "
-             "AGENTIRA_DAEMON_API_KEY in your environment — set those to point "
-             "at your local stack. e.g. `agentira daemon --test start`.",
+        False, "--test", hidden=not _DEV,
+        help="(dev) Target the isolated TEST daemon (~/.agentira-test). Default "
+             "in dev mode — a bare `agentira daemon ...` runs in test mode.",
+    ),
+    prod: bool = typer.Option(
+        False, "--prod", hidden=not _DEV,
+        help="(dev) Target your real PROD daemon (~/.agentira). Explicit; "
+             "start/stop/restart ask for confirmation first.",
     ),
 ) -> None:
-    """Manage the AgentIRA local daemon (use --test for an isolated test daemon)."""
-    if not test or os.environ.get("AGENTIRA_HOME"):
+    """Manage the AgentIRA local daemon (start, stop, restart, status, logs)."""
+    # ── Shipped / customer behavior: one daemon, no test/prod split ───────
+    # The dev flags don't apply; explain rather than do something surprising.
+    if not _DEV:
+        if test or prod:
+            typer.secho(
+                "--test/--prod are developer-only (enable with "
+                "AGENTIRA_DEV_MODE=1). Just run `agentira daemon <command>`.",
+                fg="yellow", err=True)
+            raise typer.Exit(2)
         return
+
+    # ── Developer mode: test by default, prod explicit + confirmed ────────
+    if test and prod:
+        typer.secho("Pass either --test or --prod, not both.", fg="red", err=True)
+        raise typer.Exit(2)
+
+    # ── PROD: explicit opt-in, confirmed for state-changing commands ──────
+    if prod:
+        if ctx.invoked_subcommand in _STATE_CHANGING:
+            pid = _read_pid()
+            running = "running (PID %d)" % pid if pid and _is_running(pid) else "not running"
+            typer.secho(
+                "\n⚠  PROD daemon — about to run a state-changing command.\n"
+                f"  Command:  daemon {ctx.invoked_subcommand}\n"
+                f"  Home:     {HOME}\n"
+                f"  Backend:  {DaemonConfig().api_url}\n"
+                f"  Currently: {running}\n",
+                fg="yellow", err=True,
+            )
+            if not typer.confirm("Proceed against PROD?", default=False):
+                typer.secho("Aborted — prod untouched.", err=True)
+                raise typer.Exit(1)
+        return
+
+    # ── TEST (default): isolated home + DEV-SCOPED connection ─────────────
+    # Read the test backend from AGENTIRA_TEST_API_URL / AGENTIRA_TEST_API_KEY,
+    # NOT the generic AGENTIRA_DAEMON_* — those are what DaemonConfig reads, so
+    # exporting them in your shell profile would also retarget the PROD daemon.
+    # The dev-scoped vars are safe to keep permanently in your profile; we map
+    # them onto AGENTIRA_DAEMON_* only inside the re-exec'd test child.
+    if os.environ.get("AGENTIRA_HOME"):
+        return
+    test_url = os.environ.get("AGENTIRA_TEST_API_URL")
+    test_key = os.environ.get("AGENTIRA_TEST_API_KEY")
     # start/restart actually connect and register runtimes, so they need the
     # backend URL + dev key. We never hardcode those (especially the key) —
-    # read them from the env, and if they're unset, say exactly what to set
-    # rather than silently pointing at the wrong place.
+    # read them from the env, and if they're unset, say exactly what to set.
     if ctx.invoked_subcommand in ("start", "restart"):
-        missing = [v for v in ("AGENTIRA_DAEMON_API_URL", "AGENTIRA_DAEMON_API_KEY")
-                   if not os.environ.get(v)]
+        missing = [n for n, v in (("AGENTIRA_TEST_API_URL", test_url),
+                                   ("AGENTIRA_TEST_API_KEY", test_key)) if not v]
         if missing:
             typer.secho(
-                "--test needs your local backend connection in the environment, "
-                "but these are unset:\n  " + "\n  ".join(missing) + "\n\n"
-                "Set them to point at your local stack, e.g.:\n"
-                "  export AGENTIRA_DAEMON_API_URL=http://localhost:8111\n"
-                "  export AGENTIRA_DAEMON_API_KEY=<dev key>   "
+                "TEST daemon needs your local backend in the environment, but "
+                "these are unset:\n  " + "\n  ".join(missing) + "\n\n"
+                "Set them to point at your local stack (safe — these never "
+                "affect the prod daemon), e.g.:\n"
+                "  export AGENTIRA_TEST_API_URL=http://localhost:8111\n"
+                "  export AGENTIRA_TEST_API_KEY=<dev key>   "
                 "# matches AGENTIRA_DEV_API_KEY on the backend\n\n"
-                "Then re-run. Tip: wrap them in an `agentira-test` shell alias.",
+                "Then re-run. (To act on your real daemon instead, use --prod.)",
                 fg="yellow", err=True,
             )
             raise typer.Exit(1)
-    # HOME is resolved at import time, so re-exec with the test HOME so a fresh
-    # process picks it up. The AGENTIRA_HOME guard above + stripping --test
-    # prevent an exec loop. The URL/key flow through via the copied env.
+    # HOME is resolved at import time, so re-exec into the test home. The
+    # AGENTIRA_HOME guard above prevents an exec loop after re-exec.
     env = os.environ.copy()
     env["AGENTIRA_HOME"] = os.path.expanduser(_TEST_HOME)
-    argv = [a for a in sys.argv if a != "--test"]
+    if test_url:
+        env["AGENTIRA_DAEMON_API_URL"] = test_url
+    if test_key:
+        env["AGENTIRA_DAEMON_API_KEY"] = test_key
+    argv = [a for a in sys.argv if a not in ("--test", "--prod")]
     os.execvpe(argv[0], argv, env)
 
 
