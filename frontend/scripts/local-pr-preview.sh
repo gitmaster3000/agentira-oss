@@ -49,6 +49,8 @@ case "$ACTION" in
     docker run -d --name "$NAME" -p "$PORT:3111" \
       -v "$WORKTREE:/app" -v /app/node_modules \
       -e VITE_PROXY_TARGET="$BACKEND" \
+      -e VITE_PREVIEW_PR="$PR" \
+      -e VITE_PREVIEW_BRANCH="$BRANCH" \
       "$IMAGE" >/dev/null
     echo "PREVIEW_URL=http://localhost:$PORT"
     ;;

@@ -10,7 +10,6 @@ vi.mock('../api', () => ({
             getConcierge: vi.fn(),
             listAgents: vi.fn(),
             listMessages: vi.fn(),
-            listConversations: vi.fn(),
             sendRuntimeChat: vi.fn(),
             stopChat: vi.fn(),
         },
@@ -33,12 +32,9 @@ describe('FloatingChat', () => {
         vi.clearAllMocks();
         api.forge.getConcierge.mockResolvedValue({ id: 'guide', name: 'Guide' });
         api.forge.listAgents.mockResolvedValue([]);
-        api.forge.listConversations.mockResolvedValue([
-            { scope_key: 'chat:default', message_count: 120 },
-        ]);
     });
 
-    it('loads the live tail with a paginated limit and shows loaded/total count', async () => {
+    it('loads the live tail with a paginated (windowed) limit', async () => {
         api.forge.listMessages.mockResolvedValue([
             { id: 's1', role: 'user', content: 'hi', created_at: '2026-06-07T00:00:01.000Z' },
             { id: 's2', role: 'assistant', content: 'hello', created_at: '2026-06-07T00:00:02.000Z' },
@@ -54,9 +50,6 @@ describe('FloatingChat', () => {
         );
         expect(tailCall[1]).toMatchObject({ limit: 50, scope_key: 'chat:default' });
         expect(tailCall[1].limit).toBeLessThan(100);
-
-        // Header shows loaded-window / total-thread, not just the loaded count.
-        await waitFor(() => expect(screen.getByText('2/120')).toBeInTheDocument());
     });
 
     it('fetches an older page with an offset when scrolled to the top', async () => {

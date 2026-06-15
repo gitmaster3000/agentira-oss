@@ -27,6 +27,7 @@ import { RunDetail } from './pages/forge/RunDetail';
 import { ConductorPage } from './pages/forge/ConductorPage';
 import { ForgeSettings } from './pages/forge/ForgeSettings';
 import { ROUTES } from './routes';
+import { PreviewBanner } from './components/PreviewBanner';
 
 // Old "Welcome" stub replaced by StudioDashboard — see pages/StudioDashboard.jsx
 
@@ -59,6 +60,7 @@ function LegacyBoardRedirect() {
 export default function App() {
     return (
         <AuthProvider>
+            <PreviewBanner />
             <BrowserRouter>
                 <Routes>
                     {/* Public routes */}

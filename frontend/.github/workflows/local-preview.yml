@@ -15,6 +15,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
 
+# The job comments the preview URL on the PR with the built-in GITHUB_TOKEN,
+# which defaults to read-only. Grant write to PRs so the comment posts itself —
+# no manual step.
+permissions:
+  contents: read
+  pull-requests: write
+
 concurrency:
   group: local-preview-${{ github.event.number }}
   cancel-in-progress: true
@@ -28,15 +35,27 @@ jobs:
       - name: Up / down the local preview
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.number }}
         run: |
           if [ "${{ github.event.action }}" = "closed" ]; then
-            bash scripts/local-pr-preview.sh down "${{ github.event.number }}"
+            bash scripts/local-pr-preview.sh down "$PR"
+            exit 0
+          fi
+          OUT=$(bash scripts/local-pr-preview.sh up "$PR" "${{ github.head_ref }}")
+          echo "$OUT"
+          URL=$(printf '%s\n' "$OUT" | sed -n 's/^PREVIEW_URL=//p')
+          [ -z "$URL" ] && exit 0
+          # Hidden marker so we update ONE sticky comment instead of spamming a
+          # new one on every push (like Railway's preview comment).
+          BODY="<!-- local-preview -->
+          🖥️ **Local preview** (your machine): $URL
+          Talks to your local backend (:8111, Postgres). Log in with the seeded test user — no Google OAuth needed on localhost."
+          ID=$(gh api "repos/$REPO/issues/$PR/comments" \
+                 --jq 'map(select(.body | contains("<!-- local-preview -->"))) | .[0].id // empty')
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -f body="$BODY" >/dev/null
+            echo "updated sticky comment $ID"
           else
-            OUT=$(bash scripts/local-pr-preview.sh up "${{ github.event.number }}" "${{ github.head_ref }}")
-            echo "$OUT"
-            URL=$(printf '%s\n' "$OUT" | sed -n 's/^PREVIEW_URL=//p')
-            if [ -n "$URL" ]; then
-              gh pr comment "${{ github.event.number }}" --body "🖥️ **Local preview** (your machine): $URL
-              Talks to your local backend (:8111, Postgres). Log in with the seeded test user — no Google OAuth needed on localhost."
-            fi
+            gh pr comment "$PR" --body "$BODY"
           fi

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, X, Send, Loader, GripVertical, Ban } from 'lucide-react';
 import { api } from '../api';
 import { AskUserQuestionCard } from './AskUserQuestionCard';
+import { Markdown } from './Markdown';
 import { mergeWindow, serverLoadedCount } from '../lib/chatPagination';
 
 // Each agent's floating-chat thread is its own workspace-wide conversation.
@@ -49,10 +50,6 @@ export function FloatingChat() {
     const [stopped, setStopped] = useState(false);
     // One shared anchor (top-left) for both the button and the panel.
     const [pos, setPos] = useState(null);
-    // Total messages in this conversation (from the backend), shown alongside
-    // the loaded-window count so the header reflects the whole thread, not
-    // just what's currently in view.
-    const [total, setTotal] = useState(null);
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
     const containerRef = useRef(null);
@@ -141,18 +138,6 @@ export function FloatingChat() {
         } catch { /* transient */ }
     }, [selectedId]);
 
-    // Total message count for this conversation (the whole thread, not just the
-    // loaded window) — pulled from the conversations list by scope.
-    const loadTotal = useCallback(async () => {
-        if (!selectedId) return;
-        try {
-            const convs = await api.forge.listConversations(selectedId);
-            const row = Array.isArray(convs)
-                ? convs.find((c) => c.scope_key === CHAT_SCOPE) : null;
-            setTotal(row ? row.message_count : null);
-        } catch { /* transient */ }
-    }, [selectedId]);
-
     // Older page: fetched on scroll-up. offset = server rows already loaded
     // (backend pages backward from newest). Anchors scroll so the prepend
     // doesn't jump the viewport.
@@ -184,10 +169,9 @@ export function FloatingChat() {
         reachedStartRef.current = false;
         loadingOlderRef.current = false;
         loadMessages();
-        loadTotal();
-        const t = setInterval(() => { loadMessages(); loadTotal(); }, POLL_MS);
+        const t = setInterval(() => { loadMessages(); }, POLL_MS);
         return () => clearInterval(t);
-    }, [open, selectedId, loadMessages, loadTotal]);
+    }, [open, selectedId, loadMessages]);
 
     // Prefetch older pages as the user nears the top — seamless scrollback.
     const onScroll = useCallback(() => {
@@ -323,15 +307,6 @@ export function FloatingChat() {
                         </option>
                     ))}
                 </select>
-                {/* Loaded-window / total-thread message count. */}
-                {!unavailable && total != null && (
-                    <span
-                        className="text-[11px] text-text-tertiary flex-shrink-0 tabular-nums"
-                        title="Messages loaded / total in this chat"
-                    >
-                        {messages.length}/{total}
-                    </span>
-                )}
                 <button
                     onClick={() => setOpen(false)}
                     onMouseDown={(e) => e.stopPropagation()}
@@ -444,13 +419,18 @@ function ChatBubble({ m, onAnswer }) {
     return (
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
             <div
-                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words ${
+                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm break-words ${
                     isUser
-                        ? 'bg-accent-primary text-white'
+                        ? 'bg-accent-primary text-white whitespace-pre-wrap'
                         : 'bg-bg-hover text-text-primary'
                 }`}
             >
-                {m.content || '…'}
+                {/* Agents emit markdown often — render it for assistant turns.
+                    User messages stay plain (they typed them; pre-wrap preserves
+                    their spacing and keeps the accent bubble's white text). */}
+                {isUser
+                    ? (m.content || '…')
+                    : (m.content ? <Markdown className="chat-md text-text-primary">{m.content}</Markdown> : '…')}
             </div>
         </div>
     );

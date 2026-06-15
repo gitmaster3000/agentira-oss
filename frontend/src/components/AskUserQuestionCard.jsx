@@ -7,11 +7,22 @@ import { HelpCircle, Send } from 'lucide-react';
  * "Something else") answers by calling `onAnswer(text)`.
  */
 function QuestionBlock({ q, onAnswer }) {
-    const interactive = typeof onAnswer === 'function';
     const options = Array.isArray(q.options) ? q.options : [];
     const [selected, setSelected] = useState([]);     // multiSelect picks
     const [otherOpen, setOtherOpen] = useState(false);
     const [otherText, setOtherText] = useState('');
+    // Once answered, the choose-dialog collapses to read-only: the question +
+    // options stay in the thread (the answer also posts as its own chat message
+    // via onAnswer), but the clickable controls disappear so a resolved
+    // question can't be answered twice and doesn't linger.
+    const [answered, setAnswered] = useState(false);
+    const interactive = typeof onAnswer === 'function' && !answered;
+
+    const answer = (text) => {
+        if (!text) return;
+        setAnswered(true);
+        onAnswer(text);
+    };
 
     const toggle = (label) => setSelected((prev) =>
         prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label]);
@@ -19,10 +30,10 @@ function QuestionBlock({ q, onAnswer }) {
     const submitMulti = () => {
         const parts = [...selected];
         if (otherText.trim()) parts.push(otherText.trim());
-        if (parts.length) onAnswer(parts.join(', '));
+        if (parts.length) answer(parts.join(', '));
     };
     const submitOther = () => {
-        if (otherText.trim()) onAnswer(otherText.trim());
+        if (otherText.trim()) answer(otherText.trim());
     };
 
     const optionBase = 'flex gap-2 rounded-md border px-2.5 py-1.5 text-left w-full';
@@ -74,7 +85,7 @@ function QuestionBlock({ q, onAnswer }) {
                         <button
                             key={oi}
                             type="button"
-                            onClick={() => (q.multiSelect ? toggle(opt.label) : onAnswer(opt.label))}
+                            onClick={() => (q.multiSelect ? toggle(opt.label) : answer(opt.label))}
                             className={`${optionBase} transition-colors hover:border-accent-primary/60 hover:bg-accent-primary/5 ${
                                 isSel ? 'border-accent-primary bg-accent-primary/10' : 'border-border-subtle/50 bg-bg-panel'
                             }`}
