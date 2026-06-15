@@ -1,0 +1,42 @@
+name: Local PR Preview
+
+# Automatic LOCAL preview on every PR (AP-290), running on a SELF-HOSTED runner
+# on your machine — so it can drive local Docker against your local backend
+# (Postgres), at zero cloud cost. GitHub fires the PR event → this job runs
+# locally → serves the branch in a per-PR Vite container → comments the
+# localhost URL. Closing the PR tears the preview down.
+#
+# One-time setup: register a self-hosted runner on this repo
+#   GitHub repo → Settings → Actions → Runners → New self-hosted runner
+#   (follow the steps; run `./run.sh` or install it as a service).
+# Requires Docker running locally and the agentira dev stack up (:8111).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+concurrency:
+  group: local-preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Up / down the local preview
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event.action }}" = "closed" ]; then
+            bash scripts/local-pr-preview.sh down "${{ github.event.number }}"
+          else
+            OUT=$(bash scripts/local-pr-preview.sh up "${{ github.event.number }}" "${{ github.head_ref }}")
+            echo "$OUT"
+            URL=$(printf '%s\n' "$OUT" | sed -n 's/^PREVIEW_URL=//p')
+            if [ -n "$URL" ]; then
+              gh pr comment "${{ github.event.number }}" --body "🖥️ **Local preview** (your machine): $URL
+              Talks to your local backend (:8111, Postgres). Log in with the seeded test user — no Google OAuth needed on localhost."
+            fi
+          fi
