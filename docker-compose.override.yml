@@ -16,12 +16,20 @@ services:
     environment:
       # Stable across rebuilds so browser logins don't die — dev only.
       - JWT_SECRET=dev-only-not-for-prod-32-byte-secret-12345678901234
-      # SQLite is fine for dev. Persisted in the agentira-data volume.
-      - AGENTIRA_DB_URL=sqlite:////app/data/agentira.db
+      # Local Postgres for prod parity (prod runs Postgres on Railway) — catches
+      # PG-specific behavior in dev/preview. wait_for_db() + depends_on gate on a
+      # healthy DB. /app/data (agentira-data volume) still holds attachments.
+      - AGENTIRA_DB_URL=postgresql://agentira:agentira@postgres:5432/agentira
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   mcp:
     ports:
       - "8000:8000"
+    environment:
+      # Same Postgres as the backend so MCP reads/writes the same data.
+      - AGENTIRA_DB_URL=postgresql://agentira:agentira@postgres:5432/agentira
     volumes:
       - ./backend:/app/backend
       - ./scripts:/app/scripts
@@ -44,3 +52,23 @@ services:
       # Anonymous volume so the host's node_modules (or absence of)
       # doesn't shadow the image's npm ci output.
       - /app/node_modules
+
+  # Local Postgres — prod parity (Railway prod runs Postgres). Dev-only creds.
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=agentira
+      - POSTGRES_PASSWORD=agentira
+      - POSTGRES_DB=agentira
+    ports:
+      - "5432:5432"   # exposed for laptop tools / one-off psql
+    volumes:
+      - agentira-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentira -d agentira"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  agentira-pg:
