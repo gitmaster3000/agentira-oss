@@ -516,15 +516,14 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                         <div key={att.id} className="flex items-center gap-3 p-2 rounded-lg text-sm" style={{ backgroundColor: 'var(--bg-panel)' }}>
                                             <Paperclip className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-secondary)' }} />
                                             <div className="flex-1 min-w-0">
-                                                <a
-                                                    href={api.getAttachmentDownloadUrl(att.id)}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-sm font-medium truncate block"
+                                                <button
+                                                    type="button"
+                                                    onClick={() => api.downloadAttachment(att.id, att.filename).catch(err => alert('Failed to download: ' + err.message))}
+                                                    className="text-sm font-medium truncate block text-left w-full"
                                                     style={{ color: 'var(--accent-primary)' }}
                                                 >
                                                     {att.filename}
-                                                </a>
+                                                </button>
                                                 <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
                                                     {formatSize(att.size_bytes)} · {att.uploaded_by} · {new Date(att.created_at).toLocaleDateString()}
                                                 </div>

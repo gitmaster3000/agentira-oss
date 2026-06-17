@@ -208,6 +208,23 @@ export const api = {
     },
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
     getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
+    // The download route requires the bearer token, which a plain <a href>
+    // can't carry — fetch with the header, then save the blob.
+    downloadAttachment: async (id, filename) => {
+        const token = getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(`${API_BASE}/attachments/${id}/download`, { headers });
+        if (!res.ok) throw new Error(`Download failed (${res.status})`);
+        const blobUrl = window.URL.createObjectURL(await res.blob());
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename || 'download';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(blobUrl);
+    },
 
     // AP-152: project-level attachments — same table, same download/delete
     // endpoints above, distinct list/upload routes.

@@ -65,20 +65,7 @@ export function AttachmentsSection({ taskId }) {
 
     const handleDownload = async (attachment) => {
         try {
-            const downloadUrl = api.getAttachmentDownloadUrl?.(attachment.id) || `/api/attachments/${attachment.id}/download`;
-            const response = await fetch(downloadUrl);
-            if (!response.ok) throw new Error(`Download failed with status ${response.status}`);
-
-            const blob = await response.blob();
-            const blobUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = blobUrl;
-            a.download = attachment.filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(blobUrl);
-            a.remove();
+            await api.downloadAttachment(attachment.id, attachment.filename);
         } catch (err) {
             console.error('[AttachmentsSection] Download error:', err);
             alert('Failed to download attachment: ' + err.message);

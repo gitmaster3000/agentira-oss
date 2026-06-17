@@ -514,16 +514,15 @@ function AttachmentsCard({ projectId, attachments, onChange }) {
                             <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-primary)' }} />
                             <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{a.filename}</span>
                             <span className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>{formatSize(a.size_bytes)}</span>
-                            <a
-                                href={api.getAttachmentDownloadUrl(a.id)}
-                                target="_blank"
-                                rel="noreferrer"
+                            <button
+                                type="button"
+                                onClick={() => api.downloadAttachment(a.id, a.filename).catch(err => alert('Failed to download: ' + err.message))}
                                 className="p-0.5 rounded-lg hover:bg-bg-hover"
                                 style={{ color: 'var(--text-tertiary)' }}
                                 title="Download"
                             >
                                 <Download className="w-3 h-3" />
-                            </a>
+                            </button>
                             <button
                                 type="button"
                                 onClick={() => handleDelete(a)}
