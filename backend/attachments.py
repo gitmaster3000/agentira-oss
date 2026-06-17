@@ -23,7 +23,11 @@ from backend.db import SessionLocal
 from backend.models import Activity, Attachment, Project, Task
 
 
-ATTACHMENTS_DIR = os.path.join(
+# Defaults to local disk under the repo. In prod (Railway) set
+# AGENTIRA_ATTACHMENTS_DIR to a mounted persistent volume so files survive
+# redeploys — the container filesystem is ephemeral. ponytail: local-disk only;
+# object storage (S3/GCS) is the next step if multi-instance/scale lands.
+ATTACHMENTS_DIR = os.getenv("AGENTIRA_ATTACHMENTS_DIR") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "attachments",
 )

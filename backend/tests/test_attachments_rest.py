@@ -93,3 +93,14 @@ def test_download_accepts_agent_api_key(client):
                     headers={"Authorization": f"Bearer {client.agent_api_key}"})
     assert res.status_code == 200, res.text
     assert res.content == PDF_BYTES
+
+
+def test_attachments_dir_honors_env_override():
+    # Prod (Railway) points AGENTIRA_ATTACHMENTS_DIR at a persistent volume so
+    # files survive redeploys — the container disk is ephemeral. No DB needed.
+    import importlib
+    from backend import attachments as att
+    with patch.dict("os.environ", {"AGENTIRA_ATTACHMENTS_DIR": "/mnt/vol/att"}):
+        reloaded = importlib.reload(att)
+        assert reloaded.ATTACHMENTS_DIR == "/mnt/vol/att"
+    importlib.reload(att)  # restore module default for other tests
