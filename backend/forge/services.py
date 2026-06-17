@@ -4193,14 +4193,28 @@ def send_runtime_message(
             agent_prof = db.get(Profile, a.profile_id) if a.profile_id else None
             # cwd is a template (`~/...`); daemon expands and ensures the
             # dir + git worktree. Backend can't touch the host filesystem.
+            worktree_repos: list[dict] = []
             if proj:
-                worktree_source_path = proj.repo_path or ""
-                worktree_source_url = getattr(proj, "repo_url", None) or ""
+                from backend.models import Task as _Task
+                from backend import services as _core_services
                 # Task-scoped chats share cwd with the task's runs so
                 # claude --resume works across run/chat boundaries.
                 _task_id_for_cwd = None
                 if scope_key and scope_key.startswith("task:"):
                     _task_id_for_cwd = scope_key.split(":", 1)[1]
+                # AP-121: route to the task's repo (defaults to primary when
+                # repo_name is NULL); single-repo projects resolve unchanged.
+                # Mirrors the run dispatch path — chats must honor multi-repo
+                # too, else task-scoped chats always land on the primary repo.
+                _task_row = db.get(_Task, _task_id_for_cwd) if _task_id_for_cwd else None
+                _task_repo_name = _task_row.repo_name if _task_row else None
+                chosen = _core_services.resolve_project_repo(proj.id, _task_repo_name)
+                if chosen:
+                    worktree_source_path = chosen["repo_path"] or ""
+                    worktree_source_url = chosen["repo_url"] or ""
+                else:
+                    worktree_source_path = proj.repo_path or ""
+                    worktree_source_url = getattr(proj, "repo_url", None) or ""
                 task_path, task_branch = _compute_worktree_paths(
                     agent_id=a.id, project_id=project_id,
                     task_id=_task_id_for_cwd,
@@ -4211,6 +4225,18 @@ def send_runtime_message(
                 else:
                     repo_path = ensure_agent_worktree(a, proj)
                     worktree_branch = f"agent/{a.id}/work"
+                # AP-236: multi-repo project + unpinned task → give the agent
+                # ALL git repos as worktree subdirs (no routing, no wandering).
+                if not _task_repo_name:
+                    _all_repos = _core_services.list_project_repos(proj.id)
+                    _git_repos = [r for r in _all_repos if (r.get("repo_url") or "").strip()]
+                    if len(_git_repos) > 1:
+                        for r in _git_repos:
+                            worktree_repos.append({
+                                "name": r.get("name") or "repo",
+                                "source_url": r["repo_url"],
+                                "branch": worktree_branch,
+                            })
             else:
                 repo_path = ensure_agent_home_dir(a)
                 worktree_source_path = ""
@@ -4224,6 +4250,7 @@ def send_runtime_message(
                 worktree_source_path = ""
                 worktree_source_url = ""
                 worktree_branch = ""
+                worktree_repos = []
 
             # Bake the AGENT's own api_key into the agentira MCP entry so
             # tool calls authenticate as the agent (visible in audit).
@@ -4309,7 +4336,7 @@ def send_runtime_message(
                 worktree_source_url=worktree_source_url,
                 worktree_branch=worktree_branch,
                 workspace_kind=workspace_kind,
-                worktree_repos=[],
+                worktree_repos=worktree_repos,
                 conventions_md=conventions_md,
                 mcp_config_json=mcp_config_json,
                 mcp_strict=mcp_strict,

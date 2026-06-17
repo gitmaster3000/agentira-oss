@@ -374,11 +374,24 @@ async def list_attachments(task_id: str) -> list[dict]:
     return services.list_attachments(task_id)
 
 @mcp.tool()
-async def upload_attachment(task_id: str, filename: str, content_base64: str, content_type: str = "application/octet-stream") -> dict:
-    """Upload a file attachment to a task. Encode file content as base64 and pass it as content_base64."""
+async def upload_attachment(task_id: str, filename: str, content: str = "", content_base64: str = "", content_type: str = "application/octet-stream") -> dict:
+    """Upload a file attachment to a task.
+
+    For text (code, markdown, JSON, ...) pass it straight in `content` — no
+    encoding needed. For binary, prefer uploading the file directly over HTTP
+    (no base64) with your agent key, which is already in your env:
+        curl -H "Authorization: Bearer $AGENTIRA_API_KEY" \\
+             -F "file=@/path/to/file" "<API_BASE_URL>/api/tasks/<task_id>/attachments"
+    `content_base64` is a last-resort fallback for binary over this tool.
+    """
     import base64
     actor = actor_ctx.get()
-    file_bytes = base64.b64decode(content_base64)
+    if content:
+        file_bytes = content.encode("utf-8")
+    elif content_base64:
+        file_bytes = base64.b64decode(content_base64)
+    else:
+        return {"error": "Provide content (text) or content_base64 (binary)"}
     return services.add_attachment(task_id, filename, file_bytes, content_type, uploaded_by=actor)
 
 @mcp.tool()
@@ -390,10 +403,16 @@ async def download_attachment(attachment_id: str) -> dict:
     """
     import base64
     result = services.get_attachment_bytes(attachment_id)
-    if not result:
-        return {"error": "Attachment not found or file missing on disk"}
-    meta, file_bytes = result
-    return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
+    if result:
+        meta, file_bytes = result
+        return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
+    # Bytes aren't on this container's disk: attachments live on the API
+    # service's volume, which the MCP server doesn't share (Railway volumes are
+    # single-service). Fall back to read_attachment_text, which returns the
+    # metadata + download_url + a curl hint (env-referenced key, no host) so the
+    # agent fetches it over HTTP instead of hitting a "missing on disk" error.
+    from backend import attachments as _attachments
+    return _attachments.read_text(attachment_id) or {"error": "Attachment not found"}
 
 # AP-152: project attachments + base64-free reads.
 

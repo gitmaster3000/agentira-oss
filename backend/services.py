@@ -2341,7 +2341,9 @@ def link_pr(task_id: str, *, pr_number: int, title: str = "", author: str = "",
         if not task:
             raise ValueError(f"Task {task_id} not found")
         task_id = task.id
-        existing = db.query(TaskCommit).filter_by(task_id=task_id, pr_number=pr_number, kind="pr").first()
+        # repo in the filter: a multi-repo task can have the same PR number
+        # in two repos — without it the second repo's PR overwrites the first.
+        existing = db.query(TaskCommit).filter_by(task_id=task_id, pr_number=pr_number, kind="pr", repo=repo).first()
         if existing:
             existing.pr_state = state
             # Auto-sync: update pr_url on state changes too

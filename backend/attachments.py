@@ -65,6 +65,17 @@ def _to_dict(a: Attachment) -> dict:
     }
 
 
+def _download_hint(download_url: str, filename: str) -> str:
+    """Curl shape for fetching a binary attachment over HTTP. References the
+    agent's $AGENTIRA_API_KEY env var (not its value) and leaves the API base
+    as a placeholder — no hardcoded host, no leaked credentials."""
+    return (
+        "Binary file — download over HTTP with your agent key (already in env): "
+        f'curl -H "Authorization: Bearer $AGENTIRA_API_KEY" '
+        f'"<API_BASE_URL>{download_url}" -o "{filename}"'
+    )
+
+
 def _storage_dir(task_id: str | None, project_id: str | None) -> str:
     if task_id:
         return os.path.join(ATTACHMENTS_DIR, task_id)
@@ -192,8 +203,8 @@ def read_text(attachment_id: str) -> dict[str, Any] | None:
     """MCP-friendly read.
 
     For text/* (under 200KB safety cap): returns the raw text inline.
-    For everything else: returns a `download_url` + `api_key_env` hint
-    so the agent can curl with `$AGENTIRA_API_KEY`. No base64.
+    For everything else: returns the metadata + `download_url`; the caller
+    downloads it over HTTP with its own credentials. No base64.
     """
     with SessionLocal() as db:
         a = db.get(Attachment, attachment_id)
@@ -211,13 +222,11 @@ def read_text(attachment_id: str) -> dict[str, Any] | None:
                     return meta
             except UnicodeDecodeError:
                 pass
-        # Binary or oversized text — agent fetches via REST with its API key.
-        meta["api_key_env"] = "AGENTIRA_API_KEY"
-        meta["hint"] = (
-            "Binary or large file. Fetch with: "
-            f"curl -H 'Authorization: Bearer $AGENTIRA_API_KEY' "
-            f"http://backend:8000{meta['download_url']}"
-        )
+        # Binary or oversized text: no inline content. Hint how to fetch it —
+        # $AGENTIRA_API_KEY is an env reference the agent already has, so it
+        # resolves at runtime without exposing the key value. No hardcoded host.
+        meta["served_over_http"] = True
+        meta["download_hint"] = _download_hint(meta["download_url"], a.filename)
         return meta
 
 

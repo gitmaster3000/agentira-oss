@@ -114,9 +114,14 @@ def test_read_text_returns_download_hint_for_binary():
                 content_type="image/png")
     out = att.read_text(a["id"])
     assert "content" not in out
-    assert out["api_key_env"] == "AGENTIRA_API_KEY"
     assert out["download_url"].endswith("/download")
-    assert "curl" in out["hint"]
+    assert out["served_over_http"] is True
+    # Hint helps weaker models fetch it, but references the key by env var —
+    # never the value — and hardcodes no host.
+    hint = out["download_hint"]
+    assert "$AGENTIRA_API_KEY" in hint
+    assert out["download_url"] in hint
+    assert "http://backend" not in hint
 
 
 # ── Storage layout ─────────────────────────────────────────────────────
