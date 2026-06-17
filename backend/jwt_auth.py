@@ -92,18 +92,31 @@ async def get_current_user_payload(
         from backend.db import set_current_org
         set_current_org(dev["org_id"])
         return dev
+    from backend.db import set_current_org
     try:
         payload = decode_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")
     except jwt.InvalidTokenError:
-        raise HTTPException(401, "Invalid token")
+        # Not a JWT — fall back to an agent API key. Agents curl authed REST
+        # endpoints (e.g. attachment download) with $AGENTIRA_API_KEY.
+        from backend import services
+        try:
+            prof = services.validate_api_key(credentials.credentials)
+        except ValueError:
+            raise HTTPException(401, "Invalid token")
+        if not prof.get("org_id"):
+            raise HTTPException(401, "Invalid token")
+        set_current_org(prof["org_id"])
+        return {
+            "sub": prof["name"], "profile_id": prof["id"],
+            "role": prof["role"], "org_id": prof["org_id"],
+        }
     # Tokens minted before multi-tenancy carry no org_id. Reject them so a
     # stale session can't fall through to the unscoped (system) engine — the
     # user simply re-logs in and gets an org-scoped token.
     if not payload.get("org_id"):
         raise HTTPException(401, "Session out of date — please sign in again.")
-    from backend.db import set_current_org
     set_current_org(payload.get("org_id"))
     return payload
 
