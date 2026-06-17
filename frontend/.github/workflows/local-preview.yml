@@ -46,11 +46,17 @@ jobs:
           echo "$OUT"
           URL=$(printf '%s\n' "$OUT" | sed -n 's/^PREVIEW_URL=//p')
           [ -z "$URL" ] && exit 0
+          # Stamp the sticky comment so it's clear it refreshed even when the
+          # URL is unchanged: short commit of the PR head + update time (UTC).
+          SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA=$(printf '%s' "$SHA" | cut -c1-7)
+          NOW=$(date -u +'%Y-%m-%d %H:%M UTC')
           # Hidden marker so we update ONE sticky comment instead of spamming a
           # new one on every push (like Railway's preview comment).
           BODY="<!-- local-preview -->
           🖥️ **Local preview** (your machine): $URL
-          Talks to your local backend (:8111, Postgres). Log in with the seeded test user — no Google OAuth needed on localhost."
+          Talks to your local backend (:8111, Postgres). Log in with the seeded test user — no Google OAuth needed on localhost.
+          _Updated $NOW · commit \`$SHORT_SHA\`_"
           ID=$(gh api "repos/$REPO/issues/$PR/comments" \
                  --jq 'map(select(.body | contains("<!-- local-preview -->"))) | .[0].id // empty')
           if [ -n "$ID" ]; then
