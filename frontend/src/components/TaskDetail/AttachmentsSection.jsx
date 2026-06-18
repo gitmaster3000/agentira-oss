@@ -34,6 +34,13 @@ export function AttachmentsSection({ taskId }) {
         const file = e.target.files?.[0];
         if (!file) return;
 
+        const MAX_TASK_UPLOAD = 200 * 1024 * 1024; // 200 MB cap for task attachments
+        if (file.size > MAX_TASK_UPLOAD) {
+            alert(`"${file.name}" is ${formatSize(file.size)}. Task attachments are limited to 200 MB — please upload a smaller file.`);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+
         setIsUploading(true);
         try {
             await api.uploadAttachment(taskId, file);
