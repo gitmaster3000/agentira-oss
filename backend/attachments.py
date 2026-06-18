@@ -82,6 +82,17 @@ def _storage_dir(task_id: str | None, project_id: str | None) -> str:
     return os.path.join(ATTACHMENTS_DIR, "projects", project_id)
 
 
+def _safe_rel_path(rel: str) -> str:
+    """Normalize a client-supplied relative path (folder/zip upload).
+
+    Strips drive letters, leading separators, and traversal segments so an
+    upload can never escape the attachment storage root.
+    """
+    rel = (rel or "").replace("\\", "/")
+    parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+    return "/".join(parts)
+
+
 def add(
     *,
     task_id: str | None = None,
@@ -90,8 +101,14 @@ def add(
     file_bytes: bytes,
     content_type: str = "application/octet-stream",
     uploaded_by: str = "system",
+    relative_path: str | None = None,
 ) -> dict:
-    """Persist an attachment scoped to exactly one of task_id or project_id."""
+    """Persist an attachment scoped to exactly one of task_id or project_id.
+
+    When `relative_path` is given (folder/zip upload), the file is stored under
+    a per-upload uuid dir preserving its folder structure, and `filename`
+    records the relative path so the tree can be reconstructed.
+    """
     if bool(task_id) == bool(project_id):
         raise ValueError("add() requires exactly one of task_id or project_id")
 
@@ -112,16 +129,22 @@ def add(
             project_id = project.id
 
         target_dir = _storage_dir(task_id, project_id)
-        os.makedirs(target_dir, exist_ok=True)
-        safe_name = f"{uuid.uuid4().hex[:8]}_{filename}"
-        file_path = os.path.join(target_dir, safe_name)
+        rel = _safe_rel_path(relative_path) if relative_path else ""
+        if rel:
+            display_name = rel
+            file_path = os.path.join(target_dir, uuid.uuid4().hex[:8], rel)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        else:
+            display_name = filename
+            os.makedirs(target_dir, exist_ok=True)
+            file_path = os.path.join(target_dir, f"{uuid.uuid4().hex[:8]}_{filename}")
         with open(file_path, "wb") as f:
             f.write(file_bytes)
 
         att = Attachment(
             task_id=task_id,
             project_id=project_id,
-            filename=filename,
+            filename=display_name,
             content_type=content_type,
             file_path=file_path,
             size_bytes=len(file_bytes),
@@ -133,11 +156,74 @@ def add(
             task_id=task_id,
             actor=uploaded_by,
             action="attached",
-            detail=f"Attached: {filename}",
+            detail=f"Attached: {display_name}",
         ))
         db.commit()
         db.refresh(att)
         return _to_dict(att)
+
+
+def add_folder(
+    *,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    files: list[dict],
+    uploaded_by: str = "system",
+) -> list[dict]:
+    """Persist a whole folder upload — one row per file, preserving the
+    relative path of each entry.
+
+    Each item in `files` is `{relative_path, file_bytes, content_type?}`.
+    Entries whose path sanitizes to empty (e.g. ".." only) are skipped.
+    """
+    out: list[dict] = []
+    for spec in files:
+        rel = _safe_rel_path(spec.get("relative_path", ""))
+        if not rel:
+            continue
+        out.append(add(
+            task_id=task_id,
+            project_id=project_id,
+            filename=os.path.basename(rel),
+            file_bytes=spec["file_bytes"],
+            content_type=spec.get("content_type") or "application/octet-stream",
+            uploaded_by=uploaded_by,
+            relative_path=rel,
+        ))
+    return out
+
+
+def add_zip(
+    *,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    zip_bytes: bytes,
+    uploaded_by: str = "system",
+) -> list[dict]:
+    """Unpack a .zip and persist its contents as a folder, preserving structure.
+
+    Directory entries are skipped. Raises ValueError on a corrupt archive.
+    """
+    import io
+    import zipfile
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise ValueError("Uploaded file is not a valid zip archive")
+    specs: list[dict] = []
+    with zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            specs.append({
+                "relative_path": info.filename,
+                "file_bytes": zf.read(info),
+            })
+    return add_folder(
+        task_id=task_id, project_id=project_id,
+        files=specs, uploaded_by=uploaded_by,
+    )
 
 
 def list_for_task(task_id: str) -> list[dict]:

@@ -95,6 +95,61 @@ def test_download_accepts_agent_api_key(client):
     assert res.content == PDF_BYTES
 
 
+def _make_project(client):
+    return client.post("/api/projects", json={"name": "P", "description": ""}).json()["id"]
+
+
+def test_task_folder_upload_preserves_structure(client):
+    tid = _make_task(client)
+    res = client.post(
+        f"/api/tasks/{tid}/attachments/folder",
+        files=[
+            ("files", ("main.py", b"m", "text/plain")),
+            ("files", ("util.py", b"u", "text/plain")),
+        ],
+        data={"paths": ["app/main.py", "app/lib/util.py"]},
+    )
+    assert res.status_code == 200, res.text
+    names = {r["filename"] for r in res.json()}
+    assert names == {"app/main.py", "app/lib/util.py"}
+
+
+def test_folder_upload_length_mismatch_400(client):
+    pid = _make_project(client)
+    res = client.post(
+        f"/api/projects/{pid}/attachments/folder",
+        files=[("files", ("a.txt", b"a", "text/plain"))],
+        data={"paths": ["a.txt", "b.txt"]},
+    )
+    assert res.status_code == 400
+
+
+def test_project_folder_upload_unknown_project_404(client):
+    res = client.post(
+        "/api/projects/nope/attachments/folder",
+        files=[("files", ("a.txt", b"a", "text/plain"))],
+        data={"paths": ["a.txt"]},
+    )
+    assert res.status_code == 404
+
+
+def test_zip_extract_upload(client):
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("proj/README.md", "# hi")
+        zf.writestr("proj/src/a.py", "a=1")
+    tid = _make_task(client)
+    res = client.post(
+        f"/api/tasks/{tid}/attachments?extract=true",
+        files={"file": ("proj.zip", buf.getvalue(), "application/zip")},
+    )
+    assert res.status_code == 200, res.text
+    names = {r["filename"] for r in res.json()}
+    assert names == {"proj/README.md", "proj/src/a.py"}
+
+
 def test_attachments_dir_honors_env_override():
     # Prod (Railway) points AGENTIRA_ATTACHMENTS_DIR at a persistent volume so
     # files survive redeploys — the container disk is ephemeral. No DB needed.

@@ -591,14 +591,49 @@ def api_list_project_attachments(project_id: str):
 
 @projects.post("/{project_id}/attachments")
 async def api_upload_project_attachment(project_id: str, file: UploadFile = File(...),
+                                         extract: bool = False,
                                          actor: str = Depends(get_current_user)):
+    """Upload a single file. With `?extract=true` a .zip is unpacked and its
+    contents stored as a folder (preserving structure)."""
     from backend import attachments as _attachments
     try:
         file_bytes = await file.read()
+        if extract:
+            return _attachments.add_zip(
+                project_id=project_id, zip_bytes=file_bytes, uploaded_by=actor,
+            )
         return _attachments.add(
             project_id=project_id, filename=file.filename, file_bytes=file_bytes,
             content_type=file.content_type or "application/octet-stream",
             uploaded_by=actor,
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@projects.post("/{project_id}/attachments/folder")
+async def api_upload_project_folder(
+    project_id: str,
+    files: list[UploadFile] = File(...),
+    paths: list[str] = Form(...),
+    actor: str = Depends(get_current_user),
+):
+    """Folder upload. `files[i]` is stored under its `paths[i]` relative path
+    (browser `webkitRelativePath`)."""
+    from backend import attachments as _attachments
+    if len(files) != len(paths):
+        raise HTTPException(400, "files and paths must have equal length")
+    try:
+        specs = [
+            {
+                "relative_path": p,
+                "file_bytes": await f.read(),
+                "content_type": f.content_type or "application/octet-stream",
+            }
+            for f, p in zip(files, paths)
+        ]
+        return _attachments.add_folder(
+            project_id=project_id, files=specs, uploaded_by=actor,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -775,11 +810,44 @@ def api_list_attachments(task_id: str):
     return services.list_attachments(task_id)
 
 @tasks.post("/{task_id}/attachments")
-async def api_upload_attachment(task_id: str, file: UploadFile = File(...), actor: str = Depends(get_current_user)):
+async def api_upload_attachment(task_id: str, file: UploadFile = File(...),
+                                extract: bool = False,
+                                actor: str = Depends(get_current_user)):
+    """Upload a single file. With `?extract=true` a .zip is unpacked and its
+    contents stored as a folder (preserving structure)."""
     try:
         file_bytes = await file.read()
+        if extract:
+            from backend import attachments as _attachments
+            return _attachments.add_zip(task_id=task_id, zip_bytes=file_bytes, uploaded_by=actor)
         return services.add_attachment(task_id=task_id, filename=file.filename, file_bytes=file_bytes,
                                        content_type=file.content_type or "application/octet-stream", uploaded_by=actor)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@tasks.post("/{task_id}/attachments/folder")
+async def api_upload_task_folder(
+    task_id: str,
+    files: list[UploadFile] = File(...),
+    paths: list[str] = Form(...),
+    actor: str = Depends(get_current_user),
+):
+    """Folder upload for a task. `files[i]` is stored under its `paths[i]`
+    relative path (browser `webkitRelativePath`)."""
+    from backend import attachments as _attachments
+    if len(files) != len(paths):
+        raise HTTPException(400, "files and paths must have equal length")
+    try:
+        specs = [
+            {
+                "relative_path": p,
+                "file_bytes": await f.read(),
+                "content_type": f.content_type or "application/octet-stream",
+            }
+            for f, p in zip(files, paths)
+        ]
+        return _attachments.add_folder(task_id=task_id, files=specs, uploaded_by=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 

@@ -156,6 +156,59 @@ def test_services_add_attachment_shim_still_works_for_tasks():
     assert listed[0]["filename"] == "x.txt"
 
 
+# ── Folder upload: relative_path preservation + traversal safety ───────
+
+def test_relative_path_preserves_folder_structure():
+    p = _make_project()
+    a = att.add(project_id=p["id"], filename="util.py", file_bytes=b"x",
+                content_type="text/plain", relative_path="src/lib/util.py")
+    assert a["filename"] == "src/lib/util.py"
+    _, path = att.get(a["id"])
+    assert path.endswith("/src/lib/util.py")
+
+
+def test_relative_path_rejects_traversal():
+    p = _make_project()
+    a = att.add(project_id=p["id"], filename="evil", file_bytes=b"x",
+                content_type="text/plain",
+                relative_path="../../etc/passwd")
+    # Sanitized: traversal segments stripped, stays under storage root.
+    assert a["filename"] == "etc/passwd"
+    _, path = att.get(a["id"])
+    assert "/../" not in path
+    assert f"/projects/{p['id']}/" in path
+
+
+def test_add_folder_one_row_per_file_skips_empty():
+    p = _make_project()
+    rows = att.add_folder(project_id=p["id"], files=[
+        {"relative_path": "app/main.py", "file_bytes": b"m"},
+        {"relative_path": "app/util.py", "file_bytes": b"u"},
+        {"relative_path": "..", "file_bytes": b"skip"},  # sanitizes to empty
+    ])
+    assert len(rows) == 2
+    assert {r["filename"] for r in rows} == {"app/main.py", "app/util.py"}
+
+
+def test_add_zip_unpacks_preserving_structure():
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("proj/README.md", "# hi")
+        zf.writestr("proj/src/a.py", "a=1")
+        zf.writestr("proj/empty/", "")  # dir entry — skipped
+    p = _make_project()
+    rows = att.add_zip(project_id=p["id"], zip_bytes=buf.getvalue())
+    assert {r["filename"] for r in rows} == {"proj/README.md", "proj/src/a.py"}
+
+
+def test_add_zip_rejects_bad_archive():
+    p = _make_project()
+    with pytest.raises(ValueError):
+        att.add_zip(project_id=p["id"], zip_bytes=b"not a zip")
+
+
 # ── Delete removes row + file ──────────────────────────────────────────
 
 def test_delete_removes_row_and_file():
