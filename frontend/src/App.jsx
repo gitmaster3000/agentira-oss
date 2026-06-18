@@ -17,6 +17,7 @@ import { Settings } from './pages/Settings';
 import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
 import { EpicPage } from './pages/EpicPage';
+import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
 import { AgentsDashboard } from './pages/forge/AgentsDashboard';
@@ -107,6 +108,9 @@ export default function App() {
                         <Route path="runs/:runId" element={<RunDetail />} />
                         <Route path="settings" element={<ForgeSettings />} />
                     </Route>
+
+                    {/* Phase-0 token smoke (dev only — not linked from chrome) */}
+                    <Route path="/dev/glow" element={<DevGlow />} />
 
                     {/* Catch-all */}
                     <Route path="*" element={<Navigate to="/" replace />} />

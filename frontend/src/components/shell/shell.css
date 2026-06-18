@@ -1,0 +1,27 @@
+/* Chrome interaction styles ported verbatim from Agentira.dc.html.
+   Scoped to the shell ports (AppSidebar / AppTopbar). */
+
+.nav:hover { background: #272d36 !important; }
+.ico { flex-shrink: 0; }
+
+@keyframes livedot {
+    0%   { transform: scale(.7); opacity: .75; }
+    70%  { transform: scale(2);  opacity: 0; }
+    100% { opacity: 0; }
+}
+
+/* Indeterminate "agent working" bar inside Pulse run cards (verbatim from the prototype). */
+@keyframes barwork {
+    0%   { left: -35%; }
+    100% { left: 100%; }
+}
+
+/* Pulse drawer slides in from the right (overlay, doesn't push the page). */
+@keyframes pulseSlideIn {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+@keyframes pulseFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}

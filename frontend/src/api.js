@@ -1,3 +1,10 @@
+// Return types for this module are described in src/agentira.types.ts.
+// Imported as JSDoc so plain JS callers get IDE typing without a TS build step.
+/** @typedef {import('./agentira.types').Project} Project */
+/** @typedef {import('./agentira.types').Task} Task */
+/** @typedef {import('./agentira.types').Run} Run */
+/** @typedef {import('./agentira.types').Notification} Notification */
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 function getToken() {

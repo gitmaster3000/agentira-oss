@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { Outlet } from 'react-router-dom';
-import { Navbar } from './Navbar';
-import { Sidebar } from './Sidebar';
+import { AppSidebar } from './shell/AppSidebar';
+import { AppTopbar } from './shell/AppTopbar';
+import { ShellDataProvider } from './shell/shellData';
 import { CreateProjectWizard } from './CreateProjectWizard';
 import { FloatingChat } from './FloatingChat';
+import { PulseDock } from './PulseDock';
+import './shell/shell.css';
 
 export function Layout() {
     const [showCreate, setShowCreate] = useState(false);
@@ -15,20 +18,21 @@ export function Layout() {
     };
 
     return (
-        <div className="flex flex-col h-screen overflow-hidden bg-bg-app">
-            <Navbar onNewProject={() => setShowCreate(true)} />
-
-            <div className="flex flex-1 overflow-hidden relative">
-                <Sidebar />
-
-                <main className="flex-1 overflow-hidden relative flex flex-col">
-                    <Outlet />
+        <ShellDataProvider>
+            <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0e1117' }}>
+                <AppSidebar />
+                <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <AppTopbar onNewProject={() => setShowCreate(true)} />
+                    <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                        <Outlet />
+                    </div>
                 </main>
+
+                {showCreate && <CreateProjectWizard onClose={() => setShowCreate(false)} onSuccess={handleProjectSuccess} />}
+
+                <PulseDock />
+                <FloatingChat />
             </div>
-
-            {showCreate && <CreateProjectWizard onClose={() => setShowCreate(false)} onSuccess={handleProjectSuccess} />}
-
-            <FloatingChat />
-        </div>
+        </ShellDataProvider>
     );
 }

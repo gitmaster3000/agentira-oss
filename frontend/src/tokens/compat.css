@@ -1,0 +1,32 @@
+/* Compat shim — maps pre-Phase-0 chrome variable names onto the real
+   design tokens. Lets the old className surface (bg-bg-app, --accent-primary,
+   border-border-subtle, etc.) keep painting while we migrate components to
+   the canonical Agentira tokens. Delete each line as its consumer is moved. */
+
+:root {
+    --bg-app:        var(--surface-base);
+    --bg-panel:      var(--surface-nav);
+    --bg-card:       var(--surface-card);
+    --bg-hover:      var(--surface-hover);
+
+    --border-subtle: var(--border-default);
+    --border-active: var(--border-strong);
+
+    --text-tertiary: var(--text-muted);
+
+    --accent-primary: var(--brand-lavender);
+    --accent-hover:   var(--text-bright);
+    --accent-subtle:  var(--tint-lavender);
+    --accent-on:      var(--surface-base);
+
+    --bg-surface-purple: var(--tint-purple);
+    --bg-dropdown-hover: var(--tint-lavender);
+
+    /* Status dots: backlog grey · todo blue · in-progress amber ·
+       review purple · done green (per design system readme). */
+    --status-backlog:    var(--text-muted);
+    --status-todo:       var(--pulse-blue);
+    --status-inprogress: var(--warning);
+    --status-review:     var(--accent-purple);
+    --status-done:       var(--success);
+}

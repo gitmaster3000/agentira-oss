@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { useCurrentProjectId } from '../currentProject';
 import { ThemeToggle } from './ThemeToggle';
-import { AppSwitcher } from './AppSwitcher';
+import logoMark from '../assets/logo-mark.svg';
 import {
     ChevronDown,
     Plus,
@@ -15,22 +15,13 @@ import {
     Search,
     Briefcase,
     CheckSquare,
-    Pencil,
-    Cpu,
     Zap,
     Trash2,
+    Pencil,
 } from 'lucide-react';
 
-const PRODUCTS = {
-    studio: { name: 'Studio', icon: Pencil, color: '#d0bcff', path: '/' },
-    forge:  { name: 'Forge',  icon: Cpu,    color: '#80cbc4', path: '/forge' },
-};
-
-// AP-144 / AP-145: `showProjectSwitcher` lets callers hide the Project tab +
-// its Create-Project dropdown entirely. Forge surfaces (agents / runs /
-// runtimes / conductor) are project-agnostic — the switcher there did
-// nothing on click in any case (no onNewProject handler), so we just don't
-// render it. Default true keeps Studio behavior unchanged.
+// Single brand mark — no product split. Forge nav lives in the Sidebar's
+// "Build" section now; project context auto-hides on Forge routes.
 export function Navbar({ onNewProject, showProjectSwitcher = true }) {
     const { user, logout } = useAuth();
     const { projectId: urlProjectId } = useParams();
@@ -39,8 +30,9 @@ export function Navbar({ onNewProject, showProjectSwitcher = true }) {
     const storedProjectId = useCurrentProjectId();
     const projectId = urlProjectId || storedProjectId;
     const location = useLocation();
-    const activeProduct = PRODUCTS[location.pathname.startsWith('/forge') ? 'forge' : 'studio'];
-    const ActiveIcon = activeProduct.icon;
+    // Project switcher is irrelevant on Forge surfaces — auto-hide.
+    const onForge = location.pathname.startsWith('/forge');
+    const showProject = showProjectSwitcher && !onForge;
     const navigate = useNavigate();
     const [projects, setProjects] = useState([]);
     const [isProjectOpen, setIsProjectOpen] = useState(false);
@@ -164,20 +156,17 @@ export function Navbar({ onNewProject, showProjectSwitcher = true }) {
     return (
         <header className="h-16 border-b bg-bg-panel flex items-center px-4 justify-between z-50 sticky top-0">
             <div className="flex items-center gap-5">
-                {/* Logo */}
-                <Link to={activeProduct.path} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-                    <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: activeProduct.color + '1a' }}>
-                        <ActiveIcon className="w-5 h-5" style={{ color: activeProduct.color }} />
-                    </span>
+                {/* Logo — single brand, no per-product split. */}
+                <Link to="/" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+                    <img src={logoMark} alt="Agentira" width={36} height={36} style={{ borderRadius: 'var(--radius-lg)' }} />
                     <div className="hidden md:flex flex-col leading-tight">
-                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-tertiary)' }}>AgentIRA</span>
-                        <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{activeProduct.name}</span>
+                        <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--text-muted)' }}>Agentira</span>
+                        <span className="text-title-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Workspace</span>
                     </div>
                 </Link>
 
-                {/* Project Switcher (AP-144/145: hidden in Forge — irrelevant
-                    there, plus the Create Project item was a dead button). */}
-                {showProjectSwitcher && (
+                {/* Project switcher — hidden on Forge surfaces. */}
+                {showProject && (
                 <div className="relative" ref={projectRef}>
                     <button
                         onClick={() => setIsProjectOpen(!isProjectOpen)}
@@ -362,7 +351,6 @@ export function Navbar({ onNewProject, showProjectSwitcher = true }) {
                         )}
                     </div>
                     <ThemeToggle />
-                    <AppSwitcher />
 
                     {/* User Menu */}
                     <div className="relative ml-1" ref={userRef}>

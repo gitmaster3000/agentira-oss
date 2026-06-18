@@ -1,0 +1,11 @@
+<svg width="220" height="48" viewBox="0 0 220 48" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Agentira">
+  <defs>
+    <linearGradient id="agw" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c9b8ff"></stop>
+      <stop offset="1" stop-color="#80cbc4"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="40" height="40" rx="11" fill="url(#agw)"></rect>
+  <path d="M16 33 L24 14 L32 33 M19 27 H29" stroke="#0e1117" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>
+  <text x="58" y="32" font-family="-apple-system, BlinkMacSystemFont, &#39;SF Pro Text&#39;, Inter, sans-serif" font-size="24" font-weight="700" letter-spacing="-0.01em" fill="#f0f3f6">Agentira</text>
+</svg>

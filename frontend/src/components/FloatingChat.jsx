@@ -72,6 +72,13 @@ export function FloatingChat() {
         setPos(clampPos(initial, BTN, BTN));
     }, []);
 
+    // Let chrome (sidebar "Chat") open the panel via a global event.
+    useEffect(() => {
+        const onOpen = () => setOpen(true);
+        window.addEventListener('open-chat', onOpen);
+        return () => window.removeEventListener('open-chat', onOpen);
+    }, []);
+
     // Shared drag wiring — used by both the button and the panel header,
     // writing the SAME `pos`. `onClick` (when given) fires only on a
     // no-move mouseup, so the button is both draggable and clickable.
