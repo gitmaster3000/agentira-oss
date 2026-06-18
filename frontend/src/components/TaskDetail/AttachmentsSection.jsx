@@ -11,6 +11,7 @@ export function AttachmentsSection({ taskId }) {
     const [isUploading, setIsUploading] = useState(false);
     const [attachmentToDelete, setAttachmentToDelete] = useState(null);
     const fileInputRef = useRef(null);
+    const folderInputRef = useRef(null);
 
     const loadAttachments = async () => {
         setIsLoading(true);
@@ -53,6 +54,23 @@ export function AttachmentsSection({ taskId }) {
             if (fileInputRef.current) {
                 fileInputRef.current.value = '';
             }
+        }
+    };
+
+    const handleFolderSelect = async (e) => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+
+        setIsUploading(true);
+        try {
+            await api.uploadTaskFolder(taskId, files);
+            await loadAttachments();
+        } catch (err) {
+            console.error('[AttachmentsSection] Folder upload failed:', err);
+            alert('Failed to upload folder: ' + err.message);
+        } finally {
+            setIsUploading(false);
+            if (folderInputRef.current) folderInputRef.current.value = '';
         }
     };
 
@@ -106,13 +124,31 @@ export function AttachmentsSection({ taskId }) {
                     onChange={handleFileSelect}
                     className="hidden"
                 />
-                <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="btn btn-ghost py-1 px-3 text-xs"
-                >
-                    {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Upload File'}
-                </button>
+                <input
+                    type="file"
+                    ref={folderInputRef}
+                    webkitdirectory=""
+                    directory=""
+                    multiple
+                    onChange={handleFolderSelect}
+                    className="hidden"
+                />
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="btn btn-ghost py-1 px-3 text-xs"
+                    >
+                        {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Upload File'}
+                    </button>
+                    <button
+                        onClick={() => folderInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="btn btn-ghost py-1 px-3 text-xs"
+                    >
+                        Upload Folder
+                    </button>
+                </div>
             </div>
 
             {isLoading ? (

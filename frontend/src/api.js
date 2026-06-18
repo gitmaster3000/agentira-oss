@@ -59,6 +59,24 @@ export async function request(endpoint, options = {}) {
     return res.json();
 }
 
+// Folder upload: send parallel files[] + paths[] (browser webkitRelativePath)
+// to a /…/attachments/folder endpoint so structure is preserved server-side.
+function uploadFolder(endpoint, files) {
+    const formData = new FormData();
+    for (const f of files) {
+        formData.append('files', f);
+        formData.append('paths', f.webkitRelativePath || f.name);
+    }
+    const token = getToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return fetch(`${API_BASE}${endpoint}`, { method: 'POST', body: formData, headers })
+        .then(res => {
+            if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+            return res.json();
+        });
+}
+
 export const api = {
     // Service Accounts
     createServiceAccount: (name) => request('/service-accounts', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -251,6 +269,11 @@ export const api = {
             return res.json();
         });
     },
+    // Folder upload (AP-278): preserves structure via webkitRelativePath.
+    uploadProjectFolder: (projectId, files) =>
+        uploadFolder(`/projects/${projectId}/attachments/folder`, files),
+    uploadTaskFolder: (taskId, files) =>
+        uploadFolder(`/tasks/${taskId}/attachments/folder`, files),
 
     // Roadmap
     // getRoadmap already defined above

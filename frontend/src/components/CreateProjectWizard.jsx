@@ -129,7 +129,12 @@ export function CreateProjectWizard({ onClose, onSuccess }) {
                 members,
             });
 
-            for (const file of files) {
+            const folderFiles = files.filter((f) => f.webkitRelativePath);
+            const looseFiles = files.filter((f) => !f.webkitRelativePath);
+            try {
+                if (folderFiles.length) await api.uploadProjectFolder(project.id, folderFiles);
+            } catch (e) { console.error('folder upload failed:', e); }
+            for (const file of looseFiles) {
                 try { await api.uploadProjectAttachment(project.id, file); }
                 catch (e) { console.error('attachment upload failed:', e); }
             }
@@ -297,13 +302,15 @@ function BasicsStep({ name, setName, category, setCategory, description, setDesc
 
 function AttachmentsStep({ files, setFiles }) {
     const fileInputRef = useRef(null);
+    const folderInputRef = useRef(null);
     const [drag, setDrag] = useState(false);
 
     const addFiles = useCallback((list) => {
         const arr = Array.from(list || []);
+        const key = (f) => (f.webkitRelativePath || f.name) + f.size;
         setFiles((prev) => {
-            const seen = new Set(prev.map((f) => f.name + f.size));
-            return [...prev, ...arr.filter((f) => !seen.has(f.name + f.size))];
+            const seen = new Set(prev.map(key));
+            return [...prev, ...arr.filter((f) => !seen.has(key(f)))];
         });
     }, [setFiles]);
 
@@ -330,7 +337,14 @@ function AttachmentsStep({ files, setFiles }) {
                 <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                     Drop files or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>click to browse</span>
                 </p>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                    or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}
+                             onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}>
+                        select a folder</span>
+                </p>
                 <input ref={fileInputRef} type="file" multiple className="hidden"
+                       onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+                <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple className="hidden"
                        onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
             </div>
             {files.length > 0 && (
@@ -340,7 +354,7 @@ function AttachmentsStep({ files, setFiles }) {
                              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs"
                              style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)' }}>
                             <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-primary)' }} />
-                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{f.name}</span>
+                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{f.webkitRelativePath || f.name}</span>
                             <span className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>{formatSize(f.size)}</span>
                             <button type="button" onClick={() => remove(i)}
                                     className="p-0.5 rounded-lg hover:bg-red-500/10"
