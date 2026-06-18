@@ -142,6 +142,11 @@ def add(
 
 def list_for_task(task_id: str) -> list[dict]:
     with SessionLocal() as db:
+        # Resolve a task key like 'AP-280' to its internal id, matching add().
+        if not db.get(Task, task_id):
+            t = db.query(Task).filter(Task.key == task_id.upper()).first()
+            if t:
+                task_id = t.id
         rows = (
             db.query(Attachment)
               .filter(Attachment.task_id == task_id)

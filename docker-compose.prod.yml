@@ -50,6 +50,9 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET required for production}
       - AGENTIRA_DB_URL=postgresql+psycopg2://agentira:${POSTGRES_PASSWORD}@postgres:5432/agentira
       - RAILWAY_ENVIRONMENT=production
+      # AP-280: proxy attachment upload/read to the backend so bytes land on the
+      # backend's volume (MCP has no shared volume). Set per-service URL on Railway.
+      - AGENTIRA_API_BASE_URL=${AGENTIRA_API_BASE_URL:-http://backend:8111}
     deploy:
       resources:
         limits:

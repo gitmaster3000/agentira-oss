@@ -31,6 +31,10 @@ from backend import services
 # ── Global Actor Context ──────────────────────────────────────────────────────
 # Set per-request by the auth middleware; read by tool handlers.
 actor_ctx = contextvars.ContextVar("actor", default="system")
+# Raw bearer token of the caller. AP-280: attachment tools reuse it to proxy
+# upload/read to the backend REST API so bytes land on the backend's volume
+# (MCP and backend are separate Railway services with separate filesystems).
+token_ctx = contextvars.ContextVar("token", default="")
 
 # ── Logging Setup ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,6 +91,7 @@ class ASGILoggingMiddleware:
         actor_org = None
         is_authenticated = False
 
+        token = ""
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             try:
@@ -119,6 +124,7 @@ class ASGILoggingMiddleware:
             logger.debug(f"Public access to: {path}")
 
         token_reset = actor_ctx.set(actor)
+        tok_reset = token_ctx.set(token)
         # Pin the org for the request so RLS scopes every tool call to the
         # caller's org. None for unauthenticated/public paths.
         from backend.db import set_current_org
@@ -135,6 +141,7 @@ class ASGILoggingMiddleware:
             raise
         finally:
             actor_ctx.reset(token_reset)
+            token_ctx.reset(tok_reset)
             set_current_org(None)
 
 
@@ -367,6 +374,51 @@ async def mark_notification_read(notification_id: str) -> bool:
     return services.mark_notification_read(notification_id, actor_profile_id=actor_profile_id)
 
 # ── Attachment Tools ────────────────────────────────────────────────────────────
+# AP-280: MCP and backend are separate Railway services with separate
+# filesystems (volumes are single-service). Writing/reading attachment bytes
+# on the MCP container's own disk means the backend download route 404s and the
+# bytes vanish on MCP restart. When AGENTIRA_API_BASE_URL is set we proxy
+# upload/read to the backend REST API (using the caller's bearer token) so bytes
+# land on the backend's persistent volume — the single source of truth. Unset
+# (local/dev, where docker-compose shares one volume) keeps the direct path.
+
+
+def _api_base() -> str:
+    return os.getenv("AGENTIRA_API_BASE_URL", "").rstrip("/")
+
+
+def _proxy_upload(task_id: str, filename: str, file_bytes: bytes,
+                  content_type: str) -> dict:
+    """POST the file to the backend so it lands on the backend's volume."""
+    import httpx
+    r = httpx.post(
+        f"{_api_base()}/api/tasks/{task_id}/attachments",
+        headers={"Authorization": f"Bearer {token_ctx.get()}"},
+        files={"file": (filename, file_bytes, content_type)},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _proxy_fetch_bytes(attachment_id: str) -> bytes | None:
+    """GET the attachment bytes from the backend's download route."""
+    import httpx
+    base, token = _api_base(), token_ctx.get()
+    if not base or not token:
+        return None
+    try:
+        r = httpx.get(
+            f"{base}/api/attachments/{attachment_id}/download",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.content
+    except Exception as e:
+        logger.warning(f"proxy fetch of attachment {attachment_id} failed: {e}")
+        return None
+
 
 @mcp.tool()
 async def list_attachments(task_id: str) -> list[dict]:
@@ -392,6 +444,8 @@ async def upload_attachment(task_id: str, filename: str, content: str = "", cont
         file_bytes = base64.b64decode(content_base64)
     else:
         return {"error": "Provide content (text) or content_base64 (binary)"}
+    if _api_base():
+        return _proxy_upload(task_id, filename, file_bytes, content_type)
     return services.add_attachment(task_id, filename, file_bytes, content_type, uploaded_by=actor)
 
 @mcp.tool()
@@ -402,16 +456,20 @@ async def download_attachment(attachment_id: str) -> dict:
     and a download/curl hint for binary, no base64 round-trip.
     """
     import base64
+    from backend import attachments as _attachments
     result = services.get_attachment_bytes(attachment_id)
     if result:
         meta, file_bytes = result
         return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
-    # Bytes aren't on this container's disk: attachments live on the API
-    # service's volume, which the MCP server doesn't share (Railway volumes are
-    # single-service). Fall back to read_attachment_text, which returns the
-    # metadata + download_url + a curl hint (env-referenced key, no host) so the
-    # agent fetches it over HTTP instead of hitting a "missing on disk" error.
-    from backend import attachments as _attachments
+    # Bytes aren't on this container's disk. Metadata lives in the shared DB;
+    # fetch the bytes from the backend's volume over HTTP (AP-280).
+    meta_fp = _attachments.get(attachment_id)
+    if not meta_fp:
+        return {"error": "Attachment not found"}
+    file_bytes = _proxy_fetch_bytes(attachment_id)
+    if file_bytes is not None:
+        return {**meta_fp[0], "content_base64": base64.b64encode(file_bytes).decode()}
+    # Can't proxy (no API base / token): fall back to the curl-hint shape.
     return _attachments.read_text(attachment_id) or {"error": "Attachment not found"}
 
 # AP-152: project attachments + base64-free reads.
@@ -439,6 +497,18 @@ async def read_attachment_text(attachment_id: str) -> dict:
     result = _attachments.read_text(attachment_id)
     if not result:
         return {"error": "Attachment not found"}
+    # Text whose bytes aren't on this container's disk: read_text marks it
+    # served_over_http. Pull the bytes from the backend's volume and inline
+    # them if they decode as UTF-8 (AP-280); genuine binary keeps the hint.
+    if "content" not in result and result.get("served_over_http"):
+        data = _proxy_fetch_bytes(attachment_id)
+        if data is not None:
+            try:
+                result["content"] = data.decode("utf-8")
+                result.pop("served_over_http", None)
+                result.pop("download_hint", None)
+            except UnicodeDecodeError:
+                pass
     return result
 
 # ── Project Activity Tools ──────────────────────────────────────────────────────
