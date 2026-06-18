@@ -394,6 +394,9 @@ class Task(Base):
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
     key: Mapped[str] = mapped_column(String(20), nullable=True, unique=True)
+    # Task type discriminator — a task can be a plain task, a bug, etc.
+    # Type-specific behavior lives in backend.tasks.TaskService subclasses.
+    type: Mapped[str] = mapped_column(String(20), default="task", nullable=False)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)

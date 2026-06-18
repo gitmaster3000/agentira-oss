@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal, init_db, privileged, set_current_org
 from backend.models import (
-    Project, Task, Activity, TaskPriority, Profile, Attachment,
+    Project, Task, Activity, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
     ProjectMember, Notification, TaskCommit, Epic, OAuthAccount, Org
 )
@@ -108,6 +108,7 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
     return {
         "id": t.id,
         "key": t.key or t.id,
+        "type": t.type or "task",
         "project_id": t.project_id,
         "epic_id": t.epic_id,
         "epic_name": t.epic.title if t.epic else None,
@@ -820,76 +821,14 @@ def create_task(
     dod_items: Optional[list[dict]] = None,
     epic_id: str | None = None,
     actor: str = "system",
+    type: str = "task",
 ) -> dict:
-    """Create a task. Enforces membership check (unless admin/wildcard)."""
-    with _session() as db:
-        project = db.get(Project, project_id)
-        if not project:
-            raise ValueError(f"Project {project_id} not found")
-
-        # Check membership logic
-        if not has_permission(db, actor, "project.view_all"):
-            profile = _get_profile_by_name(db, actor)
-            if not profile:
-                raise PermissionError(f"User {actor} not found")
-            
-            is_member = db.query(ProjectMember).filter_by(
-                project_id=project_id, profile_id=profile.id
-            ).first()
-            if not is_member:
-                raise PermissionError(f"User {actor} is not a member of project {project_id}")
-
-        import json
-        status_id = _get_status_id(db, status)
-        from datetime import datetime
-        start_dt = None
-        if start_date:
-            try: start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            except ValueError: pass
-        due_dt = None
-        if due_date:
-            try: due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
-            except ValueError: pass
-
-        # Generate Jira-style key
-        prefix = project.key_prefix or "PROJ"
-        num = project.next_task_number or 1
-        task_key = f"{prefix}-{num}"
-        project.next_task_number = num + 1
-
-        task = Task(
-            project_id=project_id,
-            key=task_key,
-            title=title,
-            description=description,
-            status_id=status_id,
-            priority=TaskPriority(priority),
-            assignee=assignee,
-            creator=actor,
-            tags=",".join(tags) if tags else "",
-            start_date=start_dt,
-            due_date=due_dt,
-            dod_items=json.dumps(_normalize_dod(dod_items)) if dod_items else None,
-            epic_id=epic_id if epic_id and epic_id.strip() else None,
-        )
-        db.add(task)
-        db.flush()
-
-        _log_activity(
-            db, actor, "task.create", f"Created task: {title}",
-            project_id=project_id, task_id=task.id,
-            notify_users=[assignee] if assignee and assignee != actor else []
-        )
-        db.commit()
-        
-        if assignee and assignee != actor:
-            target_prof = _get_profile_by_name(db, assignee)
-            if target_prof:
-                broker.notify(target_prof.id)
-        agent_notifier.dispatch(db, "task.assigned", _task_to_dict(task), actor)
-
-        db.refresh(task)
-        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
+    """Create a task. Delegates to the typed task domain (backend.tasks)."""
+    from backend import tasks
+    return tasks.resolve(type).create(
+        project_id, title, description, status, priority, assignee, tags,
+        start_date, due_date, dod_items, epic_id, actor,
+    )
 
 
 def list_tasks(
@@ -899,76 +838,14 @@ def list_tasks(
     priority: Optional[str] = None,
     actor: str = "system",
 ) -> list[dict]:
-    """List tasks scoped by visibility.
-
-    - Admin / 'project.view_all': Sees all tasks matching filters.
-    - Others: Sees tasks from their projects OR assigned to them.
-    """
-    with _session() as db:
-        q = db.query(Task)
-        
-        # Apply scoping rules
-        if not has_permission(db, actor, "project.view_all"):
-            profile = _get_profile_by_name(db, actor)
-            if not profile:
-                # Unknown actor sees nothing unless it's system (which has wildcard perms)
-                # But here has_permission already handled system/wildcard.
-                return []
-            
-            # Subquery based approach or simple IN clause
-            my_project_ids = [
-                pm.project_id for pm in 
-                db.query(ProjectMember.project_id).filter(ProjectMember.profile_id == profile.id).all()
-            ]
-            
-            # Condition: Task in my projects OR Task assigned to me
-            from sqlalchemy import or_
-            q = q.filter(
-                or_(
-                    Task.project_id.in_(my_project_ids),
-                    Task.assignee == actor
-                )
-            )
-
-        # Filters
-        if project_id:
-            q = q.filter(Task.project_id == project_id)
-        if status:
-            sid = _get_status_id(db, status)
-            q = q.filter(Task.status_id == sid)
-        if assignee:
-            q = q.filter(Task.assignee == assignee)
-        if priority:
-            q = q.filter(Task.priority == TaskPriority(priority))
-            
-        tasks = q.order_by(Task.updated_at.desc()).all()
-        ids = [t.id for t in tasks]
-        counts = _batch_attachment_counts(db, ids)
-        active = _active_run_agents(db, ids)
-        out = []
-        for t in tasks:
-            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
-            info = active.get(t.id)
-            d["agent_active"] = info is not None
-            if info:
-                d["active_agent_id"] = info["agent_id"]
-                d["active_agent_name"] = info["agent_name"]
-            out.append(d)
-        return out
+    """List tasks scoped by visibility. Delegates to backend.tasks."""
+    from backend import tasks
+    return tasks.TaskService().list(project_id, status, assignee, priority, actor)
 
 
 def get_task(task_id: str) -> dict | None:
-    with _session() as db:
-        t = _resolve_task(db, task_id)
-        if not t:
-            return None
-        d = _task_to_dict(t, attachments_count=_attachment_count(db, t.id))
-        info = _active_run_agents(db, [t.id]).get(t.id)
-        d["agent_active"] = info is not None
-        if info:
-            d["active_agent_id"] = info["agent_id"]
-            d["active_agent_name"] = info["agent_name"]
-        return d
+    from backend import tasks
+    return tasks.TaskService().get(task_id)
 
 
 def update_task(
@@ -987,194 +864,22 @@ def update_task(
     repos: Optional[list[str]] = None,
     actor: str = "system",
 ) -> dict:
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-        task_id = task.id
-
-        import json
-        changes = []
-        diff = {}
-        if title is not None and title != task.title:
-            diff["title"] = {"from": task.title, "to": title}
-            task.title = title
-            changes.append(f"title → {title}")
-        if description is not None and description != task.description:
-            diff["description"] = {"from": task.description[:80], "to": description[:80]}
-            task.description = description
-            changes.append("description updated")
-        if priority is not None and priority != task.priority.value:
-            diff["priority"] = {"from": task.priority.value, "to": priority}
-            task.priority = TaskPriority(priority)
-            changes.append(f"priority → {priority}")
-        if assignee is not None and assignee != task.assignee:
-            diff["assignee"] = {"from": task.assignee, "to": assignee}
-            task.assignee = assignee
-            changes.append(f"assignee → {assignee}")
-        if start_date is not None:
-            from datetime import datetime
-            dt = None
-            try: dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            except ValueError: pass
-            if dt != task.start_date:
-                diff["start_date"] = {"from": str(task.start_date), "to": str(dt)}
-                task.start_date = dt
-                changes.append(f"start_date -> {start_date}")
-
-        if due_date is not None:
-            from datetime import datetime
-            dt = None
-            try: dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
-            except ValueError: pass
-            if dt != task.due_date:
-                diff["due_date"] = {"from": str(task.due_date), "to": str(dt)}
-                task.due_date = dt
-                changes.append(f"due_date -> {due_date}")
-
-        if tags is not None:
-            old_tags = task.tags.split(",") if task.tags else []
-            if old_tags != tags:
-                diff["tags"] = {"from": old_tags, "to": tags}
-                changes.append(f"tags → {tags}")
-            task.tags = ",".join(tags)
-
-        if dod_items is not None:
-            old_dod = _normalize_dod(_parse_dod(task.dod_items)) or []
-            new_dod = _normalize_dod(dod_items) or []
-            task.dod_items = json.dumps(new_dod) if new_dod else None
-            old_checked = sum(1 for i in old_dod if i.get("checked"))
-            new_checked = sum(1 for i in new_dod if i.get("checked"))
-            if old_checked != new_checked or len(old_dod) != len(new_dod):
-                changes.append(f"DOD {new_checked}/{len(new_dod)} checked")
-
-        if branch is not None and branch != (task.branch or ""):
-            diff["branch"] = {"from": task.branch or "", "to": branch}
-            task.branch = branch
-            changes.append(f"branch → {branch}" if branch else "branch cleared")
-        if pr_url is not None and pr_url != (task.pr_url or ""):
-            diff["pr_url"] = {"from": task.pr_url or "", "to": pr_url}
-            task.pr_url = pr_url
-            changes.append(f"PR linked" if pr_url else "PR unlinked")
-
-        if epic_id is not None:
-            new_epic_id = epic_id if epic_id.strip() else None
-            if task.epic_id != new_epic_id:
-                diff["epic_id"] = {"from": task.epic_id, "to": new_epic_id}
-                task.epic_id = new_epic_id
-                changes.append(f"epic_id → {new_epic_id}")
-
-        if repos is not None:
-            # AP-154: multi-repo. Normalize, dedupe order-preserving,
-            # and validate each against project_repos.
-            seen = set()
-            cleaned: list[str] = []
-            for name in repos:
-                if not name:
-                    continue
-                if name in seen:
-                    continue
-                seen.add(name)
-                cleaned.append(name)
-            from backend.models import ProjectRepo
-            if cleaned and task.project_id:
-                valid_names = {
-                    n[0] for n in db.query(ProjectRepo.name)
-                                     .filter(ProjectRepo.project_id == task.project_id)
-                                     .all()
-                }
-                if valid_names:
-                    bad = [n for n in cleaned if n not in valid_names]
-                    if bad:
-                        raise ValueError(
-                            f"repo(s) {bad} not declared on project"
-                        )
-            new_repos_json = json.dumps(cleaned) if cleaned else None
-            if new_repos_json != task.repos_json:
-                diff["repos"] = {
-                    "from": resolve_task_repos(task),
-                    "to": cleaned,
-                }
-                task.repos_json = new_repos_json
-                # Keep legacy `repo_name` in sync with the first entry so
-                # callers that haven't migrated still see the primary
-                # repo through the old field.
-                task.repo_name = cleaned[0] if cleaned else None
-                changes.append(f"repos → {cleaned}")
-
-        if changes:
-            _log_activity(
-                db, actor, "task.update", "; ".join(changes),
-                project_id=task.project_id, task_id=task_id,
-                diff=json.dumps(diff) if diff else None,
-                notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
-            )
-
-        db.commit()
-        if assignee and assignee != actor:
-            target_prof = _get_profile_by_name(db, assignee)
-            if target_prof:
-                broker.notify(target_prof.id)
-        agent_notifier.dispatch(db, "task.updated", _task_to_dict(task), actor)
-
-        db.refresh(task)
-        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
+    """Update a task. Delegates to backend.tasks."""
+    from backend import tasks
+    return tasks.TaskService().update(
+        task_id, title, description, priority, assignee, tags, start_date,
+        due_date, dod_items, branch, pr_url, epic_id, repos, actor,
+    )
 
 
 def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
-    from backend.auth import check_transition
-
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            raise ValueError(f"Task {task_id} not found")
-        task_id = task.id
-
-        old = task.status.name
-        if old == new_status:
-            return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
-
-        check_transition(db, actor, old, new_status)
-
-        # AP-158: column-exit gate enforcement. Per-project opt-in via
-        # `Project.gates_enabled`. Today's default is OFF so existing
-        # projects keep working unchanged; turning it on (in Project
-        # Settings) makes obvious shortcuts impossible — moving to
-        # `review` without a DoD, marking `done` without a PR, etc.
-        if task.project and getattr(task.project, "gates_enabled", False):
-            from backend import gates as _gates
-            _gates.enforce(task, from_status=old, to_status=new_status)
-
-        new_status_id = _get_status_id(db, new_status)
-        task.status_id = new_status_id
-        
-        import json
-        _log_activity(
-            db, actor, "task.move", f"{old} → {new_status}",
-            project_id=task.project_id, task_id=task_id,
-            diff=json.dumps({"status": {"from": old, "to": new_status}}),
-            notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
-        )
-        
-        db.commit()
-        if task.assignee and task.assignee != actor:
-            target_prof = _get_profile_by_name(db, task.assignee)
-            if target_prof:
-                broker.notify(target_prof.id)
-        agent_notifier.dispatch(db, "task.moved", _task_to_dict(task), actor)
-
-        db.refresh(task)
-        return _task_to_dict(task, attachments_count=_attachment_count(db, task.id))
+    from backend import tasks
+    return tasks.TaskService().move(task_id, new_status, actor)
 
 
 def delete_task(task_id: str) -> bool:
-    with _session() as db:
-        task = _resolve_task(db, task_id)
-        if not task:
-            return False
-        db.delete(task)
-        db.commit()
-        return True
+    from backend import tasks
+    return tasks.TaskService().delete(task_id)
 
 
 # ── Activity / comments ─────────────────────────────────────────────────

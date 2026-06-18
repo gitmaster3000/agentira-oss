@@ -672,6 +672,8 @@ def run_migrations():
             added |= _ensure_column(conn, "tasks", "due_date", "TIMESTAMP")
             added |= _ensure_column(conn, "tasks", "epic_id", "VARCHAR(12)")
             added |= _ensure_column(conn, "tasks", "creator", "VARCHAR(120) DEFAULT ''")
+            # Task type discriminator (task | bug | ...) — DEFAULT backfills existing rows.
+            added |= _ensure_column(conn, "tasks", "type", "VARCHAR(20) DEFAULT 'task' NOT NULL")
             if added:
                 conn.commit()
 
