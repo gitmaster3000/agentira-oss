@@ -1646,6 +1646,61 @@ def list_conversations(agent_id: str) -> list[dict]:
         return out
 
 
+def list_all_conversations() -> list[dict]:
+    """Every chat across every agent, newest first — backs the global /chat
+    page where the user picks any agent's conversation. Same shape as
+    list_conversations() but with agent_id/agent_name and a last-message
+    preview so the frontend can render a chat list without N calls."""
+    with _session() as db:
+        names = dict(db.query(Agent.id, Agent.name).all())
+        msg_rows = (db.query(AgentMessage.agent_id, AgentMessage.scope_key,
+                             func.count(AgentMessage.id),
+                             func.max(AgentMessage.created_at))
+                      .filter(AgentMessage.scope_key.isnot(None))
+                      .group_by(AgentMessage.agent_id, AgentMessage.scope_key)
+                      .all())
+        conv_rows = db.query(Conversation).all()
+        merged: dict[tuple[str, str], dict] = {}
+        for aid, sk, cnt, last in msg_rows:
+            merged[(aid, sk)] = {
+                "agent_id": aid,
+                "agent_name": names.get(aid, ""),
+                "scope_key": sk,
+                "message_count": int(cnt or 0),
+                "last_used_at": _iso(last),
+                "has_session": False,
+                "session_id": "",
+            }
+        for c in conv_rows:
+            row = merged.setdefault((c.agent_id, c.scope_key), {
+                "agent_id": c.agent_id,
+                "agent_name": names.get(c.agent_id, ""),
+                "scope_key": c.scope_key,
+                "message_count": 0,
+                "last_used_at": _iso(c.last_used_at),
+                "has_session": False,
+                "session_id": "",
+            })
+            row["has_session"] = bool(c.runtime_session_id)
+            row["session_id"] = c.runtime_session_id or ""
+            if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
+                row["last_used_at"] = _iso(c.last_used_at)
+        out = []
+        for (aid, sk), row in merged.items():
+            row["label"] = _scope_label(db, sk)
+            # ponytail: per-chat preview query; chat counts are small (dozens).
+            last_msg = (db.query(AgentMessage.content)
+                          .filter(AgentMessage.agent_id == aid,
+                                  AgentMessage.scope_key == sk,
+                                  AgentMessage.content != "")
+                          .order_by(AgentMessage.created_at.desc())
+                          .first())
+            row["last_message"] = (last_msg[0][:200] if last_msg else "")
+            out.append(row)
+        out.sort(key=lambda r: r["last_used_at"] or "", reverse=True)
+        return out
+
+
 def _scope_label(db, scope_key: str) -> str:
     """Render a scope key as a human label, e.g.
     chat:project:abc → 'Chat — <project name>'

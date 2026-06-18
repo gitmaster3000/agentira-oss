@@ -716,6 +716,13 @@ def list_messages(agent_id: str, run_id: Optional[str] = None,
     )
 
 
+@router.get("/chats")
+def list_all_chats():
+    """Every chat across all agents, newest first — backs the global /chat
+    page where the user selects any agent's conversation."""
+    return services.list_all_conversations()
+
+
 @router.get("/agents/{agent_id}/conversations")
 def list_conversations(agent_id: str):
     return services.list_conversations(agent_id)
