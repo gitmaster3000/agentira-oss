@@ -65,7 +65,7 @@ function uploadFolder(endpoint, files) {
     const formData = new FormData();
     for (const f of files) {
         formData.append('files', f);
-        formData.append('paths', f.webkitRelativePath || f.name);
+        formData.append('paths', f.relativePath || f.webkitRelativePath || f.name);
     }
     const token = getToken();
     const headers = {};

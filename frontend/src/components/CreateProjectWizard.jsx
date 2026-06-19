@@ -129,8 +129,8 @@ export function CreateProjectWizard({ onClose, onSuccess }) {
                 members,
             });
 
-            const folderFiles = files.filter((f) => f.webkitRelativePath);
-            const looseFiles = files.filter((f) => !f.webkitRelativePath);
+            const folderFiles = files.filter((f) => f.relativePath || f.webkitRelativePath);
+            const looseFiles = files.filter((f) => !(f.relativePath || f.webkitRelativePath));
             try {
                 if (folderFiles.length) await api.uploadProjectFolder(project.id, folderFiles);
             } catch (e) { console.error('folder upload failed:', e); }
@@ -300,6 +300,41 @@ function BasicsStep({ name, setName, category, setCategory, description, setDesc
 }
 
 
+// Drag-drop folder expansion: a single drop accepts loose files OR whole
+// folders (the file picker can't do both in one OS dialog, but drag can).
+// webkitGetAsEntry must be read synchronously during the drop event, so we
+// collect entries first, then walk them. Files inside a folder get a
+// `relativePath` so structure is preserved on upload.
+async function readEntry(entry, prefix, out) {
+    if (entry.isFile) {
+        await new Promise((resolve) => entry.file((file) => {
+            if (prefix) file.relativePath = prefix + file.name;
+            out.push(file);
+            resolve();
+        }, resolve));
+    } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        await new Promise((resolve) => {
+            const next = () => reader.readEntries(async (batch) => {
+                if (!batch.length) return resolve();
+                for (const e of batch) await readEntry(e, prefix + entry.name + '/', out);
+                next();
+            }, resolve);
+            next();
+        });
+    }
+}
+
+async function filesFromDrop(dataTransfer) {
+    const entries = Array.from(dataTransfer.items || [])
+        .map((it) => it.webkitGetAsEntry?.())
+        .filter(Boolean);
+    if (!entries.length) return Array.from(dataTransfer.files || []);
+    const out = [];
+    for (const entry of entries) await readEntry(entry, '', out);
+    return out;
+}
+
 function AttachmentsStep({ files, setFiles }) {
     const fileInputRef = useRef(null);
     const folderInputRef = useRef(null);
@@ -307,7 +342,7 @@ function AttachmentsStep({ files, setFiles }) {
 
     const addFiles = useCallback((list) => {
         const arr = Array.from(list || []);
-        const key = (f) => (f.webkitRelativePath || f.name) + f.size;
+        const key = (f) => (f.relativePath || f.webkitRelativePath || f.name) + f.size;
         setFiles((prev) => {
             const seen = new Set(prev.map(key));
             return [...prev, ...arr.filter((f) => !seen.has(key(f)))];
@@ -322,31 +357,40 @@ function AttachmentsStep({ files, setFiles }) {
                 Drop briefs, designs, brand guides — agents will read these alongside your task descriptions.
             </p>
             <div
-                className="rounded-lg p-5 text-center cursor-pointer transition-all"
+                className="rounded-lg p-5 text-center transition-all"
                 style={{
                     border: `2px dashed ${drag ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
                     backgroundColor: drag ? 'var(--accent-subtle)' : 'var(--bg-app)',
                 }}
                 onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                 onDragLeave={() => setDrag(false)}
-                onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
-                onClick={() => fileInputRef.current?.click()}
+                onDrop={(e) => { e.preventDefault(); setDrag(false); filesFromDrop(e.dataTransfer).then(addFiles); }}
             >
                 <Upload className="w-6 h-6 mx-auto mb-1.5"
                         style={{ color: drag ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
                 <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                    Drop files or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>click to browse</span>
+                    Drag files or folders here
                 </p>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-                    or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}
-                             onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}>
-                        select a folder</span>
+                    Both files and folders work when dragged
                 </p>
-                <input ref={fileInputRef} type="file" multiple className="hidden"
-                       onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-                <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple className="hidden"
-                       onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
             </div>
+            <div className="flex items-center gap-2">
+                <button type="button" onClick={() => fileInputRef.current?.click()}
+                        className="flex-1 rounded-lg py-2 text-sm font-semibold transition-all"
+                        style={{ border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-app)' }}>
+                    Choose files
+                </button>
+                <button type="button" onClick={() => folderInputRef.current?.click()}
+                        className="flex-1 rounded-lg py-2 text-sm font-semibold transition-all"
+                        style={{ border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-app)' }}>
+                    Choose a folder
+                </button>
+            </div>
+            <input ref={fileInputRef} type="file" multiple className="hidden"
+                   onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
+            <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple className="hidden"
+                   onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
             {files.length > 0 && (
                 <div className="space-y-1">
                     {files.map((f, i) => (
@@ -354,7 +398,7 @@ function AttachmentsStep({ files, setFiles }) {
                              className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs"
                              style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)' }}>
                             <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-primary)' }} />
-                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{f.webkitRelativePath || f.name}</span>
+                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{f.relativePath || f.webkitRelativePath || f.name}</span>
                             <span className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>{formatSize(f.size)}</span>
                             <button type="button" onClick={() => remove(i)}
                                     className="p-0.5 rounded-lg hover:bg-red-500/10"
