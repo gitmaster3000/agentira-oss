@@ -16,6 +16,7 @@ import { CliAuth } from './pages/CliAuth';
 import { Settings } from './pages/Settings';
 import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
+import { Chat } from './pages/Chat';
 import { EpicPage } from './pages/EpicPage';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
@@ -87,6 +88,11 @@ export default function App() {
                         <Route path="settings" element={<Settings />} />
                         <Route path="tasks/:taskId" element={<TaskPage />} />
                         <Route path="epics/:epicId" element={<EpicPage />} />
+                    </Route>
+
+                    {/* Global Chat page (design §2.4) — in-shell, GET /forge/chats */}
+                    <Route path={ROUTES.CHAT} element={<RequireAuth><Layout /></RequireAuth>}>
+                        <Route index element={<Chat />} />
                     </Route>
 
                     {/* Root redirect */}

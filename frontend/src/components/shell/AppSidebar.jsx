@@ -69,6 +69,7 @@ export function AppSidebar() {
 
     const is = {
         home: path === '/studio',
+        chat: path === '/chat',
         agents: path.startsWith('/forge/agents'),
         runs: path.startsWith('/forge/runs'),
         conductor: path.startsWith('/forge/conductor'),
@@ -121,7 +122,7 @@ export function AppSidebar() {
                     badge={unread > 0 ? <span style={{ fontSize: '10px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 6px' }}>{unread}</span> : null} />
                 <NavRow active={false} onClick={() => navigate('/studio')} label="My Work"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>} />
-                <NavRow active={false} onClick={() => window.dispatchEvent(new CustomEvent('open-chat'))} label="Chat"
+                <NavRow active={is.chat} onClick={() => navigate('/chat')} label="Chat"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
 
                 {/* BUILD */}

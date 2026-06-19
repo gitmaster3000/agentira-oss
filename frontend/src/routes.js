@@ -18,6 +18,7 @@ export const ROUTES = {
     STUDIO_PROJECT_OVERVIEW: (projectId) => `/studio/project/${projectId}/overview`,
     STUDIO_PROJECT_SETTINGS: (projectId) => `/studio/project/${projectId}/settings`,
     STUDIO_SETTINGS: '/studio/settings',
+    CHAT: '/chat',
     STUDIO_TASK: (taskId) => `/studio/tasks/${taskId}`,
     STUDIO_EPIC: (epicId) => `/studio/epics/${epicId}`,
 

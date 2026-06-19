@@ -423,6 +423,9 @@ export const api = {
             `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
         ),
         listConversations: (agentId) => request(`/forge/agents/${agentId}/conversations`),
+        // AP-271/AP-287: every chat across all agents, newest first — backs the
+        // global /chat page conversation list.
+        listChats: () => request('/forge/chats'),
         // ADR 008 / AP-93: wipe agent memory for one scope.
         clearConversation: (agentId, scope_key) => request(
             `/forge/agents/${agentId}/conversations/clear`,
