@@ -91,6 +91,23 @@ def flush_next(agent_id: str, *, scope_key: str = "",
         return False
 
 
+def remove(*, queued_id: str, agent_id: str, scope_key: str) -> bool:
+    """Cancel a single queued message before it dispatches. Scoped to its
+    (agent, scope) so a stale id from another conversation can't delete it.
+    Returns True if a row was removed."""
+    with SessionLocal() as db:
+        qm = (db.query(QueuedMessage)
+                .filter(QueuedMessage.id == queued_id,
+                        QueuedMessage.agent_id == agent_id,
+                        QueuedMessage.scope_key == scope_key)
+                .first())
+        if not qm:
+            return False
+        db.delete(qm)
+        db.commit()
+        return True
+
+
 def list_for_scope(*, agent_id: str, scope_key: str) -> list[dict]:
     """Queued messages for this conversation, oldest first — for the UI's
     "queued" pills under the active turn."""

@@ -744,6 +744,13 @@ def agent_queued_messages(agent_id: str, scope_key: str):
     return services.list_queued_messages(agent_id=agent_id, scope_key=scope_key)
 
 
+@router.delete("/agents/{agent_id}/queued/{queued_id}")
+def cancel_queued_message(agent_id: str, queued_id: str, scope_key: str):
+    """AP-287: cancel/remove a queued message before it dispatches."""
+    return services.cancel_queued_message(
+        agent_id=agent_id, scope_key=scope_key, queued_id=queued_id)
+
+
 # ── ADR 008: chat controls (clear + stop) ──────────────────────────────
 
 @router.post("/agents/{agent_id}/conversations/clear")

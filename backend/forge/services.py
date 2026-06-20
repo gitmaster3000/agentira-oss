@@ -3416,6 +3416,15 @@ def list_queued_messages(*, agent_id: str, scope_key: str) -> list[dict]:
     return msg_queue.list_for_scope(agent_id=agent_id, scope_key=scope_key)
 
 
+def cancel_queued_message(*, agent_id: str, scope_key: str, queued_id: str) -> dict:
+    """Remove a queued message before it dispatches (AP-287). Scoped to the
+    conversation so it can't delete another thread's queue entry."""
+    from backend.forge import msg_queue
+    removed = msg_queue.remove(queued_id=queued_id, agent_id=agent_id,
+                               scope_key=scope_key)
+    return {"ok": removed}
+
+
 def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     """ADR 008: Stop button in chat.
 
