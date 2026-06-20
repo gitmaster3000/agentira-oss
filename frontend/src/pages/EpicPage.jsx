@@ -174,7 +174,7 @@ export function EpicPage() {
                 )}
             </div>
 
-            <div className="card">
+            <div className="card max-h-72 overflow-y-auto flex-shrink-0">
                 {editing ? (
                     <div className="flex flex-col gap-4">
                         <div>
