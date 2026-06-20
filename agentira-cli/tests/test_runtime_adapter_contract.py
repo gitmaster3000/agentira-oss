@@ -94,6 +94,21 @@ def test_capability_constants_match_legacy_strings():
     assert Capability.STREAM_JSON == "stream_json"
     assert Capability.HTTP_GATEWAY == "http_gateway"
     assert Capability.MCP_CONFIG == "mcp_config"
+    assert Capability.COMPACT == "compact"
+
+
+# ── compaction (AP-190) ───────────────────────────────────────────────────
+
+@pytest.mark.parametrize("rt", ALL_RUNTIMES)
+def test_every_adapter_exposes_a_compact_instruction(rt):
+    """The compaction contract is portable — every adapter returns a non-empty
+    instruction usable as a normal resumed turn, even without native /compact."""
+    instr = rt.compact_instruction()
+    assert isinstance(instr, str) and instr.strip()
+
+
+def test_claude_advertises_native_compact():
+    assert Capability.COMPACT in ClaudeRuntime.capabilities
 
 
 def test_every_advertised_capability_is_a_known_flag():

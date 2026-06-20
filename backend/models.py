@@ -333,6 +333,10 @@ class Project(Base):
     # how roles resolve to agents ({"reviewer": {"match": [...], ...}}).
     # Validated (Pydantic RoleSpec) on use; the flow itself is system config.
     workflow_roles_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # AP-297: how long a run's cached pre-checks stay trusted before they're
+    # re-validated on the next on-ready fetch. NULL = default (600s / 10 min);
+    # 0 = never expire by age (only an operational-env change re-runs them).
+    ready_checks_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -366,6 +370,10 @@ class ProjectRepo(Base):
     repo_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     default_branch: Mapped[str] = mapped_column(String(120), default="main")
+    # AP-296: how fresh an agent's work desk starts. always_latest (default) =
+    # cut/rebase off the latest default_branch; new_only = latest for new desks
+    # but never rebase resumed work; pinned = opt-in, frozen base (loud warning).
+    worktree_freshness: Mapped[str] = mapped_column(String(20), default="always_latest")
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 

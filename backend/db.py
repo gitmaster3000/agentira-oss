@@ -647,6 +647,10 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "workflow_enabled",
                                     "BOOLEAN DEFAULT 0 NOT NULL")
             added |= _ensure_column(conn, "projects", "workflow_roles_json", "TEXT")
+            # AP-297: per-project TTL for cached pre-run checks (NULL = 600s
+            # default; 0 = no time expiry, env-change re-runs only).
+            added |= _ensure_column(conn, "projects", "ready_checks_ttl_seconds",
+                                    "INTEGER")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         # AP-154: tasks gain repos_json — JSON list when a task touches more
         # than one of the project's repos. NULL stays back-compat with
@@ -658,6 +662,10 @@ def run_migrations():
         # repo_url and no project_repos rows, insert one primary row.
         # Runs after `Base.metadata.create_all` has created project_repos.
         if "projects" in tables and "project_repos" in tables:
+            # AP-296: per-repo worktree freshness policy (always_latest default).
+            if _ensure_column(conn, "project_repos", "worktree_freshness",
+                              "VARCHAR(20)"):
+                added = True
             _backfill_primary_project_repo(conn)
             if added:
                 conn.commit()
@@ -757,6 +765,12 @@ def run_migrations():
             # Per-run log directory (~/.agentira/runs/<run_id>/).
             added |= _ensure_column(conn, "forge_runs", "log_dir",
                                     "VARCHAR(500)")
+            # AP-297: cached pre-run (ready) checks + their env signature/time.
+            added |= _ensure_column(conn, "forge_runs", "ready_checks_json", "TEXT")
+            added |= _ensure_column(conn, "forge_runs", "ready_checks_sig",
+                                    "VARCHAR(64)")
+            added |= _ensure_column(conn, "forge_runs", "ready_checks_at",
+                                    "TIMESTAMP")
             if added:
                 conn.commit()
 

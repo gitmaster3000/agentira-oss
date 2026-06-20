@@ -83,35 +83,63 @@ def create(*, agent_id: str, task_id: str | None = None,
         return _run_to_dict(r)
 
 
-# CLEANUP(AP-190): becomes get-or-create THE run for (agent, task) — one run
-# per task chat, reused across turns — not a fresh row reserved every dispatch.
-def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
-                               project_id: str | None,
-                               model_used: str,
-                               initial_prompt: str,
-                               worktree_path: str,
-                               worktree_branch: str,
-                               log_dir: str) -> str:
-    """Reserve a Run row for a task-chat turn at dispatch time.
+def get_or_create_task_run(db, *, agent_id: str, task_id: str,
+                           project_id: str | None,
+                           trigger_event: str = "chat",
+                           model_used: str = "",
+                           initial_prompt: str = "",
+                           worktree_path: str = "",
+                           worktree_branch: str = "",
+                           log_dir: str = "") -> str:
+    """AP-190: THE one run per (agent, task), reused across turns.
 
-    Caller owns the session and commit. Returns the new run_id.
+    First dispatch for an (agent, task) creates the row; every later turn
+    reuses the SAME run, resetting it to RUNNING for the new turn (the
+    previous turn's verdict — outcome/diff/error — is overwritten at
+    completion). `session_id` (the runtime resume handle) and `is_work` are
+    sticky: we keep resuming the same conversation, and once a run has done
+    durable work it stays work. Caller owns the session and commit; returns
+    the run_id.
 
-    Every task-chat turn gets a real run up-front so the agent can register
-    artifacts, the daemon can tee logs to a run-keyed dir, and the worktree is
-    isolated — BEFORE we know if the turn does work. It starts is_work=False;
-    `complete_trigger` sets is_work=True iff the turn produced durable work, at
-    which point it surfaces in the Runs list. A talk-only turn stays
-    is_work=False and the UI keeps it as chat. (Replaces the old shadow-run
-    reservation that was deleted/promoted at completion.)
-
-    Persists `initial_prompt` so post-mortem diagnostics on a stuck run can
-    show what the agent was asked to do — without it, a hung run is a blank row.
+    Reuse is scoped to the same `trigger_event`: a chat turn reuses the
+    (agent, task) *chat* run, never an explicit ``task.scheduled`` run — an
+    explicit work episode and a chat conversation stay distinct rows (a
+    comment must not revive a parked explicit run; see
+    test_mention_comment_does_not_revive_parked_run).
     """
+    run = (db.query(Run)
+             .filter(Run.agent_id == agent_id, Run.task_id == task_id,
+                     Run.trigger_event == trigger_event)
+             .order_by(Run.created_at.desc())
+             .first())
+    if run is not None:
+        # Reuse: start a fresh turn on the existing episode. Clear the prior
+        # turn's terminal verdict + interrupt bookkeeping; completion re-stamps.
+        run.status = RunStatus.RUNNING
+        run.started_at = _utc_now()
+        run.finished_at = None
+        run.duration_ms = None
+        run.outcome = None
+        run.error = None
+        run.interrupt_intent = None
+        run.stop_requested_at = None
+        if initial_prompt:
+            run.initial_prompt = initial_prompt
+        if worktree_path:
+            run.worktree_path = worktree_path
+        if worktree_branch:
+            run.worktree_branch = worktree_branch
+        if log_dir:
+            run.log_dir = log_dir
+        if model_used:
+            run.model_used = model_used
+        db.flush()
+        return run.id
     run = Run(
         agent_id=agent_id,
         task_id=task_id,
         project_id=project_id or None,
-        trigger_event="chat",
+        trigger_event=trigger_event,
         status=RunStatus.RUNNING,
         model_used=model_used,
         initial_prompt=initial_prompt or "",
@@ -124,6 +152,28 @@ def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
     db.add(run)
     db.flush()
     return run.id
+
+
+def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
+                               project_id: str | None,
+                               model_used: str,
+                               initial_prompt: str,
+                               worktree_path: str,
+                               worktree_branch: str,
+                               log_dir: str) -> str:
+    """AP-190: get-or-create THE (agent, task) run for a task-chat turn.
+
+    Thin wrapper over :func:`get_or_create_task_run` — kept for its existing
+    call site. Returns the (possibly reused) run_id. `complete_trigger` flips
+    is_work=True iff a turn produced durable work; a talk-only turn keeps the
+    row is_work=False and the UI shows it as chat.
+    """
+    return get_or_create_task_run(
+        db, agent_id=agent_id, task_id=task_id, project_id=project_id,
+        trigger_event="chat", model_used=model_used,
+        initial_prompt=initial_prompt, worktree_path=worktree_path,
+        worktree_branch=worktree_branch, log_dir=log_dir,
+    )
 
 
 # ── Run emergence ─────────────────────────────────────────────────────

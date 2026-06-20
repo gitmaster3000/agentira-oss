@@ -27,6 +27,11 @@
 - New features go in their own `backend/<domain>.py` (or `backend/forge/<domain>.py`), not appended to `services.py`. Functions, not class hierarchies, unless there's a real polymorphism need. See `backend/attachments.py`, `backend/forge/turns.py`, `backend/forge/live_inflight.py`.
 - **Prompts are configuration, not code.** Agent system prompts live on `Profile.system_prompt` (edited in Agent Settings UI). Task content lives on `Task.description` (edited in Task UI). Don't hardcode prompt text in dispatch code, and never re-apply a code constant on top of a user-edited row (set-if-empty seeds are the only acceptable shape).
 
+## Plain language for users (product-wide)
+- Audience is founders, software houses, solo entrepreneurs, and small teams chasing throughput — **not git or infra experts**. Everything user-facing (UI labels, settings, run badges, warnings, plan/explanation text) stays in plain language by default.
+- Technical internals (branch names, base points, git mechanics, daemon details) hide behind an optional **"Advanced / technical" reveal** — present for those who want it, never in the default view.
+- This is a standing rule for every feature, not a one-off. A non-engineer product owner must see the same honest status an engineer does, in words they understand.
+
 ## Products (Flowty umbrella)
 - **Flowty Studio** = existing Agentira workspace/tasks (routes: `/`)
 - **Flowty Forge** = agent orchestration (routes: `/forge/*`)

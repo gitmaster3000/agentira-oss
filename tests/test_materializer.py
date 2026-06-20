@@ -42,7 +42,7 @@ def isolated_home(monkeypatch, tmp_path):
 
 
 def test_materialize_writes_conventions_to_workdir_when_no_repo(isolated_home):
-    cwd, _ = materialize(
+    cwd, _, _ = materialize(
         workspace_id="agentA", task_id="task1",
         repo_path="", conventions_md="# Be brief",
     )
@@ -54,7 +54,7 @@ def test_materialize_writes_conventions_to_workdir_when_no_repo(isolated_home):
 def test_materialize_uses_repo_path_when_set(isolated_home, tmp_path):
     repo = tmp_path / "myrepo"
     repo.mkdir()
-    cwd, _ = materialize(
+    cwd, _, _ = materialize(
         workspace_id="agentA", task_id="task1",
         repo_path=str(repo), conventions_md="rules",
     )
@@ -63,7 +63,7 @@ def test_materialize_uses_repo_path_when_set(isolated_home, tmp_path):
 
 
 def test_materialize_falls_back_when_repo_path_missing(isolated_home):
-    cwd, _ = materialize(
+    cwd, _, _ = materialize(
         workspace_id="agentA", task_id="task1",
         repo_path="/nonexistent/path/xyz",
         conventions_md="rules",
@@ -76,7 +76,7 @@ def test_materialize_falls_back_when_repo_path_missing(isolated_home):
 def test_courtesy_symlinks_created(isolated_home, tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
-    cwd, _ = materialize(
+    cwd, _, _ = materialize(
         workspace_id="a", task_id="t",
         repo_path=str(repo), conventions_md="rules",
     )

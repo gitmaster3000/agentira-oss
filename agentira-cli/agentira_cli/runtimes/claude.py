@@ -15,7 +15,7 @@ class ClaudeRuntime(Runtime):
     provider = "claude"
     default_binary = "claude"
     env_path_override = "AGENTIRA_CLAUDE_PATH"
-    capabilities = ("stream_json", "mcp_config", "resume")
+    capabilities = ("stream_json", "mcp_config", "resume", "compact")
     # Static list mixing claude-code's stable aliases (always-latest) with
     # a curated set of dated SKUs so users can pin an older generation if
     # they need reproducibility or a specific behavior. The CLI accepts

@@ -73,15 +73,13 @@ def test_capture_returns_diff_for_modified_file(repo: Path):
 
 @requires_git
 def test_capture_handles_new_files(repo: Path):
-    """Untracked files don't show in `git diff`; this matches `git diff`'s
-    own behavior (it diffs vs HEAD, not the working tree as a whole).
-    Documenting this so we can extend later if we want untracked too."""
+    """ADR 009 / AP-149: capture ALSO surfaces NEW untracked files (plain
+    `git diff` would miss them, since it diffs vs HEAD). The earlier baseline
+    expected empty here; scope expanded to report untracked, so this asserts
+    the file is now surfaced."""
     (repo / "newfile.txt").write_text("hello\n")
     diff_stat, diff = capture(repo)
-    # Untracked files won't appear in plain `git diff` — confirm baseline
-    # behavior so anyone expanding scope later updates this test.
-    assert diff == ""
-    assert diff_stat == ""
+    assert "newfile.txt" in diff
 
 
 @requires_git

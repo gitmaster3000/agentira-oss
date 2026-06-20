@@ -250,6 +250,16 @@ class Run(Base):
     # legacy rows or for runs prepared before this column landed.
     log_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # AP-297: cached pre-run (ready) checks. Recomputed when the cache is
+    # older than the project's TTL or when the operational-env signature
+    # changes (runtime, daemon online, API key, env vars, MCP, repo) — never
+    # for task-content edits. Keeps re-validation meaningful without re-running
+    # the checks on every on-ready fetch of a reused run.
+    ready_checks_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ready_checks_sig: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ready_checks_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     agent: Mapped["Agent"] = relationship(back_populates="runs")

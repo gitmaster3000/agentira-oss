@@ -13,6 +13,7 @@ composes, it does not own their SQL.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -22,6 +23,8 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo
 from backend.forge.repos import tasks as tasks_repo
+
+logger = logging.getLogger("agentira.tasks")
 
 # Known task types. Behavior is identical for now (base TaskService); a subclass
 # is registered in _OVERRIDES only once a type's behavior actually diverges.
@@ -370,7 +373,19 @@ class TaskService:
             agent_notifier.dispatch(db, "task.moved", services._task_to_dict(task), actor)
 
             db.refresh(task)
-            return services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
+            result = services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
+
+        # AP-190: a completed task compacts each agent's conversation so a later
+        # reopen starts from a summary, not the whole transcript. Best-effort —
+        # the move must succeed regardless. Done outside the session above.
+        if new_status == "done":
+            try:
+                from backend.forge import compaction
+                compaction.compact_task_on_done(task_id)
+            except Exception as exc:  # noqa: BLE001 — never fail a move on this
+                logger.warning("compaction on done failed task=%s: %s",
+                               task_id, exc)
+        return result
 
     # ── delete ────────────────────────────────────────────────────────────
     def delete(self, task_id: str) -> bool:

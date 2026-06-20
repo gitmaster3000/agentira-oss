@@ -232,6 +232,9 @@ def _project_to_dict(p: Project) -> dict:
         # mapping only; the flow itself is system config, view-only).
         "workflow_enabled": bool(getattr(p, "workflow_enabled", False)),
         "workflow_roles_json": getattr(p, "workflow_roles_json", None) or "",
+        # AP-297: TTL (seconds) for cached pre-run checks. null = default (600);
+        # 0 = never expire by age (re-run only when the environment changes).
+        "ready_checks_ttl_seconds": getattr(p, "ready_checks_ttl_seconds", None),
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks),
         "members": [m.profile.name for m in p.members],
@@ -558,7 +561,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    repo_url: Optional[str] = None,
                    workspace_kind: Optional[str] = None,
                    workflow_enabled: Optional[bool] = None,
-                   workflow_roles_json: Optional[str] = None) -> dict:
+                   workflow_roles_json: Optional[str] = None,
+                   ready_checks_ttl_seconds: Optional[int] = None) -> dict:
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
@@ -614,6 +618,12 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                 except Exception as exc:
                     raise ValueError(f"invalid workflow_roles_json: {exc}")
             p.workflow_roles_json = raw
+        if ready_checks_ttl_seconds is not None:
+            # AP-297: three states. <0 resets to the default (NULL → 600s);
+            # 0 = never expire by age; >0 = custom seconds. None = no change
+            # (function convention), so a negative sentinel reaches "default".
+            ttl = int(ready_checks_ttl_seconds)
+            p.ready_checks_ttl_seconds = None if ttl < 0 else ttl
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -1005,6 +1015,7 @@ def _project_repo_to_dict(r) -> dict:
         "repo_path": r.repo_path or "",
         "repo_url": r.repo_url or "",
         "default_branch": r.default_branch or "main",
+        "worktree_freshness": getattr(r, "worktree_freshness", None) or "always_latest",
         "is_primary": bool(r.is_primary),
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
@@ -1025,7 +1036,8 @@ def list_project_repos(project_id: str) -> list[dict]:
 def update_project_repo(project_id: str, repo_name: str, *,
                         repo_url: Optional[str] = None,
                         repo_path: Optional[str] = None,
-                        default_branch: Optional[str] = None) -> dict:
+                        default_branch: Optional[str] = None,
+                        worktree_freshness: Optional[str] = None) -> dict:
     """AP-197: update an existing project repo (e.g. connect a remote URL).
 
     This is the multi-repo equivalent of editing `Project.repo_url` — needed so
@@ -1052,6 +1064,11 @@ def update_project_repo(project_id: str, repo_name: str, *,
             row.repo_path = rp or None
         if default_branch is not None:
             row.default_branch = default_branch.strip() or "main"
+        if worktree_freshness is not None:
+            wf = worktree_freshness.strip() or "always_latest"
+            if wf not in ("always_latest", "new_only", "pinned"):
+                return {"error": f"invalid worktree_freshness: {wf!r}"}
+            row.worktree_freshness = wf
         db.commit()
         db.refresh(row)
         return _project_repo_to_dict(row)

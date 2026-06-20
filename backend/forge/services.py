@@ -2280,6 +2280,11 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      worktree_source_path: str = "",
                      worktree_source_url: str = "",
                      worktree_branch: str = "",
+                     # AP-296: single-repo base branch + freshness policy. The
+                     # daemon cuts/rebases the desk off `origin/<base_branch>`
+                     # per `worktree_freshness` (always_latest|new_only|pinned).
+                     worktree_base_branch: str = "main",
+                     worktree_freshness: str = "always_latest",
                      workspace_kind: str = "",
                      # AP-236: multi-repo. When non-empty, the daemon clones
                      # each entry and worktree-adds it into <task_dir>/<name>/
@@ -2541,6 +2546,8 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         worktree_source_path=worktree_source_path,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
+        worktree_base_branch=worktree_base_branch,
+        worktree_freshness=worktree_freshness,
         workspace_kind=workspace_kind,
         worktree_repos=(worktree_repos or []),
         conventions_md=conventions_md,
@@ -2872,6 +2879,9 @@ def dispatch_pending_run(*, run_id: str,
             else:
                 worktree_source_path = project.repo_path or ""
                 worktree_source_url = (getattr(project, "repo_url", None) or "")
+            # AP-296: base branch + freshness for the single-repo desk.
+            worktree_base_branch = (chosen or {}).get("default_branch") or "main"
+            worktree_freshness = (chosen or {}).get("worktree_freshness") or "always_latest"
             # AP-236: when a multi-repo project leaves the task's repo_name
             # unset, give the agent ALL the project's repos in its worktree
             # (no routing, no wandering). Each repo materializes as a
@@ -2888,6 +2898,10 @@ def dispatch_pending_run(*, run_id: str,
                             "name": r.get("name") or "repo",
                             "source_url": r["repo_url"],
                             "branch": worktree_branch,
+                            # AP-296: per-repo base + freshness so the daemon
+                            # cuts/rebases each desk off the latest base.
+                            "base_branch": r.get("default_branch") or "main",
+                            "freshness": r.get("worktree_freshness") or "always_latest",
                         })
         else:
             repo_path = ensure_agent_home_dir(agent)            # template
@@ -2895,6 +2909,8 @@ def dispatch_pending_run(*, run_id: str,
             worktree_source_url = ""
             worktree_branch = ""
             worktree_repos = []
+            worktree_base_branch = "main"
+            worktree_freshness = "always_latest"
 
         # AP-202: thread the resolved workspace kind so the daemon knows
         # git-vs-sandbox authoritatively (no URL-presence guessing). A sandbox
@@ -2967,6 +2983,8 @@ def dispatch_pending_run(*, run_id: str,
         worktree_source_path=worktree_source_path,
         worktree_source_url=worktree_source_url,
         worktree_branch=worktree_branch,
+        worktree_base_branch=worktree_base_branch,
+        worktree_freshness=worktree_freshness,
         workspace_kind=workspace_kind,
         worktree_repos=(worktree_repos or []),
         conventions_md=conventions_md,
@@ -2998,15 +3016,50 @@ def discard_pending_run(*, run_id: str) -> dict:
     return {"ok": True}
 
 
-def ready_checks(run_id: str) -> dict:
-    """AP-113: pre-run validation for a READY run.
+_READY_CHECKS_TTL_DEFAULT = 600  # 10 min; project may override (0 = no expiry)
+
+
+def _ready_checks_signature(*, agent, prof, project, online: bool) -> str:
+    """AP-297: hash of the OPERATIONAL environment a run's pre-checks depend
+    on — runtime binding, daemon online, API key presence, env vars, MCP
+    toolkit, repo path. Task-content edits (description/DoD) are deliberately
+    excluded: editing the task must not bust the cache. A change here means the
+    cached result is no longer trustworthy and the checks are re-run."""
+    import hashlib
+    import json as _json
+    payload = _json.dumps([
+        getattr(agent, "runtime_id", None) or "",
+        bool(online),
+        bool(prof and prof.api_key),
+        (prof.env_vars if prof else "") or "",
+        (getattr(agent, "mcp_servers", None) or ""),
+        (getattr(project, "repo_path", None) or ""),
+    ], sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _ready_checks_ttl(project) -> int:
+    """Resolve a project's pre-check TTL in seconds. NULL → default (600);
+    0 → no time expiry (only an env-signature change re-runs the checks)."""
+    val = getattr(project, "ready_checks_ttl_seconds", None) if project else None
+    return _READY_CHECKS_TTL_DEFAULT if val is None else int(val)
+
+
+def ready_checks(run_id: str, *, force: bool = False) -> dict:
+    """AP-113 / AP-297: pre-run validation for a READY run, cached.
 
     Returns a checklist the UI shows before the user clicks Start —
     runtime, API key, MCP, environment/keys, repo, task context. Checks
     are advisory: only a missing runtime is fatal (and dispatch enforces
     that anyway). `ready` is False when any check is a hard fail.
+
+    The result is cached on the run and reused on later on-ready fetches; it's
+    recomputed only when the cache is older than the project's TTL, the
+    operational-env signature changed, or `force=True`. `cached` in the result
+    says whether this call served the cache.
     """
     import json as _json
+    from datetime import datetime, timezone
     from backend.models import Task, Project, Profile as _Profile
 
     checks: list[dict] = []
@@ -3027,6 +3080,25 @@ def ready_checks(run_id: str) -> dict:
         project = db.get(Project, run.project_id) if run.project_id else None
         runtime = (db.get(ForgeRuntime, agent.runtime_id)
                    if agent.runtime_id else None)
+
+        # AP-297: serve the cache while it's fresh and the operational env is
+        # unchanged. Keeps the on-ready trigger but avoids re-running on every
+        # fetch of a reused run.
+        online = _is_runtime_online(runtime)
+        sig = _ready_checks_signature(agent=agent, prof=prof, project=project,
+                                      online=online)
+        ttl = _ready_checks_ttl(project)
+        if (not force and run.ready_checks_json
+                and run.ready_checks_sig == sig and run.ready_checks_at):
+            age = (datetime.now(timezone.utc)
+                   - _utc(run.ready_checks_at)).total_seconds()
+            if ttl == 0 or age < ttl:
+                try:
+                    cached = _json.loads(run.ready_checks_json)
+                    cached["cached"] = True
+                    return cached
+                except Exception:
+                    pass  # corrupt cache → fall through and recompute
 
         # Runtime bound — the only fatal check.
         if runtime:
@@ -3128,17 +3200,25 @@ def ready_checks(run_id: str) -> dict:
             add("context", "Task context", "ok",
                 "No task — the run carries its own prompt.")
 
-    fatal = any(c["status"] == "fail" for c in checks)
-    return {
-        "run_id": run_id,
-        "ready": not fatal,
-        "checks": checks,
-        "summary": {
-            "ok": sum(1 for c in checks if c["status"] == "ok"),
-            "warn": sum(1 for c in checks if c["status"] == "warn"),
-            "fail": sum(1 for c in checks if c["status"] == "fail"),
-        },
-    }
+        fatal = any(c["status"] == "fail" for c in checks)
+        result = {
+            "run_id": run_id,
+            "ready": not fatal,
+            "checks": checks,
+            "summary": {
+                "ok": sum(1 for c in checks if c["status"] == "ok"),
+                "warn": sum(1 for c in checks if c["status"] == "warn"),
+                "fail": sum(1 for c in checks if c["status"] == "fail"),
+            },
+        }
+        # AP-297: cache the fresh result + the env signature/time on the run so
+        # later on-ready fetches reuse it until stale or the env changes.
+        run.ready_checks_json = _json.dumps(result)
+        run.ready_checks_sig = sig
+        run.ready_checks_at = datetime.now(timezone.utc)
+        db.commit()
+    result["cached"] = False
+    return result
 
 
 def schedule_task_run(*, task_id: str, agent_id: str,
@@ -4270,6 +4350,9 @@ def send_runtime_message(
                 else:
                     worktree_source_path = proj.repo_path or ""
                     worktree_source_url = getattr(proj, "repo_url", None) or ""
+                # AP-296: base branch + freshness for the single-repo desk.
+                worktree_base_branch = (chosen or {}).get("default_branch") or "main"
+                worktree_freshness = (chosen or {}).get("worktree_freshness") or "always_latest"
                 task_path, task_branch = _compute_worktree_paths(
                     agent_id=a.id, project_id=project_id,
                     task_id=_task_id_for_cwd,
@@ -4291,12 +4374,17 @@ def send_runtime_message(
                                 "name": r.get("name") or "repo",
                                 "source_url": r["repo_url"],
                                 "branch": worktree_branch,
+                                # AP-296: per-repo base + freshness.
+                                "base_branch": r.get("default_branch") or "main",
+                                "freshness": r.get("worktree_freshness") or "always_latest",
                             })
             else:
                 repo_path = ensure_agent_home_dir(a)
                 worktree_source_path = ""
                 worktree_source_url = ""
                 worktree_branch = ""
+                worktree_base_branch = "main"
+                worktree_freshness = "always_latest"
 
             # AP-202: authoritative workspace kind in the frame; sandbox chats
             # never get a git worktree.
@@ -4390,6 +4478,8 @@ def send_runtime_message(
                 worktree_source_path=worktree_source_path,
                 worktree_source_url=worktree_source_url,
                 worktree_branch=worktree_branch,
+                worktree_base_branch=worktree_base_branch,
+                worktree_freshness=worktree_freshness,
                 workspace_kind=workspace_kind,
                 worktree_repos=worktree_repos,
                 conventions_md=conventions_md,

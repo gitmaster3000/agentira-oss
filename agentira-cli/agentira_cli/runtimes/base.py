@@ -27,6 +27,7 @@ class Capability:
     PAUSE = "pause"                  # provider supports clean-terminate + resume
     TOOLS = "tools"                  # provider hosts tool execution itself
     MCP = "mcp"                      # provider accepts MCP server config
+    COMPACT = "compact"              # provider can summarize/compact its own session
 
     # Legacy wire-shape labels in use today — semantic equivalents above.
     STREAM_JSON = "stream_json"      # CLI runtime streams stream-json over stdout
@@ -136,6 +137,24 @@ class Runtime:
         - ollama / bare LLM: no thread to clear.
         """
         return None
+
+    @classmethod
+    def compact_instruction(cls) -> str:
+        """The prompt that asks a runtime to compact its own session into a
+        handoff summary (AP-190).
+
+        Portable by default: it works as a normal resumed turn for ANY runtime
+        — the runtime summarizes the conversation and the result is stored as
+        the conversation's carry-over. Adapters whose providers expose a native
+        compaction primitive (claude's `/compact`) may override to emit that
+        instead; adapters declare `Capability.COMPACT` when they do it well.
+        """
+        return (
+            "Summarize this task's conversation into a concise handoff: the "
+            "decisions made, the current state of the work, and what's left to "
+            "do. This summary replaces the full transcript on reopen, so keep "
+            "everything a fresh start would need and drop the play-by-play."
+        )
 
     @classmethod
     def detect(cls) -> DetectedRuntime | None:

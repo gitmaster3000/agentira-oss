@@ -49,13 +49,41 @@ def _git_common_dir(path: str) -> "str | None":
     if out.returncode != 0:
         return None
     gitdir = out.stdout.strip()
-    marker = "/.git/worktrees/"
+    # A linked worktree's git dir is "<common>/worktrees/<name>"; strip back to
+    # the common dir so two worktrees of the same source compare equal. Works
+    # for both a normal clone ("<main>/.git/worktrees/..") and a bare clone
+    # ("<bare>/worktrees/..") — splitting on "/worktrees/" gives the common dir
+    # in both cases.
+    marker = "/worktrees/"
     if marker in gitdir:
-        gitdir = gitdir.split(marker)[0] + "/.git"
+        gitdir = gitdir.split(marker)[0]
     return os.path.realpath(gitdir)
 
 
-def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
+def _freshen(target: str, base_branch: str, freshness: str) -> str:
+    """Bring a resumed worktree up to date per `freshness`. Returns a reason."""
+    import subprocess
+    if freshness == "pinned":
+        return "pinned_stale_base"
+    if freshness == "new_only":
+        return "ok"   # leave resumed work on its original base
+    # always_latest: rebase the in-progress branch onto the latest base.
+    r = subprocess.run(
+        ["git", "-C", target, "rebase", f"origin/{base_branch}"],
+        capture_output=True, text=True, timeout=120, check=False,
+    )
+    if r.returncode != 0:
+        # Conflict: don't break the run — abort the rebase, keep the work on
+        # its old base, and flag it so the run badge can warn.
+        subprocess.run(["git", "-C", target, "rebase", "--abort"],
+                       check=False, timeout=60)
+        return "rebase_conflict_kept_base"
+    return "ok"
+
+
+def _ensure_worktree(*, source: str, target: str, branch: str,
+                     base_branch: str = "main",
+                     freshness: str = "always_latest") -> str:
     """Create / repair a git worktree at `target` off `source` on `branch`.
 
     Returns a diagnostic reason:
@@ -89,7 +117,9 @@ def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
         want = _git_common_dir(source)
         have = _git_common_dir(target)
         if want and have and want == have:
-            return "ok"   # correct worktree already present — reuse
+            # Correct worktree already present — reuse, but freshen it (a
+            # resumed long-running task must be rebased onto the latest base).
+            return _freshen(target, base_branch, freshness)
         # Wrong-source / stale worktree → remove and recreate so the agent
         # doesn't silently run against the wrong repo.
         logger.warning(
@@ -155,12 +185,46 @@ def _ensure_worktree(*, source: str, target: str, branch: str) -> str:
         logger.info("clearing non-worktree leftover at %s before worktree add",
                     target)
         shutil.rmtree(target, ignore_errors=True)
-    # `-B` so re-creating after a worktree prune doesn't trip on the
-    # branch already existing.
-    subprocess.run(
-        ["git", "-C", source, "worktree", "add", "-B", branch, target],
-        check=True, timeout=60,
-    )
+    branch_exists = subprocess.run(
+        ["git", "-C", source, "rev-parse", "--verify", "--quiet",
+         f"refs/heads/{branch}"],
+        capture_output=True, timeout=30, check=False,
+    ).returncode == 0
+
+    if branch_exists:
+        # Resume: check out the existing branch (no `-B` reset), then freshen.
+        subprocess.run(
+            ["git", "-C", source, "worktree", "add", target, branch],
+            check=True, timeout=60,
+        )
+        fr = _freshen(target, base_branch, freshness)
+        if reason == "ok":
+            reason = fr
+    elif freshness == "pinned":
+        # Pinned new branch: cut from the clone's HEAD, not the latest base.
+        subprocess.run(
+            ["git", "-C", source, "worktree", "add", "-B", branch, target],
+            check=True, timeout=60,
+        )
+        if reason == "ok":
+            reason = "pinned_stale_base"
+    else:
+        # New branch off the latest base. Fall back to HEAD if origin/<base>
+        # isn't present (misconfigured base) so the run still proceeds.
+        add = subprocess.run(
+            ["git", "-C", source, "worktree", "add", "-b", branch, target,
+             f"origin/{base_branch}"],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        if add.returncode != 0:
+            logger.warning("worktree add off origin/%s failed (%s); using HEAD",
+                           base_branch, (add.stderr or add.stdout).strip())
+            subprocess.run(
+                ["git", "-C", source, "worktree", "add", "-B", branch, target],
+                check=True, timeout=60,
+            )
+            if reason == "ok":
+                reason = "base_not_found_used_head"
     return reason
 
 
@@ -439,6 +503,9 @@ class AgentiraDaemon:
         )
         worktree_source_url = frame.get("worktree_source_url", "") or ""
         worktree_branch = frame.get("worktree_branch", "") or ""
+        # AP-296: where to start the desk from, and whether to keep it current.
+        worktree_base_branch = (frame.get("worktree_base_branch") or "main").strip() or "main"
+        worktree_freshness = (frame.get("worktree_freshness") or "always_latest").strip() or "always_latest"
         # AP-197: workspace kind decides how the worktree source is resolved.
         # git → clone the remote into ~/.agentira/sources (default when a URL is
         # present); local_folder → use the on-host source path as-is; sandbox →
@@ -529,6 +596,8 @@ class AgentiraDaemon:
                             reason = await asyncio.to_thread(
                                 _ensure_worktree,
                                 source=clone, target=target, branch=branch,
+                                base_branch=(r.get("base_branch") or "main"),
+                                freshness=(r.get("freshness") or "always_latest"),
                             )
                             if reason.startswith("worktree_source_not_found"):
                                 provision_error = (
@@ -569,6 +638,8 @@ class AgentiraDaemon:
                             source=effective_source,
                             target=repo_path,
                             branch=worktree_branch,
+                            base_branch=worktree_base_branch,
+                            freshness=worktree_freshness,
                         )
                         # A missing source means no real working tree — fail the
                         # run instead of dispatching the agent into a stub.

@@ -40,7 +40,7 @@ def client():
         admin = Profile(name="admin", role_id=admin_role.id, password_hash="")
         db.add(admin)
         db.commit()
-        token = create_token("admin", admin.id, "admin")
+        token = create_token("admin", admin.id, "admin", admin.org_id)
         db.close()
         c = TestClient(app)
         c.headers["Authorization"] = f"Bearer {token}"

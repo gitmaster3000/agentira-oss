@@ -86,6 +86,9 @@ class ProjectUpdate(BaseModel):
     # itself is system config; see templates/workflow/default.yaml).
     workflow_enabled: Optional[bool] = None
     workflow_roles_json: Optional[str] = None
+    # AP-297: TTL (seconds) for cached pre-run checks. null = no change;
+    # negative resets to the default (600s); 0 = never expire by age.
+    ready_checks_ttl_seconds: Optional[int] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -503,6 +506,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             wake_on_comment=body.wake_on_comment,
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
+            ready_checks_ttl_seconds=body.ready_checks_ttl_seconds,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))

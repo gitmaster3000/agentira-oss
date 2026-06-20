@@ -85,18 +85,27 @@ def ensure_source_clone(url: str, *, timeout: int = 600) -> tuple[str, str]:
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
     dest = SOURCES_DIR / _slug(url)
     with _lock_for(str(dest)):
-        if (dest / ".git").is_dir():
+        if dest.exists() and _is_bare(dest):
+            # Bare master copy already present — just refresh remote-tracking
+            # refs so origin/<base> is current for the per-task worktrees.
             r = subprocess.run(
-                ["git", "-C", str(dest), "fetch", "--prune", "--quiet"],
+                ["git", "-C", str(dest), "fetch", "--prune", "--quiet", "origin"],
                 capture_output=True, text=True, timeout=timeout, env=_git_env(),
             )
             if r.returncode != 0:
                 logger.warning("git fetch failed for %s: %s",
                                dest, (r.stderr or r.stdout).strip())
             return str(dest), "ok"
+        if dest.exists():
+            # A legacy NON-bare clone (or a parked one an agent committed into).
+            # Re-clone it bare so nothing can ever sit in / mutate the master.
+            # Per-task worktrees are unaffected — their `.git` files point at
+            # this source and get re-created on next dispatch.
+            logger.info("re-cloning non-bare source %s as bare", dest)
+            shutil.rmtree(dest, ignore_errors=True)
         dest.parent.mkdir(parents=True, exist_ok=True)
         r = subprocess.run(
-            ["git", "clone", "--quiet", url, str(dest)],
+            ["git", "clone", "--bare", "--quiet", url, str(dest)],
             capture_output=True, text=True, timeout=timeout, env=_git_env(),
         )
         if r.returncode != 0:
@@ -105,7 +114,30 @@ def ensure_source_clone(url: str, *, timeout: int = 600) -> tuple[str, str]:
             raise SourceProvisionError(
                 f"git clone failed for {url}: {(r.stderr or r.stdout).strip()}"
             )
+        # A bare clone stores remote branches in refs/heads with no fetch
+        # refspec for remote-tracking. Set one + fetch so origin/<base>
+        # resolves (the worktree code branches/rebases off origin/<base>).
+        subprocess.run(
+            ["git", "-C", str(dest), "config", "remote.origin.fetch",
+             "+refs/heads/*:refs/remotes/origin/*"],
+            capture_output=True, text=True, timeout=timeout, env=_git_env(),
+            check=False,
+        )
+        subprocess.run(
+            ["git", "-C", str(dest), "fetch", "--prune", "--quiet", "origin"],
+            capture_output=True, text=True, timeout=timeout, env=_git_env(),
+            check=False,
+        )
         return str(dest), "cloned"
+
+
+def _is_bare(dest) -> bool:
+    """True if `dest` is a bare git repo (the protected master copy)."""
+    r = subprocess.run(
+        ["git", "-C", str(dest), "rev-parse", "--is-bare-repository"],
+        capture_output=True, text=True, timeout=30, env=_git_env(), check=False,
+    )
+    return r.returncode == 0 and r.stdout.strip() == "true"
 
 
 def classify_provision_error(exc: Exception, *, source: str = "") -> str:
