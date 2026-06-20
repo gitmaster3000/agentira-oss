@@ -14,7 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import {
     Folder, GitBranch, Save, Plus, Trash2, Star, Settings as SettingsIcon,
-    Link2, Pencil, Check, X,
+    Link2, Pencil, Check, X, AlertTriangle, ChevronDown,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -368,12 +368,80 @@ function RepoRow({ repo, onRemove, onUpdate, busy }) {
                         default branch: {repo.default_branch}
                     </div>
                 )}
+                <FreshnessControl
+                    value={repo.worktree_freshness || 'always_latest'}
+                    baseBranch={repo.default_branch || 'main'}
+                    busy={busy}
+                    onChange={(v) => onUpdate({ worktree_freshness: v })}
+                />
             </div>
             <button onClick={onRemove} disabled={busy}
                 className="btn btn-ghost text-red-400 hover:bg-red-500/10"
                 title="Detach this repo from the project">
                 <Trash2 className="w-4 h-4" />
             </button>
+        </div>
+    );
+}
+
+
+// Plain-language control for how fresh an agent's starting point is.
+// Default ("always latest") is a calm green line. Anything else is a
+// deliberate, warned-about choice. The raw modes + branch name live behind
+// an "Advanced" reveal — see the plain-language principle in CLAUDE.md.
+const FRESHNESS = {
+    always_latest: {
+        label: 'Agents always work from the latest',
+        advanced: 'always_latest — branch new desks off origin/<base>; rebase resumed work onto it.',
+        danger: false,
+    },
+    new_only: {
+        label: 'Only new work starts fresh',
+        plain: 'New tasks start from the latest, but long-running work keeps its original starting point (no auto-update).',
+        advanced: 'new_only — new desks off origin/<base>; resumed branches left as-is.',
+        danger: true,
+    },
+    pinned: {
+        label: 'Pinned to a fixed point',
+        plain: 'Agents always start from a frozen snapshot, never the latest. They may build on outdated work.',
+        advanced: 'pinned — desks cut from the clone HEAD; no origin/<base>, no rebase.',
+        danger: true,
+    },
+};
+
+function FreshnessControl({ value, baseBranch, busy, onChange }) {
+    const [showAdv, setShowAdv] = useState(false);
+    const cfg = FRESHNESS[value] || FRESHNESS.always_latest;
+
+    return (
+        <div className="mt-2 text-xs">
+            <div className={`flex items-center gap-1.5 ${cfg.danger ? 'text-yellow-500' : 'text-green-500'}`}>
+                {cfg.danger ? <AlertTriangle className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                <span>{cfg.label}</span>
+            </div>
+            {cfg.danger && (
+                <div className="mt-1 bg-yellow-500/10 border border-yellow-500/20 rounded p-2 text-yellow-300/90">
+                    {cfg.plain} Only choose this on purpose.
+                </div>
+            )}
+            <button type="button" onClick={() => setShowAdv((s) => !s)}
+                className="flex items-center gap-1 text-text-tertiary hover:text-text-secondary mt-1">
+                <ChevronDown className={`w-3 h-3 transition-transform ${showAdv ? '' : '-rotate-90'}`} />
+                Advanced / technical
+            </button>
+            {showAdv && (
+                <div className="mt-1 pl-4 space-y-1.5">
+                    {Object.entries(FRESHNESS).map(([key, c]) => (
+                        <label key={key} className="flex items-start gap-2 cursor-pointer">
+                            <input type="radio" name={`fresh-${baseBranch}`} className="mt-0.5"
+                                checked={value === key} disabled={busy}
+                                onChange={() => value !== key && onChange(key)} />
+                            <span className="font-mono text-text-tertiary">{c.advanced}</span>
+                        </label>
+                    ))}
+                    <div className="text-[10px] text-text-tertiary">base branch: {baseBranch}</div>
+                </div>
+            )}
         </div>
     );
 }

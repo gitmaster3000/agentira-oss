@@ -808,6 +808,24 @@ function ArtifactRow({ artifact: a }) {
     );
 }
 
+// AP-296 (T5): plain-language badge for where this run STARTED — fresh, stale,
+// or pinned. Maps the daemon's worktree reason (also in meta.json) to one line
+// anyone can read. Technical detail (branch) hides in the title/hover.
+function FreshnessBadge({ reason, branch }) {
+    if (!branch) return null;   // non-git run — nothing to say about freshness
+    const MAP = {
+        pinned_stale_base: ['📌', 'Pinned to a fixed point', 'text-yellow-400'],
+        rebase_conflict_kept_base: ['⚠️', "Kept its base — couldn't auto-update (conflict)", 'text-yellow-400'],
+        base_not_found_used_head: ['⚠️', 'Base not found — started from the last copy', 'text-yellow-400'],
+    };
+    const [icon, text, color] = MAP[reason] || ['✅', 'Started current', 'text-green-400'];
+    return (
+        <div className={`flex items-center gap-1.5 text-sm mb-2 ${color}`} title={branch}>
+            <span>{icon}</span><span>{text}</span>
+        </div>
+    );
+}
+
 // Run diagnostics — surfaces the daemon's view of WHERE the agent ran.
 // Especially calls out the "agent ran in an empty scratch dir" failure
 // mode (materialize_reason="repo_path_not_found:...") that used to be
@@ -822,6 +840,8 @@ function RunDiagnostics({ run }) {
             <h2 className="text-lg font-semibold text-text-primary mb-2">
                 Where it ran
             </h2>
+
+            <FreshnessBadge reason={reason} branch={run.worktree_branch} />
 
             {fellBack && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded p-3 mb-2 text-sm text-red-300">
