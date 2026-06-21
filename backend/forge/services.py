@@ -2629,6 +2629,11 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     uses it to carry a user's follow-up message into a retry run).
     """
     from backend.models import Task
+    # AP-298: one run per (agent, task) on the explicit scheduled path —
+    # never stack duplicate READY runs. Statuses that mean "a run is live"
+    # (can't be re-prepared without clobbering it).
+    active = {RunStatus.PENDING, RunStatus.RUNNING,
+              RunStatus.INTERRUPTING, RunStatus.PAUSED}
     with _session() as db:
         task = db.get(Task, task_id)
         if not task:
@@ -2638,18 +2643,32 @@ def prepare_task_run(*, task_id: str, agent_id: str,
             return {"error": "Agent not found"}
         if not agent.runtime_id:
             return {"error": "Agent has no bound runtime"}
+        # Reuse the existing task.scheduled run for this (agent, task). If
+        # it's already live, just return it (re-preparing would break the
+        # in-flight run); otherwise re-prepare that same row below.
+        existing = (db.query(Run)
+                      .filter(Run.agent_id == agent_id, Run.task_id == task_id,
+                              Run.trigger_event == "task.scheduled")
+                      .order_by(Run.created_at.desc())
+                      .first())
+        if existing and existing.status in active:
+            return _run_to_dict(existing)
+        existing_id = existing.id if existing else None
         prompt_template = _build_task_prompt(task, extra_context)
         project_id = task.project_id
         model = agent.model or ""
 
-    run = create_run(
-        agent_id=agent_id,
-        task_id=task_id,
-        project_id=project_id,
-        trigger_event="task.scheduled",
-        model_used=model,
-    )
-    run_id = run["id"]
+    if existing_id:
+        run_id = existing_id
+    else:
+        run = create_run(
+            agent_id=agent_id,
+            task_id=task_id,
+            project_id=project_id,
+            trigger_event="task.scheduled",
+            model_used=model,
+        )
+        run_id = run["id"]
     # Substitute the real run_id, persist the prompt for editing, and flip
     # PENDING (the create_run default) → READY so the UI knows this run is
     # waiting on the user, not on the system.
@@ -2669,6 +2688,16 @@ def prepare_task_run(*, task_id: str, agent_id: str,
             r.worktree_path = worktree_path
             r.worktree_branch = worktree_branch
             r.log_dir = log_dir
+            r.model_used = model
+            # AP-298: re-preparing a row that previously ran (terminal) —
+            # wipe the prior turn's verdict so it reads as a clean READY run.
+            r.started_at = None
+            r.finished_at = None
+            r.duration_ms = None
+            r.outcome = None
+            r.error = None
+            r.interrupt_intent = None
+            r.stop_requested_at = None
             # Mirror the per-task branch onto the Task row so the run-state
             # gate (_has_branch_or_pr) and the UI can see it — the run carries
             # worktree_branch but the gate reads task.branch. Git tasks only;

@@ -203,25 +203,24 @@ def test_prepare_unknown_task_errors(test_db):
     assert "error" in result
 
 
-# ── task runs are serialized per agent (one git worktree) ──────────────
+# ── one run per (agent, task) on the scheduled path (AP-298) ───────────
+# Full coverage (reuse, terminal-reset, live-untouched) lives in
+# test_ap298_one_run_per_task_prepare.py, which wires real org context.
 
-def test_second_concurrent_task_run_is_refused(test_db):
-    """All of an agent's task runs share one worktree — a second dispatch
-    must be refused while the first is RUNNING."""
+def test_second_prepare_reuses_the_same_run(test_db):
+    """AP-298: one run per (agent, task). Preparing a second time reuses the
+    same READY row instead of stacking a duplicate — there is never more
+    than one task.scheduled run for an (agent, task)."""
     task_id, agent_id = _mk_task_agent(test_db)
     a = _drive(lambda: forge_services.prepare_task_run(
         task_id=task_id, agent_id=agent_id))
     b = _drive(lambda: forge_services.prepare_task_run(
         task_id=task_id, agent_id=agent_id))
 
-    fake = _FakeHub()
-    with patch("backend.forge.ws_dispatch.hub", fake):
-        r1 = _drive(lambda: forge_services.dispatch_pending_run(run_id=a["id"]))
-        r2 = _drive(lambda: forge_services.dispatch_pending_run(run_id=b["id"]))
-
-    assert "error" not in r1
-    assert "error" in r2 and "already running this task" in r2["error"].lower()
-    assert len(fake.calls) == 1, "the second run must not dispatch"
+    assert a["id"] == b["id"]
+    with forge_services._session() as db:
+        assert db.query(Run).filter(
+            Run.agent_id == agent_id, Run.task_id == task_id).count() == 1
 
 
 def test_schedule_task_run_refused_and_cleaned_when_agent_busy(test_db):
