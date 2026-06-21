@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, Send, Loader, Ban, MessageSquare } from 'lucide-react';
+import { Send, Loader, Ban, MessageSquare, ChevronDown, Check } from 'lucide-react';
 import { api } from '../api';
 import { AskUserQuestionCard } from '../components/AskUserQuestionCard';
 import { Markdown } from '../components/Markdown';
 import { mergeWindow, serverLoadedCount } from '../lib/chatPagination';
 
-// Global Chat page (design §2.4): left conversation list across every agent
-// (GET /forge/chats), right conversation pane. Reuses the FloatingChat message
-// loading/sending logic but scopes to the picked (agent_id, scope_key) instead
-// of the single chat:default thread.
+// Global Chat page (design §2.4): the left rail lists one row per AGENT (not one
+// row per conversation). Picking an agent opens its most-recent thread; the
+// per-agent "Conversation" selector at the top of the pane switches between
+// that agent's scoped chats (General / project / task). Reuses the FloatingChat
+// message loading/sending logic, scoped to the picked (agent_id, scope_key).
 const POLL_MS = 3000;
 const PAGE_SIZE = 50;
 const PREFETCH_PX = 120;
@@ -30,9 +31,28 @@ function agentColor(name) {
     return `hsl(${h} 55% 55%)`;
 }
 
+// Collapse the flat (agent_id, scope_key) conversation rows into one entry per
+// agent — preserving GET /forge/chats' newest-first order — so the left rail
+// shows agents, and each agent carries its own list of scoped conversations.
+function groupByAgent(convos) {
+    const byId = new Map();
+    const agents = [];
+    for (const c of convos) {
+        let a = byId.get(c.agent_id);
+        if (!a) {
+            a = { agent_id: c.agent_id, agent_name: c.agent_name, scopes: [] };
+            byId.set(c.agent_id, a);
+            agents.push(a);
+        }
+        a.scopes.push(c);
+    }
+    return { agents, byId };
+}
+
 export function Chat() {
     const [convos, setConvos] = useState([]);
     const [sel, setSel] = useState(null);          // {agent_id, scope_key, agent_name, label}
+    const [scopeOpen, setScopeOpen] = useState(false);
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
@@ -46,12 +66,14 @@ export function Chat() {
     const reachedStartRef = useRef(false);
     const lastIdRef = useRef(null);
 
-    // ── conversation list (across all agents) ───────────────────────────
+    // ── conversation rows across all agents (GET /forge/chats) ──────────
     const loadConvos = useCallback(async () => {
         try {
             const data = await api.forge.listChats();
             if (Array.isArray(data)) {
                 setConvos(data);
+                // Default-select the newest conversation overall (data is
+                // newest-first), i.e. the first agent's most-recent scope.
                 setSel((cur) => cur || (data[0] ? {
                     agent_id: data[0].agent_id, scope_key: data[0].scope_key,
                     agent_name: data[0].agent_name, label: data[0].label,
@@ -174,51 +196,75 @@ export function Chat() {
     const lastIsUser = !stopped && !!_last && _last.role === 'user' && _last.created_at
         && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
 
+    const { agents, byId } = groupByAgent(convos);
+    // The selected agent's own conversations drive the top scope selector.
+    const selScopes = (sel && byId.get(sel.agent_id)?.scopes) || [];
+
+    // Pick an agent → open its most-recent conversation.
+    const pickAgent = (a) => {
+        const top = a.scopes[0];
+        setScopeOpen(false);
+        setSel({
+            agent_id: a.agent_id, scope_key: top.scope_key,
+            agent_name: a.agent_name, label: top.label,
+        });
+    };
+    const pickScope = (c) => {
+        setScopeOpen(false);
+        setSel({
+            agent_id: c.agent_id, scope_key: c.scope_key,
+            agent_name: c.agent_name, label: c.label,
+        });
+    };
+
     return (
         <div className="flex h-full min-h-0">
-            {/* ── conversation list ─────────────────────────────────────── */}
+            {/* ── agent list (one row per agent) ────────────────────────── */}
             <aside className="w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel flex flex-col">
                 <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2">
                     <MessageSquare className="w-5 h-5 text-accent-primary" />
                     <span className="text-title-sm font-bold text-text-primary">Chat</span>
+                    <span className="ml-auto text-[11px] text-text-tertiary">{agents.length} agents</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                    {convos.length === 0 && (
+                    {agents.length === 0 && (
                         <div className="text-xs text-text-tertiary text-center py-8 px-4">
                             No conversations yet.
                         </div>
                     )}
-                    {convos.map((c) => {
-                        const active = sel && sel.agent_id === c.agent_id && sel.scope_key === c.scope_key;
+                    {agents.map((a) => {
+                        const active = sel && sel.agent_id === a.agent_id;
+                        const top = a.scopes[0];
                         return (
                             <button
-                                key={`${c.agent_id}|${c.scope_key}`}
-                                onClick={() => setSel({
-                                    agent_id: c.agent_id, scope_key: c.scope_key,
-                                    agent_name: c.agent_name, label: c.label,
-                                })}
+                                key={a.agent_id}
+                                onClick={() => pickAgent(a)}
                                 className={`w-full text-left px-3 py-2.5 border-b border-border-subtle flex gap-2.5
                                     ${active ? 'bg-accent-subtle' : 'hover:bg-bg-hover'}`}
                             >
                                 <div
                                     className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
-                                    style={{ background: agentColor(c.agent_name) }}
+                                    style={{ background: agentColor(a.agent_name) }}
                                 >
-                                    {(c.agent_name || '?').slice(0, 2).toUpperCase()}
+                                    {(a.agent_name || '?').slice(0, 2).toUpperCase()}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="text-sm font-medium text-text-primary truncate">
-                                            {c.agent_name || 'Agent'}
+                                            {a.agent_name || 'Agent'}
                                         </span>
                                         <span className="text-[11px] text-text-tertiary flex-shrink-0">
-                                            {relTime(c.last_used_at)}
+                                            {relTime(top.last_used_at)}
                                         </span>
                                     </div>
-                                    <div className="text-[11px] text-text-tertiary truncate">{c.label}</div>
                                     <div className="text-xs text-text-secondary truncate">
-                                        {c.last_message || '—'}
+                                        {top.last_message || '—'}
                                     </div>
+                                    {a.scopes.length > 1 && (
+                                        <div className="text-[11px] text-text-tertiary">
+                                            {a.scopes.length} conversations
+                                        </div>
+                                    )}
                                 </div>
                             </button>
                         );
@@ -236,14 +282,52 @@ export function Chat() {
                     <>
                         <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2.5">
                             <div
-                                className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
+                                className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                                 style={{ background: agentColor(sel.agent_name) }}
                             >
                                 {(sel.agent_name || '?').slice(0, 2).toUpperCase()}
                             </div>
-                            <div className="min-w-0">
-                                <div className="text-sm font-semibold text-text-primary truncate">{sel.agent_name}</div>
-                                <div className="text-[11px] text-text-tertiary truncate">{sel.label}</div>
+                            <div className="text-sm font-semibold text-text-primary truncate">{sel.agent_name}</div>
+
+                            {/* Per-agent conversation (scope) selector */}
+                            <div className="relative ml-auto">
+                                <button
+                                    onClick={() => setScopeOpen((v) => !v)}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-bg-hover border border-border-subtle min-w-[180px] text-left"
+                                    title="Switch conversation"
+                                >
+                                    <span className="flex-1 text-xs font-medium text-text-primary truncate">
+                                        {sel.label || 'Conversation'}
+                                    </span>
+                                    <ChevronDown className="w-3 h-3 text-text-tertiary flex-shrink-0" />
+                                </button>
+                                {scopeOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-30" onClick={() => setScopeOpen(false)} />
+                                        <div className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-border-subtle bg-bg-app shadow-xl p-1">
+                                            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+                                                Conversations
+                                            </div>
+                                            {selScopes.map((c) => (
+                                                <button
+                                                    key={c.scope_key}
+                                                    onClick={() => pickScope(c)}
+                                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover text-left"
+                                                >
+                                                    <span className="flex-1 min-w-0">
+                                                        <span className="block text-xs text-text-primary truncate">{c.label}</span>
+                                                        <span className="block text-[10px] text-text-tertiary truncate">
+                                                            {c.last_message || '—'}
+                                                        </span>
+                                                    </span>
+                                                    {c.scope_key === sel.scope_key && (
+                                                        <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
+                                                    )}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
 

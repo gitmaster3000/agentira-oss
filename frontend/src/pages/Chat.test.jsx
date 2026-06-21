@@ -76,4 +76,47 @@ describe('Chat page', () => {
             }));
         });
     });
+
+    it('shows one row per agent, not one per conversation', async () => {
+        // Same agent (a1) with two scopes + a second agent (a2): the left rail
+        // must collapse to two agent rows, not three conversation rows.
+        api.forge.listChats.mockResolvedValue([
+            { agent_id: 'a1', agent_name: 'Conductor', scope_key: 'chat:project:p1',
+              label: 'About Smoke', last_message: 'on it', last_used_at: '2026-06-19T00:00:03.000Z' },
+            { agent_id: 'a1', agent_name: 'Conductor', scope_key: 'chat:default',
+              label: 'General', last_message: 'hi', last_used_at: '2026-06-19T00:00:02.000Z' },
+            { agent_id: 'a2', agent_name: 'Implementer', scope_key: 'chat:default',
+              label: 'General', last_message: 'done', last_used_at: '2026-06-19T00:00:01.000Z' },
+        ]);
+        render(<Chat />);
+        // Header shows the distinct-agent count, and Conductor renders once on
+        // the rail with a "2 conversations" hint.
+        await waitFor(() => expect(screen.getByText('2 agents')).toBeInTheDocument());
+        expect(screen.getByText('2 conversations')).toBeInTheDocument();
+    });
+
+    it('switches scope via the per-agent conversation selector', async () => {
+        api.forge.listChats.mockResolvedValue([
+            { agent_id: 'a1', agent_name: 'Conductor', scope_key: 'chat:project:p1',
+              label: 'About Smoke', last_message: 'on it', last_used_at: '2026-06-19T00:00:03.000Z' },
+            { agent_id: 'a1', agent_name: 'Conductor', scope_key: 'chat:default',
+              label: 'General', last_message: 'hi', last_used_at: '2026-06-19T00:00:02.000Z' },
+        ]);
+        render(<Chat />);
+        // Newest scope auto-selected → its messages load.
+        await waitFor(() => {
+            const call = api.forge.listMessages.mock.calls.find(
+                ([id, p]) => id === 'a1' && p.scope_key === 'chat:project:p1');
+            expect(call).toBeTruthy();
+        });
+        // Open the selector (its button shows the active scope label) and pick
+        // the other conversation.
+        fireEvent.click(screen.getByTitle('Switch conversation'));
+        fireEvent.click(await screen.findByText('General'));
+        await waitFor(() => {
+            const call = api.forge.listMessages.mock.calls.find(
+                ([id, p]) => id === 'a1' && p.scope_key === 'chat:default');
+            expect(call).toBeTruthy();
+        });
+    });
 });
