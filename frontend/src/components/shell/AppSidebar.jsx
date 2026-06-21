@@ -93,9 +93,9 @@ export function AppSidebar() {
 
     return (
         <aside style={{ width: '248px', flexShrink: 0, borderRight: '1px solid #30363d', background: '#161b22', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
-            {/* workspace */}
-            <div style={{ padding: '12px', borderBottom: '1px solid #30363d' }}>
-                <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px', borderRadius: '10px', background: '#1c2128', border: '1px solid #30363d', cursor: 'pointer' }}>
+            {/* workspace — fixed 54px to align its bottom border with the topbar's */}
+            <div style={{ height: '54px', flexShrink: 0, padding: '0 12px', borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center' }}>
+                <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '9px', width: '100%', padding: '7px 8px', borderRadius: '10px', background: '#1c2128', border: '1px solid #30363d', cursor: 'pointer' }}>
                     <span style={{ width: '26px', height: '26px', borderRadius: '7px', background: 'linear-gradient(135deg,#c9b8ff,#80cbc4)', color: '#0e1117', fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>A</span>
                     <div style={{ flex: 1, lineHeight: 1.1 }}>
                         <div style={{ fontSize: '13px', fontWeight: 600 }}>Agentira</div>

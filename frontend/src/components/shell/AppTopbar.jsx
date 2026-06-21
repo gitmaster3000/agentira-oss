@@ -102,7 +102,7 @@ export function AppTopbar({ onNewProject }) {
     );
 
     return (
-        <header style={{ height: '54px', flexShrink: 0, borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', background: '#0e1117', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
+        <header style={{ height: '54px', flexShrink: 0, borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', background: '#161b22', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0 }}>{crumb}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {/* Pulse pill — toggles the full-height Pulse drawer (PulseDock).

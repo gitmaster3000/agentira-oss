@@ -43,7 +43,7 @@ export function PulseDock() {
         {/* Dim backdrop — makes it read as floating OVER the page (not a pushed
             sidebar); click to dismiss. */}
         <div onClick={togglePulse} style={{ position: 'fixed', inset: 0, zIndex: 44, background: 'rgba(0,0,0,.45)', animation: 'pulseFade .2s ease' }} />
-        <aside style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: '300px', zIndex: 45, borderLeft: '1px solid #30363d', background: '#14161b', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans)', boxShadow: '-16px 0 48px rgba(0,0,0,.45)', animation: 'pulseSlideIn .22s ease' }}>
+        <aside style={{ position: 'fixed', top: 'var(--app-top-offset, 0px)', right: 0, bottom: 0, width: '300px', zIndex: 45, borderLeft: '1px solid #30363d', background: '#14161b', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans)', boxShadow: '-16px 0 48px rgba(0,0,0,.45)', animation: 'pulseSlideIn .22s ease' }}>
             {/* header */}
             <div style={{ height: '54px', flexShrink: 0, boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '9px', padding: '0 16px', borderBottom: '1px solid #30363d' }}>
                 <span style={{ position: 'relative', display: 'inline-flex' }}>

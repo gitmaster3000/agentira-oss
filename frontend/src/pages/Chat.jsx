@@ -178,7 +178,7 @@ export function Chat() {
         <div className="flex h-full min-h-0">
             {/* ── conversation list ─────────────────────────────────────── */}
             <aside className="w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel flex flex-col">
-                <div className="px-4 py-3 border-b border-border-subtle flex items-center gap-2">
+                <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2">
                     <MessageSquare className="w-5 h-5 text-accent-primary" />
                     <span className="text-title-sm font-bold text-text-primary">Chat</span>
                 </div>
@@ -227,14 +227,14 @@ export function Chat() {
             </aside>
 
             {/* ── conversation pane ─────────────────────────────────────── */}
-            <section className="flex-1 min-w-0 flex flex-col bg-bg-app">
+            <section className="flex-1 min-w-0 flex flex-col bg-bg-panel">
                 {!sel ? (
                     <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
                         Select a conversation
                     </div>
                 ) : (
                     <>
-                        <div className="px-4 py-3 border-b border-border-subtle flex items-center gap-2.5">
+                        <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2.5">
                             <div
                                 className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold"
                                 style={{ background: agentColor(sel.agent_name) }}

@@ -11,11 +11,17 @@ export function PreviewBanner() {
     const active = Boolean(PR);
 
     // Push the app down so the fixed banner never covers the real header.
+    // Also expose the offset as a CSS var: `position: fixed` overlays (PulseDock)
+    // ignore body padding, so they read this var to stay aligned with the header.
     useEffect(() => {
         if (!active) return;
         const prev = document.body.style.paddingTop;
         document.body.style.paddingTop = '44px';
-        return () => { document.body.style.paddingTop = prev; };
+        document.documentElement.style.setProperty('--app-top-offset', '44px');
+        return () => {
+            document.body.style.paddingTop = prev;
+            document.documentElement.style.removeProperty('--app-top-offset');
+        };
     }, [active]);
 
     if (!active) return null;
