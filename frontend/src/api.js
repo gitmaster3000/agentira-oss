@@ -147,6 +147,15 @@ export const api = {
         `/projects/${id}/repos/${encodeURIComponent(name)}`,
         { method: 'PATCH', body: JSON.stringify(data) },
     ),
+    // AP-302: per-repo git access token (PAT). Empty token clears it.
+    setProjectRepoToken: (id, name, token) => request(
+        `/projects/${id}/repos/${encodeURIComponent(name)}/token`,
+        { method: 'PUT', body: JSON.stringify({ token }) },
+    ),
+    checkProjectRepoToken: (id, name) => request(
+        `/projects/${id}/repos/${encodeURIComponent(name)}/token/check`,
+        { method: 'POST' },
+    ),
 
     // Members
     getProjectMembers: (projectId) => request(`/projects/${projectId}/members`),
@@ -212,6 +221,9 @@ export const api = {
     getProfiles: (role) => request(`/profiles${role ? `?role=${role}` : ''}`),
     createProfile: (data) => request('/profiles', { method: 'POST', body: JSON.stringify(data) }),
     updateProfile: (id, data) => request(`/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    // AP-302: agent/user personal git access token. Empty token clears it.
+    setGitToken: (id, token) => request(`/profiles/${id}/git-token`, { method: 'PUT', body: JSON.stringify({ token }) }),
+    checkGitToken: (id) => request(`/profiles/${id}/git-token/check`, { method: 'POST' }),
     deleteProfile: (id) => request(`/profiles/${id}`, { method: 'DELETE' }),
 
     // Attachments

@@ -11,6 +11,7 @@ import {
 import { api } from '../../api';
 import { ToolInput } from '../../components/AskUserQuestionCard';
 import { Breadcrumbs } from '../../components/Breadcrumbs';
+import { GitTokenField } from '../../components/GitTokenField';
 import { mergeWindow, serverLoadedCount } from '../../lib/chatPagination';
 
 const STATUS_STYLES = {
@@ -1761,6 +1762,26 @@ function ConfigTab({ agent, onSaved }) {
 
     return (
         <div className="p-6 space-y-6 max-w-3xl">
+            {/* AP-302: agent's personal git token — used to clone/push repos
+                when the target project repo has no token of its own. */}
+            <section className="card space-y-4">
+                <h3 className="text-sm font-semibold text-text-primary">Git Access</h3>
+                <GitTokenField
+                    hasToken={agent.has_git_token}
+                    valid={agent.git_token_valid}
+                    checkedAt={agent.git_token_checked_at}
+                    label="Personal git access token"
+                    hint="Fallback PAT for this agent. A project repo's own token takes precedence."
+                    onSave={async (t) => {
+                        await api.setGitToken(agent.profile_id, t);
+                        onSaved();
+                    }}
+                    onCheck={async () => {
+                        await api.checkGitToken(agent.profile_id);
+                        onSaved();
+                    }} />
+            </section>
+
             {/* Basic */}
             <section className="card space-y-4">
                 <h3 className="text-sm font-semibold text-text-primary">Basic Configuration</h3>

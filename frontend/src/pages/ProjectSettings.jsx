@@ -17,6 +17,7 @@ import {
     Link2, Pencil, Check, X, AlertTriangle, ChevronDown,
 } from 'lucide-react';
 import { api } from '../api';
+import { GitTokenField } from '../components/GitTokenField';
 
 
 export function ProjectSettings() {
@@ -288,6 +289,8 @@ function ReposTab({ projectId }) {
                 <div className="space-y-2">
                     {repos.map((r) => (
                         <RepoRow key={r.id || r.name} repo={r}
+                            projectId={projectId}
+                            onReload={reload}
                             onRemove={() => remove(r.name)}
                             onUpdate={(data) => update(r.name, data)}
                             busy={busy === r.name} />
@@ -307,7 +310,7 @@ function ReposTab({ projectId }) {
 }
 
 
-function RepoRow({ repo, onRemove, onUpdate, busy }) {
+function RepoRow({ repo, projectId, onReload, onRemove, onUpdate, busy }) {
     const [editing, setEditing] = useState(false);
     const [url, setUrl] = useState(repo.repo_url || '');
 
@@ -320,7 +323,8 @@ function RepoRow({ repo, onRemove, onUpdate, busy }) {
     const cancel = () => { setUrl(repo.repo_url || ''); setEditing(false); };
 
     return (
-        <div className="card flex items-center gap-3">
+        <div className="card space-y-3">
+            <div className="flex items-center gap-3">
             <Folder className="w-4 h-4 text-text-secondary flex-shrink-0" />
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -380,6 +384,24 @@ function RepoRow({ repo, onRemove, onUpdate, busy }) {
                 title="Detach this repo from the project">
                 <Trash2 className="w-4 h-4" />
             </button>
+            </div>
+            <div className="border-t border-border-subtle pt-3">
+                {/* AP-302: per-repo git access token. */}
+                <GitTokenField
+                    hasToken={repo.has_token}
+                    valid={repo.token_valid}
+                    checkedAt={repo.token_checked_at}
+                    label="Repo access token"
+                    hint="Stored on this repo. Agents working it clone/push with this token."
+                    onSave={async (t) => {
+                        await api.setProjectRepoToken(projectId, repo.name, t);
+                        await onReload();
+                    }}
+                    onCheck={async () => {
+                        await api.checkProjectRepoToken(projectId, repo.name);
+                        await onReload();
+                    }} />
+            </div>
         </div>
     );
 }
