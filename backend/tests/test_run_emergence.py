@@ -4,10 +4,13 @@ Every task-chat dispatch reserves a real Run row at trigger-time (so the agent
 can register artifacts and the daemon can capture logs/diagnostics). The row is
 never deleted. At complete_trigger:
 
-  - the turn did work (diff / artifact / finish_run outcome) -> is_work=True,
-    so it surfaces in the Runs list as a "Run".
+  - the turn did work (diff / artifact / finish_run outcome) -> is_work=True.
   - the turn was just talk -> is_work=False; the row + its messages are kept
     (transcript intact), the UI keeps it as chat.
+
+AP-190: is_work now only marks work-vs-chat for the UI badge — it no longer
+gates Runs-list visibility. The run IS the task's work-view (one row per
+(agent, task)) and surfaces whether or not a turn committed work.
 
 Replaces the old shadow create-then-delete/promote dance (test_shadow_runs.py)
 and the lazy-crystallize path (test_turns_crystallize.py).
@@ -16,8 +19,8 @@ These tests guard:
   - a task chat reserves a run (is_work=False, RUNNING, worktree/log_dir stamped)
   - non-task chats reserve no run
   - explicit run_id (Run button / resume) doesn't reserve a chat run, is_work=True
-  - a talk-only turn stays is_work=False, keeps its messages, is hidden from list_runs
-  - diff / artifact / finish_run outcome each flip is_work=True and surface it
+  - a talk-only turn stays is_work=False, keeps its messages, still lists (AP-190)
+  - diff / artifact / finish_run outcome each flip is_work=True
 """
 
 from __future__ import annotations
@@ -159,11 +162,13 @@ def test_talk_only_turn_stays_is_work_false_and_keeps_messages():
         assert msg is not None and msg.run_id == run_id, \
             "transcript persists and keeps its run_id (no survival hack)"
 
-    # Hidden from the global runs list, visible to the per-task lookup (so the
-    # chat Stop button can still find it while in flight).
-    assert not any(v["id"] == run_id
-                   for v in forge_services.list_runs(agent_id=s["agent_id"])), \
-        "is_work=False run must not pollute the Runs list"
+    # AP-190: the run IS the task's work-view — it surfaces in the Runs list
+    # even on a talk-only turn (one row per (agent, task)), so an agent working
+    # a task is visible everywhere, not only at its own URL. is_work still marks
+    # work-vs-chat for the UI badge, but no longer gates list visibility.
+    assert any(v["id"] == run_id
+               for v in forge_services.list_runs(agent_id=s["agent_id"])), \
+        "the task's run surfaces in the Runs list regardless of is_work"
     assert any(v["id"] == run_id
                for v in forge_services.list_runs_for_task(s["task_id"])), \
         "per-task lookup still sees it"

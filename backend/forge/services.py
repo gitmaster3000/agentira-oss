@@ -1277,10 +1277,14 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
             q = q.filter(Run.project_id == project_id)
         if status:
             q = q.filter(Run.status == status)
-        # CLEANUP(AP-190): drop is_work entirely. The Runs list becomes one row
-        # per (agent, task) — the work-view of that task's chat — not a
-        # per-turn-filtered view. Group/dedupe by task instead of this filter.
-        q = q.filter(Run.is_work.is_(True)).filter(_run_org_scope())
+        # AP-190: the Runs list is one row per (agent, task) — the work-view of
+        # that task's chat — NOT a per-turn is_work-filtered view. `is_work`
+        # used to hide a task run until it committed something, so an agent
+        # actively working a task was invisible everywhere except its own URL.
+        # Dropped. We still exclude throwaway shadow rows (mirrors
+        # get_active_runs). Per-task chat runs are already 1-per-(agent,task)
+        # via get_or_create_task_run, so no per-turn duplication.
+        q = q.filter(Run.trigger_event != "chat.shadow").filter(_run_org_scope())
         runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
         return [_run_to_dict(r) for r in runs]
 
