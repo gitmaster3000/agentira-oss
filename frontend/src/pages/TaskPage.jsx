@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Breadcrumbs } from '../components/Breadcrumbs';
@@ -30,6 +30,7 @@ import {
     ClipboardList,
     Activity as ActivityIcon,
     Folder,
+    Play,
 } from 'lucide-react';
 
 const TABS = [
@@ -111,6 +112,7 @@ function relTime(value) {
 
 export function TaskPage() {
     const { taskId } = useParams();
+    const navigate = useNavigate();
     const { user } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
@@ -134,6 +136,10 @@ export function TaskPage() {
     const [editingPrUrl, setEditingPrUrl] = useState(false);
     const [prUrlValue, setPrUrlValue] = useState('');
     const [copiedField, setCopiedField] = useState(null);
+    const [profiles, setProfiles] = useState([]);
+    const [forgeAgents, setForgeAgents] = useState([]);
+    const [pickingAgent, setPickingAgent] = useState(false);
+    const [scheduling, setScheduling] = useState(false);
 
     // Single source of truth for live run state (DoD: "Live run state
     // propagates from Pulse query (single source)"). One poll feeds both the
@@ -161,6 +167,7 @@ export function TaskPage() {
                 setBranchValue(data.branch || '');
                 setPrUrlValue(data.pr_url || '');
                 if (data.project_id) setCurrentProjectId(data.project_id);
+                api.getProjectMembers(data.project_id).then(setProfiles).catch(() => {});
                 const actData = await api.getActivity(taskId);
                 setActivities(actData);
                 const commitData = await api.listTaskCommits(taskId);
@@ -220,6 +227,38 @@ export function TaskPage() {
         if (task && val !== (task.pr_url || '')) {
             await api.updateTask(taskId, { pr_url: val });
             loadTask();
+        }
+    };
+
+    const saveAssignee = async (val) => {
+        if (val === (task?.assignee || '')) return;
+        await api.updateTask(taskId, { assignee: val });
+        loadTask();
+    };
+
+    const openAgentPicker = async () => {
+        setPickingAgent(true);
+        try {
+            const data = await api.forge.listAgents();
+            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
+        } catch (err) {
+            console.error('Failed to load agents:', err);
+            setForgeAgents([]);
+        }
+    };
+
+    const handleScheduleRun = async (agentId) => {
+        setScheduling(true);
+        try {
+            const result = await api.forge.prepareTaskRun(taskId, agentId);
+            setPickingAgent(false);
+            const runId = result.id || result.run_id;
+            if (runId) navigate(ROUTES.FORGE_RUN(runId));
+        } catch (err) {
+            console.error('Prepare run failed:', err);
+            alert('Failed to prepare run: ' + (err.message || err));
+        } finally {
+            setScheduling(false);
         }
     };
 
@@ -318,6 +357,8 @@ export function TaskPage() {
                 {tab === 'plan' && (
                     <PlanTab
                         task={task}
+                        profiles={profiles}
+                        saveAssignee={saveAssignee}
                         priorityColors={priorityColors}
                         dodItems={dodItems}
                         newDodText={newDodText}
@@ -343,7 +384,19 @@ export function TaskPage() {
                 )}
 
                 {tab === 'agent' && (
-                    <AgentTab run={run} runStatus={runStatus} runActive={runActive} summaryUpdatedAt={summaryUpdatedAt} />
+                    <AgentTab
+                        run={run}
+                        runStatus={runStatus}
+                        runActive={runActive}
+                        summaryUpdatedAt={summaryUpdatedAt}
+                        task={task}
+                        forgeAgents={forgeAgents}
+                        pickingAgent={pickingAgent}
+                        setPickingAgent={setPickingAgent}
+                        scheduling={scheduling}
+                        openAgentPicker={openAgentPicker}
+                        handleScheduleRun={handleScheduleRun}
+                    />
                 )}
 
                 {tab === 'activity' && (
@@ -367,19 +420,34 @@ export function TaskPage() {
     );
 }
 
-function AgentTab({ run, runStatus, runActive, summaryUpdatedAt }) {
+function AgentTab({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
+    const launcher = (
+        <RunLauncher
+            task={task}
+            forgeAgents={forgeAgents}
+            pickingAgent={pickingAgent}
+            setPickingAgent={setPickingAgent}
+            scheduling={scheduling}
+            openAgentPicker={openAgentPicker}
+            handleScheduleRun={handleScheduleRun}
+            label={run ? 'Run again with agent' : 'Run with agent'}
+        />
+    );
+
     if (!run) {
         return (
             <div className="max-w-3xl text-center py-16 bg-bg-card border border-border-subtle rounded-xl">
                 <Bot className="w-10 h-10 mx-auto mb-3 text-text-tertiary" />
                 <p className="text-text-secondary">No run yet for this task.</p>
-                <p className="text-xs text-text-tertiary mt-1">When an agent picks this task up, its run appears here.</p>
+                <p className="text-xs text-text-tertiary mt-1 mb-5">Kick one off, or wait for an agent to pick it up.</p>
+                <div className="max-w-md mx-auto px-6">{launcher}</div>
             </div>
         );
     }
     const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0);
     return (
         <div className="max-w-3xl space-y-6">
+            {!runActive && launcher}
             {/* Run header */}
             <div className="flex items-center gap-3">
                 <Link to={ROUTES.FORGE_RUN(run.id)} className="text-lg font-bold text-text-primary hover:text-accent-primary">
@@ -457,6 +525,65 @@ function AgentTab({ run, runStatus, runActive, summaryUpdatedAt }) {
     );
 }
 
+function RunLauncher({ task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun, label }) {
+    return (
+        <div>
+            <div className="flex justify-end">
+                <button
+                    onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
+                >
+                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : label}
+                </button>
+            </div>
+            {pickingAgent && (
+                <div className="mt-3 p-3 rounded-lg border border-border-subtle bg-bg-app/50 text-left">
+                    {forgeAgents.length === 0 ? (
+                        <p className="text-xs text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
+                    ) : (
+                        <div className="space-y-1">
+                            {[...forgeAgents].sort((a, b) => {
+                                const aAssigned = task?.assignee && a.name === task.assignee;
+                                const bAssigned = task?.assignee && b.name === task.assignee;
+                                if (aAssigned && !bAssigned) return -1;
+                                if (bAssigned && !aAssigned) return 1;
+                                return (a.name || '').localeCompare(b.name || '');
+                            }).map(a => {
+                                const online = a.status === 'online';
+                                const isAssigned = task?.assignee && a.name === task.assignee;
+                                return (
+                                    <button
+                                        key={a.id}
+                                        disabled={scheduling || !online}
+                                        onClick={() => handleScheduleRun(a.id)}
+                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors border ${isAssigned ? 'border-accent-primary/40 bg-accent-subtle/30' : 'border-transparent'} ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                                    >
+                                        <div className="w-7 h-7 rounded-md bg-bg-panel border border-border-subtle flex items-center justify-center text-xs font-bold text-text-secondary">
+                                            {a.name?.[0]?.toUpperCase() || 'A'}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm text-text-primary truncate flex items-center gap-2">
+                                                {a.name}
+                                                {isAssigned && (
+                                                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-primary/15 text-accent-primary">assignee</span>
+                                                )}
+                                            </div>
+                                            <div className="text-xs text-text-tertiary truncate">{a.model || a.runtime_type || 'no model'}</div>
+                                        </div>
+                                        <span className={`text-xs ${online ? 'text-green-400' : 'text-text-tertiary'}`}>
+                                            {online ? 'online' : 'offline'}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function Metric({ icon: Icon, label, value }) {
     return (
         <div className="bg-bg-card border border-border-subtle rounded-lg p-4 shadow-sm">
@@ -524,7 +651,7 @@ function ActivityTab({ user, comment, setComment, handleComment, activities, pro
 
 function PlanTab(props) {
     const {
-        task, priorityColors, dodItems, newDodText, setNewDodText,
+        task, profiles, saveAssignee, priorityColors, dodItems, newDodText, setNewDodText,
         toggleDodItem, addDodItem, removeDodItem, projectRepos,
         branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
@@ -569,10 +696,19 @@ function PlanTab(props) {
                         <div>
                             <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
                             <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary">
+                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
                                     {task.assignee ? task.assignee[0].toUpperCase() : '?'}
                                 </div>
-                                <span className="text-sm text-text-secondary">{task.assignee || 'Unassigned'}</span>
+                                <select
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg flex-1"
+                                    value={task.assignee || ''}
+                                    onChange={e => saveAssignee(e.target.value)}
+                                >
+                                    <option value="">Unassigned</option>
+                                    {profiles.map(p => (
+                                        <option key={p.id} value={p.name}>{p.display_name}</option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 

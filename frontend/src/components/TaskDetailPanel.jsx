@@ -9,6 +9,7 @@ import {
     Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
     GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
     Info, FileText, MessageSquare, Activity as ActivityIcon, Paperclip,
+    Play, Cpu,
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -19,12 +20,6 @@ const STATUS = {
     in_progress: { color: '#ff9800', label: 'In Progress' },
     review:      { color: '#7c4dff', label: 'In Review' },
     done:        { color: '#2ecc71', label: 'Done' },
-};
-const PRIORITY = {
-    critical: { color: '#f85149', bg: 'rgba(248,81,73,.14)' },
-    high:     { color: '#ff9800', bg: 'rgba(255,152,0,.14)' },
-    medium:   { color: '#7c8db5', bg: 'rgba(124,141,181,.14)' },
-    low:      { color: '#768390', bg: 'rgba(118,131,144,.14)' },
 };
 const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
 
@@ -74,6 +69,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [dodItems, setDodItems] = useState(task.dod_items || []);
     const [newDodText, setNewDodText] = useState('');
     const [taskRuns, setTaskRuns] = useState([]);
+    const [profiles, setProfiles] = useState([]);
+    const [forgeAgents, setForgeAgents] = useState([]);
+    const [pickingAgent, setPickingAgent] = useState(false);
+    const [scheduling, setScheduling] = useState(false);
     const [editingBranch, setEditingBranch] = useState(false);
     const [branchValue, setBranchValue] = useState(task.branch || '');
     const [editingPrUrl, setEditingPrUrl] = useState(false);
@@ -101,6 +100,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         setDodItems(task.dod_items || []);
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
+        if (task.project_id) api.getProjectMembers(task.project_id).then(setProfiles).catch(() => {});
         const interval = setInterval(() => { loadActivity(); loadTaskRuns(); }, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
@@ -172,11 +172,49 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
             await api.updateTask(task.id, {
                 title: formData.title,
                 description: formData.description,
-                priority: formData.priority,
             });
             toggleEditing(false);
             onUpdate();
         } catch (err) { alert(err.message); }
+    };
+
+    // Status/priority/assignee are inline-editable (no edit mode) — save on change.
+    const saveField = async (patch) => {
+        try { await api.updateTask(task.id, patch); onUpdate(); }
+        catch (err) { alert(err.message); }
+    };
+    const saveStatus = async (s) => {
+        if (s === task.status) return;
+        // Dedicated /move endpoint drives transitions/activity.
+        try { await api.moveTask(task.id, s); onUpdate(); }
+        catch (err) { alert(err.message); }
+    };
+
+    const openAgentPicker = async () => {
+        setPickingAgent(true);
+        try {
+            const data = await api.forge.listAgents();
+            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
+        } catch (err) {
+            console.error('Failed to load agents:', err);
+            setForgeAgents([]);
+        }
+    };
+
+    const handleScheduleRun = async (agentId) => {
+        setScheduling(true);
+        try {
+            const result = await api.forge.prepareTaskRun(task.id, agentId);
+            setPickingAgent(false);
+            await loadTaskRuns();
+            const runId = result.id || result.run_id;
+            if (runId) navigate(ROUTES.FORGE_RUN(runId));
+        } catch (err) {
+            console.error('Prepare run failed:', err);
+            alert('Failed to prepare run: ' + (err.message || err));
+        } finally {
+            setScheduling(false);
+        }
     };
     const handleComment = async (e) => {
         if (e) e.preventDefault();
@@ -213,7 +251,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     };
 
     const status = STATUS[task.status] || { color: '#768390', label: task.status };
-    const prio = PRIORITY[task.priority] || PRIORITY.medium;
     const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
     const comments = activities.filter(a => a.action === 'commented');
     const doneCount = dodItems.filter(i => i.checked).length;
@@ -315,6 +352,73 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             </div>
                         )}
 
+                        {/* AP-301: launch a run from the side panel. */}
+                        <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+                            <SectionLabel inline>Agent runs</SectionLabel>
+                            <button
+                                onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
+                                className="inline-flex items-center transition-colors"
+                                style={{ gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 7, background: 'var(--accent-subtle, rgba(124,77,255,.14))', color: 'var(--accent-primary, #7c4dff)' }}
+                            >
+                                <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
+                            </button>
+                        </div>
+                        {pickingAgent && (
+                            <div style={{ marginBottom: 16, padding: 10, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-app)' }}>
+                                {forgeAgents.length === 0 ? (
+                                    <p style={{ fontSize: 11.5 }} className="text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
+                                ) : (
+                                    [...forgeAgents].sort((a, b) => {
+                                        const aA = task?.assignee && a.name === task.assignee;
+                                        const bA = task?.assignee && b.name === task.assignee;
+                                        if (aA && !bA) return -1;
+                                        if (bA && !aA) return 1;
+                                        return (a.name || '').localeCompare(b.name || '');
+                                    }).map(a => {
+                                        const online = a.status === 'online';
+                                        const isAssigned = task?.assignee && a.name === task.assignee;
+                                        return (
+                                            <button
+                                                key={a.id}
+                                                disabled={scheduling || !online}
+                                                onClick={() => handleScheduleRun(a.id)}
+                                                className="w-full flex items-center transition-colors"
+                                                style={{ gap: 9, padding: '7px 8px', borderRadius: 8, textAlign: 'left', opacity: online ? 1 : 0.5, cursor: online ? 'pointer' : 'not-allowed', border: isAssigned ? '1px solid rgba(124,77,255,.4)' : '1px solid transparent' }}
+                                            >
+                                                <span style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, background: 'var(--bg-card)', fontSize: 11, fontWeight: 700 }} className="flex items-center justify-center text-text-secondary">
+                                                    {a.name?.[0]?.toUpperCase() || 'A'}
+                                                </span>
+                                                <span className="flex-1 min-w-0">
+                                                    <span className="flex items-center" style={{ gap: 6 }}>
+                                                        <span style={{ fontSize: 12.5 }} className="text-text-primary truncate">{a.name}</span>
+                                                        {isAssigned && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(124,77,255,.15)', color: '#7c4dff' }}>assignee</span>}
+                                                    </span>
+                                                    <span style={{ fontSize: 10.5 }} className="text-text-tertiary truncate block">{a.model || a.runtime_type || 'no model'}</span>
+                                                </span>
+                                                <span style={{ fontSize: 10.5 }} className={online ? 'text-green-400' : 'text-text-tertiary'}>{online ? 'online' : 'offline'}</span>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
+                        {!pickingAgent && taskRuns.filter(r => r.is_work).length > 0 && (
+                            <div style={{ marginBottom: 16 }}>
+                                {taskRuns.filter(r => r.is_work).slice(0, 5).map(r => (
+                                    <button
+                                        key={r.id}
+                                        onClick={() => navigate(ROUTES.FORGE_RUN(r.id))}
+                                        className="w-full flex items-center transition-colors"
+                                        style={{ gap: 8, padding: '6px 8px', borderRadius: 8, textAlign: 'left' }}
+                                    >
+                                        <Cpu className="w-3 h-3 flex-shrink-0 text-text-tertiary" />
+                                        <span style={{ fontSize: 12 }} className="text-text-primary truncate">{r.agent_name || r.agent_id}</span>
+                                        <span style={{ fontSize: 10.5 }} className="text-text-tertiary ml-auto">{r.status}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
                         <SectionLabel>Description</SectionLabel>
                         {isEditing ? (
                             <textarea
@@ -331,32 +435,39 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
                         <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr', gap: '12px 10px', fontSize: 12.5, alignItems: 'center', marginBottom: 18 }}>
                             <span className="text-text-tertiary">Status</span>
-                            <span className="inline-flex items-center" style={{ gap: 6 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: status.color }} />{status.label}
+                            <span className="inline-flex items-center" style={{ gap: 7 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: status.color, flexShrink: 0 }} />
+                                <select
+                                    className="ghost-select"
+                                    value={task.status}
+                                    onChange={e => saveStatus(e.target.value)}
+                                >
+                                    {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                                </select>
                             </span>
                             <span className="text-text-tertiary">Priority</span>
                             <span>
-                                {isEditing ? (
-                                    <select
-                                        className="bg-bg-app border border-border-subtle rounded text-text-primary px-2 py-1"
-                                        style={{ fontSize: 12 }}
-                                        value={formData.priority}
-                                        onChange={e => setFormData({ ...formData, priority: e.target.value })}
-                                    >
-                                        {['low', 'medium', 'high', 'critical'].map(p => <option key={p} value={p}>{p}</option>)}
-                                    </select>
-                                ) : (
-                                    <span className="inline-flex items-center capitalize" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: prio.bg, color: prio.color }}>
-                                        {task.priority}
-                                    </span>
-                                )}
+                                <select
+                                    className="ghost-select capitalize"
+                                    value={task.priority}
+                                    onChange={e => saveField({ priority: e.target.value })}
+                                >
+                                    {['low', 'medium', 'high', 'critical'].map(p => <option key={p} value={p}>{p}</option>)}
+                                </select>
                             </span>
                             <span className="text-text-tertiary">Assignee</span>
-                            <span className="inline-flex items-center" style={{ gap: 6 }}>
-                                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,188,212,.16)', color: '#00bcd4', fontSize: 9, fontWeight: 700 }} className="flex items-center justify-center">
+                            <span className="inline-flex items-center" style={{ gap: 7 }}>
+                                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,188,212,.16)', color: '#00bcd4', fontSize: 9, fontWeight: 700, flexShrink: 0 }} className="flex items-center justify-center">
                                     {initials(task.assignee)}
                                 </span>
-                                <span className="text-text-secondary">{task.assignee || 'Unassigned'}</span>
+                                <select
+                                    className="ghost-select"
+                                    value={task.assignee || ''}
+                                    onChange={e => saveField({ assignee: e.target.value })}
+                                >
+                                    <option value="">Unassigned</option>
+                                    {profiles.map(p => <option key={p.id} value={p.name}>{p.display_name}</option>)}
+                                </select>
                             </span>
                         </div>
 
@@ -495,9 +606,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             ))}
                         </div>
-                        <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginTop: 14 }}>
+                        <form onSubmit={handleComment} className="flex items-center" style={{ gap: 8, marginTop: 14 }}>
                             <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: '#b1bac4', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
-                            <div className="flex-1 flex items-center" style={{ gap: 8, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
+                            <div className="flex-1 flex items-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
                                 <MentionInput
                                     className="flex-1 bg-transparent text-text-primary text-xs focus:outline-none"
                                     placeholder="Comment or @mention…"
@@ -506,8 +617,22 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     onSubmit={handleComment}
                                     projectId={task.project_id}
                                 />
-                                <button type="submit" className="flex-shrink-0" style={{ color: '#80cbc4' }}><Send className="w-4 h-4" /></button>
                             </div>
+                            <button
+                                type="submit"
+                                disabled={!comment.trim()}
+                                title="Send comment"
+                                className="flex items-center justify-center flex-shrink-0 transition-colors"
+                                style={{
+                                    width: 32, height: 32, borderRadius: '50%',
+                                    background: comment.trim() ? 'var(--accent-primary)' : 'var(--bg-card)',
+                                    color: comment.trim() ? '#fff' : 'var(--text-tertiary)',
+                                    border: '1px solid var(--border-subtle)',
+                                    cursor: comment.trim() ? 'pointer' : 'not-allowed',
+                                }}
+                            >
+                                <Send className="w-3.5 h-3.5" />
+                            </button>
                         </form>
                     </div>
 

@@ -147,6 +147,36 @@
     cursor: pointer;
   }
 
+  /* Inline-editable value: reads as plain text at rest, reveals the dropdown
+     chrome (border + chevron) only on hover/focus. Used in dense property grids. */
+  .ghost-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 4px 9px;
+    margin-left: -9px;
+    cursor: pointer;
+    transition: border-color .12s, background-color .12s;
+  }
+  .ghost-select:hover {
+    border-color: var(--border-subtle);
+    background-color: var(--bg-panel);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23768390' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    padding-right: 28px;
+  }
+  .ghost-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    background-color: var(--bg-panel);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+  }
+
   /* MD3 Card — filled */
   .card {
     @apply rounded-md p-4;
