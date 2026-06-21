@@ -48,6 +48,11 @@ class ProfileUpdate(BaseModel):
     avatar_url: Optional[str] = None
     webhook_url: Optional[str] = None
 
+# AP-302: git access token (PAT) for a project repo or an agent/user.
+# Empty string clears the stored token. Value is write-only — never echoed.
+class RepoTokenBody(BaseModel):
+    token: str = ""
+
 class InitialTaskSpec(BaseModel):
     title: str
     description: str = ""
@@ -428,6 +433,24 @@ def api_delete_profile(profile_id: str):
         raise HTTPException(404, "Profile not found")
     return {"ok": True}
 
+
+# AP-302: agent/user personal git access token. Same shape as the per-repo
+# token: PUT stores + probes, check re-probes. Value never returned.
+@profiles.put("/{profile_id}/git-token")
+def api_set_profile_git_token(profile_id: str, body: RepoTokenBody):
+    res = services.set_profile_git_token(profile_id, body.token)
+    if res is None:
+        raise HTTPException(404, "Profile not found")
+    return res
+
+
+@profiles.post("/{profile_id}/git-token/check")
+def api_check_profile_git_token(profile_id: str):
+    res = services.check_profile_git_token(profile_id)
+    if res is None:
+        raise HTTPException(404, "Profile not found")
+    return res
+
 # Service accounts = profiles with role=bot. Admin-only: api_key is sensitive
 # and the surface is workspace-global (no per-owner concept in the schema).
 svc_accounts = APIRouter(prefix="/api/service-accounts", tags=["profiles"],
@@ -717,6 +740,23 @@ def api_remove_project_repo(project_id: str, repo_name: str):
     if not services.remove_project_repo(project_id, repo_name):
         raise HTTPException(404, "Repo not found")
     return {"ok": True}
+
+
+@projects.put("/{project_id}/repos/{repo_name}/token")
+def api_set_project_repo_token(project_id: str, repo_name: str,
+                               body: RepoTokenBody):
+    res = services.set_project_repo_token(project_id, repo_name, body.token)
+    if res is None:
+        raise HTTPException(404, "Repo not found")
+    return res
+
+
+@projects.post("/{project_id}/repos/{repo_name}/token/check")
+def api_check_project_repo_token(project_id: str, repo_name: str):
+    res = services.check_project_repo_token(project_id, repo_name)
+    if res is None:
+        raise HTTPException(404, "Repo not found")
+    return res
 
 
 # ── Tasks Router ─────────────────────────────────────────────────────────

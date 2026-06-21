@@ -218,6 +218,13 @@ class Profile(Base):
     # workspace default ("off"). Project-level override wins if set; see
     # backend.sandbox.resolve_mode. Values: off | cwd | strict | container.
     sandbox_mode: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # AP-302: personal git access token (PAT) for this agent/user. Used at
+    # dispatch as a fallback when the target project_repo has no token of its
+    # own. validity is cached the same way as project_repos. Never serialized.
+    git_token: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    git_token_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    git_token_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None)
 
     role: Mapped["Role"] = relationship(back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
@@ -375,6 +382,14 @@ class ProjectRepo(Base):
     # but never rebase resumed work; pinned = opt-in, frozen base (loud warning).
     worktree_freshness: Mapped[str] = mapped_column(String(20), default="always_latest")
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    # AP-302: git access token (PAT) so agents dispatched against this repo
+    # can clone/push private repos. token_valid/token_checked_at cache the
+    # last validity probe (None = never checked). The token value is never
+    # returned by the API — only has_token + validity.
+    access_token: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    token_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    token_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

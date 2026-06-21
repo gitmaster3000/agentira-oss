@@ -447,6 +447,12 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "conductor_report_enabled": bool(a.profile.conductor_report_enabled) if a.profile else True,
         "conductor_plan_interval_minutes": (a.profile.conductor_plan_interval_minutes if a.profile else 10),
         "conductor_active": bool(a.profile.conductor_active) if a.profile else True,
+        # AP-302: personal git token — presence + cached validity only.
+        "has_git_token": bool(a.profile.git_token) if a.profile else False,
+        "git_token_valid": (a.profile.git_token_valid if a.profile else None),
+        "git_token_checked_at": (
+            _iso(a.profile.git_token_checked_at) if a.profile else None
+        ),
         "created_at": _iso(a.created_at),
     }
 
@@ -3000,6 +3006,18 @@ def dispatch_pending_run(*, run_id: str,
         "AGENTIRA_AGENT_ID": agent_id,
         "AGENTIRA_RUN_TOKEN": run_token,
     }
+
+    # AP-302: inject the resolved git token so the agent can clone/push the
+    # target repo. Repo-level token wins; falls back to the agent's personal
+    # token. ponytail: resolves against the project's primary repo — refine
+    # to the task's specific repo when per-repo tokens on multi-repo projects
+    # need to differ.
+    from backend import services as _core_services_tok
+    _git_token = _core_services_tok.resolve_git_token(
+        project_id, None, prof.id if prof else None)
+    if _git_token:
+        env_extra["GH_TOKEN"] = _git_token
+        env_extra["GITHUB_TOKEN"] = _git_token
 
     # ADR 008: task-scope (not run-scope) so multiple runs of the same task
     # share one conversation. Agent picks up where it left off across re-runs.

@@ -4,6 +4,7 @@ Both REST API and MCP server call into this layer.
 """
 
 from __future__ import annotations
+from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -286,6 +287,13 @@ def _profile_to_dict(p: Profile) -> dict:
         "runtime_id": p.runtime_id,
         # AP-155: agent's default containment posture ("" = workspace default).
         "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
+        # AP-302: personal git token — presence + validity only, never value.
+        "has_git_token": bool(getattr(p, "git_token", None)),
+        "git_token_valid": getattr(p, "git_token_valid", None),
+        "git_token_checked_at": (
+            p.git_token_checked_at.isoformat()
+            if getattr(p, "git_token_checked_at", None) else None
+        ),
         "created_at": p.created_at.isoformat(),
     }
 
@@ -1017,6 +1025,13 @@ def _project_repo_to_dict(r) -> dict:
         "default_branch": r.default_branch or "main",
         "worktree_freshness": getattr(r, "worktree_freshness", None) or "always_latest",
         "is_primary": bool(r.is_primary),
+        # AP-302: token value is never exposed — only presence + validity.
+        "has_token": bool(getattr(r, "access_token", None)),
+        "token_valid": getattr(r, "token_valid", None),
+        "token_checked_at": (
+            r.token_checked_at.isoformat()
+            if getattr(r, "token_checked_at", None) else None
+        ),
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -1158,6 +1173,126 @@ def remove_project_repo(project_id: str, repo_name: str) -> bool:
                 next_row.is_primary = True
         db.commit()
         return True
+
+
+def set_project_repo_token(project_id: str, repo_name: str,
+                           token: str) -> dict | None:
+    """AP-302: store (or clear) a git token on a project repo, then probe
+    its validity against the repo's git remote. Returns the repo dict
+    (token value omitted). None if the repo doesn't exist.
+
+    An empty token clears the token and its cached validity.
+    """
+    from backend.models import ProjectRepo
+    from backend import repo_tokens
+    token = (token or "").strip()
+    with _session() as db:
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id,
+                         ProjectRepo.name == repo_name)
+                 .first())
+        if not row:
+            return None
+        if not token:
+            row.access_token = None
+            row.token_valid = None
+            row.token_checked_at = None
+        else:
+            valid, _ = repo_tokens.verify_git_token(token, row.repo_url)
+            row.access_token = token
+            row.token_valid = valid
+            row.token_checked_at = _dt.now(_tz.utc)
+        db.commit()
+        db.refresh(row)
+        return _project_repo_to_dict(row)
+
+
+def check_project_repo_token(project_id: str, repo_name: str) -> dict | None:
+    """AP-302: re-probe a stored project-repo token's validity. Returns the
+    repo dict, or None if the repo doesn't exist. No-op (returns dict with
+    token_valid unchanged-None) when no token is stored."""
+    from backend.models import ProjectRepo
+    from backend import repo_tokens
+    with _session() as db:
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id,
+                         ProjectRepo.name == repo_name)
+                 .first())
+        if not row:
+            return None
+        if not row.access_token:
+            return _project_repo_to_dict(row)
+        valid, _ = repo_tokens.verify_git_token(row.access_token, row.repo_url)
+        row.token_valid = valid
+        row.token_checked_at = _dt.now(_tz.utc)
+        db.commit()
+        db.refresh(row)
+        return _project_repo_to_dict(row)
+
+
+def set_profile_git_token(profile_id: str, token: str) -> dict | None:
+    """AP-302: store (or clear) an agent/user's personal git token and probe
+    it (no specific repo → validates the token authenticates). Returns the
+    profile dict (token value omitted). None if the profile doesn't exist."""
+    from backend import repo_tokens
+    token = (token or "").strip()
+    with _session() as db:
+        p = db.get(Profile, profile_id)
+        if not p:
+            return None
+        if not token:
+            p.git_token = None
+            p.git_token_valid = None
+            p.git_token_checked_at = None
+        else:
+            valid, _ = repo_tokens.verify_git_token(token, None)
+            p.git_token = token
+            p.git_token_valid = valid
+            p.git_token_checked_at = _dt.now(_tz.utc)
+        db.commit()
+        db.refresh(p)
+        return _profile_to_dict(p)
+
+
+def check_profile_git_token(profile_id: str) -> dict | None:
+    """AP-302: re-probe a stored profile git token's validity."""
+    from backend import repo_tokens
+    with _session() as db:
+        p = db.get(Profile, profile_id)
+        if not p:
+            return None
+        if not p.git_token:
+            return _profile_to_dict(p)
+        valid, _ = repo_tokens.verify_git_token(p.git_token, None)
+        p.git_token_valid = valid
+        p.git_token_checked_at = _dt.now(_tz.utc)
+        db.commit()
+        db.refresh(p)
+        return _profile_to_dict(p)
+
+
+def resolve_git_token(project_id: str, repo_name: str | None,
+                      profile_id: str | None) -> str | None:
+    """AP-302: pick the git token a dispatch should use. Repo-level token
+    wins; falls back to the agent/profile's personal token. None if neither
+    is set. Used at dispatch to inject GH_TOKEN."""
+    from backend.models import ProjectRepo
+    with _session() as db:
+        if project_id:
+            q = db.query(ProjectRepo).filter(
+                ProjectRepo.project_id == project_id)
+            if repo_name:
+                q = q.filter(ProjectRepo.name == repo_name)
+            else:
+                q = q.filter(ProjectRepo.is_primary == True)  # noqa: E712
+            row = q.first()
+            if row and row.access_token:
+                return row.access_token
+        if profile_id:
+            p = db.get(Profile, profile_id)
+            if p and p.git_token:
+                return p.git_token
+    return None
 
 
 def resolve_project_repo(project_id: str, repo_name: str | None) -> dict | None:

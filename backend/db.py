@@ -595,6 +595,10 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT 1 NOT NULL")
             # AP-155: agent-level sandbox containment mode.
             runtime_added |= _ensure_column(conn, "profiles", "sandbox_mode", "VARCHAR(20)")
+            # AP-302: personal git access token + cached validity.
+            runtime_added |= _ensure_column(conn, "profiles", "git_token", "VARCHAR(500)")
+            runtime_added |= _ensure_column(conn, "profiles", "git_token_valid", "BOOLEAN")
+            runtime_added |= _ensure_column(conn, "profiles", "git_token_checked_at", "TIMESTAMP")
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked
@@ -668,6 +672,15 @@ def run_migrations():
                 added = True
             _backfill_primary_project_repo(conn)
             if added:
+                conn.commit()
+
+        # AP-302: project_repos gain a git access token + cached validity.
+        if "project_repos" in tables:
+            repo_added = False
+            repo_added |= _ensure_column(conn, "project_repos", "access_token", "VARCHAR(500)")
+            repo_added |= _ensure_column(conn, "project_repos", "token_valid", "BOOLEAN")
+            repo_added |= _ensure_column(conn, "project_repos", "token_checked_at", "TIMESTAMP")
+            if repo_added:
                 conn.commit()
 
         # tasks
