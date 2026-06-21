@@ -26,7 +26,7 @@ export function ProjectSettings() {
     const [tab, setTab] = useState(initialTab);
 
     return (
-        <div className="flex-1 overflow-y-auto">
+        <div className="h-full overflow-y-auto">
             <div className="max-w-3xl mx-auto p-6 space-y-4">
                 <div className="flex items-center gap-3">
                     <SettingsIcon className="w-5 h-5 text-text-secondary" />
