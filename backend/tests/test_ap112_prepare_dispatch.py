@@ -15,10 +15,10 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as db_mod
+from backend.db import Base, set_current_org
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, RuntimeStatus, Run, RunStatus
@@ -29,15 +29,25 @@ def test_db():
     engine = create_engine("sqlite://",
                            connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
+    # Route the real SessionLocal (which carries the org-stamping event
+    # listeners) at the in-memory engine, then set org context so org_id is
+    # stamped on org-scoped inserts (forge_runtimes/forge_agents/tasks/...).
+    # A plain sessionmaker would skip those listeners and leave org_id NULL.
+    with patch.object(db_mod, "engine", engine), \
+         patch.object(db_mod, "app_engine", engine):
+        from backend.db import SessionLocal
+        from backend.models import Org
+        db = SessionLocal()
         core_services._seed_defaults(db)
+        db.add(Org(id="orgtest00000", name="Test Org"))
+        db.commit()
         db.close()
-        yield TestSession
+        set_current_org("orgtest00000")
+        try:
+            yield SessionLocal
+        finally:
+            set_current_org(None)
 
 
 def _seed_runtime(TestSession) -> str:

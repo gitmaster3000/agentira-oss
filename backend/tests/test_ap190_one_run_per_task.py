@@ -19,7 +19,6 @@ from backend.db import Base
 from backend import services as core_services
 from backend.forge import runs as forge_runs
 from backend.forge.models import Run, RunStatus, RunOutcome
-from backend.models import Profile, Role
 
 
 @pytest.fixture(autouse=True)
@@ -33,10 +32,9 @@ def test_db():
          patch("backend.forge.runs.SessionLocal", TestSession):
         db = TestSession()
         core_services._seed_defaults(db)
-        admin_role = db.query(Role).filter(Role.name == "admin").first()
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
-        db.commit()
         db.close()
+        # Run rows carry no org_id (not org-scoped), so these tests need no
+        # org context — only the unused admin Profile did, so it's gone.
         yield TestSession
 
 
