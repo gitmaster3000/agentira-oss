@@ -23,7 +23,7 @@ export function Layout() {
                 <AppSidebar />
                 <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <AppTopbar onNewProject={() => setShowCreate(true)} />
-                    <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                         <Outlet />
                     </div>
                 </main>

@@ -1,76 +1,71 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import ReactDOM from 'react-dom';
 import { useParams, useSearchParams, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { UserPlus, X, Search, ChevronDown } from 'lucide-react';
+import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
-import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 
-// Portal Dropdown
-function AddMemberDropdown({ anchorRef, profiles, onAdd, onClose }) {
-    const menuRef = useRef(null);
-    const [pos, setPos] = useState({ top: 0, left: 0 });
-
+// Members control — design board-toolbar "Members [N] ▾" dropdown: lists
+// current members (remove on hover) + the addable profiles under "Add member".
+function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
     useEffect(() => {
-        if (anchorRef.current) {
-            const rect = anchorRef.current.getBoundingClientRect();
-            setPos({ top: rect.bottom + 4, left: rect.left });
-        }
-    }, [anchorRef]);
-
-    useEffect(() => {
-        function handler(e) {
-            if (
-                menuRef.current && !menuRef.current.contains(e.target) &&
-                anchorRef.current && !anchorRef.current.contains(e.target)
-            ) {
-                onClose();
-            }
-        }
+        function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
-    }, [onClose, anchorRef]);
-
-    return ReactDOM.createPortal(
-        <div ref={menuRef} className="dropdown-menu" style={{ position: 'fixed', top: pos.top, left: pos.left, width: 240, zIndex: 99999 }}>
-            <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-text-tertiary border-b border-border-subtle">
-                Add Member
-            </div>
-            {profiles.length === 0 ? (
-                <div className="p-5 text-xs text-center text-text-tertiary">
-                    Everyone is already a member
-                </div>
-            ) : (
-                <div className="max-h-60 overflow-y-auto">
-                    {profiles.map(p => (
-                        <div key={p.id} onClick={() => { onAdd(p.name); }} role="button" tabIndex={0} className="dropdown-item px-3 py-2.5">
-                            <div style={{
-                                width: 28, height: 28, borderRadius: '50%',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: 12, fontWeight: 700, flexShrink: 0,
-                                backgroundColor: 'var(--accent-subtle)', color: 'var(--accent-primary)',
-                            }}>
-                                {(p.display_name || p.name)[0]?.toUpperCase()}
+    }, []);
+    const avatar = (name) => (
+        <span className="flex items-center justify-center flex-shrink-0" style={{ width: 28, height: 28, borderRadius: '50%', fontSize: 11, fontWeight: 700, background: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
+            {(name || '?')[0]?.toUpperCase()}
+        </span>
+    );
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                className="flex items-center gap-2 border rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+                style={{ padding: '6px 11px', fontSize: 12.5 }}
+            >
+                <Users className="w-4 h-4" /> Members
+                <span style={{ fontSize: 10, fontWeight: 700 }} className="text-text-tertiary bg-bg-app rounded-full px-2 py-0.5">{members.length}</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && (
+                <div className="dropdown-menu top-full left-0 mt-1.5 p-1.5" style={{ width: 268, zIndex: 50 }}>
+                    <div className="px-2 pt-1.5 pb-1 text-[9.5px] font-bold uppercase tracking-wider text-text-tertiary">Project members · {members.length}</div>
+                    {members.map(m => (
+                        <div key={m.id} className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover">
+                            {avatar(m.display_name || m.name)}
+                            <div className="flex-1 min-w-0">
+                                <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{m.display_name || m.name}</div>
+                                <div style={{ fontSize: 10.5 }} className="text-text-tertiary truncate">@{m.name}{m.role ? ` · ${m.role}` : ''}</div>
                             </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 13, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                    {p.display_name || p.name}
-                                </div>
-                                <div style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-                                    @{p.name} · {p.role}
-                                </div>
-                            </div>
+                            <button onClick={() => onRemove(m.name)} className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all" title="Remove"><X className="w-3.5 h-3.5" /></button>
                         </div>
                     ))}
+                    {availableProfiles.length > 0 && (
+                        <>
+                            <div className="px-2 pt-2 pb-1 mt-1 border-t border-border-subtle text-[9.5px] font-bold uppercase tracking-wider text-text-tertiary">Add member</div>
+                            {availableProfiles.map(p => (
+                                <div key={p.id} onClick={() => onAdd(p.name)} role="button" tabIndex={0} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover cursor-pointer">
+                                    {avatar(p.display_name || p.name)}
+                                    <div className="flex-1 min-w-0">
+                                        <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{p.display_name || p.name}</div>
+                                        <div style={{ fontSize: 10.5 }} className="text-text-tertiary truncate">@{p.name}{p.role ? ` · ${p.role}` : ''}</div>
+                                    </div>
+                                    <Plus className="w-3.5 h-3.5 text-text-tertiary" />
+                                </div>
+                            ))}
+                        </>
+                    )}
                 </div>
             )}
-        </div>,
-        document.body
+        </div>
     );
 }
 
@@ -134,10 +129,8 @@ export function ProjectLayout() {
     const selectedTaskId = searchParams.get('selectedTask');
     
     const [loading, setLoading] = useState(true);
-    const [showAddMember, setShowAddMember] = useState(false);
     const [isPanelEditing, setIsPanelEditing] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
-    const addBtnRef = useRef(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPriority, setFilterPriority] = useState('');
     const [filterAssignee, setFilterAssignee] = useState('');
@@ -251,7 +244,6 @@ export function ProjectLayout() {
         try {
             await api.addProjectMember(projectId, name);
             await loadMembers();
-            setShowAddMember(false);
         } catch (err) {
             console.error('[ProjectLayout] addProjectMember error:', err);
             alert('Failed to add member: ' + err.message);
@@ -304,53 +296,36 @@ export function ProjectLayout() {
     return (
         <div className="flex flex-row h-full overflow-hidden w-full relative">
             <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-                <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
-                    <div className="flex-1 min-w-0">
-                        <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
-                        <p className="text-body-sm mb-3 truncate text-text-secondary">{board.project.description || "No description"}</p>
+                {isBoardView ? (
+                    /* Clean single-row board toolbar (design: Agentira.dc.html board screen). */
+                    <header className="px-4 flex items-center gap-3 shrink-0 border-b" style={{ height: 53 }}>
+                        <MembersControl
+                            members={members}
+                            availableProfiles={availableProfiles}
+                            onAdd={handleAddMember}
+                            onRemove={handleRemoveMember}
+                        />
 
-                        {/* Filters + search are board-flavored; only show on the
-                            board / backlog / roadmap routes. Overview and
-                            Settings get a clean header. */}
-                        {isBoardView && (
-                        <div className="flex flex-wrap items-center gap-4 mt-2">
-                            <div className="flex items-center gap-1">
-                                {members.map(m => (
-                                    <div key={m.id} className="relative group" title={`${m.display_name} (@${m.name})`}>
-                                        <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold cursor-default bg-accent-subtle text-accent-primary border-bg-panel">
-                                            {(m.display_name || m.name)[0]?.toUpperCase()}
-                                        </div>
-                                        <button onClick={() => handleRemoveMember(m.name)} className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white items-center justify-center text-[8px] hidden group-hover:flex shadow">
-                                            <X className="w-2.5 h-2.5" />
-                                        </button>
-                                    </div>
-                                ))}
+                        <div className="flex-1" />
 
-                                <button ref={addBtnRef} onClick={() => setShowAddMember(v => !v)} className="w-8 h-8 rounded-full border-2 border-dashed flex items-center justify-center transition-colors hover:bg-white/10 border-border-subtle text-text-tertiary">
-                                    <UserPlus className="w-3.5 h-3.5" />
-                                </button>
-
-                                {showAddMember && <AddMemberDropdown anchorRef={addBtnRef} profiles={availableProfiles} onAdd={handleAddMember} onClose={() => setShowAddMember(false)} />}
-                            </div>
-                            
-                            <div className="flex flex-wrap items-center gap-2">
-                                <div className="flex items-center relative group">
-                                    <Search className="w-4 h-4 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
-                                    <input type="text" placeholder="Search tasks..." className="bg-bg-app border rounded-xl pl-9 pr-3 py-2 text-body-md w-48 lg:w-64 focus:outline-none focus:border-accent-primary focus:ring-1 focus:ring-accent-primary transition-all text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                                </div>
-                                <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
-                                <FilterDropdown label="Assignee" value={filterAssignee} onChange={setFilterAssignee} options={[{ value: '', label: 'All Assignees' }, ...members.map(m => ({ value: m.name, label: m.display_name || m.name }))]} />
-                                <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
-                                {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
-                                    <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
-                                )}
-                            </div>
+                        <div className="flex items-center relative group">
+                            <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
+                            <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                         </div>
+                        <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
+                        <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
+                        {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
+                            <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
                         )}
-                    </div>
-                </header>
-
-                {isBoardView && <ProjectActivityPanel projectId={board.project.id} />}
+                    </header>
+                ) : (
+                    <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
+                        <div className="flex-1 min-w-0">
+                            <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
+                            <p className="text-body-sm truncate text-text-secondary">{board.project.description || "No description"}</p>
+                        </div>
+                    </header>
+                )}
 
                 <div className="flex-1 overflow-hidden relative">
                     <Outlet context={filters} />

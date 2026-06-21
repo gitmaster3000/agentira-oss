@@ -1,91 +1,94 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
 import { MentionInput } from './MentionInput';
 import {
-    Trash2,
-    X,
-    Maximize2,
-    MessageSquare,
-    Clock,
-    User,
-    Tag,
-    AlertCircle,
-    Pencil,
-    CheckSquare,
-    Square,
-    Plus,
-    GitCommit,
-    GitPullRequest,
-    GitBranch,
-    ExternalLink,
-    Copy,
-    Check,
-    Cpu,
-    Play,
+    Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
+    GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
+    Info, FileText, MessageSquare, Activity as ActivityIcon, Paperclip,
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
+// Board status → dot color + label (design: guidelines/colors-semantic.html).
+const STATUS = {
+    backlog:     { color: '#768390', label: 'Backlog' },
+    todo:        { color: '#8ab4f8', label: 'To Do' },
+    in_progress: { color: '#ff9800', label: 'In Progress' },
+    review:      { color: '#7c4dff', label: 'In Review' },
+    done:        { color: '#2ecc71', label: 'Done' },
+};
+const PRIORITY = {
+    critical: { color: '#f85149', bg: 'rgba(248,81,73,.14)' },
+    high:     { color: '#ff9800', bg: 'rgba(255,152,0,.14)' },
+    medium:   { color: '#7c8db5', bg: 'rgba(124,141,181,.14)' },
+    low:      { color: '#768390', bg: 'rgba(118,131,144,.14)' },
+};
+const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
+
+const RAIL = [
+    { id: 'info', label: 'Details', icon: Info },
+    { id: 'files', label: 'Files', icon: FileText },
+    { id: 'git', label: 'Branch & PR', icon: GitBranch },
+    { id: 'comments', label: 'Comments', icon: MessageSquare },
+    { id: 'activity', label: 'Activity', icon: ActivityIcon },
+];
+
 function formatBranchDisplay(val) {
     if (!val) return '';
-    // https://github.com/owner/repo/tree/branch-name → branch-name
     const treeMatch = val.match(/\/tree\/(.+)$/);
     if (treeMatch) return treeMatch[1];
-    // strip protocol for other URLs
     if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
     return val;
 }
-
 function formatPrDisplay(val) {
     if (!val) return '';
-    // https://github.com/owner/repo/pull/5 → repo#5
     const prMatch = val.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
     if (prMatch) return `${prMatch[1]}#${prMatch[2]}`;
     if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
     return val;
 }
-import { AttachmentsSection } from './TaskDetail/AttachmentsSection';
+function initials(name) {
+    if (!name) return '?';
+    return name.slice(0, 2).toUpperCase();
+}
+function relTime(value) {
+    if (!value) return '';
+    const diff = Math.round((Date.now() - new Date(value).getTime()) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+    return new Date(value).toLocaleDateString();
+}
 
 export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditing }) {
     const navigate = useNavigate();
     const { user } = useAuth();
-    const [loading, setLoading] = useState(false);
     const [activities, setActivities] = useState([]);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [comment, setComment] = useState('');
-    const [profiles, setProfiles] = useState([]);
-    const [epics, setEpics] = useState([]);
     const [attachments, setAttachments] = useState([]);
-    const [uploading, setUploading] = useState(false);
     const [commits, setCommits] = useState([]);
     const [dodItems, setDodItems] = useState(task.dod_items || []);
     const [newDodText, setNewDodText] = useState('');
-    const [forgeAgents, setForgeAgents] = useState([]);
     const [taskRuns, setTaskRuns] = useState([]);
-    const [pickingAgent, setPickingAgent] = useState(false);
-    const [scheduling, setScheduling] = useState(false);
     const [editingBranch, setEditingBranch] = useState(false);
     const [branchValue, setBranchValue] = useState(task.branch || '');
     const [editingPrUrl, setEditingPrUrl] = useState(false);
     const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
     const [copiedField, setCopiedField] = useState(null);
-    // AP-154: list of {name, is_primary, ...} from project_repos.
-    const [projectRepos, setProjectRepos] = useState([]);
-
-    // Edit state
     const [formData, setFormData] = useState({ ...task });
+    const [activeSection, setActiveSection] = useState('info');
 
-    // Notify parent of edit state changes
-    const toggleEditing = (val) => {
-        setIsEditing(val);
-        /* onEditingChange removed — not a prop */
-    };
+    const scrollRef = useRef(null);
+    const sectionRefs = useRef({});
+    const fileInputRef = useRef(null);
+
+    const toggleEditing = (val) => setIsEditing(val);
 
     useEffect(() => {
-        // Reset edit state when switching to a different task
         setIsEditing(false);
         setFormData({ ...task });
     }, [task.id]);
@@ -98,20 +101,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         setDodItems(task.dod_items || []);
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
-        if (task.project_id) {
-            api.getProjectMembers(task.project_id).then(setProfiles).catch(console.error);
-            api.getEpics(task.project_id).then(setEpics).catch(console.error);
-            // AP-154: load the project's declared repos so the user can
-            // pick a subset for this task (multi-select). Empty array is
-            // a valid response (single-repo legacy project).
-            api.listProjectRepos(task.project_id)
-                .then((r) => setProjectRepos(Array.isArray(r) ? r : []))
-                .catch(() => setProjectRepos([]));
-        }
-        const interval = setInterval(() => {
-            loadActivity();
-            loadTaskRuns();
-        }, 3000);
+        const interval = setInterval(() => { loadActivity(); loadTaskRuns(); }, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
 
@@ -119,886 +109,449 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         try {
             const data = await api.forge.listTaskRuns(task.id);
             if (Array.isArray(data)) setTaskRuns(data);
-        } catch {
-            // Forge may not be deployed; silently ignore
-        }
+        } catch { /* forge may be down */ }
     };
-
-    const openAgentPicker = async () => {
-        setPickingAgent(true);
-        try {
-            const data = await api.forge.listAgents();
-            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
-        } catch (err) {
-            console.error('Failed to load agents:', err);
-            setForgeAgents([]);
-        }
-    };
-
-    const handleScheduleRun = async (agentId) => {
-        setScheduling(true);
-        try {
-            // AP-112: prepare (no dispatch) → land on run page so user can
-            // edit the prompt before clicking Start.
-            const result = await api.forge.prepareTaskRun(task.id, agentId);
-            setPickingAgent(false);
-            await loadTaskRuns();
-            const runId = result.id || result.run_id;
-            if (runId) navigate(`/forge/runs/${runId}`);
-        } catch (err) {
-            console.error('Prepare run failed:', err);
-            alert('Failed to prepare run: ' + (err.message || err));
-        } finally {
-            setScheduling(false);
-        }
-    };
-
     const loadActivity = async () => {
-        try {
-            const data = await api.getActivity(task.id);
-            setActivities(data);
-        } catch (err) {
-            console.error(err);
-        }
+        try { setActivities(await api.getActivity(task.id)); } catch (err) { console.error(err); }
     };
-
     const loadAttachments = async () => {
         try {
             const data = await api.listAttachments(task.id);
             if (Array.isArray(data)) setAttachments(data);
-        } catch (err) {
-            // Attachments endpoint may not exist yet — silently ignore
-        }
+        } catch { /* ignore */ }
     };
-
     const loadCommits = async () => {
         try {
             const data = await api.listTaskCommits(task.id);
             if (Array.isArray(data)) setCommits(data);
-        } catch (err) {
-            // Git integration may not exist yet
-        }
+        } catch { /* ignore */ }
     };
-
     const saveBranch = async (val) => {
         setEditingBranch(false);
         if (val !== (task.branch || '')) {
-            try {
-                await api.updateTask(task.id, { branch: val });
-                onUpdate();
-            } catch (err) { console.error('Failed to save branch:', err); }
+            try { await api.updateTask(task.id, { branch: val }); onUpdate(); } catch (err) { console.error(err); }
         }
     };
-
     const savePrUrl = async (val) => {
         setEditingPrUrl(false);
         if (val !== (task.pr_url || '')) {
-            try {
-                await api.updateTask(task.id, { pr_url: val });
-                onUpdate();
-            } catch (err) { console.error('Failed to save PR URL:', err); }
+            try { await api.updateTask(task.id, { pr_url: val }); onUpdate(); } catch (err) { console.error(err); }
         }
     };
-
     const copyToClipboard = (text, field) => {
         navigator.clipboard.writeText(text);
         setCopiedField(field);
         setTimeout(() => setCopiedField(null), 800);
     };
-
     const toggleDodItem = async (index) => {
-        const updated = dodItems.map((item, i) =>
-            i === index ? { ...item, checked: !item.checked } : item
-        );
+        const updated = dodItems.map((item, i) => i === index ? { ...item, checked: !item.checked } : item);
         setDodItems(updated);
-        try {
-            await api.updateTask(task.id, { dod_items: updated });
-            onUpdate();
-        } catch (err) {
-            console.error('Failed to update DOD:', err);
-        }
+        try { await api.updateTask(task.id, { dod_items: updated }); onUpdate(); } catch (err) { console.error(err); }
     };
-
     const addDodItem = async () => {
         if (!newDodText.trim()) return;
         const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
         setDodItems(updated);
         setNewDodText('');
-        try {
-            await api.updateTask(task.id, { dod_items: updated });
-            onUpdate();
-        } catch (err) {
-            console.error('Failed to add DOD item:', err);
-        }
+        try { await api.updateTask(task.id, { dod_items: updated }); onUpdate(); } catch (err) { console.error(err); }
     };
-
     const removeDodItem = async (index) => {
         const updated = dodItems.filter((_, i) => i !== index);
         setDodItems(updated);
-        try {
-            await api.updateTask(task.id, { dod_items: updated });
-            onUpdate();
-        } catch (err) {
-            console.error('Failed to remove DOD item:', err);
-        }
+        try { await api.updateTask(task.id, { dod_items: updated }); onUpdate(); } catch (err) { console.error(err); }
     };
-
     const handleUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        setUploading(true);
-        try {
-            await api.uploadAttachment(task.id, file);
-            loadAttachments();
-            loadActivity();
-        } catch (err) {
-            alert(err.message);
-        } finally {
-            setUploading(false);
-            e.target.value = '';
-        }
+        try { await api.uploadAttachment(task.id, file); loadAttachments(); loadActivity(); }
+        catch (err) { alert(err.message); }
+        finally { e.target.value = ''; }
     };
-
     const handleSave = async () => {
-        setLoading(true);
         try {
             await api.updateTask(task.id, {
                 title: formData.title,
                 description: formData.description,
                 priority: formData.priority,
-                assignee: formData.assignee,
-                tags: typeof formData.tags === 'string' ? formData.tags.split(',').map(t => t.trim()) : formData.tags,
-                branch: branchValue || undefined,
-                pr_url: prUrlValue || undefined,
-                epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
-                // AP-154: send only when the editor showed the multi-select
-                // (project has declared repos). Undefined means "no change."
-                repos: Array.isArray(formData.repos) ? formData.repos : undefined,
             });
             toggleEditing(false);
             onUpdate();
-        } catch (err) {
-            alert(err.message);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err) { alert(err.message); }
     };
-
     const handleComment = async (e) => {
         if (e) e.preventDefault();
         if (!comment.trim()) return;
-        try {
-            await api.addComment(task.id, { comment: comment });
-            setComment('');
-            loadActivity();
-        } catch (err) {
-            alert(err.message);
-        }
+        try { await api.addComment(task.id, { comment }); setComment(''); loadActivity(); }
+        catch (err) { alert(err.message); }
     };
-
     const handleDelete = async () => {
-        try {
-            await api.deleteTask(task.id);
-            onUpdate();
-        } catch (err) {
-            alert(err.message);
-            setIsConfirmingDelete(false);
+        try { await api.deleteTask(task.id); onUpdate(); }
+        catch (err) { alert(err.message); setIsConfirmingDelete(false); }
+    };
+
+    // Measure section offsets via getBoundingClientRect so the math is
+    // independent of offsetParent (the scroll container isn't positioned).
+    const scrollTo = (id) => {
+        const el = sectionRefs.current[id];
+        const c = scrollRef.current;
+        if (el && c) {
+            const top = el.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - 12;
+            c.scrollTo({ top, behavior: 'smooth' });
         }
+        setActiveSection(id);
+    };
+    const onScroll = () => {
+        const c = scrollRef.current;
+        if (!c) return;
+        const cTop = c.getBoundingClientRect().top;
+        let current = 'info';
+        for (const { id } of RAIL) {
+            const el = sectionRefs.current[id];
+            if (el && el.getBoundingClientRect().top - cTop <= 28) current = id;
+        }
+        setActiveSection(current);
     };
 
-    const priorityColors = {
-        critical: '#ef4444',
-        high: '#f97316',
-        medium: '#eab308',
-        low: '#6b7280',
-    };
-
-    // Only runs that produced durable work are shown as "Runs". An in-flight
-    // chat turn is internally a run row (is_work=False) for execution tracking,
-    // but it must NOT be presented as a Run — instead the "Agent is working"
-    // banner below makes the live execution visible regardless of is_work.
-    const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
-    const workRuns = taskRuns.filter(r => r.is_work);
+    const status = STATUS[task.status] || { color: '#768390', label: task.status };
+    const prio = PRIORITY[task.priority] || PRIORITY.medium;
     const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
+    const comments = activities.filter(a => a.action === 'commented');
+    const doneCount = dodItems.filter(i => i.checked).length;
 
     return (
-        <>
-            {/* Panel */}
-            <div
-                className="h-full w-[450px] bg-bg-card border-l border-border-subtle z-10 flex flex-col animate-slide-in shadow-elevation-3 overflow-hidden rounded-l-lg flex-shrink-0"
-                onClick={e => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div className="h-14 flex items-center justify-between px-6 border-b border-border-subtle flex-shrink-0">
-                    <div className="flex items-center gap-4 text-text-tertiary">
-                        <span className="text-xs font-bold tracking-widest uppercase">Task Detail</span>
-                        <div className="w-1 h-1 rounded-full bg-border-subtle" />
-                        <span className="text-xs font-mono font-medium">{task.key || task.id}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <button
-                            onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
-                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
-                            title="Open in full page"
-                        >
-                            <Maximize2 className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={onClose}
-                            className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary transition-colors"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-                    </div>
-                </div>
+        <aside
+            className="h-full flex flex-col flex-shrink-0 animate-slide-in"
+            style={{ width: 384, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-subtle)' }}
+            onClick={e => e.stopPropagation()}
+        >
+            {/* Header: key + epic · open full / edit / delete / close */}
+            <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '11px 18px', minHeight: 50, borderBottom: '1px solid var(--border-subtle)' }}>
+                <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: '#7c8db5', whiteSpace: 'nowrap' }}>
+                    {task.key || task.id}
+                </span>
+                {task.epic_name && (
+                    <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', background: `${task.epic_color || '#c9b8ff'}22`, color: task.epic_color || '#c9b8ff' }}>
+                        {task.epic_name}
+                    </span>
+                )}
+                <div className="flex-1" />
+                <button
+                    onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
+                    className="flex items-center gap-1.5 text-text-tertiary hover:text-text-primary transition-colors"
+                    style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', fontSize: 11.5 }}
+                    title="Open full task page"
+                >
+                    <ExternalLink className="w-3 h-3" /> Open full
+                </button>
+                <button onClick={() => toggleEditing(!isEditing)} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                    <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => setIsConfirmingDelete(true)} title="Delete" className="flex items-center justify-center text-text-tertiary hover:text-red-400 transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                    <Trash2 className="w-4 h-4" />
+                </button>
+                <button onClick={onClose} title="Close" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                    <X className="w-4 h-4" />
+                </button>
+            </div>
 
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="p-8">
-                        {/* Title */}
-                        <div className="mb-8 flex items-start justify-between group">
-                            <div className="flex-1 mr-4">
-                                {isEditing ? (
-                                    <input
-                                        className="bg-bg-app border border-border-subtle text-xl font-bold text-text-primary p-2 rounded-lg w-full focus:outline-none focus:border-accent-primary"
-                                        value={formData.title}
-                                        onChange={e => setFormData({ ...formData, title: e.target.value })}
-                                        autoFocus
-                                    />
-                                ) : (
-                                    <h1
-                                        className="text-2xl font-bold text-text-primary p-1 -ml-1 rounded transition-colors cursor-pointer hover:bg-bg-hover"
-                                        onClick={() => toggleEditing(true)}
-                                    >
-                                        {task.title}
-                                    </h1>
-                                )}
-                            </div>
-                        </div>
+            {/* Title */}
+            <div style={{ padding: '15px 18px 13px' }}>
+                {isEditing ? (
+                    <input
+                        className="w-full bg-bg-app border border-border-subtle rounded-lg p-2 text-text-primary focus:outline-none focus:border-accent-primary"
+                        style={{ fontSize: 17.5, fontWeight: 600 }}
+                        value={formData.title}
+                        onChange={e => setFormData({ ...formData, title: e.target.value })}
+                        autoFocus
+                    />
+                ) : (
+                    <h2 style={{ fontSize: 17.5, fontWeight: 600, margin: 0, lineHeight: 1.3 }} className="text-text-primary">{task.title}</h2>
+                )}
+            </div>
 
-                        {/* Description */}
-                        <div className="mb-8">
-                            <div className="flex items-center justify-between mb-3 group/desc">
-                                <label className="text-xs font-bold uppercase text-text-tertiary block">Description</label>
-                            </div>
-                            {isEditing ? (
-                                <textarea
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-3 rounded-lg w-full h-48 focus:outline-none focus:border-accent-primary resize-none"
-                                    value={formData.description}
-                                    onChange={e => setFormData({ ...formData, description: e.target.value })}
-                                    placeholder="Add a more detailed description..."
-                                />
-                            ) : (
-                                <div
-                                    className="text-sm text-text-secondary leading-relaxed bg-bg-app/50 p-4 rounded-lg border border-border-subtle/30 min-h-[100px] cursor-pointer hover:border-border-subtle/60 transition-colors break-words overflow-x-auto"
-                                    onClick={() => setIsEditing(true)}
-                                >
-                                    {/* AP-39: GitHub-flavored markdown render. */}
-                                    {task.description
-                                        ? <Markdown>{task.description}</Markdown>
-                                        : <span className="italic text-text-tertiary">No description provided.</span>}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Grid for properties */}
-                        <div className="grid grid-cols-2 gap-x-12 gap-y-6 mb-8 border-t border-b border-border-subtle/30 py-8">
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                        <User className="w-3 h-3" /> Assignee
-                                    </label>
-                                    {isEditing ? (
-                                        <select
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
-                                            value={formData.assignee}
-                                            onChange={e => setFormData({ ...formData, assignee: e.target.value })}
-                                        >
-                                            <option value="">Unassigned</option>
-                                            {profiles.map(p => (
-                                                <option key={p.id} value={p.name}>{p.display_name}</option>
-                                            ))}
-                                        </select>
-                                    ) : (
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary">
-                                                {task.assignee ? task.assignee[0].toUpperCase() : '?'}
-                                            </div>
-                                            <span className="text-sm text-text-secondary">{task.assignee || 'Unassigned'}</span>
-                                        </div>
-                                    )}
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                        <AlertCircle className="w-3 h-3" /> Priority
-                                    </label>
-                                    {isEditing ? (
-                                        <select
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
-                                            value={formData.priority}
-                                            onChange={e => setFormData({ ...formData, priority: e.target.value })}
-                                        >
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="critical">Critical</option>
-                                        </select>
-                                    ) : (
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityColors[task.priority] }} />
-                                            <span className="text-sm text-text-secondary capitalize">{task.priority}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                        <Tag className="w-3 h-3" /> Epic
-                                    </label>
-                                    {isEditing ? (
-                                        <select
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
-                                            value={formData.epic_id || ""}
-                                            onChange={e => setFormData({ ...formData, epic_id: e.target.value })}
-                                        >
-                                            <option value="">Unassigned</option>
-                                            {epics.map(e => (
-                                                <option key={e.id} value={e.id}>{e.title}</option>
-                                            ))}
-                                        </select>
-                                    ) : (
-                                        <div className="flex items-center gap-2">
-                                            {task.epic_name ? (
-                                                task.epic_id ? (
-                                                    <Link
-                                                        to={ROUTES.STUDIO_EPIC(task.epic_id)}
-                                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider hover:underline"
-                                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                                                        title={`Open epic: ${task.epic_name}`}
-                                                    >
-                                                        {task.epic_name}
-                                                    </Link>
-                                                ) : (
-                                                    <span
-                                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
-                                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                                                    >
-                                                        {task.epic_name}
-                                                    </span>
-                                                )
-                                            ) : (
-                                                <span className="text-xs text-text-tertiary italic">None</span>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                        <Tag className="w-3 h-3" /> Tags
-                                    </label>
-                                    {isEditing ? (
-                                        <input
-                                            className="bg-bg-app border border-border-subtle text-xs text-text-primary p-1.5 rounded-lg w-full"
-                                            value={Array.isArray(formData.tags) ? formData.tags.join(', ') : (formData.tags || '')}
-                                            onChange={e => setFormData({ ...formData, tags: e.target.value })}
-                                            placeholder="tag1, tag2..."
-                                        />
-                                    ) : (
-                                        <div className="flex flex-wrap gap-1">
-                                            {(task.tags || []).length > 0 ? task.tags.map(t => (
-                                                <span key={t} className="text-[10px] bg-bg-panel px-2 py-0.5 rounded-md border border-border-subtle text-text-secondary">{t}</span>
-                                            )) : <span className="text-xs text-text-tertiary italic">None</span>}
-                                        </div>
-                                    )}
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                        <Clock className="w-3 h-3" /> Dates
-                                    </label>
-                                    <div className="space-y-1">
-                                        <div className="text-[10px] text-text-tertiary">Created: {new Date(task.created_at).toLocaleDateString()}</div>
-                                        <div className="text-[10px] text-text-tertiary">Updated: {new Date(task.updated_at).toLocaleDateString()}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* AP-154: declared repos for this task. Multi-select against
-                            the project's project_repos. The daemon worktrees each
-                            named repo into the agent workdir so the agent has all
-                            of them inside its sandbox. Only renders when the project
-                            declared more than zero repos. */}
-                        {projectRepos.length > 0 && (
-                            <div className="mb-4">
-                                <label className="text-[10px] font-bold uppercase text-text-tertiary flex items-center gap-1.5 mb-2">
-                                    Repos this task touches
-                                </label>
-                                {isEditing ? (
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {projectRepos.map((r) => {
-                                            const selected = Array.isArray(formData.repos)
-                                                ? formData.repos
-                                                : (Array.isArray(task.repos) ? task.repos : (task.repo_name ? [task.repo_name] : []));
-                                            const isSel = selected.includes(r.name);
-                                            return (
-                                                <button key={r.name} type="button"
-                                                    onClick={() => {
-                                                        const next = isSel
-                                                            ? selected.filter((n) => n !== r.name)
-                                                            : [...selected, r.name];
-                                                        setFormData({ ...formData, repos: next });
-                                                    }}
-                                                    className="px-2 py-1 rounded-md text-[11px] border transition-colors"
-                                                    style={isSel ? {
-                                                        borderColor: 'var(--accent-primary)',
-                                                        backgroundColor: 'var(--accent-subtle)',
-                                                        color: 'var(--accent-primary)',
-                                                    } : {
-                                                        borderColor: 'var(--border-subtle)',
-                                                        color: 'var(--text-secondary)',
-                                                    }}>
-                                                    {r.name}
-                                                    {r.is_primary && <span className="ml-1 text-[9px] opacity-70">primary</span>}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                ) : (
-                                    <div className="flex flex-wrap gap-1">
-                                        {(task.repos || []).length > 0
-                                            ? task.repos.map((n) => (
-                                                <span key={n} className="text-[10px] bg-bg-panel px-2 py-0.5 rounded-md border border-border-subtle text-text-secondary">{n}</span>
-                                            ))
-                                            : <span className="text-xs text-text-tertiary italic">none — falls back to project's primary repo</span>}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-
-                        {/* Definition of Done */}
-                        <div className="mb-8">
-                            <div className="flex items-center justify-between mb-3">
-                                <label className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
-                                    <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
-                                </label>
-                                {dodItems.length > 0 && (
-                                    <span className="text-xs text-text-tertiary">
-                                        {dodItems.filter(i => i.checked).length}/{dodItems.length}
-                                    </span>
-                                )}
-                            </div>
-
-                            {dodItems.length > 0 && (
-                                <div className="w-full bg-bg-app rounded-full h-1.5 mb-3">
-                                    <div
-                                        className="h-1.5 rounded-full transition-all duration-300"
-                                        style={{
-                                            width: `${dodItems.length ? (dodItems.filter(i => i.checked).length / dodItems.length) * 100 : 0}%`,
-                                            backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
-                                        }}
-                                    />
-                                </div>
-                            )}
-
-                            <div className="space-y-1">
-                                {dodItems.map((item, i) => (
-                                    <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded-lg hover:bg-bg-hover transition-colors">
-                                        <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 text-text-secondary hover:text-accent-primary transition-colors">
-                                            {item.checked
-                                                ? <CheckSquare className="w-4 h-4 text-green-500" />
-                                                : <Square className="w-4 h-4" />
-                                            }
-                                        </button>
-                                        <span className={`text-sm flex-1 ${item.checked ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>
-                                            {item.text}
-                                        </span>
-                                        <button
-                                            onClick={() => removeDodItem(i)}
-                                            className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all p-0.5"
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="flex items-center gap-2 mt-2">
-                                <input
-                                    className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg focus:outline-none focus:border-accent-primary"
-                                    placeholder="Add DOD item..."
-                                    value={newDodText}
-                                    onChange={(e) => setNewDodText(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && addDodItem()}
-                                />
-                                <button onClick={addDodItem} className="p-1.5 rounded-lg hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
-                                    <Plus className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Git Integration */}
-                        <div className="mb-8">
-                            <label className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-3">
-                                <GitBranch className="w-3.5 h-3.5" /> Git
-                            </label>
-
-                            {/* Branch field */}
-                            <div className="mb-3">
-                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
-                                {editingBranch ? (
-                                    <input
-                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
-                                        value={branchValue}
-                                        onChange={e => setBranchValue(e.target.value)}
-                                        onBlur={() => saveBranch(branchValue)}
-                                        onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
-                                        autoFocus
-                                    />
-                                ) : (
-                                    <div className="flex items-center gap-1.5">
-                                        {branchValue ? (
-                                            <>
-                                                {branchValue.startsWith('http') ? (
-                                                    <a href={branchValue} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-primary hover:underline truncate">
-                                                        {formatBranchDisplay(branchValue)}
-                                                    </a>
-                                                ) : (
-                                                    <span className="text-sm font-mono text-text-primary truncate">{branchValue}</span>
-                                                )}
-                                                <button onClick={() => setEditingBranch(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
-                                                    <Pencil className="w-3 h-3" />
-                                                </button>
-                                                <button onClick={() => copyToClipboard(branchValue, 'branch')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
-                                                    {copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingBranch(true)}>
-                                                No branch set
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* PR URL field */}
-                            <div className="mb-4">
-                                <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
-                                {editingPrUrl ? (
-                                    <input
-                                        className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
-                                        value={prUrlValue}
-                                        onChange={e => setPrUrlValue(e.target.value)}
-                                        onBlur={() => savePrUrl(prUrlValue)}
-                                        onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
-                                        placeholder="https://github.com/..."
-                                        autoFocus
-                                    />
-                                ) : (
-                                    <div className="flex items-center gap-1.5">
-                                        {prUrlValue ? (
-                                            <>
-                                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
-                                                    {formatPrDisplay(prUrlValue)}
-                                                </a>
-                                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
-                                                    <Pencil className="w-3 h-3" />
-                                                </button>
-                                                <button onClick={() => copyToClipboard(prUrlValue, 'pr')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
-                                                    {copiedField === 'pr' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingPrUrl(true)}>
-                                                No PR linked
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Read-only commit/PR list */}
-                            {commits.length > 0 && (
-                                <>
-                                    <div className="text-[10px] font-bold uppercase text-text-secondary mb-1.5">
-                                        Commits & PRs ({commits.length})
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        {commits.map((c) => (
-                                            <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-bg-app border border-border-subtle/30 text-sm">
-                                                {c.kind === 'pr'
-                                                    ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                                    : <GitCommit className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0" />
-                                                }
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-text-primary truncate text-xs">
-                                                        {c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}
-                                                        {c.message}
-                                                    </div>
-                                                    <div className="text-[10px] text-text-tertiary">
-                                                        {c.author}{c.branch ? ` on ${c.branch}` : ''}
-                                                        {c.kind === 'pr' && c.pr_state && (
-                                                            <span className={`ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium ${
-                                                                c.pr_state === 'merged' ? 'bg-purple-500/20 text-purple-400' :
-                                                                c.pr_state === 'open' ? 'bg-green-500/20 text-green-400' :
-                                                                'bg-red-500/20 text-red-400'
-                                                            }`}>
-                                                                {c.pr_state}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                {c.url && (
-                                                    <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0">
-                                                        <ExternalLink className="w-3 h-3" />
-                                                    </a>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-
-                        {/* Attachments Section */}
-                        <div className="mb-8">
-                            <AttachmentsSection taskId={task.id} />
-                        </div>
-
-                        {/* Forge Runs — schedule an agent to work on this task,
-                            and see the runs that have been kicked off. */}
-                        <div className="mb-8">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-2 text-text-primary">
-                                    <Cpu className="w-4 h-4" />
-                                    <h3 className="font-bold">Agent runs</h3>
-                                    {workRuns.length > 0 && (
-                                        <span className="text-xs text-text-tertiary">{workRuns.length}</span>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
-                                    className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
-                                >
-                                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
-                                </button>
-                            </div>
-
-                            {/* Mandatory "agent is working" signal — driven by ANY
-                                live execution (incl. an is_work=False chat turn),
-                                so the user always knows the agent is on it even
-                                though it isn't shown as a Run. */}
-                            {liveRun && (
-                                <div className="mb-4 flex items-center gap-2.5 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-600">
-                                    <span className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500" />
-                                    </span>
-                                    <span>
-                                        {(liveRun.agent_name || 'Agent')} is working on this task…
-                                        {liveRun.status === 'interrupting' && ' (stopping)'}
-                                    </span>
-                                </div>
-                            )}
-
-                            {pickingAgent && (
-                                <div className="mb-4 p-3 rounded-lg border border-border-subtle bg-bg-app/50">
-                                    {forgeAgents.length === 0 ? (
-                                        <p className="text-xs text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
-                                    ) : (
-                                        <div className="space-y-1">
-                                            {/* Sort: assigned agent first (if any), then by name. */}
-                                            {[...forgeAgents].sort((a, b) => {
-                                                const aAssigned = task?.assignee && a.name === task.assignee;
-                                                const bAssigned = task?.assignee && b.name === task.assignee;
-                                                if (aAssigned && !bAssigned) return -1;
-                                                if (bAssigned && !aAssigned) return 1;
-                                                return (a.name || '').localeCompare(b.name || '');
-                                            }).map(a => {
-                                                const online = a.status === 'online';
-                                                const isAssigned = task?.assignee && a.name === task.assignee;
-                                                return (
-                                                    <button
-                                                        key={a.id}
-                                                        disabled={scheduling || !online}
-                                                        onClick={() => handleScheduleRun(a.id)}
-                                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors border ${isAssigned ? 'border-accent-primary/40 bg-accent-subtle/30' : 'border-transparent'} ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-                                                    >
-                                                        <div className="w-7 h-7 rounded-md bg-bg-panel border border-border-subtle flex items-center justify-center text-xs font-bold text-text-secondary">
-                                                            {a.name?.[0]?.toUpperCase() || 'A'}
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-sm text-text-primary truncate flex items-center gap-2">
-                                                                {a.name}
-                                                                {isAssigned && (
-                                                                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-primary/15 text-accent-primary">assignee</span>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-xs text-text-tertiary truncate">{a.model || a.runtime_type || 'no model'}</div>
-                                                        </div>
-                                                        <span className={`text-xs ${online ? 'text-green-400' : 'text-text-tertiary'}`}>
-                                                            {online ? 'online' : 'offline'}
-                                                        </span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {workRuns.length > 0 && (
-                                <div className="space-y-1">
-                                    {workRuns.slice(0, 5).map(r => (
-                                        <button
-                                            key={r.id}
-                                            onClick={() => navigate(`/forge/runs/${r.id}`)}
-                                            className="w-full text-left px-3 py-2 rounded-md hover:bg-bg-hover flex items-center gap-3 transition-colors border border-transparent hover:border-border-subtle/40"
-                                        >
-                                            <RunStatusDot status={r.status} />
-                                            <span className="text-sm text-text-primary">{r.agent_name || r.agent_id}</span>
-                                            <span className="text-xs text-text-tertiary">{r.status}</span>
-                                            <span className="text-xs text-text-tertiary ml-auto">
-                                                {r.created_at && new Date(r.created_at).toLocaleString()}
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Comments / Activity Section */}
-                        <div className="space-y-6">
-                            <div className="flex items-center gap-2 text-text-primary mb-4">
-                                <MessageSquare className="w-4 h-4" />
-                                <h3 className="font-bold">Activity</h3>
-                            </div>
-
-                            {/* Comment Box */}
-                            <div className="flex gap-4 mb-8">
-                                <div className="w-8 h-8 rounded-full bg-accent-subtle flex items-center justify-center font-bold text-xs text-accent-primary flex-shrink-0">
-                                    {user?.display_name?.[0]?.toUpperCase() || 'U'}
-                                </div>
-                                <form onSubmit={handleComment} className="flex-1">
-                                    <MentionInput
-                                        className="w-full bg-bg-app border border-border-subtle text-sm p-3 rounded-lg focus:outline-none focus:border-accent-primary transition-colors"
-                                        placeholder="Add a comment… (@ to mention)"
-                                        value={comment}
-                                        onChange={setComment}
-                                        onSubmit={handleComment}
-                                        projectId={task.project_id}
-                                    />
-                                    <div className="mt-2 text-[10px] text-text-tertiary">
-                                        Tip: Press <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">M</span> to focus · type <span className="p-0.5 bg-bg-panel border border-border-subtle rounded-md px-1">@</span> to mention an agent
-                                    </div>
-                                </form>
-                            </div>
-
-                            {/* Feed */}
-                            <div className="space-y-6">
-                                {activities.map((act, i) => (
-                                    <div key={act.id} className="flex gap-4">
-                                        <div className="w-8 h-8 rounded-full bg-bg-panel border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary flex-shrink-0">
-                                            {act.actor?.[0]?.toUpperCase() || '?'}
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-sm font-bold text-text-primary">{act.actor}</span>
-                                                <span className="text-xs text-text-tertiary">{new Date(act.created_at).toLocaleString()}</span>
-                                            </div>
-                                            <div className="text-sm text-text-secondary">
-                                                <span className="text-accent-primary font-medium">{act.action}</span>: {act.detail}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Footer / Actions */}
-                <div className="p-4 border-t border-border-subtle flex justify-between items-center bg-bg-panel/50">
-                    <div>
-                        <button
-                            onClick={() => setIsConfirmingDelete(true)}
-                            className="flex items-center gap-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded-lg transition-all"
-                            title="Delete Task"
-                        >
-                            <Trash2 className="w-4 h-4" /> Delete
-                        </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        {isEditing ? (
-                            <>
-                                <button
-                                    onClick={() => {
-                                        setFormData(task);
-                                        toggleEditing(false);
-                                    }}
-                                    className="btn btn-ghost text-xs py-1.5"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleSave}
-                                    disabled={loading}
-                                    className="btn btn-primary text-xs py-1.5"
-                                >
-                                    {loading ? 'Saving...' : 'Save'}
-                                </button>
-                            </>
-                        ) : (
+            <div className="flex-1 flex min-h-0" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                {/* Icon rail */}
+                <nav className="flex flex-col items-center flex-shrink-0" style={{ width: 50, borderRight: '1px solid var(--border-subtle)', gap: 4, padding: '10px 0' }}>
+                    {RAIL.map(({ id, label, icon: Icon }) => {
+                        const active = activeSection === id;
+                        return (
                             <button
-                                onClick={() => setIsEditing(true)}
-                                className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover px-3 py-1.5 rounded-lg transition-all"
-                                title="Edit Task"
+                                key={id}
+                                onClick={() => scrollTo(id)}
+                                title={label}
+                                className="flex items-center justify-center transition-colors"
+                                style={{
+                                    width: 34, height: 34, borderRadius: 8,
+                                    color: active ? '#c9b8ff' : '#768390',
+                                    background: active ? 'rgba(201,184,255,.12)' : 'transparent',
+                                }}
                             >
-                                <Pencil className="w-3.5 h-3.5" /> Edit
+                                <Icon className="w-4 h-4" />
                             </button>
+                        );
+                    })}
+                </nav>
+
+                {/* Scroll body */}
+                <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-w-0 overflow-y-auto custom-scrollbar" style={{ padding: '16px 18px', position: 'relative', scrollBehavior: 'smooth' }}>
+                    {/* INFO */}
+                    <div ref={el => (sectionRefs.current.info = el)}>
+                        {liveRun && (
+                            <div
+                                onClick={() => navigate(ROUTES.FORGE_RUN(liveRun.id))}
+                                className="agent-active-glow flex items-center gap-2 cursor-pointer"
+                                style={{ padding: 10, borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', marginBottom: 16 }}
+                            >
+                                <span style={{ width: 24, height: 24, borderRadius: 7, background: 'rgba(0,188,212,.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg>
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                    <div style={{ fontSize: 12, fontWeight: 600 }} className="text-text-primary">Agent working now</div>
+                                    <div style={{ fontSize: 10.5 }} className="text-text-tertiary">Open to watch the live run</div>
+                                </div>
+                                <span className="flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>
+                                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38bdf8' }} />LIVE
+                                </span>
+                            </div>
+                        )}
+
+                        <SectionLabel>Description</SectionLabel>
+                        {isEditing ? (
+                            <textarea
+                                className="w-full bg-bg-app border border-border-subtle rounded-lg p-2.5 text-text-secondary focus:outline-none focus:border-accent-primary"
+                                style={{ fontSize: 12.5, lineHeight: 1.6, minHeight: 90, marginBottom: 18 }}
+                                value={formData.description || ''}
+                                onChange={e => setFormData({ ...formData, description: e.target.value })}
+                            />
+                        ) : (
+                            <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }} className="text-text-tertiary break-words">
+                                {task.description ? <Markdown>{task.description}</Markdown> : <span className="italic">No description.</span>}
+                            </div>
+                        )}
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr', gap: '12px 10px', fontSize: 12.5, alignItems: 'center', marginBottom: 18 }}>
+                            <span className="text-text-tertiary">Status</span>
+                            <span className="inline-flex items-center" style={{ gap: 6 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: status.color }} />{status.label}
+                            </span>
+                            <span className="text-text-tertiary">Priority</span>
+                            <span>
+                                {isEditing ? (
+                                    <select
+                                        className="bg-bg-app border border-border-subtle rounded text-text-primary px-2 py-1"
+                                        style={{ fontSize: 12 }}
+                                        value={formData.priority}
+                                        onChange={e => setFormData({ ...formData, priority: e.target.value })}
+                                    >
+                                        {['low', 'medium', 'high', 'critical'].map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                ) : (
+                                    <span className="inline-flex items-center capitalize" style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: prio.bg, color: prio.color }}>
+                                        {task.priority}
+                                    </span>
+                                )}
+                            </span>
+                            <span className="text-text-tertiary">Assignee</span>
+                            <span className="inline-flex items-center" style={{ gap: 6 }}>
+                                <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,188,212,.16)', color: '#00bcd4', fontSize: 9, fontWeight: 700 }} className="flex items-center justify-center">
+                                    {initials(task.assignee)}
+                                </span>
+                                <span className="text-text-secondary">{task.assignee || 'Unassigned'}</span>
+                            </span>
+                        </div>
+
+                        <div className="flex items-center justify-between" style={{ marginBottom: 9 }}>
+                            <SectionLabel inline>Definition of Done</SectionLabel>
+                            {dodItems.length > 0 && <span style={{ fontSize: 11 }} className="text-text-tertiary">{doneCount} / {dodItems.length}</span>}
+                        </div>
+                        {dodItems.map((item, i) => (
+                            <div key={i} className="flex items-center group" style={{ gap: 9, fontSize: 12.5, marginBottom: 6 }}>
+                                <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 flex items-center justify-center" style={{ width: 16, height: 16, borderRadius: 5, background: item.checked ? '#2ecc71' : 'transparent', border: item.checked ? 'none' : '1.5px solid var(--border-strong, #484f58)' }}>
+                                    {item.checked && <Check className="w-2.5 h-2.5" style={{ color: '#0e1117' }} strokeWidth={3} />}
+                                </button>
+                                <span className="flex-1" style={item.checked ? { color: '#768390', textDecoration: 'line-through' } : { color: '#e8ebf0' }}>{item.text}</span>
+                                <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all"><X className="w-3 h-3" /></button>
+                            </div>
+                        ))}
+                        <div className="flex items-center" style={{ gap: 6, marginTop: 4, marginBottom: 18 }}>
+                            <input
+                                className="flex-1 bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
+                                style={{ fontSize: 12, padding: '5px 8px' }}
+                                placeholder="Add item…"
+                                value={newDodText}
+                                onChange={e => setNewDodText(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && addDodItem()}
+                            />
+                            <button onClick={addDodItem} className="text-text-tertiary hover:text-accent-primary"><Plus className="w-4 h-4" /></button>
+                        </div>
+
+                        {isEditing && (
+                            <div className="flex gap-2" style={{ marginBottom: 18 }}>
+                                <button onClick={handleSave} className="btn btn-primary" style={{ fontSize: 12.5 }}>Save</button>
+                                <button onClick={() => { toggleEditing(false); setFormData({ ...task }); }} className="btn btn-ghost" style={{ fontSize: 12.5 }}>Cancel</button>
+                            </div>
                         )}
                     </div>
+
+                    {/* FILES */}
+                    <div ref={el => (sectionRefs.current.files = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                        <SectionLabel>Files</SectionLabel>
+                        <div className="flex flex-col" style={{ gap: 8 }}>
+                            {attachments.map(att => (
+                                <a key={att.id} href={api.getAttachmentDownloadUrl(att.id)} target="_blank" rel="noopener noreferrer"
+                                   className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+                                    <FileText className="w-4 h-4 flex-shrink-0" style={{ color: '#80cbc4' }} />
+                                    <div className="flex-1 min-w-0">
+                                        <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
+                                        {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
+                                    </div>
+                                </a>
+                            ))}
+                            <button onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, marginTop: 4, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
+                                <Plus className="w-3 h-3" /> Attach a file
+                            </button>
+                            <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
+                        </div>
+                    </div>
+
+                    {/* GIT */}
+                    <div ref={el => (sectionRefs.current.git = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                        <SectionLabel>Branch</SectionLabel>
+                        <div style={{ marginBottom: 16 }}>
+                            {editingBranch ? (
+                                <input
+                                    className="w-full bg-bg-card border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
+                                    style={{ fontSize: 12, padding: '9px 11px' }}
+                                    value={branchValue}
+                                    onChange={e => setBranchValue(e.target.value)}
+                                    onBlur={() => saveBranch(branchValue)}
+                                    onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
+                                    autoFocus
+                                />
+                            ) : branchValue ? (
+                                <div className="flex items-center" style={{ gap: 8, padding: '9px 11px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', fontSize: 12 }}>
+                                    <GitBranch className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#80cbc4' }} />
+                                    <span className="flex-1 font-mono truncate" style={{ color: '#b1bac4' }}>{formatBranchDisplay(branchValue)}</span>
+                                    <button onClick={() => setEditingBranch(true)} className="text-text-tertiary hover:text-text-secondary"><Pencil className="w-3 h-3" /></button>
+                                    <button onClick={() => copyToClipboard(branchValue, 'branch')} className="text-text-tertiary hover:text-accent-primary">{copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}</button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setEditingBranch(true)} className="text-text-tertiary italic hover:text-text-secondary" style={{ fontSize: 12 }}>No branch set</button>
+                            )}
+                        </div>
+
+                        <SectionLabel>Pull Request</SectionLabel>
+                        <div style={{ marginBottom: 16 }}>
+                            {editingPrUrl ? (
+                                <input
+                                    className="w-full bg-bg-card border border-border-subtle rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
+                                    style={{ fontSize: 12, padding: '9px 11px' }}
+                                    value={prUrlValue}
+                                    onChange={e => setPrUrlValue(e.target.value)}
+                                    onBlur={() => savePrUrl(prUrlValue)}
+                                    onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
+                                    placeholder="https://github.com/…"
+                                    autoFocus
+                                />
+                            ) : prUrlValue ? (
+                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 8, padding: '9px 11px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', fontSize: 12.5 }}>
+                                    <GitPullRequest className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#a78bfa' }} />
+                                    <span className="flex-1 font-mono truncate" style={{ color: '#80cbc4' }}>{formatPrDisplay(prUrlValue)}</span>
+                                    <ExternalLink className="w-3 h-3 text-text-tertiary" />
+                                </a>
+                            ) : (
+                                <button onClick={() => setEditingPrUrl(true)} className="text-text-tertiary italic hover:text-text-secondary" style={{ fontSize: 12 }}>No PR linked</button>
+                            )}
+                        </div>
+
+                        {commits.length > 0 && (
+                            <div className="flex flex-col" style={{ gap: 6 }}>
+                                {commits.map(c => (
+                                    <div key={c.id} className="flex items-center" style={{ gap: 8, padding: '7px 9px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', fontSize: 11.5 }}>
+                                        {c.kind === 'pr' ? <GitPullRequest className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#a78bfa' }} /> : <GitCommit className="w-3.5 h-3.5 flex-shrink-0 text-text-tertiary" />}
+                                        <span className="flex-1 truncate text-text-secondary">{c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha?.slice(0, 7)} `}{c.message}</span>
+                                        {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary hover:text-accent-primary"><ExternalLink className="w-3 h-3" /></a>}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* COMMENTS */}
+                    <div ref={el => (sectionRefs.current.comments = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                        <SectionLabel>Comments</SectionLabel>
+                        <div className="flex flex-col" style={{ gap: 13 }}>
+                            {comments.length === 0 && <p style={{ fontSize: 12 }} className="text-text-tertiary italic">No comments yet.</p>}
+                            {comments.map(c => (
+                                <div key={c.id} className="flex" style={{ gap: 9 }}>
+                                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'rgba(201,184,255,.16)', color: '#c9b8ff', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{initials(c.actor)}</span>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center" style={{ gap: 7, marginBottom: 3 }}>
+                                            <span style={{ fontSize: 12, fontWeight: 600 }} className="text-text-primary">{c.actor}</span>
+                                            <span style={{ fontSize: 10 }} className="text-text-tertiary">{relTime(c.created_at)}</span>
+                                        </div>
+                                        <div className="text-text-secondary" style={{ fontSize: 12.5, lineHeight: 1.55, background: 'var(--bg-card)', borderRadius: 10, borderTopLeftRadius: 3, padding: '9px 11px' }}>{c.detail}</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginTop: 14 }}>
+                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: '#b1bac4', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
+                            <div className="flex-1 flex items-center" style={{ gap: 8, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
+                                <MentionInput
+                                    className="flex-1 bg-transparent text-text-primary text-xs focus:outline-none"
+                                    placeholder="Comment or @mention…"
+                                    value={comment}
+                                    onChange={setComment}
+                                    onSubmit={handleComment}
+                                    projectId={task.project_id}
+                                />
+                                <button type="submit" className="flex-shrink-0" style={{ color: '#80cbc4' }}><Send className="w-4 h-4" /></button>
+                            </div>
+                        </form>
+                    </div>
+
+                    {/* ACTIVITY */}
+                    <div ref={el => (sectionRefs.current.activity = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                        <SectionLabel>Activity</SectionLabel>
+                        <div className="flex flex-col">
+                            {activities.map((a, i) => (
+                                <div key={a.id} className="flex" style={{ gap: 11 }}>
+                                    <div className="flex flex-col items-center">
+                                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#00bcd4', marginTop: 3 }} />
+                                        {i < activities.length - 1 && <span className="flex-1" style={{ width: 1.5, background: 'var(--border-subtle)' }} />}
+                                    </div>
+                                    <div style={{ paddingBottom: 16 }}>
+                                        <div style={{ fontSize: 12.5, lineHeight: 1.45 }} className="text-text-primary">
+                                            <b>{a.actor}</b> <span className="text-accent-primary">{a.action}</span> {a.detail}
+                                        </div>
+                                        <div style={{ fontSize: 10.5, marginTop: 2 }} className="text-text-tertiary">{relTime(a.created_at)} ago</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div style={{ height: 80 }} />
                 </div>
             </div>
 
             {isConfirmingDelete && (
                 <ConfirmModal
                     title="Delete Task"
-                    message={`Are you sure you want to delete task "${task.title}"? This action cannot be undone.`}
+                    message={`Are you sure you want to delete task "${task.title}"?`}
                     confirmText="Delete"
                     onConfirm={handleDelete}
                     onCancel={() => setIsConfirmingDelete(false)}
                 />
             )}
-        </>
+        </aside>
     );
 }
 
-const RUN_STATUS_COLORS = {
-    pending:   '#5f6368',
-    running:   '#f1c40f',
-    completed: '#2ecc71',
-    failed:    '#e74c3c',
-    cancelled: '#9aa0a6',
-};
-
-function RunStatusDot({ status }) {
-    const color = RUN_STATUS_COLORS[status] || '#5f6368';
-    const pulse = status === 'running' || status === 'pending';
+function SectionLabel({ children, inline }) {
     return (
-        <span className="relative inline-flex w-2.5 h-2.5 flex-shrink-0">
-            {pulse && (
-                <span
-                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-                    style={{ backgroundColor: color }}
-                />
-            )}
-            <span
-                className="relative inline-flex rounded-full h-2.5 w-2.5"
-                style={{ backgroundColor: color }}
-            />
-        </span>
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.1em', color: '#768390', marginBottom: inline ? 0 : 9, textTransform: 'uppercase' }}>
+            {children}
+        </div>
     );
 }

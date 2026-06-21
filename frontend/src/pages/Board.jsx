@@ -3,11 +3,12 @@ import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
 
+// Board status dot colors — from the design system (guidelines/colors-semantic.html).
 const STATUS_COLORS = {
-    backlog: '#5f6368',
-    todo: '#00bcd4',
-    in_progress: '#7c4dff',
-    review: '#ff9800',
+    backlog: '#768390',
+    todo: '#8ab4f8',
+    in_progress: '#ff9800',
+    review: '#7c4dff',
     done: '#2ecc71',
 };
 
@@ -52,27 +53,30 @@ export function Board() {
     const filteredColumns = getFilteredColumns();
 
     return (
-        <div className="h-full overflow-x-auto overflow-y-hidden p-2 sm:p-3 lg:p-4">
-            <div className="h-full grid grid-cols-5 gap-3 min-w-[1148px] w-full">
+        <div className="h-full overflow-x-auto overflow-y-hidden p-3.5">
+            <div className="h-full grid grid-cols-5 gap-2.5 min-w-[1080px] w-full">
                 {COLUMNS.map(col => (
                     <div
                         key={col.id}
-                        className="flex flex-col rounded-md h-full overflow-hidden"
-                        style={{ backgroundColor: 'var(--bg-surface-purple)' }}
+                        className="flex flex-col overflow-hidden"
+                        style={{ backgroundColor: 'rgba(201,184,255,.04)', borderRadius: 8 }}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => handleDrop(e, col.id)}
                     >
-                        <div className="px-4 py-3 font-medium text-title-sm flex justify-between items-center border-b">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[col.id] }} />
+                        <div
+                            className="flex justify-between items-center flex-shrink-0"
+                            style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }}
+                        >
+                            <div className="flex items-center font-semibold" style={{ gap: 7, fontSize: 12.5 }}>
+                                <span className="rounded-full" style={{ width: 9, height: 9, backgroundColor: STATUS_COLORS[col.id] }} />
                                 {col.label}
                             </div>
-                            <span className="text-label-sm px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
+                            <span className="rounded-full" style={{ fontSize: 10, padding: '1px 8px', backgroundColor: 'var(--bg-app)', color: 'var(--text-secondary)' }}>
                                 {filteredColumns[col.id]?.length || 0}
                             </span>
                         </div>
 
-                        <div className="flex-1 pl-4 pr-2.5 py-2 column-scroll">
+                        <div className="flex-1 flex flex-col column-scroll" style={{ padding: 8, gap: 8 }}>
                             {filteredColumns[col.id]?.map(task => (
                                 <TaskCard
                                     key={task.id}
