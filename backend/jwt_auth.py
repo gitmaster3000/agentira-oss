@@ -26,13 +26,18 @@ JWT_EXPIRY_SECONDS = 7 * 24 * 3600  # 7 days
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def create_token(profile_name: str, profile_id: str, role: str,
+def create_token(profile_name: str, profile_id: str, roles,
                  org_id: str | None = None) -> str:
+    # RBAC: the token carries a `roles` LIST. A single string is still accepted
+    # (wrapped) for back-compat. A legacy `role` claim (first role) is emitted
+    # too so old readers keep working during rollout.
+    role_list = [roles] if isinstance(roles, str) else list(roles or [])
     now = int(time.time())
     payload = {
         "sub": profile_name,
         "profile_id": profile_id,
-        "role": role,
+        "roles": role_list,
+        "role": role_list[0] if role_list else None,
         "org_id": org_id,
         "iat": now,
         "exp": now + JWT_EXPIRY_SECONDS,
@@ -42,6 +47,16 @@ def create_token(profile_name: str, profile_id: str, role: str,
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+
+def payload_roles(payload: dict) -> list[str]:
+    """Roles from a token payload — prefers the `roles` list, falls back to a
+    legacy single `role` claim so pre-RBAC tokens still authorize."""
+    roles = payload.get("roles")
+    if roles:
+        return roles
+    legacy = payload.get("role")
+    return [legacy] if legacy else []
 
 
 def _dev_bypass_payload(token: str) -> dict | None:
@@ -62,16 +77,17 @@ def _dev_bypass_payload(token: str) -> dict | None:
         return None
     profile_name = os.getenv("AGENTIRA_DEV_PROFILE", "admin")
     from backend.db import privileged, SessionLocal
-    from backend.models import Profile, Role
+    from backend.models import Profile
     with privileged(), SessionLocal() as db:
         p = db.query(Profile).filter(Profile.name == profile_name).first()
         if not p or not p.org_id:
             return None
-        role = db.get(Role, p.role_id)
+        roles = p.role_names or ["admin"]
         return {
             "sub": p.name,
             "profile_id": p.id,
-            "role": role.name if role else "admin",
+            "roles": roles,
+            "role": roles[0],
             "org_id": p.org_id,
             "dev_bypass": True,
         }
@@ -110,7 +126,8 @@ async def get_current_user_payload(
         set_current_org(prof["org_id"])
         return {
             "sub": prof["name"], "profile_id": prof["id"],
-            "role": prof["role"], "org_id": prof["org_id"],
+            "roles": prof.get("roles", []), "role": prof.get("role"),
+            "org_id": prof["org_id"],
         }
     # Tokens minted before multi-tenancy carry no org_id. Reject them so a
     # stale session can't fall through to the unscoped (system) engine — the
@@ -131,11 +148,11 @@ async def get_current_user(
 async def require_admin(
     payload: dict = Depends(get_current_user_payload),
 ) -> str:
-    """FastAPI dependency — 403 unless the JWT's role claim == 'admin'.
+    """FastAPI dependency — 403 unless 'admin' is among the JWT's roles.
 
-    Role is taken from the token (set at login). A user whose role is
-    changed in the DB must re-login for the new role to take effect.
+    Roles are taken from the token (set at login). A user whose roles are
+    changed in the DB must re-login for the change to take effect.
     """
-    if payload.get("role") != "admin":
+    if "admin" not in payload_roles(payload):
         raise HTTPException(403, "Admin only")
     return payload["sub"]

@@ -106,8 +106,8 @@ def seed_all(org_id: str | None = None) -> dict[str, list[str]]:
     from backend.db import get_current_org
     oid = org_id or get_current_org()
     with SessionLocal() as db:
-        bot_role = db.query(Role).filter(Role.name == "bot").first()
-        if not bot_role:
+        member_role = db.query(Role).filter(Role.name == "member").first()
+        if not member_role:
             # Roles haven't been seeded yet — caller will retry later.
             return out
 
@@ -125,7 +125,8 @@ def seed_all(org_id: str | None = None) -> dict[str, list[str]]:
                     password_hash="",
                     avatar_url="",
                     webhook_url="",
-                    role_id=bot_role.id,
+                    account_type="agentira_agent",
+                    roles=[member_role],
                     api_key=secrets.token_hex(32),
                     org_id=oid,
                 )

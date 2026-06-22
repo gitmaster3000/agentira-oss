@@ -22,11 +22,8 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, Run, RunStatus, RuntimeStatus
@@ -34,29 +31,17 @@ from backend.models import Profile
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg.SessionLocal
 
 
 def _setup(TestSession) -> dict:
-    db = TestSession()
-    rt = ForgeRuntime(daemon_id="d", provider="claude", binary_path="/tmp/c",
-                      status=RuntimeStatus.ONLINE)
-    db.add(rt)
-    db.commit()
-    rt_id = rt.id
-    db.close()
+    with bdb.SessionLocal() as db:
+        rt = ForgeRuntime(daemon_id="d", provider="claude", binary_path="/tmp/c",
+                          status=RuntimeStatus.ONLINE)
+        db.add(rt)
+        db.commit()
+        rt_id = rt.id
     project = core_services.create_project("P", actor="system")
     task = core_services.create_task(project["id"], "T", actor="system")
     agent = forge_services.create_agent(name="A", executor_type="cli",
@@ -185,14 +170,19 @@ def test_two_concurrent_runs_on_same_task_rejected(test_db):
         db.query(Run).filter(Run.id == r1["id"]).update({"status": RunStatus.RUNNING})
         db.commit()
 
+    # AP-298: one run per (agent, task). Preparing again returns the SAME live
+    # run rather than minting a second — two concurrent runs on one task are
+    # impossible by construction.
     r2 = forge_services.prepare_task_run(
         task_id=s["task_id"], agent_id=s["agent_id"],
     )
+    assert r2["id"] == r1["id"], r2
+    # And the already-running run can't be re-dispatched into a second claude.
     from unittest.mock import MagicMock
     with patch("backend.forge.services._dispatch_coro",
                MagicMock(return_value=None)):
         result = forge_services.dispatch_pending_run(run_id=r2["id"])
-    assert "already running this task" in (result.get("error") or "").lower(), result
+    assert "running" in (result.get("error") or "").lower(), result
 
 
 def test_max_concurrent_runs_2_allows_two_different_tasks(test_db):

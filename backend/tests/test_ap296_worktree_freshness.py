@@ -2,33 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
-from backend.models import Profile, Role
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        admin_role = db.query(Role).filter(Role.name == "admin").first()
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
-        db.commit()
-        db.close()
-        yield TestSession
+def _harness(seed_admin):
+    """Shared ephemeral-Postgres harness (org-stamped via context)."""
+    yield
 
 
 def _project() -> str:

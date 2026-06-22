@@ -14,18 +14,17 @@ from __future__ import annotations
 import json
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from unittest.mock import patch
 
+import backend.db as bdb
 import backend.models  # noqa: F401
 import backend.forge.models  # noqa: F401
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import workflow
 from backend.models import Task, TaskPriority, Profile, Role, Status, Project
-from backend.forge.models import Agent, Run, RunStatus, RunOutcome
+from backend.forge.models import (
+    Agent, ForgeRuntime, Run, RunStatus, RunOutcome, RuntimeStatus,
+)
 
 
 # ── Schema / config layering ─────────────────────────────────────────────
@@ -76,26 +75,20 @@ def test_malformed_override_is_ignored_not_fatal():
 # ── DB-backed driver tests ───────────────────────────────────────────────
 
 @pytest.fixture
-def db_session():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.workflow.SessionLocal", TestSession):
-        s = TestSession()
-        core_services._seed_defaults(s)
-        s.close()
-        yield TestSession
+def db_session(pg):
+    yield bdb.SessionLocal
 
 
 def _mk_agent(db, name, runtime_id="rt1"):
     role = db.query(Role).first()
     prof = Profile(name=name, display_name=name, password_hash="", avatar_url="",
-                   webhook_url="", role_id=role.id, api_key="k_" + name,
+                   webhook_url="", roles=[role], api_key="k_" + name,
                    conductor_enabled=True)
     db.add(prof); db.flush()
+    if not db.get(ForgeRuntime, runtime_id):
+        db.add(ForgeRuntime(id=runtime_id, daemon_id="d", provider="claude",
+                            binary_path="/tmp/c", status=RuntimeStatus.ONLINE))
+        db.flush()
     agent = Agent(id=prof.id, profile_id=prof.id, name=name, runtime_id=runtime_id)
     db.add(agent); db.commit()
     return agent.id

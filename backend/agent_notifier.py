@@ -121,7 +121,7 @@ def get_webhook_targets(db, project_id: str, event: str, assignee_name: str) -> 
     Returns:
         List of Profile ORM objects whose resolved transport is 'webhook'.
     """
-    from backend.models import Project, ProjectMember, Profile, Role
+    from backend.models import Project, ProjectMember, Profile
 
     project = db.get(Project, project_id)
     if not project:
@@ -157,9 +157,9 @@ def get_webhook_targets(db, project_id: str, event: str, assignee_name: str) -> 
     elif receiver_group == "bots":
         targets = (
             db.query(Profile)
-            .join(Role)
             .join(ProjectMember, ProjectMember.profile_id == Profile.id)
-            .filter(ProjectMember.project_id == project_id, Role.name == "bot")
+            .filter(ProjectMember.project_id == project_id,
+                    Profile.account_type != "human")
             .all()
         )
     elif receiver_group == "members":

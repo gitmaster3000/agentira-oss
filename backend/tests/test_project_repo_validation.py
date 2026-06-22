@@ -6,29 +6,16 @@ is stranded. Reject it at registration.
 """
 
 from __future__ import annotations
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import models as _forge_models  # noqa: F401 — register FK tables
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                        poolclass=StaticPool)
-    TS = sessionmaker(bind=eng)
-    Base.metadata.create_all(eng)
-    with patch("backend.services.SessionLocal", TS):
-        db = TS()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TS
+def test_db(pg):
+    yield pg.SessionLocal
 
 
 def _project() -> str:

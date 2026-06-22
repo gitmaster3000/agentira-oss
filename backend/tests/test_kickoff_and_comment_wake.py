@@ -14,11 +14,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -28,19 +24,8 @@ from backend.models import Profile, Task, ProjectMember
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield
 
 
 # ── Kickoff on project create ────────────────────────────────────────────
@@ -72,13 +57,19 @@ def test_create_project_auto_adds_conductor_and_kickoff_task():
 
 
 def test_kickoff_skipped_gracefully_when_bot_role_missing(test_db):
-    """A workspace without the 'bot' role can't seed the Conductor; the
+    """A workspace without the 'member' role can't seed the Conductor; the
     project must still be created (best-effort kickoff)."""
-    # Strip bot role + Conductor profile (simulating a fresh install)
-    from backend.models import Role
+    # Strip member role + Conductor profile (simulating a fresh install).
+    # The Conductor is an agentira_agent that needs the 'member' role; with
+    # it gone, get_or_create_conductor returns an error and kickoff no-ops.
+    from backend.models import Role, RolePermission
     with forge_services._session() as db:
         db.query(Profile).filter(Profile.name == "Conductor").delete()
-        db.query(Role).filter(Role.name == "bot").delete()
+        member = db.query(Role).filter(Role.name == "member").first()
+        if member:
+            (db.query(RolePermission)
+               .filter(RolePermission.role_id == member.id).delete())
+            db.delete(member)
         db.commit()
 
     p = core_services.create_project("Lone project", actor="system")

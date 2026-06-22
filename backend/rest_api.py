@@ -1,7 +1,7 @@
 """FastAPI REST API — entity-level routers, thin wrapper around services."""
 
 from __future__ import annotations
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
+from backend.password_service import password_service
 from backend.jwt_auth import (create_token, get_current_user, require_admin,
                               get_current_user_payload)
 
@@ -27,6 +28,7 @@ class ProfileSignup(BaseModel):
     name: str
     display_name: str = ""
     password: str
+    email: str  # AP-306: every account must carry an email
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
@@ -44,9 +46,25 @@ class ProfileCreate(BaseModel):
 
 class ProfileUpdate(BaseModel):
     display_name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = None          # legacy single-role (still accepted)
+    roles: Optional[List[str]] = None   # RBAC: assign one or more roles
     avatar_url: Optional[str] = None
     webhook_url: Optional[str] = None
+    email: Optional[str] = None  # AP-306: admin sets/backfills a member's email
+
+# AP-306: password lifecycle request bodies.
+class AdminSetPasswordBody(BaseModel):
+    new_password: Optional[str] = None  # omit → server generates a temp password
+
+class ChangePasswordBody(BaseModel):
+    new_password: str
+
+class ForgotPasswordBody(BaseModel):
+    email: str
+
+class ResetPasswordBody(BaseModel):
+    token: str
+    new_password: str
 
 # AP-302: git access token (PAT) for a project repo or an agent/user.
 # Empty string clears the stored token. Value is write-only — never echoed.
@@ -172,10 +190,13 @@ class WebhookConfigUpdate(BaseModel):
 
 def _make_token(user: dict) -> str:
     """Create a JWT from a user dict returned by services."""
-    role = user.get("role", "member")
-    if isinstance(role, dict):
-        role = role.get("name", "member")
-    return create_token(user["name"], user["id"], role, user.get("org_id"))
+    roles = user.get("roles")
+    if not roles:
+        role = user.get("role", "member")
+        if isinstance(role, dict):
+            role = role.get("name", "member")
+        roles = [role]
+    return create_token(user["name"], user["id"], roles, user.get("org_id"))
 
 
 # ── Auth Router (PUBLIC — no JWT required) ───────────────────────────────
@@ -193,6 +214,21 @@ def api_login(body: LoginRequest):
 def api_signup(body: ProfileSignup):
     # Open self-serve signup is disabled — accounts are invite-only.
     raise HTTPException(403, "Signup is invite-only. Ask your admin for an invite link.")
+
+
+# ── AP-306: forgot/reset password (PUBLIC) ───────────────────────────────
+
+@auth.post("/auth/forgot-password")
+def api_forgot_password(body: ForgotPasswordBody):
+    """Always 200 — never reveal whether an email is registered."""
+    password_service.request_reset(body.email)
+    return {"ok": True}
+
+@auth.post("/auth/reset-password")
+def api_reset_password(body: ResetPasswordBody):
+    if not password_service.reset_with_token(body.token, body.new_password):
+        raise HTTPException(400, "Invalid or expired reset link")
+    return {"ok": True}
 
 
 # ── Invites ──────────────────────────────────────────────────────────────
@@ -216,7 +252,7 @@ def api_accept_invite(code: str, body: ProfileSignup):
     try:
         user = services.accept_invite(
             code, name=body.name, password=body.password,
-            display_name=body.display_name or "")
+            display_name=body.display_name or "", email=body.email)
         return {"user": user, "token": _make_token(user)}
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -378,8 +414,9 @@ def api_cli_approve(body: dict, payload: dict = Depends(get_current_user_payload
     if not s:
         raise HTTPException(404, "Invalid or expired code")
     s["status"] = "approved"
+    from backend.jwt_auth import payload_roles
     s["token"] = create_token(payload["sub"], payload["profile_id"],
-                              payload.get("role", "admin"), payload.get("org_id"))
+                              payload_roles(payload) or ["admin"], payload.get("org_id"))
     return {"ok": True}
 
 @auth.get("/statuses")
@@ -423,14 +460,32 @@ def api_get_profile(profile_id: str):
 @profiles.patch("/{profile_id}", dependencies=[Depends(require_admin)])
 def api_update_profile(profile_id: str, body: ProfileUpdate):
     try:
-        return services.update_profile(profile_id, display_name=body.display_name, role=body.role, avatar_url=body.avatar_url, webhook_url=body.webhook_url)
+        return services.update_profile(profile_id, display_name=body.display_name, role=body.role, roles=body.roles, avatar_url=body.avatar_url, webhook_url=body.webhook_url, email=body.email)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        # "not found" → 404; validation errors (bad/duplicate email) → 400.
+        raise HTTPException(404 if "not found" in str(e).lower() else 400, str(e))
 
 @profiles.delete("/{profile_id}", dependencies=[Depends(require_admin)])
 def api_delete_profile(profile_id: str):
     if not services.delete_profile(profile_id):
         raise HTTPException(404, "Profile not found")
+    return {"ok": True}
+
+# AP-306: admin sets/resets a member's password (forces change on next login).
+@profiles.post("/{profile_id}/reset-password", dependencies=[Depends(require_admin)])
+def api_admin_reset_password(profile_id: str, body: AdminSetPasswordBody):
+    res = password_service.admin_set_password(profile_id, body.new_password)
+    if res is None:
+        raise HTTPException(404, "Profile not found")
+    return res
+
+# AP-306: logged-in user changes their own password.
+@profiles.post("/me/password")
+def api_change_own_password(body: ChangePasswordBody, actor: str = Depends(get_current_user)):
+    try:
+        password_service.change_own_password(actor, body.new_password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
 
 
@@ -475,6 +530,13 @@ def api_get_service_account(profile_id: str):
     # Block leakage of managed agents (bot + runtime_id) through this endpoint.
     if result.get("runtime_id"):
         raise HTTPException(404, "Not a service account")
+    return result
+
+@svc_accounts.post("/{profile_id}/regenerate-key")
+def api_regenerate_service_account_key(profile_id: str):
+    result = services.regenerate_api_key(profile_id)
+    if not result:
+        raise HTTPException(404, "Service account not found")
     return result
 
 @svc_accounts.delete("/{profile_id}")

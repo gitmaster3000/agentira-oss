@@ -8,33 +8,17 @@ course (commit, register artifact, or declare blocked).
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, Run, RuntimeStatus
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield bdb.SessionLocal
 
 
 def _setup(TestSession) -> dict:

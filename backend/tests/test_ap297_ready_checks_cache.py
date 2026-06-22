@@ -9,14 +9,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -26,21 +22,13 @@ from backend.models import Profile, Role
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
+def test_db(pg):
+    with bdb.privileged(), bdb.SessionLocal() as db:
         admin_role = db.query(Role).filter(Role.name == "admin").first()
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
+        db.add(Profile(name="admin", account_type="human", roles=[admin_role],
+                       org_id=pg.org_id, password_hash=""))
         db.commit()
-        db.close()
-        yield TestSession
+    yield bdb.SessionLocal
 
 
 def _prep(TestSession, *, ttl=None):
@@ -50,7 +38,7 @@ def _prep(TestSession, *, ttl=None):
                       last_heartbeat=datetime.now(timezone.utc))
     db.add(rt)
     db.flush()
-    prof = Profile(name="bot", role_id=db.query(Role).first().id,
+    prof = Profile(name="bot", roles=[db.query(Role).first()],
                    password_hash="", api_key="k")
     db.add(prof)
     db.flush()

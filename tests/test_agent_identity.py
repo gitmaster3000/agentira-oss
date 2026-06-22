@@ -40,7 +40,7 @@ def test_service_account_lifecycle():
     # Checks that creation returns the API key
     bot_profile = services.create_service_account("code_agent")
     assert bot_profile["name"] == "code_agent"
-    assert bot_profile["role"] == "bot"
+    assert bot_profile["account_type"] == "external_agent"
     assert "api_key" in bot_profile
     api_key = bot_profile["api_key"]
     

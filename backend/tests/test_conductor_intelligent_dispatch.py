@@ -10,14 +10,11 @@ priority first.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from unittest.mock import patch
 
 import backend.models  # noqa: F401
 import backend.forge.models  # noqa: F401
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import conductor
 from backend.models import Task, TaskPriority, Profile, Role
@@ -25,24 +22,14 @@ from backend.forge.models import Agent
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession):
-        s = TestSession()
-        core_services._seed_defaults(s)
-        s.close()
-        yield TestSession
+def db_session(pg):
+    yield bdb.SessionLocal
 
 
 def _mk_agent(db, name="builder"):
     role = db.query(Role).first()
     prof = Profile(name=name, display_name=name, password_hash="", avatar_url="",
-                   webhook_url="", role_id=role.id, api_key="k_" + name,
+                   webhook_url="", roles=[role], api_key="k_" + name,
                    conductor_enabled=True)
     db.add(prof); db.flush()
     agent = Agent(id=prof.id, profile_id=prof.id, name=name)
@@ -98,7 +85,7 @@ def test_planning_facts_include_specialty_and_description(db_session):
         # conductor-enabled agent bound to the project, with a persona.
         role = db.query(Role).first()
         prof = Profile(name="Backend Implementer", display_name="Backend Implementer",
-                       password_hash="", avatar_url="", webhook_url="", role_id=role.id,
+                       password_hash="", avatar_url="", webhook_url="", roles=[role],
                        api_key="k_be", conductor_enabled=True, default_project_id=pid,
                        system_prompt="You are a Backend Implementer.\nBuild APIs.",
                        model="claude-sonnet-4-6")

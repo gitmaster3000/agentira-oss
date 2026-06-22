@@ -35,13 +35,11 @@ def test_db():
     )
     TestSession = sessionmaker(bind=engine)
     Base.metadata.create_all(engine)
-    # AP-86 merge: create_agent needs a bot role to mint backing profiles.
-    # Seed it so tests that call create_agent don't fail with
-    # "bot role missing".
+    # create_agent needs a member role to mint backing profiles.
     from backend.models import Role
     s = TestSession()
     try:
-        s.add(Role(name="bot"))
+        s.add(Role(name="member"))
         s.commit()
     finally:
         s.close()

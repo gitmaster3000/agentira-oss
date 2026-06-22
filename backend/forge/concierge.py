@@ -101,13 +101,14 @@ def get_or_create_concierge(org_id: str | None = None) -> dict:
                 logger.info("Renamed legacy Concierge profile %s -> %r",
                             prof.id, CONCIERGE_NAME)
         if prof is None:
-            role = db.query(Role).filter(Role.name == "bot").first()
+            role = db.query(Role).filter(Role.name == "member").first()
             if role is None:
-                return {"error": "bot role missing"}
+                return {"error": "member role missing"}
             prof = Profile(
                 name=CONCIERGE_NAME, display_name=CONCIERGE_NAME,
                 password_hash="", avatar_url="", webhook_url="",
-                role_id=role.id, api_key=secrets.token_hex(32),
+                account_type="agentira_agent", roles=[role],
+                api_key=secrets.token_hex(32),
                 org_id=oid,
             )
             db.add(prof)

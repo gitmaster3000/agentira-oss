@@ -63,8 +63,9 @@ services:
       - /app/node_modules
 
   # Local Postgres — prod parity (Railway prod runs Postgres). Dev-only creds.
+  # Pin the same image as qa/prod and the test harness (postgres:16-alpine).
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     environment:
       - POSTGRES_USER=agentira
       - POSTGRES_PASSWORD=agentira

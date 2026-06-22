@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "httpx"]
+dev = ["pytest", "pytest-asyncio", "httpx", "testcontainers[postgres]>=4.0.0"]
 
 [tool.setuptools]
 packages = ["backend"]

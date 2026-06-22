@@ -3,34 +3,20 @@
 from __future__ import annotations
 
 import json as _json
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import agent_templates
-from backend import services as core_services
 from backend.forge import services as forge_services  # noqa: F401 — register mappers
 from backend.models import Profile, Role
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.agent_templates.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    """Shared ephemeral-Postgres harness; yield the real routing sessionmaker.
+    seed_all() scopes to the pinned org via the org context."""
+    yield bdb.SessionLocal
 
 
 # ── Discovery — pure file IO, no DB ─────────────────────────────────────
@@ -67,12 +53,11 @@ def test_seed_all_creates_one_profile_per_template(test_db):
     assert set(result["created"]) >= expected
 
     with test_db() as db:
-        bot = db.query(Role).filter(Role.name == "bot").first()
         for name in expected:
             prof = db.query(Profile).filter(Profile.name == name).first()
             assert prof is not None, f"profile {name!r} should be seeded"
-            assert prof.role_id == bot.id
-            assert prof.api_key, "every bot needs an api_key"
+            assert prof.account_type == "agentira_agent"
+            assert prof.api_key, "every agent needs an api_key"
 
 
 def test_seed_all_is_idempotent(test_db):
@@ -143,11 +128,13 @@ def test_seed_all_does_not_overwrite_user_edited_model(test_db):
         assert prof.model == "claude-opus-4-7"
 
 
-def test_seed_all_skips_when_bot_role_missing(test_db):
-    """Fresh DB with no roles → return empty result, don't crash."""
-    with test_db() as db:
-        db.query(Profile).filter(Profile.role_id != None).delete()  # noqa: E711
-        db.query(Role).delete()
+def test_seed_all_skips_when_member_role_missing(test_db):
+    """Fresh DB with no roles → return empty result, don't crash.
+
+    seed_all gates on the 'member' role (the old 'bot' role is gone)."""
+    from sqlalchemy import text
+    with bdb.privileged(), test_db() as db:
+        db.execute(text("TRUNCATE TABLE roles CASCADE"))
         db.commit()
     out = agent_templates.seed_all()
     assert out["created"] == []

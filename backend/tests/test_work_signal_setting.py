@@ -3,27 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-from unittest.mock import patch
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import services as forge_services, turns, live_inflight
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession(); core_services._seed_defaults(db); db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg.SessionLocal
 
 
 def test_update_and_resolve_work_signal():

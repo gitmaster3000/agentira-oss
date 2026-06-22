@@ -6,18 +6,12 @@ retry so a partially-failed run is safe to replay.
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
-# Importing forge.models registers ForgeRuntime so Profile.runtime_id's
-# FK can be resolved against the in-memory SQLite metadata.
-import backend.forge.models  # noqa: F401
+import backend.forge.models  # noqa: F401 — register FK targets
 from backend.template_loader import (
     ACCheckType, Template, TemplateAgent,
     instantiate_project_from_template,
@@ -26,21 +20,8 @@ from backend.models import Profile, Project
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    # template_loader does `from backend.db import SessionLocal` inside
-    # the function — so the canonical patch site is backend.db itself,
-    # plus the same patches the other service-level tests apply.
-    with patch("backend.db.SessionLocal", TestSession), \
-         patch("backend.services.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield bdb.SessionLocal
 
 
 def _template(**overrides) -> Template:

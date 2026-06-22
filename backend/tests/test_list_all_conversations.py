@@ -7,45 +7,25 @@ picker without one call per agent.
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
-from backend import services as core_services
-from backend.models import Org
 from backend.forge import services as fs
 from backend.forge.models import Agent, AgentMessage, MessageRole
 
-_ORG_ID = "orgtest00000"
-
 
 @pytest.fixture(autouse=True)
-def test_db():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                        poolclass=StaticPool)
-    TS = sessionmaker(bind=eng)
-    Base.metadata.create_all(eng)
-    with patch("backend.services.SessionLocal", TS), \
-         patch("backend.forge.services.SessionLocal", TS):
-        db = TS()
-        core_services._seed_defaults(db)
-        db.add(Org(id=_ORG_ID, name="Test Org"))
-        db.commit()
-        db.close()
-        yield TS
+def org(pg):
+    """Shared ephemeral-Postgres harness with org context pinned."""
+    return pg
 
 
 def _agent(name: str) -> str:
     # Insert the Agent row directly — list_all_conversations only needs the
-    # agent + its messages, no runtime. org_id is set explicitly because the
-    # auto-stamp before_flush hook is bound to the real SessionLocal, not the
-    # test sessionmaker.
+    # agent + its messages, no runtime. org_id is auto-stamped by before_flush
+    # from the pinned org context.
     with fs._session() as db:
-        a = Agent(org_id=_ORG_ID, name=name, executor_type="cli")
+        a = Agent(name=name, executor_type="cli")
         db.add(a)
         db.commit()
         return a.id

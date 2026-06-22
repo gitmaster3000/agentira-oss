@@ -42,7 +42,8 @@ def test_transition_wildcard_granted_to_member():
 
 
 def test_transition_wildcard_granted_to_bot():
-    services.create_profile("bot_user", role="bot")
+    # Bots (service accounts) are members — member role has transition:*.
+    services.create_profile("bot_user", role="member")
     with services._session() as db:
         assert has_permission(db, "bot_user", "transition:*") is True
 
@@ -109,7 +110,7 @@ def test_member_can_move_task_backwards():
 
 
 def test_bot_can_move_task_any_direction():
-    services.create_profile("bot", role="bot")
+    services.create_profile("bot", role="member")
     p = services.create_project("P")
     t = services.create_task(p["id"], "T", actor="system")
 

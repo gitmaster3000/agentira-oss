@@ -8,35 +8,28 @@ transcript.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
-from backend.forge.models import Conversation, Run, RunStatus, RunOutcome
-from backend.models import Profile, Role
+from backend.forge import services as forge_services  # noqa: F401 — register mappers
+from backend.forge.models import Agent, Conversation, Run, RunStatus, RunOutcome
 
 
-@pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        admin_role = db.query(Role).filter(Role.name == "admin").first()
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
+@pytest.fixture
+def test_db(pg):
+    """Yield the real routing sessionmaker; create FK targets (agent, task)
+    so Conversation/Run rows referencing 'a1'/'t1' satisfy Postgres FKs."""
+    from backend.models import Task, Status
+    proj = core_services.create_project("P")
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        db.add(Agent(id="a1", profile_id=None, name="bot1",
+                     executor_type="http", model="", org_id=pg.org_id))
+        status = db.query(Status).first()
+        db.add(Task(id="t1", project_id=proj["id"], key="P-1", title="T",
+                    description="", status_id=status.id, org_id=pg.org_id))
         db.commit()
-        db.close()
-        yield TestSession
+    yield bdb.SessionLocal
 
 
 def _seed(db, *, agent_id="a1", task_id="t1", summary="did the work",

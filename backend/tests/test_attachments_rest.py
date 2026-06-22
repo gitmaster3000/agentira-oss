@@ -10,12 +10,8 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
-from backend import services as core_services
-import backend.forge.models  # noqa: F401 — FK target registration
+import backend.db as bdb
 from backend.rest_api import app
 from backend.jwt_auth import create_token
 
@@ -23,32 +19,19 @@ PDF_BYTES = b"%PDF-1.4\n" + bytes(range(256)) * 26  # binary, ~6.7KB
 
 
 @pytest.fixture
-def client(tmp_path):
-    import backend.db as bdb
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    Base.metadata.create_all(engine)
+def client(pg, tmp_path):
     storage = tmp_path / "attachments"
-    # Point the app's engines at the test DB but keep the real SessionLocal so
-    # its tenancy event hooks (org-stamping on insert, org filter on select)
-    # still fire — swapping SessionLocal out would silently drop them.
-    with patch.object(bdb, "engine", engine), \
-         patch.object(bdb, "app_engine", engine), \
-         patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
-        from backend.db import privileged
-        from backend.models import Org, Profile, Role
-        with privileged(), bdb.SessionLocal() as db:
-            core_services._seed_defaults(db)
-            org = Org(name="TestOrg")
-            db.add(org)
-            db.flush()
-            admin_role = db.query(Role).filter(Role.name == "admin").first()
-            admin = Profile(name="admin", org_id=org.id, role_id=admin_role.id,
-                            password_hash="", api_key="agentira_testkey_abc123")
-            db.add(admin)
-            db.commit()
-            token = create_token("admin", admin.id, "admin", org_id=org.id)
+    from backend.models import Profile, Role
+    # Seed an admin carrying the agent api_key the download-by-key test needs.
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        admin_role = db.query(Role).filter(Role.name == "admin").first()
+        admin = Profile(name="admin", account_type="human", org_id=pg.org_id,
+                        roles=[admin_role], password_hash="",
+                        api_key="agentira_testkey_abc123")
+        db.add(admin)
+        db.commit()
+        token = create_token("admin", admin.id, "admin", org_id=pg.org_id)
+    with patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
         c = TestClient(app)
         c.headers["Authorization"] = f"Bearer {token}"
         c.agent_api_key = "agentira_testkey_abc123"

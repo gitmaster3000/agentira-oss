@@ -9,14 +9,10 @@ history.
 
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as fs
 from backend.forge.models import (
@@ -25,18 +21,8 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    eng = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                        poolclass=StaticPool)
-    TS = sessionmaker(bind=eng)
-    Base.metadata.create_all(eng)
-    with patch("backend.services.SessionLocal", TS), \
-         patch("backend.forge.services.SessionLocal", TS), \
-         patch("backend.forge.runs.SessionLocal", TS):
-        db = TS()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TS
+def test_db(pg):
+    yield bdb.SessionLocal
 
 
 def _seed_messages(n: int, scope: str = "task:T1") -> str:

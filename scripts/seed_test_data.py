@@ -38,10 +38,21 @@ def _existing_test_profile():
         return db.query(Profile).filter(Profile.name == TEST_USER).first()
 
 
+def _clear_must_change(profile_id: str) -> None:
+    """Ensure the preview user never hits the force-password-change overlay."""
+    with privileged(), SessionLocal() as db:
+        p = db.get(Profile, profile_id)
+        if p and p.must_change_password:
+            p.must_change_password = False
+            db.commit()
+
+
 def main() -> None:
     init_db()
 
-    if _existing_test_profile():
+    existing = _existing_test_profile()
+    if existing:
+        _clear_must_change(existing.id)
         print(f"Test user '{TEST_USER}' already exists — mock data seeded. Nothing to do.")
         print(f"login →  {TEST_USER} / {TEST_PASSWORD}")
         return
@@ -50,7 +61,8 @@ def main() -> None:
     #    org's default agent team — Conductor, Planner, Reviewer, etc.).
     inv = services.create_invite(role="admin", org_id=None, email=TEST_EMAIL)
     profile = services.accept_invite(
-        inv["code"], name=TEST_USER, password=TEST_PASSWORD, display_name=TEST_DISPLAY
+        inv["code"], name=TEST_USER, password=TEST_PASSWORD,
+        display_name=TEST_DISPLAY, email=TEST_EMAIL,
     )
     org_id = profile["org_id"]
     print(f"created test user '{TEST_USER}' in org {org_id}")

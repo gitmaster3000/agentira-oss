@@ -8,45 +8,28 @@ via a synthetic fallback in resolve_project_repo.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 import backend.forge.models  # noqa: F401 — registers FK target tables
-from backend.models import Project, ProjectRepo
+from backend.models import Project
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.db.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg.SessionLocal
 
 
 def _make_project(TestSession, *, repo_path: str = "",
                   repo_url: str = "") -> str:
     p = core_services.create_project("P", actor="system")
     if repo_path or repo_url:
-        with patch("backend.services.SessionLocal", TestSession):
-            db = TestSession()
+        with bdb.SessionLocal() as db:
             row = db.query(Project).filter(Project.id == p["id"]).first()
             row.repo_path = repo_path or None
             row.repo_url = repo_url or None
             db.commit()
-            db.close()
     return p["id"]
 
 

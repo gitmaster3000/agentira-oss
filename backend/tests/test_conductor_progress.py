@@ -16,11 +16,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor
@@ -29,20 +25,8 @@ from backend.forge.models import (Agent, ForgeRuntime, Run, RunOutcome,
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg
 
 
 def _mk_runtime(db) -> str:
@@ -76,7 +60,7 @@ def _mk_task(*, project_id: str, status_name: str, assignee: str = ""):
     from backend.models import Status, Task
     with forge_services._session() as db:
         st = db.query(Status).filter(Status.name == status_name).first()
-        t = Task(id=uuid.uuid4().hex, project_id=project_id,
+        t = Task(project_id=project_id,
                  key=f"T-{uuid.uuid4().hex[:4]}",
                  title=f"Task in {status_name}", description="",
                  status_id=st.id, assignee=assignee)

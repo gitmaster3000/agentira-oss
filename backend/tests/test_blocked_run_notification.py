@@ -5,14 +5,9 @@ every admin profile, on top of the existing task-comment side effect.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, RuntimeStatus
@@ -20,19 +15,8 @@ from backend.models import Notification, Profile, Role
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield bdb.SessionLocal
 
 
 def _seed_admin(test_db) -> None:
@@ -41,7 +25,8 @@ def _seed_admin(test_db) -> None:
     db = test_db()
     admin_role = db.query(Role).filter(Role.name == "admin").first()
     if not db.query(Profile).filter(Profile.name == "admin").first():
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
+        db.add(Profile(name="admin", account_type="human",
+                       roles=[admin_role], password_hash=""))
         db.commit()
     db.close()
 
@@ -72,8 +57,7 @@ def _admin_notifications(test_db, *, type_prefix: str = "") -> list[Notification
     try:
         q = (db.query(Notification)
                .join(Profile, Notification.profile_id == Profile.id)
-               .join(Role, Profile.role_id == Role.id)
-               .filter(Role.name == "admin"))
+               .filter(Profile.roles.any(Role.name == "admin")))
         if type_prefix:
             q = q.filter(Notification.type.startswith(type_prefix))
         return q.all()

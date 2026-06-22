@@ -9,14 +9,10 @@ project (or hold the project.view_all wildcard).
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -26,38 +22,25 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg
 
 
-def _seed_runtime(TestSession) -> str:
-    db = TestSession()
-    rt = ForgeRuntime(daemon_id="d", provider="claude",
-                      binary_path="/tmp/claude", status=RuntimeStatus.ONLINE)
-    db.add(rt)
-    db.commit()
-    rt_id = rt.id
-    db.close()
-    return rt_id
+def _seed_runtime() -> str:
+    with bdb.SessionLocal() as db:
+        rt = ForgeRuntime(daemon_id="d", provider="claude",
+                          binary_path="/tmp/claude", status=RuntimeStatus.ONLINE)
+        db.add(rt)
+        db.commit()
+        return rt.id
 
 
-def _seed_scenario(TestSession):
+def _seed_scenario():
     """One project with member 'alice', non-member 'bob', and a finished
     Run owned by an agent on that project."""
     core_services.create_service_account("alice")
     core_services.create_service_account("bob")
-    rt_id = _seed_runtime(TestSession)
+    rt_id = _seed_runtime()
     project = core_services.create_project("P", actor="alice")
     agent = forge_services.create_agent(name="worker", executor_type="cli",
                                         runtime_id=rt_id)
@@ -88,7 +71,7 @@ def _add_events(run_id, agent_id, *triples):
 # ── get_run_detail ────────────────────────────────────────────────────
 
 def test_get_run_detail_returns_run_shape(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     d = forge_services.get_run_detail(s["run_id"], actor="alice")
     # Spec'd fields the investigator needs.
     for key in ("id", "agent_id", "project_id", "status", "outcome",
@@ -102,7 +85,7 @@ def test_get_run_detail_returns_run_shape(test_db):
 
 
 def test_get_run_detail_unknown_id_returns_error_dict(test_db):
-    _seed_scenario(test_db)
+    _seed_scenario()
     out = forge_services.get_run_detail("does-not-exist", actor="alice")
     assert out == {"error": "run_not_found"}
 
@@ -110,7 +93,7 @@ def test_get_run_detail_unknown_id_returns_error_dict(test_db):
 # ── RBAC ───────────────────────────────────────────────────────────────
 
 def test_get_run_detail_denies_non_member(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     with pytest.raises(PermissionError):
         forge_services.get_run_detail(s["run_id"], actor="bob")
 
@@ -118,7 +101,7 @@ def test_get_run_detail_denies_non_member(test_db):
 def test_get_run_detail_allows_system_actor(test_db):
     """The literal 'system' actor (and any is_system profile) wildcards
     project.view_all and may investigate any run."""
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     d = forge_services.get_run_detail(s["run_id"], actor="system")
     assert d["id"] == s["run_id"]
 
@@ -126,7 +109,7 @@ def test_get_run_detail_allows_system_actor(test_db):
 # ── list_run_events ────────────────────────────────────────────────────
 
 def test_list_run_events_returns_role_tool_content(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     _add_events(
         s["run_id"], s["agent_id"],
         (MessageRole.USER, "", "do the thing"),
@@ -142,7 +125,7 @@ def test_list_run_events_returns_role_tool_content(test_db):
 
 
 def test_list_run_events_paginates(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     _add_events(s["run_id"], s["agent_id"], *[
         (MessageRole.ASSISTANT, "", f"msg-{i}") for i in range(7)
     ])
@@ -156,7 +139,7 @@ def test_list_run_events_paginates(test_db):
 
 
 def test_list_run_events_caps_content(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     big = "x" * 20_000
     _add_events(s["run_id"], s["agent_id"],
                 (MessageRole.TOOL, "Read", big))
@@ -167,13 +150,13 @@ def test_list_run_events_caps_content(test_db):
 
 
 def test_list_run_events_denies_non_member(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     with pytest.raises(PermissionError):
         forge_services.list_run_events(s["run_id"], actor="bob")
 
 
 def test_list_run_events_caps_limit_at_500(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     out = forge_services.list_run_events(s["run_id"], actor="alice",
                                          limit=9999)
     assert out["limit"] == 500
@@ -182,7 +165,7 @@ def test_list_run_events_caps_limit_at_500(test_db):
 # ── get_run_diagnostics ────────────────────────────────────────────────
 
 def test_get_run_diagnostics_reads_persisted_blob(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     diag = {"exit_code": 1, "stderr_tail": "boom\nnot found",
             "last_events_tail": [{"role": "tool", "content": "x"}],
             "captured_at": "2025-01-01T00:00:00Z"}
@@ -201,7 +184,7 @@ def test_get_run_diagnostics_reads_persisted_blob(test_db):
 
 
 def test_get_run_diagnostics_no_blob_is_safe(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     out = forge_services.get_run_diagnostics(s["run_id"], actor="alice")
     assert out["exit_code"] is None
     assert out["stderr_tail"] == ""
@@ -209,7 +192,7 @@ def test_get_run_diagnostics_no_blob_is_safe(test_db):
 
 
 def test_status_vs_outcome_flags_disagreement(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     # Force the run into a contradictory state: process FAILED but the
     # agent declared SUCCEEDED. Should flag as disagreement.
     with forge_services._session() as db:
@@ -222,13 +205,13 @@ def test_status_vs_outcome_flags_disagreement(test_db):
 
 
 def test_status_vs_outcome_agrees_on_clean_success(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     out = forge_services.get_run_diagnostics(s["run_id"], actor="alice")
     assert out["status_vs_outcome"] == "agree"
 
 
 def test_get_run_diagnostics_denies_non_member(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     with pytest.raises(PermissionError):
         forge_services.get_run_diagnostics(s["run_id"], actor="bob")
 
@@ -236,7 +219,7 @@ def test_get_run_diagnostics_denies_non_member(test_db):
 # ── diagnostics blob trimming ──────────────────────────────────────────
 
 def test_diagnostics_blob_is_capped(test_db):
-    s = _seed_scenario(test_db)
+    s = _seed_scenario()
     diag = {"exit_code": 1, "stderr_tail": "x" * 200_000}
     forge_services.complete_trigger(
         agent_id=s["agent_id"], trace_id="t2", run_id=s["run_id"],

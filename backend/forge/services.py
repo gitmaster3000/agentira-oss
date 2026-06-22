@@ -348,10 +348,9 @@ def _sync_bots(db) -> None:
     id. Runtime fields mirror from profile (post-merge source of truth).
     Skips orphans (Agent rows whose profile_id was deleted).
     """
-    bot_role = db.query(Role).filter(Role.name == "bot").first()
-    if not bot_role:
-        return
-    bots = db.query(Profile).filter(Profile.role_id == bot_role.id).all()
+    # Managed agents (agentira_agent) get a backing Agent row; service accounts
+    # and humans do not. Keyed on account_type now that the 'bot' role is gone.
+    bots = db.query(Profile).filter(Profile.account_type == "agentira_agent").all()
     # Index existing agents by profile_id and by id; same-id is the new
     # invariant but we tolerate old random-id rows during transition.
     existing_by_pid = {a.profile_id: a for a in db.query(Agent).all() if a.profile_id}
@@ -905,11 +904,11 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
             if not prof:
                 return {"error": "profile not found"}
         else:
-            # Create a bot profile to back this agent. Same id as the agent
-            # so they're 1:1 at the schema level too.
-            role_row = db.query(Role).filter(Role.name == "bot").first()
-            if not role_row:
-                return {"error": "bot role missing"}
+            # Create an agentira_agent profile to back this agent. Same id as
+            # the agent so they're 1:1 at the schema level too.
+            member_role = db.query(Role).filter(Role.name == "member").first()
+            if not member_role:
+                return {"error": "member role missing"}
             new_id = _new_id()
             # Mint an api_key — managed agents call the `agentira` MCP
             # server, which authenticates the agent via this key. Without
@@ -919,7 +918,8 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
             prof = Profile(
                 id=new_id, name=name, display_name=name,
                 password_hash="", avatar_url="", webhook_url="",
-                role_id=role_row.id,
+                account_type="agentira_agent",
+                roles=[member_role],
                 model=model,
                 runtime_id=runtime_id,
                 api_key=_secrets.token_hex(32),
@@ -1473,10 +1473,10 @@ def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
     Caller is responsible for committing the session.
     """
     from backend.models import Notification, Role
+    # RBAC: roles are many-to-many — match any profile holding the admin role.
     admins = (
         db.query(Profile)
-        .join(Role, Profile.role_id == Role.id)
-        .filter(Role.name == "admin")
+        .filter(Profile.roles.any(Role.name == "admin"))
         .all()
     )
     for prof in admins:

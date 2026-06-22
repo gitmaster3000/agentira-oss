@@ -13,11 +13,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor
@@ -27,21 +23,8 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg
 
 
 def _mk_runtime(db) -> str:
@@ -77,7 +60,7 @@ def _mk_setup(*, conductor_enabled: bool = True,
                   executor_type="http", model="", runtime_id=rt_id)
         db.add(a)
         todo_status = db.query(Status).filter(Status.name == "todo").first()
-        t = Task(id=uuid.uuid4().hex, project_id=proj["id"],
+        t = Task(project_id=proj["id"],
                  key="P1-1", title="Task 1", description="",
                  status_id=todo_status.id, assignee=assignee)
         db.add(t)

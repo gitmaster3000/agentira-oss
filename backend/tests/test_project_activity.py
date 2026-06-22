@@ -2,36 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
-from backend.forge import services as forge_services
+from backend.forge import services as forge_services  # noqa: F401
 from backend.forge.router import get_project_activity
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession), \
-         patch("backend.forge.digest.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg.SessionLocal
 
 
 def test_activity_returns_digest_and_conductor_view(test_db):

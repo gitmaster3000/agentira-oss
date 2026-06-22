@@ -385,8 +385,10 @@ def _auth_ws_token(token: str, *, require_admin: bool = False) -> dict | None:
         return None
     if not payload.get("org_id"):
         return None
-    if require_admin and payload.get("role") != "admin":
-        return None
+    if require_admin:
+        from backend.jwt_auth import payload_roles
+        if "admin" not in payload_roles(payload):
+            return None
     return payload
 
 

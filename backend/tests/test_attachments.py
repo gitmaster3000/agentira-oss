@@ -14,33 +14,19 @@ Covers:
 from __future__ import annotations
 
 import os
-import tempfile
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend import attachments as att
 
 
 @pytest.fixture(autouse=True)
-def test_db_and_storage(tmp_path):
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
+def test_db_and_storage(pg, tmp_path):
     storage = tmp_path / "attachments"
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.attachments.SessionLocal", TestSession), \
-         patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+    with patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
+        yield
 
 
 def _make_project(name: str = "P1") -> dict:

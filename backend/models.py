@@ -3,7 +3,7 @@
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint
+from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Table, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.db import Base
@@ -34,6 +34,23 @@ class NotificationTransport(str, enum.Enum):
 
 # ── Auth ─────────────────────────────────────────────────────────────────
 
+# Account type (what an identity IS) — orthogonal to roles (what it MAY do).
+#   human          — a person; logs in with email + password.
+#   agentira_agent — an AI agent dispatched/managed inside Agentira.
+#   external_agent — a service account; external systems auth with an API key.
+ACCOUNT_TYPES = ("human", "agentira_agent", "external_agent")
+
+
+# Many-to-many: a profile holds one or more roles (permission tiers). Pure
+# association, no extra columns — a plain Table, not a mapped class.
+profile_roles = Table(
+    "profile_roles",
+    Base.metadata,
+    Column("profile_id", ForeignKey("profiles.id"), primary_key=True),
+    Column("role_id", ForeignKey("roles.id"), primary_key=True),
+)
+
+
 class Role(Base):
     __tablename__ = "roles"
 
@@ -41,7 +58,7 @@ class Role(Base):
     name: Mapped[str] = mapped_column(String(60), nullable=False, unique=True)
 
     permissions: Mapped[list["RolePermission"]] = relationship(back_populates="role", cascade="all, delete-orphan")
-    profiles: Mapped[list["Profile"]] = relationship(back_populates="role")
+    profiles: Mapped[list["Profile"]] = relationship(secondary=profile_roles, back_populates="roles")
 
 
 class Permission(Base):
@@ -146,13 +163,21 @@ class Profile(Base):
     display_name: Mapped[str] = mapped_column(String(120), default="")
     password_hash: Mapped[str] = mapped_column(String(128), default="")  # Simple hash (e.g. sha256)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, default=None)
+    # AP-306: password lifecycle. must_change_password is set when an admin
+    # sets/resets a password (or for any temp credential) so the UI forces a
+    # change on next login. reset_token + expiry back the forgot-password flow.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reset_token: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    reset_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
     webhook_url: Mapped[str] = mapped_column(String(500), default="")
     notification_transport: Mapped[str | None] = mapped_column(
         SAEnum(NotificationTransport), nullable=True, default=None
     )
-    role_id: Mapped[str] = mapped_column(ForeignKey("roles.id"), nullable=False)
+    # What this identity IS (human / agentira_agent / external_agent). Stored,
+    # not derived — decoupled from roles. See ACCOUNT_TYPES.
+    account_type: Mapped[str] = mapped_column(String(20), default="human", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # ── Runtime config (agents only; humans leave these null) ────────────
@@ -226,11 +251,15 @@ class Profile(Base):
     git_token_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None)
 
-    role: Mapped["Role"] = relationship(back_populates="profiles")
+    roles: Mapped[list["Role"]] = relationship(secondary=profile_roles, back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     project_memberships: Mapped[list["ProjectMember"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     notifications: Mapped[list["Notification"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+    @property
+    def role_names(self) -> list[str]:
+        return [r.name for r in self.roles]
 
 
 class OAuthAccount(Base):

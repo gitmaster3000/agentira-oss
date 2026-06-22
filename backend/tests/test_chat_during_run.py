@@ -14,11 +14,8 @@ import uuid
 from unittest.mock import patch, MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import msg_queue
@@ -28,19 +25,8 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.msg_queue.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield bdb.SessionLocal
 
 
 def _setup(TestSession):
@@ -56,7 +42,7 @@ def _setup(TestSession):
 
 def _mk_run(s, status, outcome=None):
     with forge_services._session() as db:
-        r = Run(id=uuid.uuid4().hex, agent_id=s["agent_id"], task_id=s["task_id"],
+        r = Run(id=uuid.uuid4().hex[:12], agent_id=s["agent_id"], task_id=s["task_id"],
                 project_id=s["project_id"], status=status, outcome=outcome)
         db.add(r); db.commit()
         return r.id

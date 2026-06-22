@@ -16,11 +16,8 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 
 import backend.db as db_mod
-from backend.db import Base, set_current_org
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -29,27 +26,10 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def org_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    # Route the real SessionLocal (with the org-stamping event listeners) at
-    # the in-memory engine for both the request and privileged binds.
-    with patch.object(db_mod, "engine", engine), \
-         patch.object(db_mod, "app_engine", engine):
-        from backend.db import SessionLocal
-        from backend.models import Org
-        db = SessionLocal()
-        core_services._seed_defaults(db)
-        db.add(Org(id="orgtest00000", name="Test Org"))
-        db.commit()
-        db.close()
-        set_current_org("orgtest00000")
-        try:
-            yield
-        finally:
-            set_current_org(None)
+def org_db(pg):
+    """Shared ephemeral-Postgres harness; the org context is already pinned by
+    the `pg` fixture, so the prepare/dispatch services run end to end."""
+    yield
 
 
 class _FakeHub:

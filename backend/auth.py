@@ -32,13 +32,14 @@ def get_permissions(db: Session, actor: str) -> set[str]:
     if getattr(profile, "is_system", False):
         return {"*"}
 
-    # Role permissions
+    # Role permissions — union across ALL of the profile's roles (RBAC M2M).
+    role_ids = [r.id for r in profile.roles]
     role_perms = (
         db.query(Permission.codename)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .filter(RolePermission.role_id == profile.role_id)
+        .filter(RolePermission.role_id.in_(role_ids))
         .all()
-    )
+    ) if role_ids else []
 
     # Extra profile-level permissions
     profile_perms = (

@@ -444,6 +444,49 @@ def _backfill_primary_project_repo(conn: Connection) -> None:
         conn.commit()
 
 
+def _derive_account_type(role_name, runtime_id) -> str:
+    """Map a legacy (role_name, runtime_id) pair to a stored account_type.
+
+    Used by the one-shot RBAC backfill. The retired 'bot' role split into two
+    account types by whether the profile is dispatched (has a runtime)."""
+    if role_name == "bot":
+        return "agentira_agent" if runtime_id else "external_agent"
+    return "human"
+
+
+def _migrate_rbac_account_types(conn: Connection) -> None:
+    """One-shot: legacy single-`role_id` schema → stored `account_type` +
+    many-to-many `profile_roles`.
+
+    Backfills account_type from (role, runtime_id), copies each profile's single
+    role into profile_roles (the retired 'bot' role remaps to 'member'), drops
+    profiles.role_id, and deletes the 'bot' role. Guarded by role_id's presence
+    so it no-ops once applied and on fresh (create_all) DBs."""
+    if "role_id" not in _columns_of(conn, "profiles"):
+        return
+    is_pg = _dialect_name() == "postgresql"
+    rows = conn.execute(text(
+        "SELECT p.id, r.name, p.runtime_id, p.role_id "
+        "FROM profiles p JOIN roles r ON p.role_id = r.id")).all()
+    member_id = conn.execute(text("SELECT id FROM roles WHERE name='member'")).scalar()
+    insert_sql = ("INSERT INTO profile_roles (profile_id, role_id) VALUES (:p, :r) "
+                  + ("ON CONFLICT DO NOTHING" if is_pg else ""))
+    if not is_pg:
+        insert_sql = insert_sql.replace("INSERT INTO", "INSERT OR IGNORE INTO")
+    for pid, rname, runtime_id, role_id in rows:
+        conn.execute(text("UPDATE profiles SET account_type = :a WHERE id = :i"),
+                     {"a": _derive_account_type(rname, runtime_id), "i": pid})
+        target = member_id if rname == "bot" else role_id
+        if target:
+            conn.execute(text(insert_sql), {"p": pid, "r": target})
+    if is_pg:
+        conn.execute(text("ALTER TABLE profiles DROP COLUMN role_id"))
+    # Remove the retired 'bot' role (its grants first — no guaranteed FK cascade).
+    conn.execute(text("DELETE FROM role_permissions WHERE role_id IN "
+                      "(SELECT id FROM roles WHERE name = 'bot')"))
+    conn.execute(text("DELETE FROM roles WHERE name = 'bot'"))
+
+
 def _migrate_forge_agents_to_profiles(conn: Connection) -> None:
     """AP-86 bot/agent merge: each forge_agent becomes a 1:1 profile.
 
@@ -455,6 +498,10 @@ def _migrate_forge_agents_to_profiles(conn: Connection) -> None:
     NOT dropped here (code still queries it during transition); a follow-up
     drops it after the code paths migrate.
     """
+    # Post-RBAC schema has no role_id and no 'bot' role — this legacy AP-86
+    # path inserts role_id, so it only applies to pre-RBAC databases.
+    if "role_id" not in _columns_of(conn, "profiles"):
+        return
     role_row = conn.execute(text("SELECT id FROM roles WHERE name = 'bot' LIMIT 1")).first()
     if not role_row:
         return  # no bot role; nothing to do (fresh DBs handled by create_all)
@@ -567,6 +614,12 @@ def run_migrations():
             added |= _ensure_column(conn, "profiles", "webhook_url", "VARCHAR(500) DEFAULT ''")
             added |= _ensure_column(conn, "profiles", "notification_transport", "VARCHAR(20)")
             added |= _ensure_column(conn, "profiles", "email", "VARCHAR(255)")
+            # AP-306: password lifecycle + forgot-password tokens
+            added |= _ensure_column(conn, "profiles", "must_change_password", "BOOLEAN DEFAULT FALSE NOT NULL")
+            added |= _ensure_column(conn, "profiles", "reset_token", "VARCHAR(64)")
+            added |= _ensure_column(conn, "profiles", "reset_token_expires", "TIMESTAMP")
+            # RBAC remodel: stored account type, decoupled from roles.
+            added |= _ensure_column(conn, "profiles", "account_type", "VARCHAR(20) DEFAULT 'human' NOT NULL")
             # AP-86: bot/agent merge — runtime config moves onto profile
             runtime_added = False
             runtime_added |= _ensure_column(conn, "profiles", "model", "VARCHAR(120) DEFAULT ''")
@@ -609,6 +662,10 @@ def run_migrations():
             if "forge_agents" in tables and "forge_runs" in tables \
                and "profile_id" not in _columns_of(conn, "forge_runs"):
                 _migrate_forge_agents_to_profiles(conn)
+            # RBAC remodel: single role_id → account_type + profile_roles M2M.
+            # No-ops (guarded) once applied and on fresh create_all databases.
+            _migrate_rbac_account_types(conn)
+            conn.commit()
 
         # OAuth accounts table — `create_all` makes this for us when
         # the model is registered, so we don't bootstrap it here anymore.

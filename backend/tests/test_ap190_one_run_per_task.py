@@ -8,34 +8,29 @@ sticky `is_work`.
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
-from backend import services as core_services
+import backend.db as bdb
 from backend.forge import runs as forge_runs
-from backend.forge.models import Run, RunStatus, RunOutcome
+from backend.forge.models import Agent, Run, RunStatus, RunOutcome
+from backend.models import Project, Task, Status
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        # Run rows carry no org_id (not org-scoped), so these tests need no
-        # org context — only the unused admin Profile did, so it's gone.
-        yield TestSession
+def test_db(pg):
+    """Shared ephemeral-Postgres harness. forge_runs.get_or_create_task_run
+    takes a db session, so we yield the real SessionLocal. Run's agent_id /
+    task_id / project_id are FKs (Postgres enforces them) — the literal
+    "a1"/"a2"/"t1"/"p1" handles the tests pass need backing rows."""
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        status_id = db.query(Status).first().id
+        db.add(Agent(id="a1", org_id=pg.org_id, name="A1", executor_type="cli"))
+        db.add(Agent(id="a2", org_id=pg.org_id, name="A2", executor_type="cli"))
+        db.add(Project(id="p1", org_id=pg.org_id, name="P1"))
+        db.add(Task(id="t1", org_id=pg.org_id, project_id="p1", title="T1",
+                    status_id=status_id))
+        db.commit()
+    yield bdb.SessionLocal
 
 
 def _count_runs(db, agent_id, task_id):

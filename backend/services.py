@@ -8,7 +8,7 @@ from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
 from sqlalchemy.orm import Session
 
-from backend.db import SessionLocal, init_db, privileged, set_current_org
+from backend.db import SessionLocal, init_db, privileged, set_current_org, _derive_account_type
 from backend.models import (
     Project, Task, Activity, Profile, Attachment,
     Role, Permission, RolePermission, ProfilePermission, Status,
@@ -263,23 +263,25 @@ def _activity_to_dict(a: Activity) -> dict:
 
 def _profile_to_dict(p: Profile) -> dict:
     extra = [pp.permission.codename for pp in p.extra_permissions]
-    role_name = p.role.name
-    # Derived identity kind. Three values:
-    #   user            — role=user
-    #   managed_agent   — role=bot AND runtime_id IS NOT NULL
-    #   service_account — role=bot AND runtime_id IS NULL
-    if role_name == "bot":
-        kind = "managed_agent" if p.runtime_id else "service_account"
-    else:
-        kind = "user"
+    roles = p.role_names
+    account_type = p.account_type
+    # Legacy `kind` (still read by some daemon/MCP consumers) — derive from the
+    # stored account_type so the old triplet keeps working during transition.
+    kind = {"human": "user", "agentira_agent": "managed_agent",
+            "external_agent": "service_account"}.get(account_type, "user")
     return {
         "id": p.id,
         "org_id": p.org_id,
         "name": p.name,
         "display_name": p.display_name or p.name,
-        "role": role_name,
+        "account_type": account_type,
+        "roles": roles,
+        # Back-compat: a single `role` (first role) for callers not yet on the
+        # `roles` list (frontend badge, JWT minting, api-key fallback).
+        "role": roles[0] if roles else None,
         "kind": kind,
         "email": p.email,
+        "must_change_password": bool(getattr(p, "must_change_password", False)),
         "avatar_url": p.avatar_url,
         "webhook_url": p.webhook_url,
         "extra_permissions": extra,
@@ -312,6 +314,22 @@ def _get_role_id(db: Session, role_name: str) -> str:
     if not r:
         raise ValueError(f"Role '{role_name}' not found")
     return r.id
+
+
+def _resolve_roles(db: Session, names: list[str]) -> list[Role]:
+    """Resolve role names to Role objects (for the profile_roles M2M).
+    Raises ValueError on any unknown name; de-duplicates while preserving order."""
+    seen: set[str] = set()
+    out: list[Role] = []
+    for n in names:
+        if n in seen:
+            continue
+        seen.add(n)
+        r = db.query(Role).filter(Role.name == n).first()
+        if not r:
+            raise ValueError(f"Role '{n}' not found")
+        out.append(r)
+    return out
 
 
 def _get_profile_by_name(db: Session, name: str) -> Profile | None:
@@ -1160,6 +1178,9 @@ def remove_project_repo(project_id: str, repo_name: str) -> bool:
             return False
         was_primary = row.is_primary
         db.delete(row)
+        # Flush the delete before the promotion query — autoflush is off, so
+        # otherwise the SELECT still sees the doomed row and "promotes" it.
+        db.flush()
         if was_primary:
             # Promote the next-oldest repo to primary so dispatch still
             # has a fallback target. If none remain, leave it — the
@@ -1754,18 +1775,26 @@ def validate_api_key(api_key: str) -> dict:
         return _profile_to_dict(p)
 
 
-def create_profile(name: str, display_name: str = "", role: str = "member", avatar_url: str = "", password: str = "") -> dict:
-    """Internal use. Returns profile dict WITH api_key."""
+def create_profile(name: str, display_name: str = "", role: str = None,
+                    roles: list[str] = None, account_type: str = "human",
+                    avatar_url: str = "", password: str = "") -> dict:
+    """Internal use. Returns profile dict WITH api_key.
+
+    Roles (permission tiers) are decoupled from account_type (what the identity
+    IS). Pass `roles` (a list) for the M2M; the legacy single `role` arg is
+    still accepted and wrapped into a one-element list."""
+    role_names = roles if roles is not None else ([role] if role else ["member"])
     with _session() as db:
-        role_id = _get_role_id(db, role)
+        role_objs = _resolve_roles(db, role_names)
         password_hash = _hash_password(password) if password else ""
         profile = Profile(
-            name=name, 
-            display_name=display_name or name, 
-            role_id=role_id, 
+            name=name,
+            display_name=display_name or name,
+            account_type=account_type,
             avatar_url=avatar_url,
             password_hash=password_hash,
-            api_key=secrets.token_hex(32)
+            api_key=secrets.token_hex(32),
+            roles=role_objs,
         )
         db.add(profile)
         db.commit()
@@ -1775,14 +1804,13 @@ def create_profile(name: str, display_name: str = "", role: str = "member", avat
         return res
 
 
-def create_service_account(name: str, display_name: str = "", role: str = "bot") -> dict:
-    """Create a service account (bot) profile and return its API key."""
-    # Ensure name is unique or append suffix? For now, let DB constraint handle it.
-    if not display_name:
-        display_name = name
-    
-    # Force role to be bot if not specified (though arg default is bot)
-    return create_profile(name, display_name, role=role)
+def create_service_account(name: str, display_name: str = "") -> dict:
+    """Create an external-agent (service account) identity + API key.
+
+    account_type=external_agent (an API-key-only identity for external systems);
+    role=member (a real permission tier — the old 'bot' role is gone)."""
+    return create_profile(name, display_name or name,
+                           account_type="external_agent", roles=["member"])
 
 
 def _create_org(db: Session, owner_display_name: str) -> Org:
@@ -1885,9 +1913,8 @@ def _assert_member_capacity(db: Session, org_id: str) -> None:
     org = db.get(Org, org_id)
     if not org:
         raise ValueError("org not found")
-    bot_role_id = _get_role_id(db, "bot")
     non_bot = (db.query(Profile)
-               .filter(Profile.org_id == org_id, Profile.role_id != bot_role_id)
+               .filter(Profile.org_id == org_id, Profile.account_type == "human")
                .count())
     # founding admin doesn't count against the member cap
     if max(non_bot - 1, 0) >= org.max_members:
@@ -1895,10 +1922,16 @@ def _assert_member_capacity(db: Session, org_id: str) -> None:
 
 
 def accept_invite(code: str, *, name: str, password: str = "",
-                  display_name: str = "") -> dict:
+                  display_name: str = "", email: str = "") -> dict:
     """Accept an invite by code, creating the profile (and org for admin
-    invites). Returns profile + api_key. Privileged: no org context yet."""
+    invites). Returns profile + api_key. Privileged: no org context yet.
+
+    AP-306: email is required for every account. The submitted email wins
+    over any address stored on the invite."""
     from backend.models import Invite
+    email = (email or "").strip().lower()
+    if "@" not in email:
+        raise ValueError("a valid email is required")
     with privileged(), _session() as db:
         inv = db.query(Invite).filter(Invite.code == code).first()
         if not inv:
@@ -1909,26 +1942,29 @@ def accept_invite(code: str, *, name: str, password: str = "",
             raise ValueError("invite expired")
         if db.query(Profile).filter(Profile.name == name).first():
             raise ValueError(f"username '{name}' is taken")
+        if db.query(Profile).filter(Profile.email == email).first():
+            raise ValueError("that email is already in use")
 
         new_org = False
         if inv.role == "admin":
             org = _create_org(db, display_name or name)
             org_id = org.id
-            role_id = _get_role_id(db, "admin")
+            role_objs = _resolve_roles(db, ["admin"])
             new_org = True
         else:
             if not inv.org_id:
                 raise ValueError("malformed member invite")
             _assert_member_capacity(db, inv.org_id)
             org_id = inv.org_id
-            role_id = _get_role_id(db, "member")
+            role_objs = _resolve_roles(db, ["member"])
 
         profile = Profile(
             org_id=org_id,
             name=name,
             display_name=display_name or name,
-            email=inv.email,
-            role_id=role_id,
+            email=email,
+            account_type="human",
+            roles=role_objs,
             password_hash=_hash_password(password) if password else "",
             api_key=secrets.token_hex(32),
         )
@@ -1943,6 +1979,9 @@ def accept_invite(code: str, *, name: str, password: str = "",
     # Seed the new org's default agents (after commit, outside the session).
     if new_org:
         seed_org_defaults(org_id)
+    # AP-306: welcome email (best-effort; no-op if SMTP unconfigured).
+    from backend import email_sender
+    email_sender.send_welcome_email(email, display_name or name)
     return res
 
 
@@ -1986,13 +2025,13 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
 
             if inv.role == "admin":
                 org = _create_org(db, display_name or (email or "My"))
-                org_id, role_id = org.id, _get_role_id(db, "admin")
+                org_id, role_objs = org.id, _resolve_roles(db, ["admin"])
                 new_org_id = org.id
             else:
                 if not inv.org_id:
                     raise ValueError("malformed member invite")
                 _assert_member_capacity(db, inv.org_id)
-                org_id, role_id = inv.org_id, _get_role_id(db, "member")
+                org_id, role_objs = inv.org_id, _resolve_roles(db, ["member"])
 
             base_name = (email.split("@")[0] if email else display_name.lower().replace(" ", "_"))[:60]
             name = base_name
@@ -2006,7 +2045,8 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
                 name=name,
                 display_name=display_name or name,
                 email=email,
-                role_id=role_id,
+                account_type="human",
+                roles=role_objs,
                 avatar_url=avatar_url,
                 api_key=secrets.token_hex(32),
             )
@@ -2035,25 +2075,18 @@ def list_profiles(role: Optional[str] = None) -> list[dict]:
     with _session() as db:
         q = db.query(Profile)
         if role:
-            q = q.join(Role).filter(Role.name == role)
+            q = q.filter(Profile.roles.any(Role.name == role))
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
 
 
 def list_service_accounts() -> list[dict]:
-    """Service accounts: bot-role profiles WITHOUT a runtime binding.
+    """Service accounts: external-agent identities (API-key-only).
 
-    These are API-key-only identities used by external systems (CI, plugins,
-    external MCP/Claude sessions). They're project-membership-capable but
-    NOT dispatched by Forge — Forge agents live in `forge_agents` with a
-    non-null `runtime_id` and are surfaced by `forge.services.list_agents`.
-    """
-    from sqlalchemy import or_
+    Used by external systems (CI, plugins, external MCP/Claude sessions).
+    Distinct from agentira_agent (dispatched/managed agents). Keyed on the
+    stored account_type, not the retired 'bot' role."""
     with _session() as db:
-        q = (db.query(Profile)
-               .join(Role).filter(Role.name == "bot")
-               # Defensive: data may have empty-string runtime_id from older
-               # rows; treat either NULL or "" as "no runtime".
-               .filter(or_(Profile.runtime_id.is_(None), Profile.runtime_id == "")))
+        q = db.query(Profile).filter(Profile.account_type == "external_agent")
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
 
 
@@ -2064,35 +2097,64 @@ def get_profile(profile_id: str) -> dict | None:
 
 
 def get_service_account(profile_id: str) -> dict | None:
-    """Returns bot profile details WITH api_key."""
+    """Returns an external-agent profile's details WITH api_key."""
     with _session() as db:
         p = db.get(Profile, profile_id)
-        if not p or p.role.name != "bot":
+        if not p or p.account_type != "external_agent":
             return None
         res = _profile_to_dict(p)
         res["api_key"] = p.api_key
         return res
 
 
-def update_profile(profile_id: str, display_name: Optional[str] = None, role: Optional[str] = None, avatar_url: Optional[str] = None, webhook_url: Optional[str] = None) -> dict:
+def regenerate_api_key(profile_id: str) -> dict | None:
+    """Rotate a service account's API key. Returns the profile WITH the new
+    key, or None if it isn't an external-agent identity."""
+    with _session() as db:
+        p = db.get(Profile, profile_id)
+        if not p or p.account_type != "external_agent":
+            return None
+        p.api_key = secrets.token_hex(32)
+        db.commit()
+        db.refresh(p)
+        res = _profile_to_dict(p)
+        res["api_key"] = p.api_key
+        return res
+
+
+def update_profile(profile_id: str, display_name: Optional[str] = None, role: Optional[str] = None, roles: Optional[list[str]] = None, avatar_url: Optional[str] = None, webhook_url: Optional[str] = None, email: Optional[str] = None) -> dict:
     with _session() as db:
         p = db.get(Profile, profile_id)
         if not p:
             raise ValueError(f"Profile {profile_id} not found")
-        
+
         # TODO: Add actor check here if not already handled by caller (REST/MCP)
         # For now, we assume caller validates permissions.
-        
+
         if display_name is not None:
             p.display_name = display_name
-        if role is not None:
-            # Only admin should change role, but again, caller check.
-            p.role_id = _get_role_id(db, role)
+        # RBAC: assign one or more roles (admin-gated by the caller). `roles`
+        # (the list) wins; the legacy single `role` is still accepted.
+        if roles is not None:
+            p.roles = _resolve_roles(db, roles)
+        elif role is not None:
+            p.roles = _resolve_roles(db, [role])
         if avatar_url is not None:
             p.avatar_url = avatar_url
         if webhook_url is not None:
             p.webhook_url = webhook_url
-            
+        if email is not None:
+            # AP-306: admins set/backfill a member's email. Normalize + keep
+            # globally unique.
+            email = email.strip().lower()
+            if "@" not in email:
+                raise ValueError("a valid email is required")
+            clash = db.query(Profile).filter(Profile.email == email,
+                                             Profile.id != profile_id).first()
+            if clash:
+                raise ValueError("that email is already in use")
+            p.email = email
+
         db.commit()
         db.refresh(p)
         return _profile_to_dict(p)
@@ -2291,8 +2353,9 @@ def process_github_webhook(payload: dict) -> list[dict]:
 def _seed_defaults(db: Session) -> None:
     """Create default roles, statuses, permissions, and transition rules."""
 
-    # Roles
-    for rname in ("admin", "member", "viewer", "bot"):
+    # Roles — permission tiers only. The old 'bot' role is retired: agents and
+    # service accounts are distinguished by account_type, not a role.
+    for rname in ("admin", "member", "viewer"):
         if not db.query(Role).filter(Role.name == rname).first():
             db.add(Role(name=rname))
     db.flush()
@@ -2342,7 +2405,7 @@ def _seed_defaults(db: Session) -> None:
         # project.manage intentionally omitted (only admins manage projects)
     ]
 
-    for rname in ["member", "bot"]:
+    for rname in ["member"]:
         role_obj = db.query(Role).filter(Role.name == rname).first()
         if not role_obj: continue
         
@@ -2390,7 +2453,7 @@ def bootstrap():
             if admin_password:
                 sys_org = _ensure_system_org(db)
                 db.add(Profile(name="admin", display_name="Admin User",
-                               org_id=sys_org.id, role_id=admin_role.id,
+                               org_id=sys_org.id, account_type="human", roles=[admin_role],
                                password_hash=passwords.hash_password(admin_password)))
                 db.commit()
                 logger.info("Created admin user from AGENTIRA_ADMIN_PASSWORD")
@@ -2403,7 +2466,7 @@ def bootstrap():
                                "— set AGENTIRA_ADMIN_PASSWORD for real deploys")
                 sys_org = _ensure_system_org(db)
                 db.add(Profile(name="admin", display_name="Admin User",
-                               org_id=sys_org.id, role_id=admin_role.id,
+                               org_id=sys_org.id, account_type="human", roles=[admin_role],
                                password_hash=passwords.hash_password("admin123")))
                 db.commit()
 

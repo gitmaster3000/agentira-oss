@@ -10,14 +10,10 @@ without a real WebSocket.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -28,22 +24,13 @@ from backend.models import Profile, Role
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
+def test_db(pg):
+    with bdb.privileged(), bdb.SessionLocal() as db:
         admin_role = db.query(Role).filter(Role.name == "admin").first()
-        db.add(Profile(name="admin", role_id=admin_role.id, password_hash=""))
+        db.add(Profile(name="admin", account_type="human", roles=[admin_role],
+                       org_id=pg.org_id, password_hash=""))
         db.commit()
-        db.close()
-        yield TestSession
+    yield pg
 
 
 # ── ClientHub fan-out ────────────────────────────────────────────────
@@ -121,16 +108,15 @@ def test_broadcast_from_sync_caller_lands_in_queue():
 
 # ── transitions fire broadcasts ──────────────────────────────────────
 
-def _setup(TestSession) -> dict:
-    db = TestSession()
+def _setup() -> dict:
     from datetime import datetime, timezone
-    rt = ForgeRuntime(daemon_id="d", provider="claude", binary_path="/tmp/c",
-                      status=RuntimeStatus.ONLINE,
-                      last_heartbeat=datetime.now(timezone.utc))
-    db.add(rt)
-    db.commit()
-    rt_id = rt.id
-    db.close()
+    with bdb.SessionLocal() as db:
+        rt = ForgeRuntime(daemon_id="d", provider="claude", binary_path="/tmp/c",
+                          status=RuntimeStatus.ONLINE,
+                          last_heartbeat=datetime.now(timezone.utc))
+        db.add(rt)
+        db.commit()
+        rt_id = rt.id
     project = core_services.create_project("P", actor="system")
     task = core_services.create_task(project["id"], "T", actor="system")
     agent = forge_services.create_agent(name="A", executor_type="cli",
@@ -147,7 +133,7 @@ def _setup(TestSession) -> dict:
 
 def test_pause_run_emits_broadcast(test_db, monkeypatch):
     """pause_run must call _broadcast_status with the INTERRUPTING state."""
-    s = _setup(test_db)
+    s = _setup()
     calls = []
     monkeypatch.setattr(
         forge_services, "_broadcast_status",
@@ -159,7 +145,7 @@ def test_pause_run_emits_broadcast(test_db, monkeypatch):
 
 
 def test_cancel_run_emits_broadcast(test_db, monkeypatch):
-    s = _setup(test_db)
+    s = _setup()
     calls = []
     # cancel_run delegates to backend.forge.runs.cancel — patch the
     # canonical broadcast function in that module.
@@ -175,7 +161,7 @@ def test_cancel_run_emits_broadcast(test_db, monkeypatch):
 
 def test_complete_trigger_cancelled_emits_terminal_broadcast(test_db,
                                                              monkeypatch):
-    s = _setup(test_db)
+    s = _setup()
     forge_services.cancel_run(s["run_id"])
     calls = []
     monkeypatch.setattr(
@@ -192,7 +178,7 @@ def test_complete_trigger_cancelled_emits_terminal_broadcast(test_db,
 
 def test_complete_trigger_paused_emits_terminal_broadcast(test_db,
                                                           monkeypatch):
-    s = _setup(test_db)
+    s = _setup()
     forge_services.pause_run(s["run_id"])
     calls = []
     monkeypatch.setattr(

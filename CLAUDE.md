@@ -13,6 +13,15 @@
 - **Modular by default. Classes only when polymorphism or state make them earn their place.** Functions for everything else.
 - **Maintain docs as code changes.** When you change behavior, update `/docs/`, the relevant ADR, or the runbook in the same PR. A behavior change without a doc update is half-shipped.
 
+## Testing
+- **TDD.** New feature or bug fix → write the failing test first, watch it fail for the right reason, then make it pass. A behavior change without a test is unfinished.
+- **Tests run on Postgres, never SQLite.** Prod is Postgres, so tests are: `backend/tests/conftest.py` spins ONE ephemeral `testcontainers` Postgres for the session. Each test gets a fresh schema + seeded defaults + a default org with the org-context pinned. (Needs Docker running.)
+- **Use the shared fixtures — don't build your own DB.** Depend on `pg` (fresh schema, seeded roles/statuses, a `TestOrg`, org context pinned; exposes `.org_id` / `.SessionLocal`) or `seed_admin` (returns `(admin_id, bearer_token)`). For REST tests, make a `TestClient(app)` and set `Authorization: Bearer <token>` — see `test_repo_tokens.py::client`.
+- **Never** `create_engine("sqlite://…")`, build a private `sessionmaker`, use `StaticPool`, or `patch(...SessionLocal...)`. The real `SessionLocal` is a `RoutingSession` that reads the module-level `backend.db.engine` / `app_engine` at call time; conftest points those at the container, so the real session + its org-stamping/RLS event hooks route at the test DB automatically.
+- **Org context is already set**, so new rows get `org_id` stamped for you — insert profiles/projects without spelling it out. Use `privileged()` to bypass org scoping for cross-org setup/asserts.
+- **RBAC shape:** a Profile has a stored `account_type` (`human` / `agentira_agent` / `external_agent`) AND a `roles` M2M (`admin` / `member` / `viewer`). Build with `roles=[role_obj]`, never `role_id=`. There is no `bot` role.
+- Run: `cd backend && ../venv/bin/python -m pytest tests/ -q` (or a single file while iterating). Don't weaken an assertion to make a test pass — fix the code.
+
 ## Data Access
 - **No direct DB calls in services.** `services.py` / `forge/services.py` / `forge/conductor.py` / any orchestration module must NOT use `db.query(...)`, `db.add(...)`, `db.commit(...)` inline. Every read or write goes through a per-domain data-access function (e.g. `backend/forge/repos/runs.py`, `tasks_repo.py`). Services compose; repos own the SQL.
 - Why: inline `db.query` leaks ORM internals into business logic, hides N+1 traps, makes the layer untestable without a real DB, and quietly breaks when the schema moves. The repo layer is where transactions, eager-loads, and dialect quirks live.

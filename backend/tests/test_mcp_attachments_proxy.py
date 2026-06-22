@@ -17,45 +17,29 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
-from backend import services as core_services
+import backend.db as bdb
 from backend import attachments as att
-import backend.forge.models  # noqa: F401 — FK target registration
 from backend.rest_api import app
 from backend import mcp_server
 
 
 @pytest.fixture
-def env(tmp_path):
-    import backend.db as bdb
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    Base.metadata.create_all(engine)
+def env(pg, tmp_path):
     storage = tmp_path / "attachments"
-    with patch.object(bdb, "engine", engine), \
-         patch.object(bdb, "app_engine", engine), \
-         patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
-        from backend.db import privileged, set_current_org
-        from backend.models import Org, Profile, Role
-        with privileged(), bdb.SessionLocal() as db:
-            core_services._seed_defaults(db)
-            org = Org(name="TestOrg")
-            db.add(org)
-            db.flush()
-            admin_role = db.query(Role).filter(Role.name == "admin").first()
-            admin = Profile(name="admin", org_id=org.id, role_id=admin_role.id,
-                            password_hash="", api_key="agentira_testkey_abc123")
-            db.add(admin)
-            db.commit()
-            org_id = org.id
-        set_current_org(org_id)
+    from backend.models import Profile, Role
+    # Seed an admin carrying the agent api_key the MCP proxy authenticates with.
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        admin_role = db.query(Role).filter(Role.name == "admin").first()
+        admin = Profile(name="admin", account_type="human", org_id=pg.org_id,
+                        roles=[admin_role], password_hash="",
+                        api_key="agentira_testkey_abc123")
+        db.add(admin)
+        db.commit()
+    with patch("backend.attachments.ATTACHMENTS_DIR", str(storage)):
         client = TestClient(app)
         client.headers["Authorization"] = "Bearer agentira_testkey_abc123"
-        yield client, org_id
-        set_current_org(None)
+        yield client, pg.org_id
 
 
 def _make_task(client):

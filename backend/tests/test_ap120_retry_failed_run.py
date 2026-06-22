@@ -11,11 +11,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge.models import (
@@ -24,20 +20,9 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.msg_queue.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def _harness(pg):
+    """Shared ephemeral-Postgres harness (org context pinned by `pg`)."""
+    yield
 
 
 def _mk_agent_task():
@@ -49,7 +34,7 @@ def _mk_agent_task():
                   executor_type="http", model="")
         db.add(a)
         status = db.query(Status).first()
-        t = Task(id=uuid.uuid4().hex, project_id=proj["id"],
+        t = Task(id=uuid.uuid4().hex[:12], project_id=proj["id"],
                  key="P-1", title="T", description="",
                  status_id=status.id if status else None)
         db.add(t)

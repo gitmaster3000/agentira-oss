@@ -11,39 +11,24 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
+import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor as _conductor
 from backend.forge.scheduler import _parse_hhmm
-from backend.forge.models import ForgeRuntime, RuntimeStatus, Run, RunStatus, RunOutcome
+from backend.forge.models import (Agent, ForgeRuntime, RuntimeStatus, Run,
+                                   RunStatus, RunOutcome)
 from backend.models import Profile
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession), \
-         patch("backend.forge.conductor.SessionLocal", TestSession), \
-         patch("backend.forge.digest.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    yield pg
 
 
 def _seed_runtime(TestSession) -> str:
-    db = TestSession()
+    db = bdb.SessionLocal()
     rt = ForgeRuntime(daemon_id="d", provider="claude",
                       binary_path="/tmp/claude", status=RuntimeStatus.ONLINE)
     db.add(rt)
@@ -61,6 +46,9 @@ def _project_with_done_run(TestSession):
     task = core_services.create_task(proj["id"], "Ship it", actor="system")
     bot = core_services.create_service_account("worker")
     with forge_services._session() as db:
+        db.add(Agent(id=bot["id"], profile_id=bot["id"], name="worker",
+                     executor_type="http", model=""))
+        db.flush()
         db.add(Run(id=uuid.uuid4().hex[:12], agent_id=bot["id"],
                    task_id=task["id"], project_id=proj["id"],
                    status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,

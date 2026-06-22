@@ -115,13 +115,14 @@ def get_or_create_conductor(org_id: str | None = None) -> dict:
             q = q.filter(Profile.org_id == oid)
         prof = q.first()
         if prof is None:
-            role = db.query(Role).filter(Role.name == "bot").first()
+            role = db.query(Role).filter(Role.name == "member").first()
             if role is None:
-                return {"error": "bot role missing"}
+                return {"error": "member role missing"}
             prof = Profile(
                 name=CONDUCTOR_NAME, display_name="Conductor",
                 password_hash="", avatar_url="", webhook_url="",
-                role_id=role.id, api_key=secrets.token_hex(32),
+                account_type="agentira_agent", roles=[role],
+                api_key=secrets.token_hex(32),
                 org_id=oid,
             )
             db.add(prof)
