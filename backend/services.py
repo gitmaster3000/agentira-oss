@@ -36,8 +36,12 @@ def authenticate_user(username: str, password: str) -> dict | None:
     Transparently migrates legacy unsalted SHA-256 hashes to bcrypt on a
     successful login (AP-194), so the old scheme drains without a reset."""
     # Login is cross-org: we don't know the user's org until we find them.
+    # Identifier is the username (name) or, failing that, the email (stored
+    # lowercased) — admins hand out emails, so people log in with them too.
     with privileged(), _session() as db:
         p = db.query(Profile).filter(Profile.name == username).first()
+        if not p and "@" in username:
+            p = db.query(Profile).filter(Profile.email == username.strip().lower()).first()
         if not p:
             return None
         if not passwords.verify_password(password, p.password_hash or ""):

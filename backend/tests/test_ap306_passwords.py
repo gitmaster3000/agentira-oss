@@ -96,6 +96,14 @@ def test_admin_reset_with_explicit_password(env):
     assert _login(c, "bob", "set123").status_code == 200
 
 
+def test_login_by_email(env):
+    # Admins hand out emails — people log in with the email too, not just @name.
+    c, ctx = env
+    assert _login(c, "bob@x.io", "oldpw").status_code == 200
+    assert _login(c, "BOB@X.IO", "oldpw").status_code == 200   # case-insensitive
+    assert _login(c, "bob@x.io", "wrong").status_code == 401
+
+
 def test_admin_reset_requires_admin(env):
     c, ctx = env
     r = c.post(f"/api/profiles/{ctx['member_id']}/reset-password", json={},
