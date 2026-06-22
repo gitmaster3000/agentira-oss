@@ -59,7 +59,17 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('agentira_token');
     };
 
-    const value = { user, login, loginWithOAuth, logout, loading };
+    // Merge a partial update into the current user + persist (e.g. clearing
+    // must_change_password after a forced change). AP-306.
+    const updateUser = (patch) => {
+        setUser((prev) => {
+            const next = { ...prev, ...patch };
+            localStorage.setItem('agentira_user', JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const value = { user, login, loginWithOAuth, logout, updateUser, loading };
 
     return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
 }

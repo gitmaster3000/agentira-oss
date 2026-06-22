@@ -83,6 +83,8 @@ export const api = {
     listServiceAccounts: () => request('/service-accounts'),
     getServiceAccount: (id) => request(`/service-accounts/${id}`),
     deleteServiceAccount: (id) => request(`/service-accounts/${id}`, { method: 'DELETE' }),
+    // Mint a fresh API key for a service account; the old one stops working.
+    regenerateApiKey: (id) => request(`/service-accounts/${id}/regenerate-key`, { method: 'POST' }),
 
     async login(username, password) {
         const res = await fetch(`${API_BASE}/login`, {
@@ -225,6 +227,22 @@ export const api = {
     setGitToken: (id, token) => request(`/profiles/${id}/git-token`, { method: 'PUT', body: JSON.stringify({ token }) }),
     checkGitToken: (id) => request(`/profiles/${id}/git-token/check`, { method: 'POST' }),
     deleteProfile: (id) => request(`/profiles/${id}`, { method: 'DELETE' }),
+
+    // AP-306: password lifecycle
+    // Admin resets a member's password. Omit newPassword → server returns a temp one.
+    resetMemberPassword: (id, newPassword) => request(`/profiles/${id}/reset-password`, {
+        method: 'POST', body: JSON.stringify(newPassword ? { new_password: newPassword } : {}),
+    }),
+    // Logged-in user changes their own password.
+    changeMyPassword: (newPassword) => request('/profiles/me/password', {
+        method: 'POST', body: JSON.stringify({ new_password: newPassword }),
+    }),
+    // Public: request a reset link by email (always succeeds — no account enumeration).
+    forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
+    // Public: consume a reset token to set a new password.
+    resetPasswordWithToken: (token, newPassword) => request('/auth/reset-password', {
+        method: 'POST', body: JSON.stringify({ token, new_password: newPassword }),
+    }),
 
     // Attachments
     listAttachments: (taskId) => request(`/tasks/${taskId}/attachments`),

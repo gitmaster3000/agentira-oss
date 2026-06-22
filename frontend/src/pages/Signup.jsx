@@ -9,7 +9,7 @@ export function Signup() {
     const [searchParams] = useSearchParams();
     const inviteCode = searchParams.get('invite') || '';
 
-    const [formData, setFormData] = useState({ name: '', display_name: '', password: '' });
+    const [formData, setFormData] = useState({ name: '', display_name: '', email: '', password: '' });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [invite, setInvite] = useState(null);        // { role, org_name, ... }
@@ -141,6 +141,12 @@ export function Signup() {
                     <input id="signup-display-name" name="display_name" type="text" autoComplete="name"
                         value={formData.display_name} onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
                         className="input" placeholder="e.g. John Doe" />
+                </div>
+                <div>
+                    <label htmlFor="signup-email" className="text-label-md text-text-secondary mb-1 block">Email</label>
+                    <input id="signup-email" name="email" type="email" autoComplete="email" required
+                        value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        className="input" placeholder="you@example.com" />
                 </div>
                 <div>
                     <label htmlFor="signup-password" className="text-label-md text-text-secondary mb-1 block">Password</label>

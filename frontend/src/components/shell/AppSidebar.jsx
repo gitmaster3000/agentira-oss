@@ -199,9 +199,6 @@ export function AppSidebar() {
                         <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', color: '#b1bac4' }}>
                             <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M1 12h4M19 12h4" /></svg>Settings
                         </div>
-                        <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', color: '#b1bac4' }}>
-                            <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>Profile
-                        </div>
                         <div className="nav" onClick={() => { localStorage.removeItem('agentira_token'); navigate('/login'); }} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px', borderRadius: '7px', cursor: 'pointer', fontSize: '13px', color: '#f87171' }}>
                             <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>Sign out
                         </div>

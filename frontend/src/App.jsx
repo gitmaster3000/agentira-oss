@@ -11,6 +11,9 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
+import { ForgotPassword } from './pages/ForgotPassword';
+import { ResetPassword } from './pages/ResetPassword';
+import { ForcePasswordChange } from './components/ForcePasswordChange';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { CliAuth } from './pages/CliAuth';
 import { Settings } from './pages/Settings';
@@ -37,7 +40,8 @@ function RequireAuth({ children }) {
     const { user, loading } = useAuth();
     if (loading) return <div>Loading...</div>;
     if (!user) return <Navigate to={ROUTES.WELCOME} replace />;
-    return children;
+    // AP-306: force a password change before anything else if flagged.
+    return <>{children}<ForcePasswordChange /></>;
 }
 
 function RedirectIfAuth({ children }) {
@@ -69,6 +73,8 @@ export default function App() {
                     <Route path={ROUTES.WELCOME} element={<RedirectIfAuth><Landing /></RedirectIfAuth>} />
                     <Route path={ROUTES.LOGIN} element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
                     <Route path={ROUTES.SIGNUP} element={<RedirectIfAuth><Signup /></RedirectIfAuth>} />
+                    <Route path={ROUTES.FORGOT_PASSWORD} element={<RedirectIfAuth><ForgotPassword /></RedirectIfAuth>} />
+                    <Route path={ROUTES.RESET_PASSWORD} element={<ResetPassword />} />
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
                     <Route path="/cli-auth" element={<CliAuth />} />
 

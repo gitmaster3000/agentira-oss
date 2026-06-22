@@ -126,6 +126,11 @@ export function Login() {
                             <input id="login-password" name="password" type="password" autoComplete="current-password"
                                 value={password} onChange={(e) => setPassword(e.target.value)}
                                 className="input" placeholder="••••••••" />
+                            <div className="text-right mt-1">
+                                <Link to={ROUTES.FORGOT_PASSWORD} className="text-label-sm font-medium" style={{ color: 'var(--accent-primary)' }}>
+                                    Forgot password?
+                                </Link>
+                            </div>
                         </div>
                         <button type="submit" className="btn btn-primary w-full justify-center text-body-md">
                             Sign In

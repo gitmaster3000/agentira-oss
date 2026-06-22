@@ -6,6 +6,8 @@ export const ROUTES = {
     WELCOME: '/welcome',
     LOGIN: '/login',
     SIGNUP: '/signup',
+    FORGOT_PASSWORD: '/forgot-password',
+    RESET_PASSWORD: '/reset-password',
     GITHUB_CALLBACK: '/auth/github/callback',
 
     // Studio
