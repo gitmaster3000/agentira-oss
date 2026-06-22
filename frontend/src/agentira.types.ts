@@ -34,6 +34,7 @@ export interface Project {
   repo: string;               // primary repo slug "acme/web"
   workspaceKind: 'git' | 'local_folder' | 'sandbox';
   sandboxMode: 'off' | 'cwd' | 'strict' | 'container';
+  envIsolation: 'auto' | 'hermetic' | 'per_run_db' | 'per_run_compose'; // AP-308
   liveRuns: number;           // count of RUNNING runs (for the sidebar dot)
   needsAttention: number;     // count waiting on the user
   counts: Record<TaskStatus, number>; // board distribution → Overview + Roadmap

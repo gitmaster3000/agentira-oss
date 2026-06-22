@@ -69,6 +69,22 @@ function TabButton({ active, onClick, label }) {
 
 // ── General ──────────────────────────────────────────────────────────
 
+// AP-308: per-run environment isolation. Plain labels up front (audience:
+// non-infra founders); the technical mode name + setup/teardown commands live
+// behind the Advanced reveal. The worktree forks a run's source; this forks
+// the runtime environment its commands hit so concurrent runs can't collide
+// on the shared dev stack.
+const ENV_ISOLATION = [
+    { value: 'auto', label: 'Automatic (recommended)',
+      help: 'Agentira picks the safest, cheapest isolation for this project.' },
+    { value: 'hermetic', label: 'No shared services',
+      help: "Runs use a clean, empty environment. Best when tests don't need a live database." },
+    { value: 'per_run_db', label: 'Isolated database per run',
+      help: 'Each run gets its own throwaway database. Agents never share data. Needs a setup command below (any engine).' },
+    { value: 'per_run_compose', label: 'Isolated full stack per run',
+      help: 'Each run gets its own full set of services (docker compose). Heaviest, strongest isolation.' },
+];
+
 function GeneralTab({ projectId }) {
     const [project, setProject] = useState(null);
     const [form, setForm] = useState(null);
@@ -86,6 +102,10 @@ function GeneralTab({ projectId }) {
                 conventions_md: p.conventions_md || '',
                 work_signal: p.work_signal || 'working_tree',
                 sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
+                env_isolation: p.env_isolation || 'auto',  // AP-308; '' = auto
+                env_setup_cmd: p.env_setup_cmd || '',
+                env_teardown_cmd: p.env_teardown_cmd || '',
+                env_db_admin_url: p.env_db_admin_url || '',
                 gates_enabled: !!p.gates_enabled,  // AP-158
             });
         }).catch(() => setProject(null));
@@ -101,6 +121,10 @@ function GeneralTab({ projectId }) {
         || form.conventions_md !== (project.conventions_md || '')
         || form.work_signal !== (project.work_signal || 'working_tree')
         || form.sandbox_mode !== (project.sandbox_mode || '')
+        || form.env_isolation !== (project.env_isolation || 'auto')
+        || form.env_setup_cmd !== (project.env_setup_cmd || '')
+        || form.env_teardown_cmd !== (project.env_teardown_cmd || '')
+        || form.env_db_admin_url !== (project.env_db_admin_url || '')
         || form.gates_enabled !== !!project.gates_enabled
     );
 
@@ -120,6 +144,11 @@ function GeneralTab({ projectId }) {
                 // "don't change" in the PATCH; "" is the explicit
                 // clear value the backend recognizes.
                 sandbox_mode: form.sandbox_mode,
+                // AP-308: "auto" round-trips as "" (the backend stores NULL).
+                env_isolation: form.env_isolation === 'auto' ? '' : form.env_isolation,
+                env_setup_cmd: form.env_setup_cmd,
+                env_teardown_cmd: form.env_teardown_cmd,
+                env_db_admin_url: form.env_db_admin_url,
                 gates_enabled: form.gates_enabled,
             });
             setProject(updated);
@@ -181,6 +210,7 @@ function GeneralTab({ projectId }) {
                     <option value="container">container — per-agent Docker (strongest)</option>
                 </select>
             </Field>
+            <EnvIsolationField form={form} setForm={setForm} />
             <Field label="Gated transitions (AP-158)"
                 hint={
                     "Block column moves when evidence is missing — DoD on the task, assignee, branch/PR linked, all DoD items checked before done. Off by default; turn on for strict workflows."
@@ -207,6 +237,67 @@ function GeneralTab({ projectId }) {
                 )}
             </div>
         </div>
+    );
+}
+
+
+// AP-308: the env-isolation control. Plain-label select; the technical mode
+// name and the setup/teardown commands (how this project provisions its DB —
+// any engine — and what to inject) live behind the Advanced reveal.
+function EnvIsolationField({ form, setForm }) {
+    const [advanced, setAdvanced] = useState(false);
+    const sel = ENV_ISOLATION.find((m) => m.value === form.env_isolation)
+        || ENV_ISOLATION[0];
+    const showCmds = form.env_isolation === 'per_run_db'
+        || form.env_isolation === 'per_run_compose';
+
+    return (
+        <Field label="Environment isolation (AP-308)" hint={sel.help}>
+            <select className="input" value={form.env_isolation}
+                onChange={(e) => setForm({ ...form, env_isolation: e.target.value })}>
+                {ENV_ISOLATION.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+            </select>
+            <button type="button" onClick={() => setAdvanced((s) => !s)}
+                className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary mt-2">
+                <ChevronDown className={`w-3 h-3 transition-transform ${advanced ? '' : '-rotate-90'}`} />
+                Advanced
+            </button>
+            {advanced && (
+                <div className="mt-2 pl-1 space-y-3 border-l border-border-subtle">
+                    <p className="text-xs text-text-tertiary pl-2">
+                        Technical mode: <code className="text-text-secondary">
+                        {form.env_isolation === 'auto' ? 'auto (resolved at dispatch)' : form.env_isolation}</code>
+                    </p>
+                    {showCmds && (
+                        <div className="pl-2 space-y-3">
+                            <Field label="Setup command"
+                                hint="Run before each run, in the worktree. Provisions this run's environment (any DB engine / language) and prints KEY=VALUE connection vars on stdout — e.g. AGENTIRA_DB_URL=… — which are injected into the agent. $AGENTIRA_RUN_SCOPE and $AGENTIRA_DB_ADMIN_URL are available. Required for 'Isolated database per run'.">
+                                <textarea className="input font-mono text-xs" rows="2"
+                                    placeholder={'createdb "$AGENTIRA_RUN_SCOPE" && echo "AGENTIRA_DB_URL=postgres://localhost/$AGENTIRA_RUN_SCOPE"'}
+                                    value={form.env_setup_cmd}
+                                    onChange={(e) => setForm({ ...form, env_setup_cmd: e.target.value })} />
+                            </Field>
+                            <Field label="Teardown command"
+                                hint="Run when the run finishes (any exit). Drops what setup created. Left blank for compose uses 'docker compose down -v'.">
+                                <textarea className="input font-mono text-xs" rows="2"
+                                    placeholder={'dropdb --if-exists "$AGENTIRA_RUN_SCOPE"'}
+                                    value={form.env_teardown_cmd}
+                                    onChange={(e) => setForm({ ...form, env_teardown_cmd: e.target.value })} />
+                            </Field>
+                            <Field label="DB admin URL (optional)"
+                                hint="Passed to the setup/teardown commands as $AGENTIRA_DB_ADMIN_URL — the admin connection they use to create/drop the per-run database. Stored as-is.">
+                                <input className="input font-mono text-xs"
+                                    placeholder="postgres://admin@localhost:5432/postgres"
+                                    value={form.env_db_admin_url}
+                                    onChange={(e) => setForm({ ...form, env_db_admin_url: e.target.value })} />
+                            </Field>
+                        </div>
+                    )}
+                </div>
+            )}
+        </Field>
     );
 }
 
