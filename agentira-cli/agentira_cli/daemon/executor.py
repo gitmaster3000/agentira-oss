@@ -117,6 +117,7 @@ async def run_cli_stream(
     resume_session_id: str = "",
     workdir: Optional[str] = None,
     env_extra: Optional[dict] = None,
+    env_strip: Optional[set] = None,   # AP-308: hermetic — drop these inherited vars
     on_event=None,        # async callable(event_list) for batching to backend
     on_proc=None,         # called with the spawned proc (and again with None on exit) so callers can kill() externally
     # Per-run log files. When set, every byte of stdout / stderr is
@@ -162,7 +163,7 @@ async def run_cli_stream(
             allowed_tools=allowed_tools,
         )
 
-        env = _build_env(env_extra or {})
+        env = _build_env(env_extra or {}, strip=env_strip)
 
         # Stream-json lines from claude can exceed asyncio's default 64KB
         # readline limit (single tool_result with a big diff, e.g.). Bump
@@ -508,9 +509,15 @@ def _write_mcp_config(config_json: str) -> str:
         return f.name
 
 
-def _build_env(extra: dict) -> dict:
-    """Build subprocess environment: current env + injected vars, filtered."""
-    _BLOCKED = {"AGENTIRA_DAEMON_API_KEY"}
+def _build_env(extra: dict, strip: Optional[set] = None) -> dict:
+    """Build subprocess environment: current env + injected vars, filtered.
+
+    `strip` (AP-308 hermetic mode) drops shared-service vars from the
+    inherited env so a run can't reach the developer's long-lived stack.
+    Applied to the inherited env only — explicitly injected `extra` wins
+    (per_run_db injects its own AGENTIRA_DB_URL there).
+    """
+    _BLOCKED = {"AGENTIRA_DAEMON_API_KEY"} | (strip or set())
     env = {k: v for k, v in os.environ.items() if k not in _BLOCKED}
     env.update(extra)
     return env

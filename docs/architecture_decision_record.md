@@ -1,3 +1,69 @@
+# ADR 010: Per-Run Environment Isolation
+
+## Status
+
+Accepted (AP-308). Spec: `docs/superpowers/specs/2026-06-22-per-run-env-isolation-design.md`.
+
+## Context
+
+Agentira isolates a run's **workspace** (a git worktree per task + a locked-down agent
+home) but not the **runtime environment** its commands hit. Every agent subprocess
+inherits the host env and shares the dev-stack Postgres/ports, so any command touching a
+shared service is a cross-agent race: the recurring "org_id" test failure, "port already
+in use", migrations clobbering each other, one agent's data poisoning another. The source
+is forked per task; everything it talks to is a singleton. This recurs in **every**
+service-backed project.
+
+## Decision
+
+One per-run primitive — **provision before spawn, teardown on finish** — with three modes
+resolved by the backend and executed by the daemon:
+
+| Mode | Provision | Agent gets | Teardown |
+|---|---|---|---|
+| **hermetic** | nothing; *strip* shared service URLs from the inherited env | clean env; suite falls back to its own in-memory/file DB | none |
+| **per_run_db** | run the **project's** setup command, which provisions this run's own DB (any engine) and prints `KEY=VALUE` connection vars; inject them | its own throwaway database | project's teardown command |
+| **per_run_compose** | same mechanism, docker-compose defaults (`-p run_<id> up`, ephemeral ports) | its own full stack | `compose -p run_<id> down -v` |
+
+**auto (default):** resolved at dispatch — `per_run_db` when the project declares a setup
+command, else `hermetic`. `per_run_compose` is never auto (explicit opt-in).
+
+**Engine-agnostic by design.** The daemon hardcodes nothing about a database engine or a
+language. The non-hermetic modes are the *same* mechanism — run a command, capture its
+`KEY=VALUE` output, run a teardown command — differing only in the compose defaults.
+Anything engine-specific lives in the project-declared command (Postgres `createdb`, MySQL
+`CREATE`, a SQLite file copy, `npm run migrate`, …), never in the daemon.
+
+## Implementation surface
+
+- **backend** `models.py` — `Project.env_isolation` + `env_setup_cmd`/`env_teardown_cmd`/
+  `env_db_admin_url`; `db.py:run_migrations` idempotent column-add; `db.py --bootstrap
+  --url <dsn>` schema entrypoint (a Python project's setup command can use it for parity);
+  `forge/services.py:_resolve_env_isolation` collapses `auto` and packs the instruction
+  onto `env_extra` (the existing injection channel, same as `AGENTIRA_SANDBOX_MODE`).
+- **daemon** `daemon/env_isolation.py` (new — `provision_env`/`teardown_env`, functions
+  not classes); `core.py:_execute` provisions after materialize / fails closed / tears down
+  on the terminal finish path; `executor.py:_build_env` accepts a per-run strip set;
+  `inflight.py` persists the teardown ctx and reaps orphan envs on startup.
+- **frontend** Project Settings — plain-label select + Advanced reveal (technical mode name
+  + setup/teardown commands + admin URL); round-trips via the project update API.
+
+## Failure handling (fail closed)
+
+Setup non-zero/timeout or malformed env → run fails with a clear diagnostic, agent NOT
+spawned, partial provision torn down. Teardown failure → logged + left for the startup
+reaper, never blocks the outcome. Daemon crash mid-run → startup reap drops the orphaned
+env from the persisted teardown ctx.
+
+## Consequences
+
+Structurally removes the org_id-collision class for every project. Sticky-run aware:
+provision is idempotent across turns, teardown fires only on the backend's terminal signal
+(same lifecycle as worktree cleanup), so a paused/idle run keeps its env. Ceiling: a
+terminal run with no worktree (sandbox) tears down via the reaper rather than inline.
+
+---
+
 # ADR 009: Conversations, Turns & Runs — the Execution Backbone
 
 ## Status

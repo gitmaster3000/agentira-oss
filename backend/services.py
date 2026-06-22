@@ -228,6 +228,12 @@ def _project_to_dict(p: Project) -> dict:
         "work_signal": getattr(p, "work_signal", None) or "",
         # AP-155: project-level sandbox override ("" = inherit from agent).
         "sandbox_mode": getattr(p, "sandbox_mode", None) or "",
+        # AP-308: per-run environment isolation ("" = auto). Override cmds/url
+        # are advanced knobs; surfaced so the settings form round-trips them.
+        "env_isolation": getattr(p, "env_isolation", None) or "",
+        "env_setup_cmd": getattr(p, "env_setup_cmd", None) or "",
+        "env_teardown_cmd": getattr(p, "env_teardown_cmd", None) or "",
+        "env_db_admin_url": getattr(p, "env_db_admin_url", None) or "",
         # AP-158: column-exit gates on/off for this project.
         "gates_enabled": bool(getattr(p, "gates_enabled", False)),
         # AP-184: when on, ANY comment wakes the assigned agent (legacy). Off
@@ -586,6 +592,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    repo_path: Optional[str] = None, conventions_md: Optional[str] = None,
                    work_signal: Optional[str] = None,
                    sandbox_mode: Optional[str] = None,
+                   env_isolation: Optional[str] = None,
+                   env_setup_cmd: Optional[str] = None,
+                   env_teardown_cmd: Optional[str] = None,
+                   env_db_admin_url: Optional[str] = None,
                    gates_enabled: Optional[bool] = None,
                    wake_on_comment: Optional[bool] = None,
                    repo_url: Optional[str] = None,
@@ -625,6 +635,19 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             normalized = sandbox_mode.strip() or None
             if is_valid_mode(normalized):
                 p.sandbox_mode = normalized
+        if env_isolation is not None:
+            # AP-308: empty string re-enables auto. Validate against the known
+            # modes; ignore junk so a bad value can't wedge dispatch.
+            mode = env_isolation.strip().lower() or None
+            if mode in (None, "auto", "hermetic", "per_run_db", "per_run_compose"):
+                # "auto" is stored as NULL — same as unset.
+                p.env_isolation = None if mode in (None, "auto") else mode
+        if env_setup_cmd is not None:
+            p.env_setup_cmd = env_setup_cmd.strip() or None
+        if env_teardown_cmd is not None:
+            p.env_teardown_cmd = env_teardown_cmd.strip() or None
+        if env_db_admin_url is not None:
+            p.env_db_admin_url = env_db_admin_url.strip() or None
         if gates_enabled is not None:
             p.gates_enabled = bool(gates_enabled)
         if wake_on_comment is not None:

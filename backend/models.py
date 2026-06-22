@@ -348,6 +348,17 @@ class Project(Base):
     # AP-155: project-level containment override. NULL = inherit from the
     # agent (Profile.sandbox_mode); both NULL = workspace default ("off").
     sandbox_mode: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    # AP-308: per-run environment isolation. The worktree forks the *source*;
+    # this forks the *runtime environment* a run's commands hit so concurrent
+    # runs can't collide on the shared dev stack (the org_id/port/migration
+    # race class). NULL/"auto" → resolved at dispatch (per_run_db when a DB
+    # service is present, else hermetic). "hermetic" | "per_run_db" |
+    # "per_run_compose". The override cmds/admin URL are NULL unless a project
+    # needs a custom setup; built-in defaults live daemon-side.
+    env_isolation: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    env_setup_cmd: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    env_teardown_cmd: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    env_db_admin_url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
     # AP-158: column-exit gate enforcement on transitions. False/NULL =
     # off (today's behavior — move_task only RBAC-checks). True = the
     # gate engine evaluates the transition; any failed gate blocks it

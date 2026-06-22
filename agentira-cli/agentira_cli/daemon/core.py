@@ -668,6 +668,13 @@ class AgentiraDaemon:
         env_extra = frame.get("env_extra", {}) or {}
         if not isinstance(env_extra, dict):
             env_extra = {}
+        # AP-308: lift the env-isolation control vars OUT of env_extra so they
+        # never reach the agent subprocess (the admin DSN especially). We
+        # provision below, after materialize, once cwd_path exists.
+        env_iso_mode = env_extra.pop("AGENTIRA_ENV_ISOLATION", "") or "hermetic"
+        env_iso_setup = env_extra.pop("AGENTIRA_ENV_SETUP_CMD", "") or ""
+        env_iso_teardown = env_extra.pop("AGENTIRA_ENV_TEARDOWN_CMD", "") or ""
+        env_iso_db_admin = env_extra.pop("AGENTIRA_ENV_DB_ADMIN_URL", "") or ""
 
         runtime_cls = get_runtime_cls(provider)
         if runtime_cls is None:
@@ -776,6 +783,33 @@ class AgentiraDaemon:
                 else f"{worktree_reason}; {materialize_reason}"
             )
 
+        # AP-308: provision the run's isolated environment now that the
+        # worktree exists, before we spawn. Only tracked runs get isolation —
+        # free-form chat (no run_id) keeps today's behavior. Fail CLOSED: a run
+        # that can't get its own env must NOT silently fall back to the shared
+        # dev stack (that's the whole org_id/port/migration race we're killing).
+        env_strip: set = set()
+        env_teardown_ctx = None
+        if run_id:
+            from agentira_cli.daemon import env_isolation as _env_iso
+            try:
+                prov_env, env_strip, env_teardown_ctx = await asyncio.to_thread(
+                    _env_iso.provision_env,
+                    mode=env_iso_mode, run_id=run_id,
+                    cwd=str(cwd_path) if cwd_path else None,
+                    setup_cmd=env_iso_setup, teardown_cmd=env_iso_teardown,
+                    db_admin_url=env_iso_db_admin,
+                    inherited_env=dict(os.environ),
+                )
+                env_extra.update(prov_env)
+            except _env_iso.EnvSetupError as exc:
+                logger.warning("env provision failed trace=%s: %s", trace_id, exc)
+                await self._post_setup_failure(
+                    trace_id=trace_id, run_id=run_id, agent_id=agent_id,
+                    reason=f"environment setup failed: {exc}",
+                )
+                return
+
         have_memory = "memory" in (mcp_config_json or "")  # cheap probe
 
         # Compose the system prompt: user-context preamble + conventions +
@@ -838,6 +872,9 @@ class AgentiraDaemon:
                         scope_key=scope_key, trace_id=trace_id,
                         run_id=run_id, pid=proc.pid,
                         daemon_id=self._daemon_id,
+                        # AP-308: so a daemon crash mid-run can still tear the
+                        # run's env down (startup reap reads this).
+                        env_teardown=env_teardown_ctx,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("inflight record skipped trace=%s: %s",
@@ -908,6 +945,7 @@ class AgentiraDaemon:
                     mcp_strict=mcp_strict,
                     resume_session_id=resume_session_id,
                     env_extra=env_extra,
+                    env_strip=env_strip,
                     stdout_log_path=stdout_log_path or None,
                     stderr_log_path=stderr_log_path or None,
                 )
@@ -938,6 +976,7 @@ class AgentiraDaemon:
                         mcp_strict=mcp_strict,
                         resume_session_id="",  # fresh
                         env_extra=env_extra,
+                    env_strip=env_strip,
                         stdout_log_path=stdout_log_path or None,
                         stderr_log_path=stderr_log_path or None,
                     )
@@ -1009,6 +1048,8 @@ class AgentiraDaemon:
                 cb = resp.get("cleanup_branch")
                 if cw and cb:
                     self._cleanup_worktree(cw, cb)
+            # AP-308: a cancel is terminal — always tear the run's env down.
+            self._teardown_env(env_teardown_ctx, scope_key, trace_id)
             return
 
         # If the run was PAUSED, the backend already set status=PAUSED. The
@@ -1106,6 +1147,27 @@ class AgentiraDaemon:
             cb = resp.get("cleanup_branch")
             if cw and cb:
                 self._cleanup_worktree(cw, cb)
+                # AP-308: the cleanup hint is the backend's "run is terminal"
+                # signal (sent on success/fail, never on a sticky idle turn or
+                # pause) — same lifecycle as the worktree, so tear the run's
+                # env down here too. Sandbox runs without a worktree get no
+                # hint; the startup reaper backstops those from the persisted
+                # teardown ctx.
+                self._teardown_env(env_teardown_ctx, scope_key, trace_id)
+
+    # AP-308: tear a finished run's env down. Best-effort — teardown_env never
+    # raises into the run path. The durable inflight record was already cleared
+    # earlier in the finish path, so a clean finish needs no reap entry; a
+    # crash *during* the run leaves the record (carrying env_teardown) intact
+    # for the startup reaper.
+    def _teardown_env(self, teardown_ctx, scope_key: str, trace_id: str) -> None:
+        if not teardown_ctx:
+            return
+        try:
+            from agentira_cli.daemon import env_isolation as _env_iso
+            _env_iso.teardown_env(teardown_ctx)
+        except Exception as exc:  # noqa: BLE001 — never break the finish path
+            logger.warning("env teardown errored trace=%s: %s", trace_id, exc)
 
     # AP-123: tear down a per-run worktree after the backend confirms the
     # run is terminal. Best-effort — failures are logged, never raised.

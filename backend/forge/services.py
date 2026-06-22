@@ -2276,6 +2276,35 @@ def _resolve_workspace_kind(project) -> str:
     return "sandbox"
 
 
+def _resolve_env_isolation(project) -> dict:
+    """AP-308: resolve a project's per-run environment isolation to a concrete
+    instruction for the daemon. `auto` is collapsed here (backend has the
+    project row + repo metadata) so the daemon never re-implements detection.
+
+    Returns the env-var bundle the daemon reads off env_extra:
+      AGENTIRA_ENV_ISOLATION  — resolved mode (never "auto")
+      AGENTIRA_ENV_SETUP_CMD / _TEARDOWN_CMD — project overrides ("" = use the
+        daemon's built-in default for the mode)
+      AGENTIRA_ENV_DB_ADMIN_URL — admin DSN for per_run_db ("" = daemon derives
+        it from the inherited AGENTIRA_DB_URL)
+    """
+    setup_cmd = getattr(project, "env_setup_cmd", None) or ""
+    mode = (getattr(project, "env_isolation", None) or "").strip().lower()
+    if mode not in ("hermetic", "per_run_db", "per_run_compose"):
+        # auto / unset / junk → resolve. per_run_db needs a project-declared
+        # setup command (it provisions the DB for ANY engine), so auto only
+        # picks it when the project has opted in by configuring that command;
+        # otherwise hermetic (zero cost). per_run_compose is never auto-picked
+        # (it binds host ports + boots arbitrary containers — explicit only).
+        mode = "per_run_db" if setup_cmd else "hermetic"
+    return {
+        "AGENTIRA_ENV_ISOLATION": mode,
+        "AGENTIRA_ENV_SETUP_CMD": (getattr(project, "env_setup_cmd", None) or ""),
+        "AGENTIRA_ENV_TEARDOWN_CMD": (getattr(project, "env_teardown_cmd", None) or ""),
+        "AGENTIRA_ENV_DB_ADMIN_URL": (getattr(project, "env_db_admin_url", None) or ""),
+    }
+
+
 def dispatch_trigger(agent_id: str, prompt: str, *,
                      run_id: str | None = None, kind: str = "chat",
                      repo_path: str = "", conventions_md: str = "",
@@ -2438,6 +2467,16 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
             sandbox_mode, sb_project_mode, sb_agent_mode,
         )
 
+        # AP-308: resolve per-run environment isolation (auto → concrete mode)
+        # so the daemon gets a ready instruction, never re-runs detection.
+        _env_iso_proj = db.get(_Proj, sb_project_id) if sb_project_id else None
+        env_isolation_vars = _resolve_env_isolation(_env_iso_proj)
+        _dispatch_logger.info(
+            "env_isolation trace=%s project=%s mode=%s",
+            trace_id, sb_project_id or "-",
+            env_isolation_vars["AGENTIRA_ENV_ISOLATION"],
+        )
+
         # Auto-baked self/project/task awareness preamble.
         # Identity + current screen + project + recent involvement so the
         # agent doesn't open every chat with "this is the start of our
@@ -2530,6 +2569,11 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     # for this dispatch. Phase 1: daemon logs and proceeds as-is. Phase 2:
     # adapter honors per its declared capabilities.
     env_extra_combined.setdefault("AGENTIRA_SANDBOX_MODE", sandbox_mode)
+    # AP-308: the resolved per-run env-isolation instruction. The daemon reads
+    # these off env_extra, provisions the env before spawn, and strips the
+    # control vars (incl. the admin URL) so they never reach the agent.
+    for _k, _v in env_isolation_vars.items():
+        env_extra_combined.setdefault(_k, _v)
     # AP-152: agent's own API key so it can authenticate REST calls
     # (e.g. download binary attachments). setdefault so explicit callers win.
     if agent_api_key:

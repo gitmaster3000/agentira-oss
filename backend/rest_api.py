@@ -100,6 +100,13 @@ class ProjectUpdate(BaseModel):
     # AP-155: project-level sandbox containment override. NULL → inherit
     # from the dispatched agent's `Profile.sandbox_mode`.
     sandbox_mode: Optional[str] = None
+    # AP-308: per-run environment isolation. "" / "auto" = resolved at
+    # dispatch; "hermetic" | "per_run_db" | "per_run_compose" force a mode.
+    # The override cmds/url are advanced knobs (built-in defaults daemon-side).
+    env_isolation: Optional[str] = None
+    env_setup_cmd: Optional[str] = None
+    env_teardown_cmd: Optional[str] = None
+    env_db_admin_url: Optional[str] = None
     # AP-158: column-exit gate enforcement.
     gates_enabled: Optional[bool] = None
     # AP-184: when on, any comment wakes the assigned agent (legacy). Off
@@ -587,6 +594,10 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             conventions_md=body.conventions_md,
             work_signal=body.work_signal,
             sandbox_mode=body.sandbox_mode,
+            env_isolation=body.env_isolation,
+            env_setup_cmd=body.env_setup_cmd,
+            env_teardown_cmd=body.env_teardown_cmd,
+            env_db_admin_url=body.env_db_admin_url,
             gates_enabled=body.gates_enabled,
             wake_on_comment=body.wake_on_comment,
             workflow_enabled=body.workflow_enabled,

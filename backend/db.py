@@ -686,6 +686,11 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "work_signal", "VARCHAR(20)")
             # AP-155: project-level sandbox containment override.
             added |= _ensure_column(conn, "projects", "sandbox_mode", "VARCHAR(20)")
+            # AP-308: per-run environment isolation (mode + override cmds/url).
+            added |= _ensure_column(conn, "projects", "env_isolation", "VARCHAR(20)")
+            added |= _ensure_column(conn, "projects", "env_setup_cmd", "TEXT")
+            added |= _ensure_column(conn, "projects", "env_teardown_cmd", "TEXT")
+            added |= _ensure_column(conn, "projects", "env_db_admin_url", "VARCHAR(500)")
             # AP-158: per-project gate-engine toggle.
             added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
             # AP-197: workspace kind (git | sandbox | local_folder). NULL =
@@ -955,3 +960,39 @@ def _sqlite_rebuild_forge_agents_profile_id_nullable(conn: Connection) -> None:
     conn.execute(text(f"INSERT INTO forge_agents ({col_list}) SELECT {col_list} FROM forge_agents_old"))
     conn.execute(text("DROP TABLE forge_agents_old"))
     conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def bootstrap_schema(url: str) -> None:
+    """AP-308: create the full current schema against an arbitrary DSN.
+
+    Used by the daemon's per_run_db isolation to give a throwaway
+    ``run_<id>`` database exact schema parity with the app — it shells out
+    to ``python -m backend.db --bootstrap --url <dsn>`` so it never has to
+    import the backend package. A fresh DB needs no incremental migrations;
+    ``create_all`` from the live models IS the current schema.
+    """
+    from backend.models import (  # noqa: F401
+        Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
+    )
+    from backend.forge.models import Agent, Run, ForgeRuntime  # noqa: F401
+    target = create_engine(url, echo=False)
+    try:
+        Base.metadata.create_all(bind=target)
+    finally:
+        target.dispose()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="agentira db utilities")
+    parser.add_argument("--bootstrap", action="store_true",
+                        help="create the schema against --url and exit")
+    parser.add_argument("--url", help="target DSN for --bootstrap")
+    args = parser.parse_args()
+    if args.bootstrap:
+        if not args.url:
+            parser.error("--bootstrap requires --url")
+        bootstrap_schema(args.url)
+        print(f"bootstrapped schema at {args.url}")
+    else:
+        parser.error("nothing to do (try --bootstrap --url <dsn>)")

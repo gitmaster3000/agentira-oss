@@ -50,10 +50,14 @@ def _path(scope_key: str) -> Path:
 
 
 def record(*, scope_key: str, trace_id: str, run_id: str,
-           pid: int, daemon_id: str) -> None:
+           pid: int, daemon_id: str, env_teardown: dict | None = None) -> None:
     """Write/overwrite the live-turn record for ``scope_key``.
 
     Overwriting enforces one live turn per scope. Best-effort.
+
+    AP-308: ``env_teardown`` (when set) is the per-run environment teardown
+    ctx, persisted so a daemon crash mid-run can still tear the env down on
+    next startup (``reap_orphans``).
     """
     if not scope_key:
         return
@@ -64,6 +68,7 @@ def record(*, scope_key: str, trace_id: str, run_id: str,
         "pid": int(pid),
         "started_at": time.time(),
         "daemon_id": daemon_id,
+        "env_teardown": env_teardown or None,
     }
     try:
         path = _path(scope_key)
@@ -183,6 +188,16 @@ def reap_orphans(*, daemon_id: str) -> list[dict]:
             entry["reaped"] = "killed"
         else:
             entry["reaped"] = "stale"
+        # AP-308: a crashed run can leave its isolated env (DB / compose stack)
+        # standing — tear it down from the persisted ctx. Best-effort.
+        td = entry.get("env_teardown")
+        if td:
+            try:
+                from agentira_cli.daemon import env_isolation as _env_iso
+                _env_iso.teardown_env(td)
+                logger.info("reaped orphan env scope=%s", scope)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("orphan env teardown failed scope=%s: %s", scope, exc)
         clear(scope_key=scope, trace_id=entry.get("trace_id", ""))
         reaped.append(entry)
     if reaped:

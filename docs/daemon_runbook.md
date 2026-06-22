@@ -194,3 +194,44 @@ Manual recovery for a stuck process (rare, if a registry entry is missing):
 `ps -ef | grep claude` then `kill -TERM -<pgid>`.
 
 See [ADR 009](./architecture_decision_record.md).
+
+## Per-run environment isolation (ADR 010 / AP-308)
+
+Each run can get its own runtime environment so concurrent runs don't collide
+on the shared dev stack (the org_id / "port already in use" / migration race
+class). Set per project in **Project Settings → Environment isolation**:
+
+- **Automatic** (default) — `per_run_db` if the project declares a setup
+  command, else `hermetic`.
+- **No shared services (hermetic)** — the daemon strips `AGENTIRA_DB_URL` /
+  `AGENTIRA_APP_DB_URL` from the run's env; the suite falls back to its own
+  in-memory/file DB. Zero cost.
+- **Isolated database per run (per_run_db)** — runs the project's **setup
+  command** (any engine/language), which provisions the run's DB and prints
+  `KEY=VALUE` connection vars (e.g. `AGENTIRA_DB_URL=…`) injected into the
+  agent; the **teardown command** drops it. `$AGENTIRA_RUN_SCOPE` and
+  `$AGENTIRA_DB_ADMIN_URL` are available to both. A Python project can point
+  setup at `python -m backend.db --bootstrap --url $AGENTIRA_DB_URL` for exact
+  schema parity.
+- **Isolated full stack per run (per_run_compose)** — `docker compose -p
+  run_<id> up -d --wait` (override via the setup command); `down -v` on finish.
+
+Behavior:
+
+- **Fail closed.** A setup non-zero/timeout fails the run with
+  `environment setup failed: …` and the agent is NOT spawned — a run never
+  silently falls back to shared infra.
+- **Sticky-run aware.** Provision is idempotent across a run's turns; teardown
+  fires only on the backend's terminal cleanup signal (same lifecycle as the
+  worktree), so a paused/idle run keeps its env.
+- **Crash-safe.** The teardown ctx is persisted in the inflight record; the
+  startup reaper tears down orphaned envs after a daemon crash.
+
+Common gotcha: **hermetic but the suite genuinely needs a DB** → the suite
+fails on its own missing-DB error (correct signal). Switch the project to
+*Isolated database per run* and set its setup command.
+
+Timeouts: `AGENTIRA_ENV_SETUP_TIMEOUT` (default 300s),
+`AGENTIRA_ENV_TEARDOWN_TIMEOUT` (default 120s).
+
+See [ADR 010](./architecture_decision_record.md).

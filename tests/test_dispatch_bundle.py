@@ -207,8 +207,10 @@ def test_dispatch_chat_trigger_sends_empty_bundle(test_db):
     # (resolved containment policy, default "off"), and AGENTIRA_API_KEY
     # when the agent has one (used to authenticate REST calls — e.g.
     # binary attachment reads). Empty bundle = just these env vars.
+    _ENV_ISO_KEYS = {"AGENTIRA_ENV_ISOLATION", "AGENTIRA_ENV_SETUP_CMD",
+                     "AGENTIRA_ENV_TEARDOWN_CMD", "AGENTIRA_ENV_DB_ADMIN_URL"}
     assert set(call["env_extra"].keys()) <= {"AGENTIRA_SANDBOX_MODE",
-                                             "AGENTIRA_API_KEY"}
+                                             "AGENTIRA_API_KEY"} | _ENV_ISO_KEYS
     if "AGENTIRA_SANDBOX_MODE" in call["env_extra"]:
         assert call["env_extra"]["AGENTIRA_SANDBOX_MODE"] == "off"
     assert call["run_token"] == ""
