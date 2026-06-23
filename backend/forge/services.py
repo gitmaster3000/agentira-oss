@@ -1662,11 +1662,14 @@ def list_all_conversations() -> list[dict]:
     list_conversations() but with agent_id/agent_name and a last-message
     preview so the frontend can render a chat list without N calls."""
     with _session() as db:
-        # Resolve a non-empty display name per agent. Bare Agent.name is blank
-        # for some rows (e.g. externally-registered runtime agents whose name
-        # lives on the linked profile / runtime handle), which surfaced in the
-        # global chat list as a red "?" / "Agent" row (AP-309). Fall back
-        # through profile name and the runtime handle before giving up.
+        # AP-309: the global chat list showed red "?" / "Agent" rows for every
+        # failed-execution thread. They're orphans — forge_messages.agent_id
+        # points at an agent that was deleted or merged away (the live schema
+        # has no enforced FK on that column, and the AP-86 profile/agent merge
+        # repointed ids), so the agent row is simply gone. You can't chat with
+        # a deleted agent, so drop those threads entirely. For agents that DO
+        # still exist, resolve a non-empty display name via the linked profile
+        # / runtime handle so a blank Agent.name never renders as "?".
         names = {
             a.id: (a.name or (a.profile.name if a.profile else None)
                    or a.runtime_agent_name or "Agent")
@@ -1681,9 +1684,11 @@ def list_all_conversations() -> list[dict]:
         conv_rows = db.query(Conversation).all()
         merged: dict[tuple[str, str], dict] = {}
         for aid, sk, cnt, last in msg_rows:
+            if aid not in names:   # orphaned thread — agent was deleted/merged
+                continue
             merged[(aid, sk)] = {
                 "agent_id": aid,
-                "agent_name": names.get(aid) or "Agent",
+                "agent_name": names[aid],
                 "scope_key": sk,
                 "message_count": int(cnt or 0),
                 "last_used_at": _iso(last),
@@ -1691,9 +1696,11 @@ def list_all_conversations() -> list[dict]:
                 "session_id": "",
             }
         for c in conv_rows:
+            if c.agent_id not in names:   # orphaned thread — agent gone
+                continue
             row = merged.setdefault((c.agent_id, c.scope_key), {
                 "agent_id": c.agent_id,
-                "agent_name": names.get(c.agent_id) or "Agent",
+                "agent_name": names[c.agent_id],
                 "scope_key": c.scope_key,
                 "message_count": 0,
                 "last_used_at": _iso(c.last_used_at),

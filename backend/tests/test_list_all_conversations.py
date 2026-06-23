@@ -10,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
+from sqlalchemy import text
+
 from backend.forge import services as fs
 from backend.forge.models import Agent, AgentMessage, MessageRole
 from backend.models import Profile
@@ -90,15 +92,27 @@ def test_blank_name_falls_back_to_profile_name():
     assert chats[0]["agent_name"] == "Gamma"
 
 
-def test_blank_name_no_profile_uses_neutral_label():
+def test_orphaned_thread_is_excluded():
+    """The real AP-309 cause: forge_messages.agent_id points at an agent that
+    was deleted / merged away (the live schema has no enforced FK on that
+    column). Those dead threads — all old "⚠ Agent execution failed: …" runs —
+    rendered as red "?" rows. You can't chat with a deleted agent, so the
+    global list must drop them, not relabel them."""
+    keep = _agent("Keeper")
+    ghost = _agent("Ghost")
+    _msg(keep, "chat:default", "still here", 1)
+    _msg(ghost, "chat:default", "⚠ Agent execution failed: Not logged in", 2)
+
+    # Simulate prod drift: remove the agent row out from under its messages.
+    # session_replication_role=replica suspends FK enforcement so the orphan
+    # state the production DB actually contains can be reproduced here.
     with fs._session() as db:
-        a = Agent(name="", executor_type="cli")
-        db.add(a)
+        db.execute(text("SET session_replication_role = replica"))
+        db.execute(text("DELETE FROM forge_agents WHERE id = :id"), {"id": ghost})
+        db.execute(text("SET session_replication_role = origin"))
         db.commit()
-        aid = a.id
-    _msg(aid, "chat:default", "⚠ Agent execution failed: Not logged in", 1)
 
     chats = fs.list_all_conversations()
-    assert chats[0]["agent_id"] == aid
-    # Never the empty string that the frontend turned into a red "?".
-    assert chats[0]["agent_name"] == "Agent"
+    ids = [c["agent_id"] for c in chats]
+    assert keep in ids
+    assert ghost not in ids          # orphaned thread dropped, not shown as "?"
