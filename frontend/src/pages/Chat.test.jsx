@@ -95,6 +95,20 @@ describe('Chat page', () => {
         expect(screen.getByText('2 conversations')).toBeInTheDocument();
     });
 
+    it('renders a readable label, not a blank/"?", when agent_name is empty (AP-309)', async () => {
+        // The global chat list used to send agent_name:"" for failed-execution
+        // threads, which rendered as a red "?" avatar with no name. The rail
+        // must degrade to a neutral "Agent" label instead of an empty string.
+        api.forge.listChats.mockResolvedValue([
+            { agent_id: 'x1', agent_name: '', scope_key: 'chat:default',
+              label: 'General', last_message: '⚠ Agent execution failed: Not logged in',
+              last_used_at: '2026-06-19T00:00:01.000Z' },
+        ]);
+        render(<Chat />);
+        await waitFor(() => expect(api.forge.listChats).toHaveBeenCalled());
+        expect((await screen.findAllByText('Agent')).length).toBeGreaterThan(0);
+    });
+
     it('gives user and agent bubbles distinct, token-based surfaces', async () => {
         api.forge.listMessages.mockResolvedValue([
             { id: 'm1', role: 'user', content: 'my question', created_at: '2026-06-19T00:00:01.000Z' },
