@@ -263,8 +263,14 @@ export function FloatingChat() {
     const selectedAgent = agents.find((a) => a.id === selectedId);
 
     // Both elements derive their on-screen position from the one anchor.
+    // On phones the 380×520 panel is bigger than the viewport — shrink it to
+    // fit (leaving an 8px gutter) so it can't be anchored off-screen.
+    const vw = typeof window !== 'undefined' ? window.innerWidth : PANEL_W + 16;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : PANEL_H + 16;
+    const panelW = Math.min(PANEL_W, vw - 16);
+    const panelH = Math.min(PANEL_H, vh - 16);
     const btnXY = pos ? clampPos(pos, BTN, BTN) : null;
-    const panelXY = pos ? clampPos(pos, PANEL_W, PANEL_H) : null;
+    const panelXY = pos ? clampPos(pos, panelW, panelH) : null;
 
     // ── collapsed: a small, draggable icon button ───────────────────────
     if (!open) {
@@ -286,13 +292,13 @@ export function FloatingChat() {
             style={{
                 left: panelXY ? panelXY.x : undefined,
                 top: panelXY ? panelXY.y : undefined,
-                width: PANEL_W, height: PANEL_H,
+                width: panelW, height: panelH,
                 maxWidth: 'calc(100vw - 1rem)', maxHeight: 'calc(100vh - 1rem)',
             }}
         >
             {/* Header — drag handle */}
             <div
-                onMouseDown={(e) => startDrag(e, panelXY, PANEL_W, PANEL_H)}
+                onMouseDown={(e) => startDrag(e, panelXY, panelW, panelH)}
                 className="flex items-center gap-2 px-3 py-2.5 border-b border-border-subtle cursor-move select-none"
             >
                 <GripVertical className="w-4 h-4 text-text-tertiary flex-shrink-0" />

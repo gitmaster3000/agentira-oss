@@ -42,7 +42,7 @@ function useBreadcrumb(activeProjectName) {
     return [crumbSeg('Home')];
 }
 
-export function AppTopbar({ onNewProject }) {
+export function AppTopbar({ onNewProject, onMenu }) {
     const navigate = useNavigate();
     const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
@@ -103,7 +103,14 @@ export function AppTopbar({ onNewProject }) {
 
     return (
         <header style={{ height: '54px', flexShrink: 0, borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', background: '#161b22', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0 }}>{crumb}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0 }}>
+                {/* Hamburger — opens the off-canvas sidebar. CSS hides it on desktop. */}
+                <button onClick={onMenu} className="shell-hamburger" title="Menu" aria-label="Open navigation"
+                    style={{ background: 'none', border: 'none', padding: '6px', marginRight: '2px', color: '#b1bac4', cursor: 'pointer', alignItems: 'center' }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+                </button>
+                {crumb}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {/* Pulse pill — toggles the full-height Pulse drawer (PulseDock).
                     Pulse blue when something is running; muted "All quiet" otherwise.

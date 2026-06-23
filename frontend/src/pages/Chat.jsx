@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Loader, Ban, MessageSquare, ChevronDown, Check } from 'lucide-react';
+import { Send, Loader, Ban, MessageSquare, ChevronDown, ChevronLeft, Check } from 'lucide-react';
 import { api } from '../api';
 import { AskUserQuestionCard } from '../components/AskUserQuestionCard';
 import { Markdown } from '../components/Markdown';
@@ -57,6 +57,9 @@ export function Chat() {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [stopped, setStopped] = useState(false);
+    // Mobile is single-pane: false → agent list, true → the open thread.
+    // Ignored on desktop (md+), where both panes show side by side.
+    const [mobilePane, setMobilePane] = useState(false);
 
     const bottomRef = useRef(null);
     const inputRef = useRef(null);
@@ -213,6 +216,7 @@ export function Chat() {
     const pickAgent = (a) => {
         const top = a.scopes[0];
         setScopeOpen(false);
+        setMobilePane(true);
         setSel({
             agent_id: a.agent_id, scope_key: top.scope_key,
             agent_name: a.agent_name, label: top.label,
@@ -220,6 +224,7 @@ export function Chat() {
     };
     const pickScope = (c) => {
         setScopeOpen(false);
+        setMobilePane(true);
         setSel({
             agent_id: c.agent_id, scope_key: c.scope_key,
             agent_name: c.agent_name, label: c.label,
@@ -229,7 +234,7 @@ export function Chat() {
     return (
         <div className="flex h-full min-h-0">
             {/* ── agent list (one row per agent) ────────────────────────── */}
-            <aside className="w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel flex flex-col">
+            <aside className={`w-full md:w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel md:flex flex-col ${mobilePane ? 'hidden' : 'flex'}`}>
                 <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2">
                     <MessageSquare className="w-5 h-5 text-accent-primary" />
                     <span className="text-title-sm font-bold text-text-primary">Chat</span>
@@ -282,7 +287,7 @@ export function Chat() {
             </aside>
 
             {/* ── conversation pane ─────────────────────────────────────── */}
-            <section className="flex-1 min-w-0 flex flex-col bg-bg-panel">
+            <section className={`flex-1 min-w-0 md:flex flex-col bg-bg-panel ${mobilePane ? 'flex' : 'hidden'}`}>
                 {!sel ? (
                     <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
                         Select a conversation
@@ -290,6 +295,14 @@ export function Chat() {
                 ) : (
                     <>
                         <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2.5">
+                            <button
+                                onClick={() => setMobilePane(false)}
+                                className="md:hidden -ml-1 p-1 text-text-tertiary hover:text-text-primary flex-shrink-0"
+                                title="Back to conversations"
+                                aria-label="Back"
+                            >
+                                <ChevronLeft className="w-5 h-5" />
+                            </button>
                             <div
                                 className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                                 style={{ background: agentColor(sel.agent_name) }}

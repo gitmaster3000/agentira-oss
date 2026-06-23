@@ -4,6 +4,35 @@
 .nav:hover { background: #272d36 !important; }
 .ico { flex-shrink: 0; }
 
+/* ── Mobile chrome: off-canvas sidebar + hamburger ──────────────────────
+   Desktop keeps the static 248px rail. On narrow viewports the rail becomes
+   a fixed drawer that slides in over the content, toggled by the topbar
+   hamburger; a backdrop dismisses it. Route changes close it (Layout). */
+.shell-hamburger { display: none; }
+.shell-backdrop { display: none; }
+
+@media (max-width: 768px) {
+    .shell-hamburger { display: inline-flex; }
+    .shell-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 60;
+        transform: translateX(-100%);
+        transition: transform .2s ease;
+        box-shadow: 0 0 32px rgba(0, 0, 0, .55);
+    }
+    .shell-sidebar.shell-sidebar--open { transform: translateX(0); }
+    .shell-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 55;
+        background: rgba(0, 0, 0, .5);
+    }
+}
+
 @keyframes livedot {
     0%   { transform: scale(.7); opacity: .75; }
     70%  { transform: scale(2);  opacity: 0; }

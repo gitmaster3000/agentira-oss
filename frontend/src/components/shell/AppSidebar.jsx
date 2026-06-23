@@ -40,7 +40,7 @@ function NavRow({ active, onClick, icon, label, badge }) {
     );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ open = false }) {
     const navigate = useNavigate();
     const location = useLocation();
     const { projectId: urlProjectId } = useParams();
@@ -92,7 +92,7 @@ export function AppSidebar() {
     const activeLive = active ? runningByProject[active.id] || 0 : 0;
 
     return (
-        <aside style={{ width: '248px', flexShrink: 0, borderRight: '1px solid #30363d', background: '#161b22', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
+        <aside className={`shell-sidebar${open ? ' shell-sidebar--open' : ''}`} style={{ width: '248px', flexShrink: 0, borderRight: '1px solid #30363d', background: '#161b22', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
             {/* workspace — fixed 54px to align its bottom border with the topbar's */}
             <div style={{ height: '54px', flexShrink: 0, padding: '0 12px', borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center' }}>
                 <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '9px', width: '100%', padding: '7px 8px', borderRadius: '10px', background: '#1c2128', border: '1px solid #30363d', cursor: 'pointer' }}>
