@@ -12,6 +12,7 @@ import pytest
 
 from backend.forge import services as fs
 from backend.forge.models import Agent, AgentMessage, MessageRole
+from backend.models import Profile
 
 
 @pytest.fixture(autouse=True)
@@ -67,3 +68,37 @@ def test_separate_row_per_scope_with_counts():
     assert by_scope["chat:default"]["message_count"] == 1
     assert by_scope["task:T1"]["message_count"] == 2
     assert by_scope["task:T1"]["last_message"] == "three"
+
+
+# ── AP-309: a blank Agent.name rendered a red "?" / "Agent" row in the
+# global chat list for every failed-execution thread. agent_name must never
+# come back empty — fall back to the linked profile, then a neutral label.
+
+def test_blank_name_falls_back_to_profile_name():
+    with fs._session() as db:
+        prof = Profile(name="Gamma", account_type="agentira_agent")
+        db.add(prof)
+        db.flush()
+        a = Agent(name="", profile_id=prof.id, executor_type="cli")
+        db.add(a)
+        db.commit()
+        aid = a.id
+    _msg(aid, "chat:default", "boom", 1)
+
+    chats = fs.list_all_conversations()
+    assert chats[0]["agent_id"] == aid
+    assert chats[0]["agent_name"] == "Gamma"
+
+
+def test_blank_name_no_profile_uses_neutral_label():
+    with fs._session() as db:
+        a = Agent(name="", executor_type="cli")
+        db.add(a)
+        db.commit()
+        aid = a.id
+    _msg(aid, "chat:default", "⚠ Agent execution failed: Not logged in", 1)
+
+    chats = fs.list_all_conversations()
+    assert chats[0]["agent_id"] == aid
+    # Never the empty string that the frontend turned into a red "?".
+    assert chats[0]["agent_name"] == "Agent"

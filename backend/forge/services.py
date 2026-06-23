@@ -1662,7 +1662,16 @@ def list_all_conversations() -> list[dict]:
     list_conversations() but with agent_id/agent_name and a last-message
     preview so the frontend can render a chat list without N calls."""
     with _session() as db:
-        names = dict(db.query(Agent.id, Agent.name).all())
+        # Resolve a non-empty display name per agent. Bare Agent.name is blank
+        # for some rows (e.g. externally-registered runtime agents whose name
+        # lives on the linked profile / runtime handle), which surfaced in the
+        # global chat list as a red "?" / "Agent" row (AP-309). Fall back
+        # through profile name and the runtime handle before giving up.
+        names = {
+            a.id: (a.name or (a.profile.name if a.profile else None)
+                   or a.runtime_agent_name or "Agent")
+            for a in db.query(Agent).all()
+        }
         msg_rows = (db.query(AgentMessage.agent_id, AgentMessage.scope_key,
                              func.count(AgentMessage.id),
                              func.max(AgentMessage.created_at))
@@ -1674,7 +1683,7 @@ def list_all_conversations() -> list[dict]:
         for aid, sk, cnt, last in msg_rows:
             merged[(aid, sk)] = {
                 "agent_id": aid,
-                "agent_name": names.get(aid, ""),
+                "agent_name": names.get(aid) or "Agent",
                 "scope_key": sk,
                 "message_count": int(cnt or 0),
                 "last_used_at": _iso(last),
@@ -1684,7 +1693,7 @@ def list_all_conversations() -> list[dict]:
         for c in conv_rows:
             row = merged.setdefault((c.agent_id, c.scope_key), {
                 "agent_id": c.agent_id,
-                "agent_name": names.get(c.agent_id, ""),
+                "agent_name": names.get(c.agent_id) or "Agent",
                 "scope_key": c.scope_key,
                 "message_count": 0,
                 "last_used_at": _iso(c.last_used_at),
