@@ -95,6 +95,21 @@ describe('Chat page', () => {
         expect(screen.getByText('2 conversations')).toBeInTheDocument();
     });
 
+    it('gives user and agent bubbles distinct, token-based surfaces', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'user', content: 'my question', created_at: '2026-06-19T00:00:01.000Z' },
+            { id: 'm2', role: 'assistant', content: 'agent reply', created_at: '2026-06-19T00:00:02.000Z' },
+        ]);
+        render(<Chat />);
+        const userBubble = (await screen.findByText('my question')).closest('div[class*="max-w-"]');
+        const agentBubble = (await screen.findByText('agent reply')).closest('div[class*="max-w-"]');
+        // User bubble = soft lavender tint; agent = neutral card. Distinct, and
+        // neither is the old glaring solid accent fill.
+        expect(userBubble.style.background).toBe('var(--tint-lavender)');
+        expect(agentBubble.style.background).toBe('var(--bg-card)');
+        expect(userBubble.style.background).not.toBe(agentBubble.style.background);
+    });
+
     it('switches scope via the per-agent conversation selector', async () => {
         api.forge.listChats.mockResolvedValue([
             { agent_id: 'a1', agent_name: 'Conductor', scope_key: 'chat:project:p1',

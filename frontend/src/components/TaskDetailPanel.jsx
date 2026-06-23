@@ -591,6 +591,39 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     {/* COMMENTS */}
                     <div ref={el => (sectionRefs.current.comments = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
                         <SectionLabel>Comments</SectionLabel>
+                        {/* Composer sits ABOVE the thread so it's the first thing
+                            you reach, and grows with what you type. */}
+                        <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginBottom: 16 }}>
+                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: '#b1bac4', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
+                            <div className="flex-1 min-w-0" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
+                                <MentionInput
+                                    multiline
+                                    autoGrow
+                                    rows={2}
+                                    className="block w-full bg-transparent text-text-primary text-xs leading-relaxed focus:outline-none resize-none max-h-32 overflow-y-auto"
+                                    placeholder="Comment or @mention…  (Shift+Enter for a new line)"
+                                    value={comment}
+                                    onChange={setComment}
+                                    onSubmit={handleComment}
+                                    projectId={task.project_id}
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={!comment.trim()}
+                                title="Send comment"
+                                className="flex items-center justify-center flex-shrink-0 transition-colors"
+                                style={{
+                                    width: 32, height: 32, borderRadius: '50%',
+                                    background: comment.trim() ? 'var(--accent-primary)' : 'var(--bg-card)',
+                                    color: comment.trim() ? '#2d1a6e' : 'var(--text-tertiary)',
+                                    border: '1px solid var(--border-subtle)',
+                                    cursor: comment.trim() ? 'pointer' : 'not-allowed',
+                                }}
+                            >
+                                <Send className="w-3.5 h-3.5" />
+                            </button>
+                        </form>
                         <div className="flex flex-col" style={{ gap: 13 }}>
                             {comments.length === 0 && <p style={{ fontSize: 12 }} className="text-text-tertiary italic">No comments yet.</p>}
                             {comments.map(c => (
@@ -606,34 +639,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             ))}
                         </div>
-                        <form onSubmit={handleComment} className="flex items-center" style={{ gap: 8, marginTop: 14 }}>
-                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: '#b1bac4', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
-                            <div className="flex-1 flex items-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
-                                <MentionInput
-                                    className="flex-1 bg-transparent text-text-primary text-xs focus:outline-none"
-                                    placeholder="Comment or @mention…"
-                                    value={comment}
-                                    onChange={setComment}
-                                    onSubmit={handleComment}
-                                    projectId={task.project_id}
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={!comment.trim()}
-                                title="Send comment"
-                                className="flex items-center justify-center flex-shrink-0 transition-colors"
-                                style={{
-                                    width: 32, height: 32, borderRadius: '50%',
-                                    background: comment.trim() ? 'var(--accent-primary)' : 'var(--bg-card)',
-                                    color: comment.trim() ? '#fff' : 'var(--text-tertiary)',
-                                    border: '1px solid var(--border-subtle)',
-                                    cursor: comment.trim() ? 'pointer' : 'not-allowed',
-                                }}
-                            >
-                                <Send className="w-3.5 h-3.5" />
-                            </button>
-                        </form>
                     </div>
 
                     {/* ACTIVITY */}

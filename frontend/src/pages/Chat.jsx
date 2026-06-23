@@ -148,6 +148,15 @@ export function Chat() {
 
     useEffect(() => { inputRef.current?.focus(); }, [selKey]);
 
+    // Auto-grow the composer with its content (shrinks back when cleared);
+    // the CSS max-height caps it and switches to scroll.
+    useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+    }, [input]);
+
     const postMessage = async (content) => {
         const text = (content || '').trim();
         if (!text || !sel) return;
@@ -366,8 +375,8 @@ export function Chat() {
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
                                     }}
-                                    placeholder="Type a message…"
-                                    className="flex-1 resize-none bg-bg-hover border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-primary max-h-28"
+                                    placeholder="Type a message…  (Shift+Enter for a new line)"
+                                    className="flex-1 resize-none bg-bg-hover border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-primary max-h-44 overflow-y-auto"
                                 />
                                 {lastIsUser ? (
                                     <button onClick={stop} className="p-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25" title="Stop">
@@ -409,8 +418,16 @@ function ChatBubble({ m, onAnswer }) {
     const isUser = role === 'user';
     return (
         <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[75%] rounded-lg px-3 py-2 text-sm break-words ${
-                isUser ? 'bg-accent-primary text-white whitespace-pre-wrap' : 'bg-bg-hover text-text-primary'}`}>
+            {/* Two quiet, distinct bubbles: the user's own message is a soft
+                lavender tint with a lavender hairline (branded, not a glaring
+                fill); agent replies sit on a neutral raised card. Light text on
+                both for readable contrast. */}
+            <div
+                className={`max-w-[78%] rounded-xl border px-3.5 py-2 text-sm break-words ${isUser ? 'whitespace-pre-wrap' : ''}`}
+                style={isUser
+                    ? { background: 'var(--tint-lavender)', borderColor: 'rgba(201,184,255,0.40)', color: 'var(--text-primary)' }
+                    : { background: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-primary)' }}
+            >
                 {isUser
                     ? (m.content || '…')
                     : (m.content ? <Markdown className="chat-md text-text-primary">{m.content}</Markdown> : '…')}

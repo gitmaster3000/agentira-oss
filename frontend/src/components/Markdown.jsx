@@ -26,12 +26,23 @@ const COMPONENTS = {
     li: (p) => <li className="text-sm text-text-secondary" {...p} />,
     a:  (p) => <a className="text-accent-primary underline hover:text-accent-primary-hover" target="_blank" rel="noopener noreferrer" {...p} />,
     code({ inline, className, children, ...props }) {
-        return inline ? (
-            <code className="px-1 py-0.5 rounded bg-bg-panel text-xs font-mono text-text-primary" {...props}>{children}</code>
-        ) : (
-            <pre className="my-2 p-3 rounded-lg bg-bg-panel border overflow-x-auto">
-                <code className={`text-xs font-mono text-text-primary ${className || ''}`} {...props}>{children}</code>
-            </pre>
+        if (inline) {
+            return <code className="px-1.5 py-0.5 rounded bg-bg-panel border border-border-subtle text-[0.85em] font-mono text-text-primary" {...props}>{children}</code>;
+        }
+        // Editor-style block: a deep "code well" surface, an optional language
+        // label bar (from ```lang fences), and horizontal scroll for long lines.
+        const lang = /language-(\w+)/.exec(className || '')?.[1];
+        return (
+            <div className="my-2 rounded-lg border border-border-subtle overflow-hidden">
+                {lang && (
+                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary bg-bg-card border-b border-border-subtle">
+                        {lang}
+                    </div>
+                )}
+                <pre className="p-3 overflow-x-auto" style={{ background: 'var(--surface-sunken)' }}>
+                    <code className={`text-[12.5px] leading-relaxed font-mono text-text-primary ${className || ''}`} {...props}>{children}</code>
+                </pre>
+            </div>
         );
     },
     blockquote: (p) => <blockquote className="border-l-2 border-border-subtle pl-3 my-2 text-sm text-text-tertiary italic" {...p} />,

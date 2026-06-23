@@ -20,6 +20,7 @@ export function MentionInput({
     menuAbove = false,
     multiline = false,
     rows = 3,
+    autoGrow = false,
 }) {
     const [members, setMembers] = useState([]);
     const [open, setOpen] = useState(false);
@@ -35,6 +36,17 @@ export function MentionInput({
             .catch(() => { if (alive) setMembers([]); });
         return () => { alive = false; };
     }, [projectId]);
+
+    // Auto-grow a multiline box with its content (capped by the consumer's
+    // max-height class, which then scrolls). Opt-in so single-line and
+    // fixed-height callers are untouched.
+    useEffect(() => {
+        if (!multiline || !autoGrow) return;
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+    }, [value, multiline, autoGrow]);
 
     const candidates = members
         .map(m => (typeof m === 'string' ? { name: m } : m))
