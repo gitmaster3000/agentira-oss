@@ -509,14 +509,15 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         <SectionLabel>Files</SectionLabel>
                         <div className="flex flex-col" style={{ gap: 8 }}>
                             {attachments.map(att => (
-                                <a key={att.id} href={api.getAttachmentDownloadUrl(att.id)} target="_blank" rel="noopener noreferrer"
-                                   className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+                                <button key={att.id} type="button"
+                                   onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
+                                   className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
                                     <FileText className="w-4 h-4 flex-shrink-0" style={{ color: '#80cbc4' }} />
                                     <div className="flex-1 min-w-0">
                                         <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
                                         {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
                                     </div>
-                                </a>
+                                </button>
                             ))}
                             <button onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, marginTop: 4, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
                                 <Plus className="w-3 h-3" /> Attach a file

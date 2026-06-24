@@ -262,7 +262,6 @@ export const api = {
         });
     },
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
-    getAttachmentDownloadUrl: (id) => `${API_BASE}/attachments/${id}/download`,
     // The download route requires the bearer token, which a plain <a href>
     // can't carry — fetch with the header, then save the blob.
     downloadAttachment: async (id, filename) => {
