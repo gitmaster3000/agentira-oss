@@ -453,10 +453,11 @@ class Epic(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (UniqueConstraint("project_id", "key", name="uq_tasks_project_key"),)
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
-    key: Mapped[str] = mapped_column(String(20), nullable=True, unique=True)
+    key: Mapped[str] = mapped_column(String(20), nullable=True)
     # Task type discriminator — a task can be a plain task, a bug, etc.
     # Type-specific behavior lives in backend.tasks.TaskService subclasses.
     type: Mapped[str] = mapped_column(String(20), default="task", nullable=False)
