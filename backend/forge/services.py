@@ -3699,12 +3699,15 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
             r.summary = summary
         db.commit()
 
-        # Post a comment back to the linked task so the human reading the task
-        # feed sees the agent's verdict + summary. ONLY for explicit runs —
-        # a chat turn (trigger="chat") must NOT post a "Run {outcome}" entry
-        # into the activity feed (that made a plain @mention comment look like
-        # it produced a run). The agent's reply already shows in the chat.
-        if r.task_id and r.trigger_event != "chat":
+        # When the agent declares a run finished, surface it to the humans on
+        # the project. A run is a run: every (agent, task) run that the agent
+        # closes via finish_run notifies the project members with a live push,
+        # so the bell updates immediately instead of the verdict landing as a
+        # silent row. The activity-feed COMMENT stays explicit-runs-only — a
+        # chat turn's reply already shows in the thread, so duplicating it as a
+        # "Run {outcome}" feed row is noise — but the notification fires either
+        # way (the human may have navigated away from the chat).
+        if r.task_id:
             try:
                 from backend.models import Task as _Task, Activity as _Activity, Profile as _Profile
                 task = db.get(_Task, r.task_id)
@@ -3722,18 +3725,27 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                             prof = db.get(_Profile, agent.profile_id)
                             if prof:
                                 actor_name = prof.name
-                    comment_body = (
-                        f"{icon} **Run {outcome_enum.value}** "
-                        f"([run {r.id[:8]}](/forge/runs/{r.id}))\n\n"
-                        f"{summary or '(no summary provided)'}"
-                    )
-                    db.add(_Activity(
+                    if r.trigger_event != "chat":
+                        comment_body = (
+                            f"{icon} **Run {outcome_enum.value}** "
+                            f"([run {r.id[:8]}](/forge/runs/{r.id}))\n\n"
+                            f"{summary or '(no summary provided)'}"
+                        )
+                        db.add(_Activity(
+                            project_id=task.project_id,
+                            task_id=task.id,
+                            actor=actor_name or "agent",
+                            action="commented",
+                            detail=comment_body,
+                        ))
+                    _notify_project_members(
+                        db,
                         project_id=task.project_id,
-                        task_id=task.id,
-                        actor=actor_name or "agent",
-                        action="commented",
-                        detail=comment_body,
-                    ))
+                        type_=f"forge.run.{outcome_enum.value}",
+                        title=f"{icon} {actor_name or 'Agent'} {outcome_enum.value} "
+                              f"{task.key or 'task'}: {(summary or '').strip()[:120]}",
+                        link=f"/projects/{task.project_id}/tasks/{task.id}",
+                    )
                     db.commit()
             except Exception as exc:  # noqa: BLE001 — best-effort
                 # Don't fail the agent's finish_run because the side-effect
