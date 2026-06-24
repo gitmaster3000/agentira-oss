@@ -53,7 +53,11 @@ memory for this scope.
 
 ### Stop button — interrupt a dispatch in progress
 
-Visible during an active dispatch. Clicking it:
+Visible during an active dispatch. Both the per-agent chat (Agent detail) and
+the global **Chat** page decide visibility the same way: a 3s poll of the
+daemon's live-turn mirror (`GET /forge/agents/{id}/scope-live`) keeps Stop up
+for as long as a turn is actually running — it does not drop the moment the
+agent posts a reply or after a fixed timeout. Clicking it:
 
 - Cancels the in-flight subprocess gracefully.
 - If the chat is in a task scope AND a run is running for that task →
