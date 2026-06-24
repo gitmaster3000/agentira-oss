@@ -632,20 +632,20 @@ def run_migrations():
             if "forge_messages" in tables:
                 _ensure_column(conn, "forge_messages", "scope_key", "VARCHAR(120)")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_disabled", "TEXT")
-            runtime_added |= _ensure_column(conn, "profiles", "mcp_strict", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_strict", "BOOLEAN DEFAULT FALSE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_config_override", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "home_path", "VARCHAR(500)")
             # AP-80 Conductor: opt-in autonomous task pickup
-            runtime_added |= _ensure_column(conn, "profiles", "conductor_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_enabled", "BOOLEAN DEFAULT FALSE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "max_concurrent_runs", "INTEGER DEFAULT 1 NOT NULL")
             # System agents (Conductor, Concierge) + Conductor cadence config
-            runtime_added |= _ensure_column(conn, "profiles", "is_system", "BOOLEAN DEFAULT 0 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "is_system", "BOOLEAN DEFAULT FALSE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_tick_seconds", "INTEGER DEFAULT 60 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_time", "VARCHAR(5) DEFAULT '09:00' NOT NULL")
-            runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT 1 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT TRUE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_plan_interval_minutes", "INTEGER DEFAULT 10 NOT NULL")
-            runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT 1 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT TRUE NOT NULL")
             # AP-155: agent-level sandbox containment mode.
             runtime_added |= _ensure_column(conn, "profiles", "sandbox_mode", "VARCHAR(20)")
             # AP-302: personal git access token + cached validity.
@@ -692,7 +692,7 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "env_teardown_cmd", "TEXT")
             added |= _ensure_column(conn, "projects", "env_db_admin_url", "VARCHAR(500)")
             # AP-158: per-project gate-engine toggle.
-            added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT 0 NOT NULL")
+            added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT FALSE NOT NULL")
             # AP-197: workspace kind (git | sandbox | local_folder). NULL =
             # inferred at dispatch. Backfilled below from existing repo fields.
             if _ensure_column(conn, "projects", "workspace_kind", "VARCHAR(20)"):
@@ -711,7 +711,7 @@ def run_migrations():
             # Workflow driver: per-project opt-in + the restricted customer
             # override (role->agent mapping only; the flow is system config).
             added |= _ensure_column(conn, "projects", "workflow_enabled",
-                                    "BOOLEAN DEFAULT 0 NOT NULL")
+                                    "BOOLEAN DEFAULT FALSE NOT NULL")
             added |= _ensure_column(conn, "projects", "workflow_roles_json", "TEXT")
             # AP-297: per-project TTL for cached pre-run checks (NULL = 600s
             # default; 0 = no time expiry, env-change re-runs only).
@@ -757,6 +757,31 @@ def run_migrations():
             added |= _ensure_column(conn, "tasks", "creator", "VARCHAR(120) DEFAULT ''")
             # Task type discriminator (task | bug | ...) — DEFAULT backfills existing rows.
             added |= _ensure_column(conn, "tasks", "type", "VARCHAR(20) DEFAULT 'task' NOT NULL")
+            # Scope the task-key unique constraint to project instead of globally.
+            # The old tasks_key_key constraint made keys unique across all orgs,
+            # causing collisions when two orgs share a project key prefix.
+            if _dialect_name() == "postgresql":
+                indexes = {
+                    r[0] for r in conn.execute(text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE tablename='tasks' AND indexname='tasks_key_key'"
+                    ))
+                }
+                if "tasks_key_key" in indexes:
+                    conn.execute(text("ALTER TABLE tasks DROP CONSTRAINT tasks_key_key"))
+                    added = True
+                new_indexes = {
+                    r[0] for r in conn.execute(text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE tablename='tasks' AND indexname='uq_tasks_project_key'"
+                    ))
+                }
+                if "uq_tasks_project_key" not in new_indexes:
+                    conn.execute(text(
+                        "ALTER TABLE tasks ADD CONSTRAINT uq_tasks_project_key "
+                        "UNIQUE (project_id, key)"
+                    ))
+                    added = True
             if added:
                 conn.commit()
 
