@@ -68,6 +68,7 @@ export function CreateEpicModal({ projectId, onClose, onCreated }) {
                             placeholder="What are we aiming for?"
                             value={formData.title}
                             onChange={e => setFormData({ ...formData, title: e.target.value })}
+                            maxLength={255}
                             required
                         />
                     </div>

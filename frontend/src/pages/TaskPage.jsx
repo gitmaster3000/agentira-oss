@@ -29,7 +29,6 @@ import {
     AlertTriangle,
     ClipboardList,
     Activity as ActivityIcon,
-    Folder,
     Play,
 } from 'lucide-react';
 
@@ -37,7 +36,6 @@ const TABS = [
     { id: 'plan', label: 'Plan', icon: ClipboardList },
     { id: 'agent', label: 'Agent', icon: Bot },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
-    { id: 'files', label: 'Files', icon: Folder },
 ];
 
 // Minimal run-status palette — mirrors RunDetail's STATUS_CONFIG for the
@@ -206,6 +204,21 @@ export function TaskPage() {
         };
         tick();
         return () => { cancelled = true; clearTimeout(timer); };
+    }, [taskId]);
+
+    // Keep the Activity tab live — agents and the daemon append activity while
+    // the page is open, so poll it (matching the side panel's cadence) instead
+    // of only loading once on mount.
+    useEffect(() => {
+        let cancelled = false;
+        const poll = async () => {
+            try {
+                const data = await api.getActivity(taskId);
+                if (!cancelled) setActivities(data);
+            } catch { /* transient */ }
+        };
+        const interval = setInterval(poll, 3000);
+        return () => { cancelled = true; clearInterval(interval); };
     }, [taskId]);
 
     const copyToClipboard = (text, field) => {
@@ -380,6 +393,12 @@ export function TaskPage() {
                         commits={commits}
                         copiedField={copiedField}
                         copyToClipboard={copyToClipboard}
+                        taskId={taskId}
+                        user={user}
+                        comment={comment}
+                        setComment={setComment}
+                        handleComment={handleComment}
+                        activities={activities}
                     />
                 )}
 
@@ -399,22 +418,7 @@ export function TaskPage() {
                     />
                 )}
 
-                {tab === 'activity' && (
-                    <ActivityTab
-                        user={user}
-                        comment={comment}
-                        setComment={setComment}
-                        handleComment={handleComment}
-                        activities={activities}
-                        projectId={task.project_id}
-                    />
-                )}
-
-                {tab === 'files' && (
-                    <div className="max-w-3xl bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
-                        <AttachmentsSection taskId={taskId} />
-                    </div>
-                )}
+                {tab === 'activity' && <ActivityTab activities={activities} />}
             </div>
         </div>
     );
@@ -596,15 +600,54 @@ function Metric({ icon: Icon, label, value }) {
     );
 }
 
-function ActivityTab({ user, comment, setComment, handleComment, activities, projectId }) {
+function ActivityTab({ activities }) {
+    // Full, read-only timeline of everything that happened on the task
+    // (status changes, comments, runs…). Posting comments lives on the Plan tab.
     return (
-        <div className="max-w-3xl space-y-8">
-            <h2 className="text-sm font-bold uppercase text-text-tertiary border-b border-border-subtle pb-2 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" /> Activity
+        <div className="max-w-3xl">
+            <h2 className="text-sm font-bold uppercase text-text-tertiary mb-6 flex items-center gap-2">
+                <ActivityIcon className="w-4 h-4" /> Activity
+            </h2>
+            {activities.length === 0 ? (
+                <p className="text-sm text-text-tertiary italic">No activity yet.</p>
+            ) : (
+                <div className="space-y-6">
+                    {activities.map(act => (
+                        <div key={act.id} className="flex gap-4">
+                            <div className="w-10 h-10 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary shadow-sm flex-shrink-0">
+                                {act.actor?.[0]?.toUpperCase() || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-3 mb-1">
+                                    <span className="text-sm font-bold text-text-primary">{act.actor}</span>
+                                    <span className="text-xs text-text-tertiary">
+                                        {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                </div>
+                                <div className="text-sm text-text-secondary break-words">
+                                    <span className="text-accent-primary font-medium mr-1">{act.action}</span>
+                                    {act.detail}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function CommentsSection({ user, comment, setComment, handleComment, activities, projectId }) {
+    // Comments only — the full activity timeline lives in the board side panel.
+    const comments = activities.filter(a => a.action === 'commented');
+    return (
+        <div>
+            <h2 className="text-sm font-bold uppercase text-text-tertiary mb-4 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4" /> Comments
             </h2>
 
-            <div className="flex gap-4">
-                <div className="w-10 h-10 rounded-full bg-accent-subtle flex items-center justify-center font-bold text-sm text-accent-primary">
+            <div className="flex gap-4 mb-8">
+                <div className="w-10 h-10 rounded-full bg-accent-subtle flex items-center justify-center font-bold text-sm text-accent-primary flex-shrink-0">
                     {user?.display_name?.[0]?.toUpperCase() || 'U'}
                 </div>
                 <form onSubmit={handleComment} className="flex-1">
@@ -624,21 +667,21 @@ function ActivityTab({ user, comment, setComment, handleComment, activities, pro
                 </form>
             </div>
 
-            <div className="space-y-8 mt-8">
-                {activities.map(act => (
+            <div className="space-y-6">
+                {comments.length === 0 && <p className="text-sm text-text-tertiary italic">No comments yet.</p>}
+                {comments.map(act => (
                     <div key={act.id} className="flex gap-4 group">
-                        <div className="w-10 h-10 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary shadow-sm">
+                        <div className="w-10 h-10 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary shadow-sm flex-shrink-0">
                             {act.actor?.[0]?.toUpperCase() || '?'}
                         </div>
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-3 mb-1">
                                 <span className="text-sm font-bold text-text-primary">{act.actor}</span>
                                 <span className="text-xs text-text-tertiary">
                                     {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                             </div>
-                            <div className="text-sm text-text-secondary">
-                                <span className="text-accent-primary font-medium mr-1">{act.action}</span>
+                            <div className="text-sm text-text-secondary bg-bg-card border border-border-subtle rounded-lg px-4 py-3 break-words">
                                 {act.detail}
                             </div>
                         </div>
@@ -656,11 +699,12 @@ function PlanTab(props) {
         branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
         commits, copiedField, copyToClipboard,
+        taskId, user, comment, setComment, handleComment, activities,
     } = props;
 
     return (
         <div className="flex flex-col lg:flex-row gap-12">
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
                 <div className="mb-10">
                     <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
                     <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm break-words overflow-x-auto">
@@ -669,6 +713,16 @@ function PlanTab(props) {
                             : <span className="italic text-text-tertiary">No description provided.</span>}
                     </div>
                 </div>
+
+                {/* Comments live in the main column now (no separate tab). */}
+                <CommentsSection
+                    user={user}
+                    comment={comment}
+                    setComment={setComment}
+                    handleComment={handleComment}
+                    activities={activities}
+                    projectId={task.project_id}
+                />
             </div>
 
             <div className="w-full lg:w-80 space-y-8">
@@ -923,6 +977,13 @@ function PlanTab(props) {
                             </div>
                         </>
                     )}
+                </div>
+
+                {/* Files live in the side column now (no separate tab). The
+                    AttachmentsSection brings its own header + top border, so it
+                    sits directly in the card. */}
+                <div className="bg-bg-card border border-border-subtle rounded-xl px-6 pb-6 shadow-sm">
+                    <AttachmentsSection taskId={taskId} />
                 </div>
 
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">

@@ -129,6 +129,7 @@ export function EpicPage() {
                         className="input flex-1 min-w-0 text-2xl font-bold"
                         value={form.title}
                         onChange={e => setForm({ ...form, title: e.target.value })}
+                        maxLength={255}
                         placeholder="Epic title"
                     />
                 ) : (

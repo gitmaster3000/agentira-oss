@@ -167,6 +167,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         catch (err) { alert(err.message); }
         finally { e.target.value = ''; }
     };
+    const handleDeleteAttachment = async (id, filename) => {
+        if (!confirm(`Delete attachment "${filename}"?`)) return;
+        try { await api.deleteAttachment(id); loadAttachments(); loadActivity(); }
+        catch (err) { alert(err.message); }
+    };
     const handleSave = async () => {
         try {
             await api.updateTask(task.id, {
@@ -252,6 +257,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
     const status = STATUS[task.status] || { color: '#768390', label: task.status };
     const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
+    const workRuns = taskRuns.filter(r => r.is_work);
     const comments = activities.filter(a => a.action === 'commented');
     const doneCount = dodItems.filter(i => i.checked).length;
 
@@ -261,8 +267,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
             style={{ width: 384, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-subtle)' }}
             onClick={e => e.stopPropagation()}
         >
-            {/* Header: key + epic · open full / edit / delete / close */}
-            <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '11px 18px', minHeight: 50, borderBottom: '1px solid var(--border-subtle)' }}>
+            {/* Header: key + epic · open full / edit / delete / close.
+                Fixed 53px height matches the board toolbar so the panel's top
+                divider lines up with the board header's bottom border. While
+                editing, the edit/delete pair swaps to Save/Cancel — the same
+                standard used on the Epic page. */}
+            <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '0 18px', height: 53, borderBottom: '1px solid var(--border-subtle)' }}>
                 <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: '#7c8db5', whiteSpace: 'nowrap' }}>
                     {task.key || task.id}
                 </span>
@@ -272,20 +282,33 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </span>
                 )}
                 <div className="flex-1" />
-                <button
-                    onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
-                    className="flex items-center gap-1.5 text-text-tertiary hover:text-text-primary transition-colors"
-                    style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', fontSize: 11.5 }}
-                    title="Open full task page"
-                >
-                    <ExternalLink className="w-3 h-3" /> Open full
-                </button>
-                <button onClick={() => toggleEditing(!isEditing)} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
-                    <Pencil className="w-4 h-4" />
-                </button>
-                <button onClick={() => setIsConfirmingDelete(true)} title="Delete" className="flex items-center justify-center text-text-tertiary hover:text-red-400 transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
-                    <Trash2 className="w-4 h-4" />
-                </button>
+                {isEditing ? (
+                    <>
+                        <button onClick={handleSave} title="Save changes" className="flex items-center gap-1.5 transition-colors" style={{ padding: '6px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 600, background: 'var(--accent-primary)', color: '#fff' }}>
+                            <Check className="w-3.5 h-3.5" /> Save
+                        </button>
+                        <button onClick={() => { toggleEditing(false); setFormData({ ...task }); }} title="Cancel" className="flex items-center gap-1.5 text-text-secondary hover:text-text-primary transition-colors" style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', fontSize: 11.5, fontWeight: 500 }}>
+                            <X className="w-3.5 h-3.5" /> Cancel
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button
+                            onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
+                            className="flex items-center gap-1.5 text-text-tertiary hover:text-text-primary transition-colors"
+                            style={{ padding: '6px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', fontSize: 11.5 }}
+                            title="Open full task page"
+                        >
+                            <ExternalLink className="w-3 h-3" /> Open full
+                        </button>
+                        <button onClick={() => toggleEditing(true)} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setIsConfirmingDelete(true)} title="Delete" className="flex items-center justify-center text-text-tertiary hover:text-red-400 transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </>
+                )}
                 <button onClick={onClose} title="Close" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
                     <X className="w-4 h-4" />
                 </button>
@@ -299,10 +322,19 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         style={{ fontSize: 17.5, fontWeight: 600 }}
                         value={formData.title}
                         onChange={e => setFormData({ ...formData, title: e.target.value })}
+                        maxLength={255}
                         autoFocus
                     />
                 ) : (
-                    <h2 style={{ fontSize: 17.5, fontWeight: 600, margin: 0, lineHeight: 1.3 }} className="text-text-primary">{task.title}</h2>
+                    // Clamp to 3 lines so a long title can't push the divider below
+                    // out of alignment; full title stays available on hover.
+                    <h2
+                        title={task.title}
+                        style={{ fontSize: 17.5, fontWeight: 600, margin: 0, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                        className="text-text-primary"
+                    >
+                        {task.title}
+                    </h2>
                 )}
             </div>
 
@@ -402,21 +434,26 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 )}
                             </div>
                         )}
-                        {!pickingAgent && taskRuns.filter(r => r.is_work).length > 0 && (
-                            <div style={{ marginBottom: 16 }}>
-                                {taskRuns.filter(r => r.is_work).slice(0, 5).map(r => (
-                                    <button
-                                        key={r.id}
-                                        onClick={() => navigate(ROUTES.FORGE_RUN(r.id))}
-                                        className="w-full flex items-center transition-colors"
-                                        style={{ gap: 8, padding: '6px 8px', borderRadius: 8, textAlign: 'left' }}
-                                    >
-                                        <Cpu className="w-3 h-3 flex-shrink-0 text-text-tertiary" />
-                                        <span style={{ fontSize: 12 }} className="text-text-primary truncate">{r.agent_name || r.agent_id}</span>
-                                        <span style={{ fontSize: 10.5 }} className="text-text-tertiary ml-auto">{r.status}</span>
-                                    </button>
-                                ))}
-                            </div>
+                        {!pickingAgent && (
+                            workRuns.length > 0 ? (
+                                <div style={{ marginBottom: 16 }}>
+                                    {workRuns.slice(0, 5).map(r => (
+                                        <button
+                                            key={r.id}
+                                            onClick={() => navigate(ROUTES.FORGE_RUN(r.id))}
+                                            className="w-full flex items-center transition-colors hover:bg-bg-card"
+                                            style={{ gap: 8, padding: '6px 8px', borderRadius: 8, textAlign: 'left' }}
+                                        >
+                                            <Cpu className="w-3 h-3 flex-shrink-0 text-text-tertiary" />
+                                            <span style={{ fontSize: 12 }} className="text-text-primary truncate">{r.agent_name || r.agent_id}</span>
+                                            <span style={{ fontSize: 10.5 }} className="text-text-tertiary ml-auto">{r.status}</span>
+                                            <span style={{ fontSize: 10 }} className="text-text-tertiary">{relTime(r.created_at)}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p style={{ fontSize: 11.5, marginBottom: 16 }} className="text-text-tertiary">No agent runs yet. Launch one to get started.</p>
+                            )
                         )}
 
                         <SectionLabel>Description</SectionLabel>
@@ -496,12 +533,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             <button onClick={addDodItem} className="text-text-tertiary hover:text-accent-primary"><Plus className="w-4 h-4" /></button>
                         </div>
 
-                        {isEditing && (
-                            <div className="flex gap-2" style={{ marginBottom: 18 }}>
-                                <button onClick={handleSave} className="btn btn-primary" style={{ fontSize: 12.5 }}>Save</button>
-                                <button onClick={() => { toggleEditing(false); setFormData({ ...task }); }} className="btn btn-ghost" style={{ fontSize: 12.5 }}>Cancel</button>
-                            </div>
-                        )}
                     </div>
 
                     {/* FILES */}
@@ -509,15 +540,23 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         <SectionLabel>Files</SectionLabel>
                         <div className="flex flex-col" style={{ gap: 8 }}>
                             {attachments.map(att => (
-                                <button key={att.id} type="button"
-                                   onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
-                                   className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
-                                    <FileText className="w-4 h-4 flex-shrink-0" style={{ color: '#80cbc4' }} />
-                                    <div className="flex-1 min-w-0">
-                                        <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
-                                        {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
-                                    </div>
-                                </button>
+                                <div key={att.id} className="flex items-center group hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+                                    <button type="button"
+                                       onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
+                                       className="flex items-center min-w-0 flex-1" style={{ gap: 10, textAlign: 'left', cursor: 'pointer' }}>
+                                        <FileText className="w-4 h-4 flex-shrink-0" style={{ color: '#80cbc4' }} />
+                                        <div className="flex-1 min-w-0">
+                                            <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
+                                            {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
+                                        </div>
+                                    </button>
+                                    <button type="button"
+                                       onClick={() => handleDeleteAttachment(att.id, att.filename || att.name)}
+                                       title="Delete attachment"
+                                       className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all">
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
                             ))}
                             <button onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, marginTop: 4, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
                                 <Plus className="w-3 h-3" /> Attach a file
@@ -681,7 +720,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
 function SectionLabel({ children, inline }) {
     return (
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.1em', color: '#768390', marginBottom: inline ? 0 : 9, textTransform: 'uppercase' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', color: '#e8ebf0', marginBottom: inline ? 0 : 11, textTransform: 'uppercase' }}>
             {children}
         </div>
     );

@@ -80,6 +80,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                             className="input"
                             value={formData.title}
                             onChange={e => setFormData({ ...formData, title: e.target.value })}
+                            maxLength={255}
                             required
                         />
                     </div>
