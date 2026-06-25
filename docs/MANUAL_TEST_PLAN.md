@@ -340,9 +340,30 @@ in the UI directly.
 
 ## Phase 11 — Cleanup
 
-- [ ] Delete the Smoke Test project (or rename to "🗑 done").
-- [ ] Confirm: deleting a project doesn't crash anything; runs scoped to
-      it are still visible in `/forge/runs`.
+### Delete a project (cascade)
+
+Setup so there's something to cascade: the Smoke Test project should already
+have at least one task, one run, a chat, and an attached file from earlier
+phases. If not, add a task, open its chat and send one message, and attach a
+file.
+
+- [ ] Note the project's task(s), run(s), chat(s), and attached file(s).
+- [ ] Delete the Smoke Test project (Project Settings → Delete, or
+      `delete_project` via MCP, or `DELETE /api/projects/{id}`).
+- [ ] **Expect:** the call succeeds (`{"ok": true}` / `true`) and the project
+      disappears from the project list.
+- [ ] **Confirm full cascade — all of the following are gone:**
+      - the project's tasks and epics no longer resolve.
+      - its runs no longer appear in `/forge/runs`.
+      - its chats (project chat + per-task chats) are gone.
+      - attached files are removed (DB record **and** the file on disk under
+        `data/attachments/` — check the volume).
+      - `project_repos` for it are gone.
+- [ ] **Confirm survivors:** the agent(s) still exist in `/forge/agents`;
+      only their *default project* pointer was cleared. Nothing else crashes.
+- [ ] Deleting a non-existent project id returns a 404 (REST) / `false` (MCP).
+
+Exercises the project cascade-delete feature (`docs/feature-project-delete.md`).
 
 ---
 

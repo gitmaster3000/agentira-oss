@@ -16,6 +16,7 @@ shims that call this module, so existing REST + MCP callers keep working.
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from typing import Any
 
@@ -319,6 +320,17 @@ def read_text(attachment_id: str) -> dict[str, Any] | None:
         meta["served_over_http"] = True
         meta["download_hint"] = _download_hint(meta["download_url"], a.filename)
         return meta
+
+
+def purge_project_files(project_id: str, task_ids: list[str]) -> None:
+    """Remove the on-disk storage dirs for a project and its tasks. ORM
+    cascade drops the Attachment rows but leaves the files — this clears them
+    so a project delete doesn't orphan blobs on the persistent volume."""
+    dirs = [_storage_dir(None, project_id)] + \
+           [_storage_dir(tid, None) for tid in task_ids]
+    for d in dirs:
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def delete(attachment_id: str) -> bool:

@@ -683,10 +683,26 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
 
 
 def delete_project(project_id: str) -> bool:
+    """Cascade-delete a project and everything it owns: tasks, epics, members,
+    activities, attachments (rows + on-disk files), forge runs, and chats.
+
+    ORM cascade handles the core children (tasks/epics/members/activities/
+    attachment rows). Forge runs/chats and the default-project pointers carry
+    no cascade, so they're cleared first via repos — otherwise the delete
+    FK-violates on `forge_runs`."""
+    from backend.repos import projects as projects_repo
+    from backend.forge.repos import project_purge
+    from backend import attachments
     with _session() as db:
         p = db.get(Project, project_id)
         if not p:
             return False
+        task_ids = [t.id for t in p.tasks]
+        attachments.purge_project_files(project_id, task_ids)
+        project_purge.purge_project_data(db, project_id=project_id,
+                                         task_ids=task_ids)
+        projects_repo.delete_project_repos(db, project_id)
+        projects_repo.clear_default_project_pointers(db, project_id)
         db.delete(p)
         db.commit()
         return True

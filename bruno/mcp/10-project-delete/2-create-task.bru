@@ -1,0 +1,54 @@
+meta {
+  name: Create Task In Doomed Project
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("doomedProjectId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 102,
+    method: "tools/call",
+    params: {
+      name: "create_task",
+      arguments: {
+        project_id: pid,
+        title: "Task that should cascade-delete",
+        description: "Lives only to be deleted with its project"
+      }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+script:post-response {
+  if (res.body.result && res.body.result.content && res.body.result.content[0].text) {
+    try {
+      const text = res.body.result.content[0].text.replace(/'/g, '"');
+      const data = JSON.parse(text);
+      if (data && data.id) {
+        bru.setVar("doomedTaskId", data.id);
+      }
+    } catch (e) {
+    }
+  }
+}
+
+tests {
+  test("Task created in doomed project", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.result.content[0].text).to.contain("cascade-delete");
+  });
+}

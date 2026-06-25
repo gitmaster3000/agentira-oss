@@ -1,0 +1,39 @@
+meta {
+  name: Verify Doomed Project Gone
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+  const pid = bru.getVar("doomedProjectId");
+  req.setBody({
+    jsonrpc: "2.0",
+    id: 104,
+    method: "tools/call",
+    params: {
+      name: "get_project",
+      arguments: { project_id: pid }
+    }
+  });
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Project no longer exists", function() {
+    expect(res.status).to.equal(200);
+    // get_project returns null once the project (and its cascade) is gone.
+    const text = JSON.stringify(res.body.result);
+    expect(text).to.not.contain("Cascade Delete Project");
+  });
+}
