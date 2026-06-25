@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
-import { TASK_TEMPLATES, getTaskTemplate } from '../lib/taskTemplates';
+import { TASK_TEMPLATES, DOD_TEMPLATES, getTaskTemplate, getDodTemplate } from '../lib/taskTemplates';
 
 export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const navigate = useNavigate();
@@ -34,10 +34,11 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
 
     const removeDodItem = (index) => setDodItems(dodItems.filter((_, i) => i !== index));
 
-    const applyTemplate = (templateId) => {
+    // Task template: prefill the task's own fields. Fills empty fields only —
+    // never clobbers what the user already typed. Does not touch the DoD.
+    const applyTaskTemplate = (templateId) => {
         const tmpl = getTaskTemplate(templateId);
         if (!tmpl) return;
-        // Fill task fields the user hasn't filled — never clobber their input.
         setFormData(prev => {
             const next = { ...prev };
             if (tmpl.title && !prev.title.trim()) next.title = tmpl.title;
@@ -49,12 +50,21 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
             }
             return next;
         });
-        // Merge the template's checklist in, skipping items already present.
-        const existing = new Set(dodItems.map(d => d.text));
-        const added = (tmpl.dod || [])
-            .filter(text => !existing.has(text))
-            .map(text => ({ text, checked: false }));
-        if (added.length) setDodItems([...dodItems, ...added]);
+    };
+
+    // DoD template: toggle a named group of checklist items. Items carry the
+    // template id so un-toggling removes exactly the items that group added.
+    const isDodTemplateActive = (templateId) => dodItems.some(d => d.templateId === templateId);
+
+    const toggleDodTemplate = (templateId) => {
+        const tmpl = getDodTemplate(templateId);
+        if (!tmpl) return;
+        if (isDodTemplateActive(templateId)) {
+            setDodItems(dodItems.filter(d => d.templateId !== templateId));
+        } else {
+            const added = tmpl.items.map(text => ({ text, checked: false, templateId }));
+            setDodItems([...dodItems, ...added]);
+        }
     };
 
     const addFiles = (fileList) => setFiles([...files, ...Array.from(fileList)]);
@@ -70,7 +80,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                 ...formData,
                 epic_id: formData.epic_id || undefined,
                 tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
-                dod_items: dodItems.length ? dodItems : undefined
+                dod_items: dodItems.length ? dodItems.map(({ text, checked }) => ({ text, checked })) : undefined
             });
             for (const file of files) {
                 await api.uploadAttachment(task.id, file);
@@ -97,6 +107,24 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                 </div>
 
                 <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
+                    <div>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Task template</label>
+                        <div className="flex flex-wrap gap-2">
+                            {TASK_TEMPLATES.map(t => (
+                                <button
+                                    key={t.id}
+                                    type="button"
+                                    aria-label={`Task template: ${t.name}`}
+                                    onClick={() => applyTaskTemplate(t.id)}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                    style={{ border: '1px solid var(--border-subtle)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
+                                >
+                                    {t.name}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
                     <div>
                         <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Title</label>
                         <input
@@ -175,19 +203,27 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     </div>
 
                     <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                            <label className="block text-xs font-bold uppercase" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
-                            <select
-                                aria-label="Template"
-                                className="input py-1 text-xs w-auto"
-                                value=""
-                                onChange={e => { applyTemplate(e.target.value); e.target.value = ''; }}
-                            >
-                                <option value="">Apply template…</option>
-                                {TASK_TEMPLATES.map(t => (
-                                    <option key={t.id} value={t.id}>{t.name}</option>
-                                ))}
-                            </select>
+                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                            {DOD_TEMPLATES.map(t => {
+                                const active = isDodTemplateActive(t.id);
+                                return (
+                                    <button
+                                        key={t.id}
+                                        type="button"
+                                        aria-label={`DoD template: ${t.name}`}
+                                        aria-pressed={active}
+                                        onClick={() => toggleDodTemplate(t.id)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                        style={active
+                                            ? { border: '1px solid var(--accent-primary)', color: 'var(--accent-on)', backgroundColor: 'var(--accent-primary)' }
+                                            : { border: '1px solid var(--border-subtle)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
+                                    >
+                                        <span aria-hidden="true">{active ? '✓' : '+'}</span>
+                                        {t.name}
+                                    </button>
+                                );
+                            })}
                         </div>
                         {dodItems.length > 0 && (
                             <div className="flex flex-col gap-1.5 mb-2">

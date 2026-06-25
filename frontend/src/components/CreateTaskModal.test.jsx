@@ -31,26 +31,15 @@ function renderModal(props = {}) {
 describe('CreateTaskModal', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('applies a task template to the Definition of Done', async () => {
+    it('task template button prefills task fields but not the DoD', async () => {
         renderModal();
 
-        const select = await screen.findByLabelText('Template');
-        fireEvent.change(select, { target: { value: 'professionalization' } });
+        fireEvent.click(await screen.findByRole('button', { name: 'Task template: Professionalization' }));
 
-        expect(screen.getByText('Unit tests')).toBeInTheDocument();
-        expect(screen.getByText('Bruno integration tests')).toBeInTheDocument();
-        expect(screen.getByText('Manual test description attached')).toBeInTheDocument();
-    });
-
-    it('prefills task fields (description, priority) from the template', async () => {
-        renderModal();
-
-        const select = await screen.findByLabelText('Template');
-        fireEvent.change(select, { target: { value: 'professionalization' } });
-
-        const description = screen.getByLabelText('Description');
-        expect(description.value).toMatch(/production/i);
+        expect(screen.getByLabelText('Description').value).toMatch(/production/i);
         expect(screen.getByLabelText('Priority').value).toBe('high');
+        // No DoD items added by a task template.
+        expect(screen.queryByText('Unit tests')).not.toBeInTheDocument();
     });
 
     it('does not overwrite a description the user already typed', async () => {
@@ -58,10 +47,25 @@ describe('CreateTaskModal', () => {
         const description = screen.getByLabelText('Description');
         fireEvent.change(description, { target: { value: 'my own notes' } });
 
-        const select = await screen.findByLabelText('Template');
-        fireEvent.change(select, { target: { value: 'professionalization' } });
+        fireEvent.click(await screen.findByRole('button', { name: 'Task template: Professionalization' }));
 
         expect(description.value).toBe('my own notes');
+    });
+
+    it('DoD template toggles its items on and off and stays out of task fields', async () => {
+        renderModal();
+        const btn = await screen.findByRole('button', { name: 'DoD template: Professionalization' });
+
+        fireEvent.click(btn);
+        expect(screen.getByText('Unit tests')).toBeInTheDocument();
+        expect(screen.getByText('Bruno integration tests')).toBeInTheDocument();
+        expect(btn).toHaveAttribute('aria-pressed', 'true');
+        // DoD template must not fill task content.
+        expect(screen.getByLabelText('Description').value).toBe('');
+
+        fireEvent.click(btn);
+        expect(screen.queryByText('Unit tests')).not.toBeInTheDocument();
+        expect(btn).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('navigates to the new task detail page (by key) after creation', async () => {
