@@ -11,6 +11,7 @@ vi.mock('../api', () => ({
             listMessages: vi.fn(),
             sendRuntimeChat: vi.fn(),
             stopChat: vi.fn(),
+            scopeLive: vi.fn(),
         },
     },
 }));
@@ -35,6 +36,8 @@ describe('Chat page', () => {
         api.forge.listChats.mockResolvedValue(CONVOS);
         api.forge.listMessages.mockResolvedValue([]);
         api.forge.sendRuntimeChat.mockResolvedValue({});
+        api.forge.scopeLive.mockResolvedValue({ live: false });
+        api.forge.stopChat.mockResolvedValue({});
     });
 
     it('lists every agent conversation from GET /forge/chats', async () => {
@@ -147,5 +150,50 @@ describe('Chat page', () => {
                 ([id, p]) => id === 'a1' && p.scope_key === 'chat:default');
             expect(call).toBeTruthy();
         });
+    });
+
+    // The reported bug: the unified chat's Stop button used to depend solely on
+    // "the last message is the user's", so it vanished the instant the agent
+    // posted a reply — even mid-turn. It must instead track the daemon's
+    // live-turn mirror (scopeLive), matching the per-agent chat.
+    it('shows Stop while the scope is live even when the last message is an agent reply', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'user', content: 'go', created_at: '2026-06-19T00:00:01.000Z' },
+            { id: 'm2', role: 'assistant', content: 'working on it', created_at: '2026-06-19T00:00:02.000Z' },
+        ]);
+        api.forge.scopeLive.mockResolvedValue({ live: true });
+        render(<Chat />);
+        await waitFor(() => expect(api.forge.scopeLive).toHaveBeenCalledWith('a1', 'chat:project:p1'));
+        // Stop button (title="Stop") is present, Send is not, and the thinking
+        // indicator shows — all driven by scopeLive, not the message role.
+        expect(await screen.findByTitle('Stop')).toBeInTheDocument();
+        expect(screen.queryByTitle('Send')).not.toBeInTheDocument();
+        expect(screen.getByText(/is thinking/i)).toBeInTheDocument();
+    });
+
+    it('shows Send (not Stop) when the scope is idle and the agent has replied', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'user', content: 'go', created_at: '2026-06-19T00:00:01.000Z' },
+            { id: 'm2', role: 'assistant', content: 'all done', created_at: '2026-06-19T00:00:02.000Z' },
+        ]);
+        api.forge.scopeLive.mockResolvedValue({ live: false });
+        render(<Chat />);
+        await waitFor(() => expect(api.forge.scopeLive).toHaveBeenCalled());
+        expect(await screen.findByTitle('Send')).toBeInTheDocument();
+        expect(screen.queryByTitle('Stop')).not.toBeInTheDocument();
+    });
+
+    it('pressing Stop cancels the live turn and latches the button off', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'user', content: 'go', created_at: '2026-06-19T00:00:01.000Z' },
+        ]);
+        api.forge.scopeLive.mockResolvedValue({ live: true });
+        render(<Chat />);
+        const stopBtn = await screen.findByTitle('Stop');
+        fireEvent.click(stopBtn);
+        await waitFor(() => expect(api.forge.stopChat).toHaveBeenCalledWith('a1', 'chat:project:p1'));
+        // Latched off immediately even though scopeLive still reports live.
+        await waitFor(() => expect(screen.queryByTitle('Stop')).not.toBeInTheDocument());
+        expect(screen.getByTitle('Send')).toBeInTheDocument();
     });
 });

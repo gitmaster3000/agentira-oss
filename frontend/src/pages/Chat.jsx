@@ -57,6 +57,12 @@ export function Chat() {
     const [input, setInput] = useState('');
     const [sending, setSending] = useState(false);
     const [stopped, setStopped] = useState(false);
+    // ADR 009 / E2: daemon-reported "a turn is live for this scope" — the same
+    // restart-proof signal the per-agent chat (AgentDetail) uses to keep Stop
+    // visible the whole time the agent works. Replaces the old lastIsUser-only
+    // heuristic, which dropped the button the instant any agent/tool message
+    // landed (or after 10 min) even while the turn was still running.
+    const [scopeLive, setScopeLive] = useState(false);
     // Mobile is single-pane: false → agent list, true → the open thread.
     // Ignored on desktop (md+), where both panes show side by side.
     const [mobilePane, setMobilePane] = useState(false);
@@ -128,11 +134,30 @@ export function Chat() {
     useEffect(() => {
         if (!sel) return;
         setMessages([]);
+        setStopped(false);          // don't carry a Stop latch across conversations
         reachedStartRef.current = false;
         loadingOlderRef.current = false;
         loadMessages();
         const t = setInterval(loadMessages, POLL_MS);
         return () => clearInterval(t);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selKey]);
+
+    // Poll the daemon's live-turn mirror for the selected conversation so Stop
+    // stays available exactly while a turn runs — restart-proof, no staleness
+    // guess. Mirrors AgentDetail's scopeLive poll.
+    useEffect(() => {
+        if (!sel) { setScopeLive(false); return; }
+        let alive = true;
+        const tick = async () => {
+            try {
+                const r = await api.forge.scopeLive(sel.agent_id, sel.scope_key);
+                if (alive) setScopeLive(!!(r && r.live));
+            } catch { if (alive) setScopeLive(false); }
+        };
+        tick();
+        const t = setInterval(tick, POLL_MS);
+        return () => { alive = false; clearInterval(t); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selKey]);
 
@@ -204,9 +229,16 @@ export function Chat() {
         loadMessages().catch(() => {});
     };
 
+    // Optimistic instant signal: right after a send, the user's local message
+    // is the tail and the daemon mirror hasn't flipped yet — show Stop without
+    // waiting for the first poll. The 10-min cap only bounds this optimistic
+    // window; scopeLive (below) is the authoritative "still working" signal.
     const _last = messages[messages.length - 1];
-    const lastIsUser = !stopped && !!_last && _last.role === 'user' && _last.created_at
+    const lastIsUser = !!_last && _last.role === 'user' && _last.created_at
         && (Date.now() - new Date(_last.created_at).getTime()) < 10 * 60 * 1000;
+    // Agent is working — show the Stop button and the thinking indicator. A
+    // user-pressed Stop latches this off for the current view.
+    const working = !stopped && (scopeLive || lastIsUser);
 
     const { agents, byId } = groupByAgent(convos);
     // The selected agent's own conversations drive the top scope selector.
@@ -369,7 +401,7 @@ export function Chat() {
                                 </div>
                             )}
                             {messages.map((m) => <ChatBubble key={m.id} m={m} onAnswer={postMessage} />)}
-                            {lastIsUser && (
+                            {working && (
                                 <div className="flex items-center gap-1.5 px-2 text-xs text-text-tertiary">
                                     <Loader className="w-3 h-3 animate-spin" />
                                     {sel.agent_name || 'Agent'} is thinking…
@@ -391,7 +423,7 @@ export function Chat() {
                                     placeholder="Type a message…  (Shift+Enter for a new line)"
                                     className="flex-1 resize-none bg-bg-hover border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent-primary max-h-44 overflow-y-auto"
                                 />
-                                {lastIsUser ? (
+                                {working ? (
                                     <button onClick={stop} className="p-2 rounded-lg bg-red-500/15 text-red-400 hover:bg-red-500/25" title="Stop">
                                         <Ban className="w-4 h-4" />
                                     </button>
