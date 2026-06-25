@@ -11,12 +11,14 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
     Folder, GitBranch, Save, Plus, Trash2, Star, Settings as SettingsIcon,
     Link2, Pencil, Check, X, AlertTriangle, ChevronDown,
 } from 'lucide-react';
 import { api } from '../api';
+import { ROUTES } from '../routes';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { GitTokenField } from '../components/GitTokenField';
 
 
@@ -86,10 +88,14 @@ const ENV_ISOLATION = [
 ];
 
 function GeneralTab({ projectId }) {
+    const navigate = useNavigate();
     const [project, setProject] = useState(null);
     const [form, setForm] = useState(null);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
+    const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteErr, setDeleteErr] = useState('');
 
     useEffect(() => {
         api.getProject(projectId).then((p) => {
@@ -110,6 +116,22 @@ function GeneralTab({ projectId }) {
             });
         }).catch(() => setProject(null));
     }, [projectId]);
+
+    const remove = async () => {
+        setDeleting(true);
+        setDeleteErr('');
+        try {
+            await api.deleteProject(projectId);
+            // Navigating to the studio root remounts the dashboard and changes
+            // the active projectId, so the navbar + sidebar drop the deleted
+            // project from their lists.
+            navigate(ROUTES.STUDIO);
+        } catch (err) {
+            setDeleteErr('Delete failed: ' + (err.message || err));
+            setDeleting(false);
+            setConfirmingDelete(false);
+        }
+    };
 
     if (!form) return <div className="text-text-tertiary text-sm">Loading…</div>;
 
@@ -236,6 +258,56 @@ function GeneralTab({ projectId }) {
                     </span>
                 )}
             </div>
+
+            <DangerZone
+                projectName={project?.name}
+                deleting={deleting}
+                error={deleteErr}
+                onDelete={() => setConfirmingDelete(true)}
+            />
+
+            {confirmingDelete && (
+                <ConfirmModal
+                    isDanger
+                    title={`Delete "${project?.name || 'this project'}"?`}
+                    message={
+                        'This permanently deletes the project and everything in it — '
+                        + 'all tasks, runs, chats, and attached files. This cannot be undone.'
+                    }
+                    confirmText={deleting ? 'Deleting…' : 'Delete permanently'}
+                    cancelText="Cancel"
+                    onConfirm={remove}
+                    onCancel={() => setConfirmingDelete(false)}
+                />
+            )}
+        </div>
+    );
+}
+
+
+// AP-332: destructive project delete. Cordoned off in a red "Danger zone" so
+// it's never confused with the Save action above; the actual delete goes
+// through ConfirmModal (the standard destructive-confirmation surface).
+function DangerZone({ projectName, deleting, error, onDelete }) {
+    return (
+        <div className="mt-8 border border-red-500/30 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
+                <AlertTriangle className="w-4 h-4" />
+                Danger zone
+            </div>
+            <p className="text-xs text-text-secondary">
+                Deleting <strong className="text-text-primary">{projectName || 'this project'}</strong> permanently
+                removes it and everything inside — all tasks, runs, chats, and
+                attached files. This cannot be undone.
+            </p>
+            <button
+                onClick={onDelete}
+                disabled={deleting}
+                className="btn btn-ghost text-red-400 hover:bg-red-500/10 disabled:opacity-50">
+                <Trash2 className="w-4 h-4" />
+                {deleting ? 'Deleting…' : 'Delete project'}
+            </button>
+            {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
     );
 }
