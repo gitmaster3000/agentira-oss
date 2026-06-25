@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { TASK_TEMPLATES, getTaskTemplate } from '../lib/taskTemplates';
 
 export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const navigate = useNavigate();
@@ -32,6 +33,29 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     };
 
     const removeDodItem = (index) => setDodItems(dodItems.filter((_, i) => i !== index));
+
+    const applyTemplate = (templateId) => {
+        const tmpl = getTaskTemplate(templateId);
+        if (!tmpl) return;
+        // Fill task fields the user hasn't filled — never clobber their input.
+        setFormData(prev => {
+            const next = { ...prev };
+            if (tmpl.title && !prev.title.trim()) next.title = tmpl.title;
+            if (tmpl.description && !prev.description.trim()) next.description = tmpl.description;
+            if (tmpl.priority) next.priority = tmpl.priority;
+            if (tmpl.tags?.length) {
+                const have = prev.tags.split(',').map(t => t.trim()).filter(Boolean);
+                next.tags = [...new Set([...have, ...tmpl.tags])].join(', ');
+            }
+            return next;
+        });
+        // Merge the template's checklist in, skipping items already present.
+        const existing = new Set(dodItems.map(d => d.text));
+        const added = (tmpl.dod || [])
+            .filter(text => !existing.has(text))
+            .map(text => ({ text, checked: false }));
+        if (added.length) setDodItems([...dodItems, ...added]);
+    };
 
     const addFiles = (fileList) => setFiles([...files, ...Array.from(fileList)]);
 
@@ -88,6 +112,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     <div>
                         <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Description</label>
                         <textarea
+                            aria-label="Description"
                             className="input resize-none h-24"
                             value={formData.description}
                             onChange={e => setFormData({ ...formData, description: e.target.value })}
@@ -98,6 +123,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         <div className="flex-1">
                             <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Priority</label>
                             <select
+                                aria-label="Priority"
                                 className="input"
                                 value={formData.priority}
                                 onChange={e => setFormData({ ...formData, priority: e.target.value })}
@@ -149,7 +175,20 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <label className="block text-xs font-bold uppercase" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
+                            <select
+                                aria-label="Template"
+                                className="input py-1 text-xs w-auto"
+                                value=""
+                                onChange={e => { applyTemplate(e.target.value); e.target.value = ''; }}
+                            >
+                                <option value="">Apply template…</option>
+                                {TASK_TEMPLATES.map(t => (
+                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                ))}
+                            </select>
+                        </div>
                         {dodItems.length > 0 && (
                             <div className="flex flex-col gap-1.5 mb-2">
                                 {dodItems.map((item, i) => (

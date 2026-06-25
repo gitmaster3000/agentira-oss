@@ -31,6 +31,39 @@ function renderModal(props = {}) {
 describe('CreateTaskModal', () => {
     beforeEach(() => vi.clearAllMocks());
 
+    it('applies a task template to the Definition of Done', async () => {
+        renderModal();
+
+        const select = await screen.findByLabelText('Template');
+        fireEvent.change(select, { target: { value: 'professionalization' } });
+
+        expect(screen.getByText('Unit tests')).toBeInTheDocument();
+        expect(screen.getByText('Bruno integration tests')).toBeInTheDocument();
+        expect(screen.getByText('Manual test description attached')).toBeInTheDocument();
+    });
+
+    it('prefills task fields (description, priority) from the template', async () => {
+        renderModal();
+
+        const select = await screen.findByLabelText('Template');
+        fireEvent.change(select, { target: { value: 'professionalization' } });
+
+        const description = screen.getByLabelText('Description');
+        expect(description.value).toMatch(/production/i);
+        expect(screen.getByLabelText('Priority').value).toBe('high');
+    });
+
+    it('does not overwrite a description the user already typed', async () => {
+        renderModal();
+        const description = screen.getByLabelText('Description');
+        fireEvent.change(description, { target: { value: 'my own notes' } });
+
+        const select = await screen.findByLabelText('Template');
+        fireEvent.change(select, { target: { value: 'professionalization' } });
+
+        expect(description.value).toBe('my own notes');
+    });
+
     it('navigates to the new task detail page (by key) after creation', async () => {
         api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-9' });
         renderModal();
