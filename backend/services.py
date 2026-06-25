@@ -440,7 +440,8 @@ _KICKOFF_TASK_TITLE = "Plan this project"
 
 def create_project(name: str, description: str = "", actor: str = "system",
                    *, initial_tasks: list[dict] | None = None,
-                   members: list[str] | None = None) -> dict:
+                   members: list[str] | None = None,
+                   seed_defaults: bool = False) -> dict:
     """Create a project.
 
     Two modes:
@@ -516,6 +517,17 @@ def create_project(name: str, description: str = "", actor: str = "system",
             _seed_project_kickoff(project_id=project_id, actor=actor)
         except Exception as exc:  # noqa: BLE001 — project must still be created
             logger.warning("project kickoff seeding failed project=%s: %s",
+                           project_id, exc)
+
+    if seed_defaults:
+        # Seed the default "professionalization" backlog (epics + tasks) the
+        # user can run with the Conductor. Best-effort: failure must not sink
+        # the project create.
+        try:
+            from backend import default_tasks
+            default_tasks.seed_default_tasks(project_id, actor=actor)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("default-tasks seeding failed project=%s: %s",
                            project_id, exc)
 
     return result

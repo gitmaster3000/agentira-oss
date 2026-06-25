@@ -86,6 +86,9 @@ class ProjectCreate(BaseModel):
     # (even empty list) → wizard mode: user owns membership + tasks.
     initial_tasks: Optional[list[InitialTaskSpec]] = None
     members: Optional[list[str]] = None
+    # Seed the default "professionalization" backlog (logging, tests, security,
+    # CI/CD) the user can then run with the Conductor.
+    seed_defaults: bool = False
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -572,6 +575,7 @@ def api_create_project(body: ProjectCreate, actor: str = Depends(get_current_use
         body.name, body.description, actor=actor,
         initial_tasks=initial_tasks,
         members=body.members,
+        seed_defaults=body.seed_defaults,
     )
 
 @projects.get("/{project_id}")

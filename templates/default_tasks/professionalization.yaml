@@ -1,0 +1,184 @@
+# Default "professionalization" backlog — SYSTEM config (ships with the product).
+#
+# A new project can seed this backlog and run it with the Conductor to turn a
+# working-but-rough codebase into a professionally engineered one: structured
+# logging, real test coverage, live integration tests, a tester-facing manual
+# test guide, security hardening, and automated CI/CD.
+#
+# Parsed by backend/default_tasks.py (yaml.safe_load + a Pydantic schema).
+# This is data, not code: edit the text here, not in Python. Each task ships
+# with a Definition of Done so the Conductor and reviewers have machine- and
+# human-checkable acceptance criteria.
+
+name: "Professionalization"
+description: |
+  Default engineering-quality backlog seeded into a new project. Six epics take
+  a vibe-coded repo to production grade: logging, unit tests, integration tests
+  (Bruno by default), a manual test guide for testers, security checks, and
+  CI/CD via GitHub Actions. Run it with the Conductor.
+
+epics:
+  - title: "Logging & Observability"
+    color: "#6366f1"
+    description: |
+      Replace ad-hoc prints with structured, levelled logging so failures are
+      diagnosable in production without a debugger.
+    tasks:
+      - title: "Adopt structured logging with levels"
+        priority: high
+        description: |
+          Introduce a single logging setup used across the codebase. Use the
+          standard levels (DEBUG, INFO, WARNING, ERROR, CRITICAL) and emit
+          structured records (JSON or key=value) so logs are greppable and
+          machine-parseable. Make the level configurable via environment
+          variable (e.g. LOG_LEVEL) and default to INFO.
+        dod:
+          - "A shared logger/config module exists and is imported, not re-created per file"
+          - "Log level is read from an env var (LOG_LEVEL) defaulting to INFO"
+          - "No bare print() statements remain in application code paths"
+          - "At least one log line per request/job records start, outcome, and duration"
+      - title: "Add request/correlation IDs and error context"
+        priority: medium
+        description: |
+          Attach a correlation/request ID to each unit of work so a single
+          request can be traced across log lines. Log unhandled exceptions with
+          a stack trace at ERROR, and never log secrets or PII.
+        dod:
+          - "Each request/job carries a correlation ID that appears on its log lines"
+          - "Unhandled exceptions are logged at ERROR with a traceback"
+          - "A review confirms no secrets, tokens, or PII are written to logs"
+
+  - title: "Unit Testing"
+    color: "#10b981"
+    description: |
+      Establish a fast, deterministic unit-test suite covering core business
+      logic and edge cases, runnable locally and in CI.
+    tasks:
+      - title: "Stand up the unit test suite and runner"
+        priority: high
+        description: |
+          Pick the project's standard test runner (pytest, vitest, jest, etc.),
+          wire a single `test` command, and add a baseline set of unit tests for
+          the most important modules. Tests must be deterministic and run
+          without external network calls.
+        dod:
+          - "A single documented command runs the whole unit suite"
+          - "Core business-logic modules have unit tests covering happy path + edge cases"
+          - "The suite is deterministic and runs offline (no live network/DB)"
+          - "All unit tests pass locally"
+      - title: "Add coverage reporting and a minimum threshold"
+        priority: medium
+        description: |
+          Measure line/branch coverage, surface the report, and set a realistic
+          minimum threshold that CI enforces so coverage cannot silently rot.
+        dod:
+          - "Coverage is measured and a summary is printed by the test command"
+          - "A minimum coverage threshold is configured and enforced in CI"
+
+  - title: "Integration Testing (Bruno)"
+    color: "#f59e0b"
+    description: |
+      Verify the system end-to-end against live endpoints. Bruno is the default
+      methodology: API collections live in the repo as version-controlled .bru
+      files and run both locally and headless in CI via the Bruno CLI. Prefer
+      Bruno over Postman so the collections are diffable and code-reviewable.
+    tasks:
+      - title: "Create a Bruno collection for the core API flows"
+        priority: high
+        description: |
+          Add a `bruno/` collection (bruno.json + environments) covering the
+          critical end-to-end flows against running endpoints: auth, the primary
+          create/read/update paths, and at least one failure case. Use a
+          dedicated test environment, never production. Keep secrets in env
+          files that are git-ignored.
+        dod:
+          - "A bruno/ collection with at least one environment is committed"
+          - "Collections cover auth + the primary happy-path flows + one failure case"
+          - "Assertions check status codes and key response fields"
+          - "No real secrets are committed; env files reference variables"
+      - title: "Run Bruno integration tests headless in CI"
+        priority: medium
+        description: |
+          Run the Bruno collection from the command line (`bru run`) against a
+          spun-up test instance so integration tests gate merges. Document how a
+          developer runs the same collection locally.
+        dod:
+          - "`bru run` executes the collection headless and fails the job on assertion errors"
+          - "CI starts/points at a test instance and runs the collection on PRs"
+          - "README documents how to run the Bruno collection locally"
+
+  - title: "Manual Test Guide"
+    color: "#ec4899"
+    description: |
+      A plain-language document a non-developer tester can follow to exercise
+      the product by hand and report pass/fail without reading the code.
+    tasks:
+      - title: "Write a manual testing guide for testers"
+        priority: medium
+        description: |
+          Produce docs/MANUAL_TESTING.md aimed at a tester (not an engineer):
+          prerequisites/setup, test accounts, and step-by-step scenarios for
+          each major feature with explicit expected results and a place to mark
+          pass/fail. Keep it in plain language.
+        dod:
+          - "docs/MANUAL_TESTING.md exists and is written for a non-developer tester"
+          - "It lists setup/prerequisites and any test credentials"
+          - "Each major feature has numbered steps with expected results and pass/fail"
+          - "A new tester can follow it end-to-end without reading source code"
+
+  - title: "Security Checks"
+    color: "#ef4444"
+    description: |
+      Catch the common, high-impact security problems automatically and fix the
+      findings before they reach production.
+    tasks:
+      - title: "Add automated dependency and secret scanning"
+        priority: high
+        description: |
+          Wire secret scanning (e.g. trufflehog/gitleaks) and dependency
+          vulnerability auditing (e.g. pip-audit, npm audit) into CI so leaked
+          credentials and known-vulnerable packages fail the build. Triage and
+          fix or document the current findings.
+        dod:
+          - "Secret scanning runs in CI and fails on a detected secret"
+          - "Dependency vulnerability auditing runs in CI"
+          - "Existing high/critical findings are fixed or explicitly accepted with a reason"
+      - title: "Run a security review of inputs, authz, and config"
+        priority: medium
+        description: |
+          Review the app for the common issues: input validation/injection,
+          authentication & authorization on every protected route, secure secret
+          handling (no secrets in source), and safe defaults (HTTPS, secure
+          cookies, CORS). Record findings and fixes.
+        dod:
+          - "Every protected endpoint enforces authentication and authorization"
+          - "User input is validated/escaped on the paths that reach a datastore or shell"
+          - "No secrets are hardcoded in source; config comes from env/secret store"
+          - "Findings and their resolution are recorded in a short security note"
+
+  - title: "CI/CD & Deployment"
+    color: "#0ea5e9"
+    description: |
+      Automate build, test, and deployment with GitHub Actions so every change
+      is verified the same way and shipping is one click, not a ritual.
+    tasks:
+      - title: "Add a GitHub Actions CI pipeline"
+        priority: high
+        description: |
+          Create a workflow that runs on every pull request: install deps, lint,
+          run unit tests, run the Bruno integration suite, and run the security
+          scans. A red pipeline must block merge.
+        dod:
+          - ".github/workflows holds a CI workflow triggered on pull requests"
+          - "CI runs lint + unit tests + integration tests + security scans"
+          - "Branch protection (or equivalent) requires CI to pass before merge"
+      - title: "Add a GitHub Actions deployment workflow"
+        priority: medium
+        description: |
+          Add a workflow that deploys on merge to the release branch (or on a
+          tag), using repository secrets for credentials. Support a rollback or
+          re-deploy path and document the deploy/runbook steps.
+        dod:
+          - "A deploy workflow ships the app on merge/tag using GitHub secrets"
+          - "Deployment credentials come from GitHub secrets, never source"
+          - "A rollback/redeploy path is documented in a short runbook"
