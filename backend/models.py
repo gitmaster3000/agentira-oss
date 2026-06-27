@@ -449,6 +449,7 @@ class Epic(Base):
 
     project: Mapped["Project"] = relationship(back_populates="epics")
     tasks: Mapped[list["Task"]] = relationship(back_populates="epic", foreign_keys="Task.epic_id")
+    attachments: Mapped[list["Attachment"]] = relationship(back_populates="epic", cascade="all, delete-orphan")
 
 
 class Task(Base):
@@ -520,11 +521,12 @@ class Attachment(Base):
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
-    # AP-152: task_id XOR project_id — a row attaches to exactly one of them.
-    # Both columns are nullable at the DB level; the XOR invariant is
+    # AP-152/AP-351: a row attaches to exactly one of task_id, project_id or
+    # epic_id. All three are nullable at the DB level; the one-of invariant is
     # enforced in `backend.attachments.add`.
     task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -534,6 +536,7 @@ class Attachment(Base):
 
     task: Mapped["Task | None"] = relationship(back_populates="attachments")
     project: Mapped["Project | None"] = relationship(back_populates="attachments")
+    epic: Mapped["Epic | None"] = relationship(back_populates="attachments")
 
 
 # ── Git Integration ─────────────────────────────────────────────────────

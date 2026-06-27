@@ -805,6 +805,9 @@ def run_migrations():
         if "attachments" in tables:
             if _ensure_column(conn, "attachments", "project_id", "VARCHAR(12)"):
                 conn.commit()
+            # AP-351: epic-scoped attachments.
+            if _ensure_column(conn, "attachments", "epic_id", "VARCHAR(12)"):
+                conn.commit()
             if _column_is_not_null(conn, "attachments", "task_id"):
                 if _dialect_name() == "postgresql":
                     _drop_not_null(conn, "attachments", "task_id")

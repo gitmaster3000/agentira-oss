@@ -2791,6 +2791,60 @@ def prepare_task_run(*, task_id: str, agent_id: str,
     return run
 
 
+# Tag that marks the auto-created planning task for an epic, so re-running
+# "Plan Epic" reuses one planning task instead of spawning duplicates.
+EPIC_PLAN_TAG = "epic-planning"
+
+
+def prepare_epic_plan_run(*, epic_id: str, agent_id: str,
+                          prompt: str | None = None) -> dict:
+    """AP-351: prepare a READY "Epic Planning" run for an epic.
+
+    Find-or-creates a planning task scoped to the epic, prepares a run on it
+    (reusing prepare_task_run's worktree/READY machinery), then overrides the
+    run prompt with the injection-guarded epic-plan prompt. The optional
+    `prompt` is the user's edited planning request — it is wrapped as DATA, so
+    it can never override the authoritative system guard.
+    """
+    from backend import services as core_services
+    from backend.forge import epic_planning
+
+    epic = core_services.get_epic(epic_id)
+    if not epic:
+        return {"error": "Epic not found"}
+
+    # Reuse the epic's planning task if one already exists; else create it.
+    task_id = None
+    for t in core_services.list_epic_tasks(epic_id):
+        if EPIC_PLAN_TAG in (t.get("tags") or []):
+            task_id = t["id"]
+            break
+    if not task_id:
+        created = core_services.create_task(
+            project_id=epic["project_id"],
+            title=f"Plan epic: {epic.get('title') or 'Untitled'}",
+            description=epic_planning.default_plan_prompt(epic),
+            tags=[EPIC_PLAN_TAG],
+            epic_id=epic_id,
+        )
+        task_id = created["id"]
+
+    run = prepare_task_run(task_id=task_id, agent_id=agent_id)
+    if run.get("error"):
+        return run
+
+    final_prompt = epic_planning.build_plan_prompt(epic, prompt)
+    final_prompt = final_prompt.replace("{run_id}", run["id"])
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run["id"]).first()
+        if r:
+            r.initial_prompt = final_prompt
+            db.commit()
+            db.refresh(r)
+            return _run_to_dict(r)
+    return run
+
+
 def _compute_log_dir(*, run_id: str) -> str:
     """Per-run log directory. Tilde-prefixed; daemon expanduser's at use
     time. Daemon writes stdout.log / stderr.log / meta.json here."""

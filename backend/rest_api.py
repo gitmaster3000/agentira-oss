@@ -188,6 +188,10 @@ class EpicUpdate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
 
+class EpicPlanRequest(BaseModel):
+    agent_id: str
+    prompt: Optional[str] = None
+
 class WebhookRuleSchema(BaseModel):
     event: str
     receivers: str
@@ -1053,6 +1057,57 @@ def api_delete_epic(epic_id: str):
     if not services.delete_epic(epic_id):
         raise HTTPException(404, "Epic not found")
     return {"ok": True}
+
+
+# AP-351: epic planning — the editable default prompt for the modal, and the
+# action that prepares an "Epic Planning" run.
+@epics_router.get("/{epic_id}/plan-template")
+def api_get_epic_plan_template(epic_id: str):
+    epic = services.get_epic(epic_id)
+    if not epic:
+        raise HTTPException(404, "Epic not found")
+    from backend.forge import epic_planning
+    return {"prompt": epic_planning.default_plan_prompt(epic)}
+
+
+@epics_router.post("/{epic_id}/plan", status_code=201)
+def api_plan_epic(epic_id: str, body: EpicPlanRequest):
+    from backend.forge import services as _forge_services
+    result = _forge_services.prepare_epic_plan_run(
+        epic_id=epic_id, agent_id=body.agent_id, prompt=body.prompt)
+    if result.get("error"):
+        code = 404 if result["error"] in ("Epic not found", "Task not found",
+                                          "Agent not found") else 400
+        raise HTTPException(code, result["error"])
+    return result
+
+
+# AP-351: epic-scoped attachments. Same Attachment table + shared
+# /api/attachments/{id}/{download,delete} endpoints handle either side.
+@epics_router.get("/{epic_id}/attachments")
+def api_list_epic_attachments(epic_id: str):
+    from backend import attachments as _attachments
+    return _attachments.list_for_epic(epic_id)
+
+
+@epics_router.post("/{epic_id}/attachments")
+async def api_upload_epic_attachment(epic_id: str, file: UploadFile = File(...),
+                                     extract: bool = False,
+                                     actor: str = Depends(get_current_user)):
+    """Upload a single file. With `?extract=true` a .zip is unpacked and its
+    contents stored as a folder (preserving structure)."""
+    from backend import attachments as _attachments
+    try:
+        file_bytes = await file.read()
+        if extract:
+            return _attachments.add_zip(
+                epic_id=epic_id, zip_bytes=file_bytes, uploaded_by=actor)
+        return _attachments.add(
+            epic_id=epic_id, filename=file.filename, file_bytes=file_bytes,
+            content_type=file.content_type or "application/octet-stream",
+            uploaded_by=actor)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 # ── Workflow Router (roles, permissions) ─────────────────────────────────

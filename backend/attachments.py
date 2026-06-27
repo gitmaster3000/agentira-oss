@@ -21,7 +21,7 @@ import uuid
 from typing import Any
 
 from backend.db import SessionLocal
-from backend.models import Activity, Attachment, Project, Task
+from backend.models import Activity, Attachment, Epic, Project, Task
 
 
 # Defaults to local disk under the repo. In prod (Railway) set
@@ -57,6 +57,7 @@ def _to_dict(a: Attachment) -> dict:
         "id": a.id,
         "task_id": a.task_id,
         "project_id": a.project_id,
+        "epic_id": a.epic_id,
         "filename": a.filename,
         "content_type": a.content_type,
         "size_bytes": a.size_bytes,
@@ -77,9 +78,12 @@ def _download_hint(download_url: str, filename: str) -> str:
     )
 
 
-def _storage_dir(task_id: str | None, project_id: str | None) -> str:
+def _storage_dir(task_id: str | None, project_id: str | None,
+                 epic_id: str | None = None) -> str:
     if task_id:
         return os.path.join(ATTACHMENTS_DIR, task_id)
+    if epic_id:
+        return os.path.join(ATTACHMENTS_DIR, "epics", epic_id)
     return os.path.join(ATTACHMENTS_DIR, "projects", project_id)
 
 
@@ -98,21 +102,27 @@ def add(
     *,
     task_id: str | None = None,
     project_id: str | None = None,
+    epic_id: str | None = None,
     filename: str,
     file_bytes: bytes,
     content_type: str = "application/octet-stream",
     uploaded_by: str = "system",
     relative_path: str | None = None,
 ) -> dict:
-    """Persist an attachment scoped to exactly one of task_id or project_id.
+    """Persist an attachment scoped to exactly one of task_id, project_id or
+    epic_id.
 
     When `relative_path` is given (folder/zip upload), the file is stored under
     a per-upload uuid dir preserving its folder structure, and `filename`
     records the relative path so the tree can be reconstructed.
     """
-    if bool(task_id) == bool(project_id):
-        raise ValueError("add() requires exactly one of task_id or project_id")
+    if sum(bool(x) for x in (task_id, project_id, epic_id)) != 1:
+        raise ValueError(
+            "add() requires exactly one of task_id, project_id or epic_id")
 
+    # Activity rows are project-scoped; an epic attachment logs against the
+    # epic's project so it shows in the project activity feed.
+    activity_project_id = project_id
     with SessionLocal() as db:
         # Resolve+validate the owner row so callers can pass a task key
         # like 'AGNT-1' for tasks (same lenient lookup services.py used).
@@ -123,13 +133,19 @@ def add(
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             task_id = task.id
+        elif epic_id:
+            epic = db.get(Epic, epic_id)
+            if not epic:
+                raise ValueError(f"Epic {epic_id} not found")
+            epic_id = epic.id
+            activity_project_id = epic.project_id
         else:
             project = db.get(Project, project_id)
             if not project:
                 raise ValueError(f"Project {project_id} not found")
             project_id = project.id
 
-        target_dir = _storage_dir(task_id, project_id)
+        target_dir = _storage_dir(task_id, project_id, epic_id)
         rel = _safe_rel_path(relative_path) if relative_path else ""
         if rel:
             display_name = rel
@@ -145,6 +161,7 @@ def add(
         att = Attachment(
             task_id=task_id,
             project_id=project_id,
+            epic_id=epic_id,
             filename=display_name,
             content_type=content_type,
             file_path=file_path,
@@ -153,7 +170,7 @@ def add(
         )
         db.add(att)
         db.add(Activity(
-            project_id=project_id,
+            project_id=activity_project_id,
             task_id=task_id,
             actor=uploaded_by,
             action="attached",
@@ -168,6 +185,7 @@ def add_folder(
     *,
     task_id: str | None = None,
     project_id: str | None = None,
+    epic_id: str | None = None,
     files: list[dict],
     uploaded_by: str = "system",
 ) -> list[dict]:
@@ -185,6 +203,7 @@ def add_folder(
         out.append(add(
             task_id=task_id,
             project_id=project_id,
+            epic_id=epic_id,
             filename=os.path.basename(rel),
             file_bytes=spec["file_bytes"],
             content_type=spec.get("content_type") or "application/octet-stream",
@@ -198,6 +217,7 @@ def add_zip(
     *,
     task_id: str | None = None,
     project_id: str | None = None,
+    epic_id: str | None = None,
     zip_bytes: bytes,
     uploaded_by: str = "system",
 ) -> list[dict]:
@@ -222,7 +242,7 @@ def add_zip(
                 "file_bytes": zf.read(info),
             })
     return add_folder(
-        task_id=task_id, project_id=project_id,
+        task_id=task_id, project_id=project_id, epic_id=epic_id,
         files=specs, uploaded_by=uploaded_by,
     )
 
@@ -237,6 +257,17 @@ def list_for_task(task_id: str) -> list[dict]:
         rows = (
             db.query(Attachment)
               .filter(Attachment.task_id == task_id)
+              .order_by(Attachment.created_at.desc())
+              .all()
+        )
+        return [_to_dict(a) for a in rows]
+
+
+def list_for_epic(epic_id: str) -> list[dict]:
+    with SessionLocal() as db:
+        rows = (
+            db.query(Attachment)
+              .filter(Attachment.epic_id == epic_id)
               .order_by(Attachment.created_at.desc())
               .all()
         )
