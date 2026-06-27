@@ -429,6 +429,59 @@ export function RunDetail() {
                 </div>
             )}
 
+            {/* Conversation — bounded preview of the most recent messages
+                tagged with this run_id. Capped at a fixed height (no infinite
+                scroll); older turns are summarized as a count. AP-109: when
+                there's a task, the whole card links to the combined agent
+                chat scoped to this task, where the full, send-able thread
+                lives. Moved up top (was below the metrics/diagnostics) so the
+                conversation is the first thing you read on the run. */}
+            {(() => {
+                const { shown, hiddenCount } = previewEvents(events);
+                const inner = (
+                    <>
+                        <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                            <MessageSquare className="w-5 h-5" /> Conversation
+                            {run.task_id && run.agent_id && (
+                                <span className="ml-auto text-xs text-accent-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                    Open in chat →
+                                </span>
+                            )}
+                        </h2>
+                        {events.length === 0 ? (
+                            <p className="text-sm text-text-tertiary">
+                                {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
+                            </p>
+                        ) : (
+                            <>
+                                {hiddenCount > 0 && (
+                                    <p className="text-xs text-text-tertiary mb-3">
+                                        {hiddenCount} earlier message{hiddenCount === 1 ? '' : 's'} hidden — open in chat for the full thread.
+                                    </p>
+                                )}
+                                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                    {shown.map((m) => (
+                                        <MessageRow key={m.id} m={m} />
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </>
+                );
+                if (run.task_id && run.agent_id) {
+                    return (
+                        <Link
+                            to={`/forge/agents/${run.agent_id}?tab=chat&scope=${encodeURIComponent(`task:${run.task_id}`)}`}
+                            className="card block group hover:border-accent-primary/40 transition-colors"
+                            title="Open in agent chat — Stop in chat pauses this run"
+                        >
+                            {inner}
+                        </Link>
+                    );
+                }
+                return <div className="card">{inner}</div>;
+            })()}
+
             {/* Metrics Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <MetricCard
@@ -455,11 +508,6 @@ export function RunDetail() {
                 />
             </div>
 
-            {/* Diagnostics — where the agent ran, which branch, which
-                claude session. Surfaces the silent-empty-dir failure mode
-                so the user knows immediately why a run "did nothing". */}
-            <RunDiagnostics run={run} />
-
             {/* Timeline */}
             <div className="card">
                 <h2 className="text-lg font-semibold text-text-primary mb-4">Timeline</h2>
@@ -484,50 +532,6 @@ export function RunDetail() {
                     </div>
                 </div>
             )}
-
-            {/* Conversation — messages tagged with this run_id (one row per
-                user prompt + every assistant text/tool event the daemon
-                streamed back). Polls every 5s along with run state.
-                AP-109: when there's a task, the whole card is a link to
-                the live agent chat scoped to this task, so the read-only
-                thread here becomes send-able with one click. */}
-            {(() => {
-                const inner = (
-                    <>
-                        <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                            <MessageSquare className="w-5 h-5" /> Conversation
-                            {run.task_id && run.agent_id && (
-                                <span className="ml-auto text-xs text-accent-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                                    Open in chat →
-                                </span>
-                            )}
-                        </h2>
-                        {events.length === 0 ? (
-                            <p className="text-sm text-text-tertiary">
-                                {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
-                            </p>
-                        ) : (
-                            <div className="space-y-3">
-                                {events.map((m) => (
-                                    <MessageRow key={m.id} m={m} />
-                                ))}
-                            </div>
-                        )}
-                    </>
-                );
-                if (run.task_id && run.agent_id) {
-                    return (
-                        <Link
-                            to={`/forge/agents/${run.agent_id}?tab=chat&scope=${encodeURIComponent(`task:${run.task_id}`)}`}
-                            className="card block group hover:border-accent-primary/40 transition-colors"
-                            title="Open in agent chat — Stop in chat pauses this run"
-                        >
-                            {inner}
-                        </Link>
-                    );
-                }
-                return <div className="card">{inner}</div>;
-            })()}
 
             {/* Trace ids — each turn shares one. Useful for grepping logs. */}
             {(() => {
@@ -597,6 +601,13 @@ export function RunDetail() {
                     )}
                 </div>
             </div>
+
+            {/* Diagnostics — where the agent ran, which branch, which
+                claude session. Surfaces the silent-empty-dir failure mode
+                so the user knows immediately why a run "did nothing". Moved
+                to the bottom: it's deep technical detail, below the
+                conversation/metrics/details a human reads first. */}
+            <RunDiagnostics run={run} />
         </div>
     );
 }
@@ -935,6 +946,21 @@ function hasAnyOutput(run) {
     if ((run.diff_stat || '').trim()) return true;
     if ((run.task_pr_url || '').trim()) return true;
     return false;
+}
+
+// Bounded conversation preview. The Run page shows only the most recent
+// turns inside a fixed-height box — it never grows without limit. The
+// full, send-able thread lives in the combined chat (click the card).
+// Returns the tail slice plus how many older messages were dropped.
+const PREVIEW_EVENT_LIMIT = 8;
+export function previewEvents(events, limit = PREVIEW_EVENT_LIMIT) {
+    if (!Array.isArray(events) || events.length === 0) {
+        return { shown: [], hiddenCount: 0 };
+    }
+    if (events.length <= limit) {
+        return { shown: events, hiddenCount: 0 };
+    }
+    return { shown: events.slice(-limit), hiddenCount: events.length - limit };
 }
 
 
