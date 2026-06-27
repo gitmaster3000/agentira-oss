@@ -174,9 +174,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     };
     const handleSave = async () => {
         try {
+            // Edit mode edits everything, including Branch & PR.
             await api.updateTask(task.id, {
                 title: formData.title,
                 description: formData.description,
+                branch: formData.branch || '',
+                pr_url: formData.pr_url || '',
             });
             toggleEditing(false);
             onUpdate();
@@ -261,6 +264,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const comments = activities.filter(a => a.action === 'commented');
     const doneCount = dodItems.filter(i => i.checked).length;
 
+    // Branch & PR are a per-repo 1:1 mapping. Surface which repo they belong to
+    // so multi-repo tasks read correctly. `repo_name`/`repos` come from the API
+    // (repos[0] is the task's first declared repo; falls back to primary repo).
+    const taskRepos = task.repos || [];
+    const gitRepoLabel = task.repo_name || taskRepos[0] || '';
+    const isMultiRepo = taskRepos.length > 1;
+
     return (
         <aside
             className="h-full flex flex-col flex-shrink-0 animate-slide-in"
@@ -301,7 +311,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         >
                             <ExternalLink className="w-3 h-3" /> Open full
                         </button>
-                        <button onClick={() => toggleEditing(true)} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                        <button onClick={() => { setFormData({ ...task }); toggleEditing(true); }} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
                             <Pencil className="w-4 h-4" />
                         </button>
                         <button onClick={() => setIsConfirmingDelete(true)} title="Delete" className="flex items-center justify-center text-text-tertiary hover:text-red-400 transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
@@ -567,9 +577,29 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
                     {/* GIT */}
                     <div ref={el => (sectionRefs.current.git = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                        {/* Branch & PR are a per-repo 1:1 mapping — show which repo
+                            they belong to so multi-repo tasks read unambiguously. */}
+                        {gitRepoLabel && (
+                            <div className="flex items-center" style={{ gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                                <span className="inline-flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '.04em', background: 'rgba(128,203,196,.12)', color: '#80cbc4' }}>
+                                    <GitBranch className="w-3 h-3" /> {gitRepoLabel}
+                                </span>
+                                {isMultiRepo && <span style={{ fontSize: 10.5 }} className="text-text-tertiary">Branch &amp; PR apply to this repo</span>}
+                            </div>
+                        )}
+
                         <SectionLabel>Branch</SectionLabel>
                         <div style={{ marginBottom: 16 }}>
-                            {editingBranch ? (
+                            {isEditing ? (
+                                <input
+                                    aria-label="Branch"
+                                    className="w-full bg-bg-app border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
+                                    style={{ fontSize: 12, padding: '9px 11px' }}
+                                    value={formData.branch || ''}
+                                    onChange={e => setFormData({ ...formData, branch: e.target.value })}
+                                    placeholder="feature/my-branch"
+                                />
+                            ) : editingBranch ? (
                                 <input
                                     className="w-full bg-bg-card border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
                                     style={{ fontSize: 12, padding: '9px 11px' }}
@@ -593,7 +623,16 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
                         <SectionLabel>Pull Request</SectionLabel>
                         <div style={{ marginBottom: 16 }}>
-                            {editingPrUrl ? (
+                            {isEditing ? (
+                                <input
+                                    aria-label="Pull Request"
+                                    className="w-full bg-bg-app border border-border-subtle rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
+                                    style={{ fontSize: 12, padding: '9px 11px' }}
+                                    value={formData.pr_url || ''}
+                                    onChange={e => setFormData({ ...formData, pr_url: e.target.value })}
+                                    placeholder="https://github.com/…"
+                                />
+                            ) : editingPrUrl ? (
                                 <input
                                     className="w-full bg-bg-card border border-border-subtle rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
                                     style={{ fontSize: 12, padding: '9px 11px' }}
