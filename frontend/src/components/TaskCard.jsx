@@ -5,7 +5,7 @@ import { api } from '../api';
 import { ROUTES } from '../routes';
 import { ConfirmModal } from './ConfirmModal';
 
-// Priority pill + left-border accent. Hex matches the design tokens
+// Priority pill colors. Hex matches the design tokens
 // (tokens/colors.css --priority-*) — these are theme-independent accents.
 const PRIORITY = {
     critical: { color: '#f85149', bg: 'rgba(248,81,73,.14)' },
@@ -34,7 +34,9 @@ export function TaskCard({ task, onUpdate, onDelete }) {
 
     const live = task.agent_active;
     const prio = PRIORITY[task.priority] || PRIORITY.medium;
-    const leftBorder = live ? '#38bdf8' : prio.color;
+    // No priority color on the left edge — only the live-agent indicator,
+    // which appears just for active tasks. Priority still reads via its pill.
+    const leftBorder = live ? '#38bdf8' : 'var(--border-subtle)';
 
     return (
         <div
