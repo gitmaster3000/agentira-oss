@@ -137,11 +137,12 @@ def test_mention_comment_wakes_agent():
 
 
 def test_mention_comment_does_not_revive_parked_run():
-    """A comment (even @mention) must NOT flip a parked needs_input/blocked
-    task.scheduled run back to RUNNING — it's a chat turn, not a run. It
-    dispatches a fresh chat turn instead, leaving the explicit run untouched."""
+    """A comment (even @mention) must NOT flip a parked needs_input/blocked run
+    back to RUNNING. Strictly one run per (agent, task): it does NOT open a
+    second run either — the comment is recorded as context (visible to the
+    agent on its next turn), leaving the parked run untouched."""
     import uuid
-    from backend.forge.models import Run, RunStatus, RunOutcome
+    from backend.forge.models import Run, RunStatus, RunOutcome, AgentMessage
     s = _make_agent_for_task()  # agent name "backend-agent"
     pid = uuid.uuid4().hex[:12]
     with forge_services._session() as db:
@@ -156,11 +157,36 @@ def test_mention_comment_does_not_revive_parked_run():
         parked = db.query(Run).filter(Run.id == pid).first()
         assert parked.status == RunStatus.COMPLETED \
             and parked.outcome == RunOutcome.NEEDS_INPUT, \
-            "a comment must not revive the parked task.scheduled run"
-        chat_runs = (db.query(Run)
-                       .filter(Run.task_id == s["task_id"],
-                               Run.trigger_event == "chat").all())
-        assert len(chat_runs) == 1, "comment dispatches a fresh chat turn instead"
+            "a comment must not revive the parked run"
+        runs = (db.query(Run).filter(Run.task_id == s["task_id"]).all())
+        assert len(runs) == 1 and runs[0].id == pid, \
+            "no second run — strictly one run per (agent, task)"
+        ctx = (db.query(AgentMessage)
+                 .filter(AgentMessage.agent_id == s["agent_id"],
+                         AgentMessage.scope_key == f"task:{s['task_id']}").all())
+        assert any("the answer is 42" in (m.content or "") for m in ctx), \
+            "the comment is recorded as context for the agent's next turn"
+
+
+def test_mention_comment_reuses_completed_run_no_second_run():
+    """A wake into a task whose single run already COMPLETED (not parked)
+    continues THAT run — one run per (agent, task), never a second."""
+    import uuid
+    from backend.forge.models import Run, RunStatus, RunOutcome
+    s = _make_agent_for_task()  # agent name "backend-agent"
+    rid = uuid.uuid4().hex[:12]
+    with forge_services._session() as db:
+        db.add(Run(id=rid, agent_id=s["agent_id"], task_id=s["task_id"],
+                   trigger_event="task.scheduled", status=RunStatus.COMPLETED,
+                   outcome=RunOutcome.SUCCEEDED, is_work=True))
+        db.commit()
+    with patch("backend.forge.services._dispatch_coro", lambda c: None):
+        core_services.add_comment(s["task_id"],
+                                  "@backend-agent one more tweak please", actor="system")
+    with forge_services._session() as db:
+        runs = db.query(Run).filter(Run.task_id == s["task_id"]).all()
+        assert len(runs) == 1 and runs[0].id == rid, "the single run is reused"
+        assert runs[0].status == RunStatus.RUNNING
 
 
 def test_wake_on_comment_toggle_dispatches_plain_comment():

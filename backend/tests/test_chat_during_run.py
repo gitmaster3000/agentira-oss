@@ -123,8 +123,33 @@ def test_message_resumes_needs_input_run(test_db):
 @patch("backend.forge.services._dispatch_coro", MagicMock(return_value=None))
 def test_message_with_no_active_run_is_plain_chat(test_db):
     s = _setup(test_db)
-    # latest run is COMPLETED+SUCCEEDED → not revived; a fresh chat turn runs
-    _mk_run(s, RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
+    # No prior run at all → a fresh chat turn opens the task's single run.
     res = forge_services.send_runtime_message(
         s["agent_id"], content="thanks!", scope_key=f"task:{s['task_id']}")
     assert "queued_id" not in res and "resumed_run_id" not in res
+    with forge_services._session() as db:
+        assert db.query(Run).filter(Run.task_id == s["task_id"]).count() == 1
+
+
+@patch("backend.forge.services._dispatch_coro", MagicMock(return_value=None))
+def test_chat_after_completed_run_reuses_it(test_db):
+    """AP-335 (1 task = 1 run): chatting into a task whose explicit
+    (task.scheduled) run already completed continues THAT run — regardless of
+    trigger_event — instead of spawning a separate chat run."""
+    s = _setup(test_db)
+    run_id = _mk_run(s, RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
+    with forge_services._session() as db:
+        db.query(Run).filter(Run.id == run_id).update(
+            {"trigger_event": "task.scheduled", "is_work": True})
+        db.commit()
+
+    forge_services.send_runtime_message(
+        s["agent_id"], content="now tweak the header", scope_key=f"task:{s['task_id']}")
+
+    with forge_services._session() as db:
+        runs = (db.query(Run).filter(Run.task_id == s["task_id"],
+                                     Run.agent_id == s["agent_id"]).all())
+        assert len(runs) == 1, "no second run spawned for the task"
+        assert runs[0].id == run_id, "the existing run is reused, not replaced"
+        assert runs[0].status == RunStatus.RUNNING
+        assert runs[0].is_work is True, "is_work stays sticky across the chat turn"

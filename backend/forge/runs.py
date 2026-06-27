@@ -91,25 +91,26 @@ def get_or_create_task_run(db, *, agent_id: str, task_id: str,
                            worktree_path: str = "",
                            worktree_branch: str = "",
                            log_dir: str = "") -> str:
-    """AP-190: THE one run per (agent, task), reused across turns.
+    """AP-190/AP-335: THE one run per (agent, task), reused across turns.
 
-    First dispatch for an (agent, task) creates the row; every later turn
-    reuses the SAME run, resetting it to RUNNING for the new turn (the
-    previous turn's verdict — outcome/diff/error — is overwritten at
-    completion). `session_id` (the runtime resume handle) and `is_work` are
-    sticky: we keep resuming the same conversation, and once a run has done
-    durable work it stays work. Caller owns the session and commit; returns
-    the run_id.
+    Strictly one run per (agent, task): the first dispatch creates the row,
+    and EVERY later turn — chat or explicit work — reuses the SAME run,
+    resetting it to RUNNING for the new turn (the previous turn's verdict —
+    outcome/diff/error — is overwritten at completion). `session_id` (the
+    runtime resume handle) and `is_work` are sticky: we keep resuming the same
+    conversation, and once a run has done durable work it stays work. Caller
+    owns the session and commit; returns the run_id.
 
-    Reuse is scoped to the same `trigger_event`: a chat turn reuses the
-    (agent, task) *chat* run, never an explicit ``task.scheduled`` run — an
-    explicit work episode and a chat conversation stay distinct rows (a
-    comment must not revive a parked explicit run; see
-    test_mention_comment_does_not_revive_parked_run).
+    Reuse is NOT scoped by `trigger_event` (AP-335): a chat continues the
+    task's single run even if it started as an explicit ``task.scheduled``
+    work episode. `trigger_event` is only the label stamped at creation. There
+    is never a second run for an (agent, task) — the "don't revive a parked
+    run on a comment-wake" safety is enforced upstream by recording the comment
+    as context instead of dispatching (see _deliver_comment_to_agent), not by
+    opening another run.
     """
     run = (db.query(Run)
-             .filter(Run.agent_id == agent_id, Run.task_id == task_id,
-                     Run.trigger_event == trigger_event)
+             .filter(Run.agent_id == agent_id, Run.task_id == task_id)
              .order_by(Run.created_at.desc())
              .first())
     if run is not None:
@@ -174,6 +175,25 @@ def create_chat_run_in_session(db, *, agent_id: str, task_id: str,
         initial_prompt=initial_prompt, worktree_path=worktree_path,
         worktree_branch=worktree_branch, log_dir=log_dir,
     )
+
+
+def latest_task_run_is_parked(agent_id: str, task_id: str) -> bool:
+    """True if the agent's single run for this task is PAUSED or parked
+    (needs_input/blocked).
+
+    A comment-wake must not flip such a run back to RUNNING, and (strictly one
+    run per agent+task) must not open a second one — so the caller records the
+    comment as context instead of dispatching (see _deliver_comment_to_agent).
+    """
+    with SessionLocal() as db:
+        run = (db.query(Run)
+                 .filter(Run.agent_id == agent_id, Run.task_id == task_id)
+                 .order_by(Run.created_at.desc())
+                 .first())
+        if run is None:
+            return False
+        return (run.status == RunStatus.PAUSED
+                or run.outcome in (RunOutcome.NEEDS_INPUT, RunOutcome.BLOCKED))
 
 
 # ── Run emergence ─────────────────────────────────────────────────────

@@ -76,9 +76,12 @@ transition guard rejects it.
 | `interrupting` | `cancelled` | daemon ack, or reconciler timeout | when `interrupt_intent=discard` |
 | `paused` | `pending` | user — **Resume** | Re-dispatch with `--resume`; then `pending → running` as usual. |
 | `paused` | `cancelled` | user — **Discard** | Abandon a paused run. |
+| `completed` | `running` | user — **chat into the task** | A follow-up chat continues the task's single run rather than spawning a new one — **regardless of how that run started** (chat or explicit `task.scheduled` work); one task = one run (AP-335). The reuse ignores `trigger_event`. There is never a second run for an (agent, task): a comment-wake into a **parked** (`needs_input`/`blocked`) or **paused** run is *not* dispatched at all — the comment is recorded as context (the agent sees it on its next turn) so it neither revives the run nor opens another one. |
 
-**Terminal states** (`completed`, `failed`, `cancelled`) have no outgoing transitions.
-"Restart" is a *new* run, not a transition.
+**Terminal states** (`failed`, `cancelled`) have no outgoing transitions.
+"Restart" is a *new* run, not a transition. A `completed` run is reused in place
+when the user keeps chatting in the task (one run per task), so it is terminal
+only until the next turn.
 
 ```
                 ┌────────── user Start ──────────┐
