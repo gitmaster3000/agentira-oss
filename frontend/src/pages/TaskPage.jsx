@@ -34,9 +34,17 @@ import {
 
 const TABS = [
     { id: 'plan', label: 'Plan', icon: ClipboardList },
-    { id: 'agent', label: 'Agent', icon: Bot },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
 ];
+
+const STATUS_OPTIONS = [
+    { value: 'backlog', label: 'Backlog' },
+    { value: 'todo', label: 'To Do' },
+    { value: 'in_progress', label: 'In Progress' },
+    { value: 'review', label: 'In Review' },
+    { value: 'done', label: 'Done' },
+];
+const PRIORITY_OPTIONS = ['critical', 'high', 'medium', 'low'];
 
 // Minimal run-status palette — mirrors RunDetail's STATUS_CONFIG for the
 // states a task's single run actually reaches. Local so TaskPage doesn't
@@ -142,7 +150,9 @@ export function TaskPage() {
     // Edit mode for the core task fields (title + description). Status,
     // priority and assignee stay inline-editable in the Plan tab.
     const [isEditing, setIsEditing] = useState(false);
-    const [formData, setFormData] = useState({ title: '', description: '' });
+    const [formData, setFormData] = useState({
+        title: '', description: '', status: 'backlog', priority: 'medium', assignee: '', tags: [],
+    });
 
     // Single source of truth for live run state (DoD: "Live run state
     // propagates from Pulse query (single source)"). One poll feeds both the
@@ -248,14 +258,15 @@ export function TaskPage() {
         }
     };
 
-    const saveAssignee = async (val) => {
-        if (val === (task?.assignee || '')) return;
-        await api.updateTask(taskId, { assignee: val });
-        loadTask();
-    };
-
     const startEditing = () => {
-        setFormData({ title: task.title || '', description: task.description || '' });
+        setFormData({
+            title: task.title || '',
+            description: task.description || '',
+            status: task.status || 'backlog',
+            priority: task.priority || 'medium',
+            assignee: task.assignee || '',
+            tags: task.tags || [],
+        });
         setIsEditing(true);
     };
 
@@ -266,7 +277,14 @@ export function TaskPage() {
             await api.updateTask(taskId, {
                 title: formData.title,
                 description: formData.description,
+                priority: formData.priority,
+                assignee: formData.assignee,
+                tags: formData.tags,
             });
+            // Status transitions go through the dedicated /move endpoint.
+            if (formData.status && formData.status !== task.status) {
+                await api.moveTask(taskId, formData.status);
+            }
             setIsEditing(false);
             loadTask();
         } catch (err) {
@@ -366,20 +384,6 @@ export function TaskPage() {
                         <h1 className="text-3xl font-bold text-text-primary">{task.title}</h1>
                     )}
                     <div className="flex items-center gap-2 flex-shrink-0">
-                        {runStatus && !isEditing && (
-                            <span
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold text-white"
-                                style={{ backgroundColor: runStatus.bg }}
-                            >
-                                {runActive && (
-                                    <span className="relative flex h-2 w-2">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                                    </span>
-                                )}
-                                {runStatus.label}
-                            </span>
-                        )}
                         {isEditing ? (
                             <>
                                 <button
@@ -437,8 +441,17 @@ export function TaskPage() {
                         formData={formData}
                         setFormData={setFormData}
                         profiles={profiles}
-                        saveAssignee={saveAssignee}
                         priorityColors={priorityColors}
+                        run={run}
+                        runStatus={runStatus}
+                        runActive={runActive}
+                        summaryUpdatedAt={summaryUpdatedAt}
+                        forgeAgents={forgeAgents}
+                        pickingAgent={pickingAgent}
+                        setPickingAgent={setPickingAgent}
+                        scheduling={scheduling}
+                        openAgentPicker={openAgentPicker}
+                        handleScheduleRun={handleScheduleRun}
                         dodItems={dodItems}
                         newDodText={newDodText}
                         setNewDodText={setNewDodText}
@@ -468,29 +481,13 @@ export function TaskPage() {
                     />
                 )}
 
-                {tab === 'agent' && (
-                    <AgentTab
-                        run={run}
-                        runStatus={runStatus}
-                        runActive={runActive}
-                        summaryUpdatedAt={summaryUpdatedAt}
-                        task={task}
-                        forgeAgents={forgeAgents}
-                        pickingAgent={pickingAgent}
-                        setPickingAgent={setPickingAgent}
-                        scheduling={scheduling}
-                        openAgentPicker={openAgentPicker}
-                        handleScheduleRun={handleScheduleRun}
-                    />
-                )}
-
                 {tab === 'activity' && <ActivityTab activities={activities} />}
             </div>
         </div>
     );
 }
 
-function AgentTab({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
+function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
     const launcher = (
         <RunLauncher
             task={task}
@@ -506,11 +503,13 @@ function AgentTab({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgen
 
     if (!run) {
         return (
-            <div className="max-w-3xl text-center py-16 bg-bg-card border border-border-subtle rounded-xl">
-                <Bot className="w-10 h-10 mx-auto mb-3 text-text-tertiary" />
-                <p className="text-text-secondary">No run yet for this task.</p>
-                <p className="text-xs text-text-tertiary mt-1 mb-5">Kick one off, or wait for an agent to pick it up.</p>
-                <div className="max-w-md mx-auto px-6">{launcher}</div>
+            <div className="bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm flex items-center gap-4">
+                <Bot className="w-8 h-8 text-text-tertiary flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                    <p className="text-sm text-text-secondary">No agent run yet for this task.</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">Kick one off, or wait for an agent to pick it up.</p>
+                </div>
+                <div className="flex-shrink-0">{launcher}</div>
             </div>
         );
     }
@@ -760,17 +759,38 @@ function CommentsSection({ user, comment, setComment, handleComment, activities,
 
 function PlanTab(props) {
     const {
-        task, isEditing, formData, setFormData, profiles, saveAssignee, priorityColors, dodItems, newDodText, setNewDodText,
+        task, isEditing, formData, setFormData, profiles, priorityColors, dodItems, newDodText, setNewDodText,
         toggleDodItem, addDodItem, removeDodItem, projectRepos,
         branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
         commits, copiedField, copyToClipboard,
         taskId, user, comment, setComment, handleComment, activities,
+        run, runStatus, runActive, summaryUpdatedAt,
+        forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun,
     } = props;
 
     return (
         <div className="flex flex-col lg:flex-row gap-12">
             <div className="flex-1 min-w-0">
+                {/* Run info inline on the main page (no separate Agent tab). */}
+                {!isEditing && (
+                    <div className="mb-10">
+                        <AgentSection
+                            run={run}
+                            runStatus={runStatus}
+                            runActive={runActive}
+                            summaryUpdatedAt={summaryUpdatedAt}
+                            task={task}
+                            forgeAgents={forgeAgents}
+                            pickingAgent={pickingAgent}
+                            setPickingAgent={setPickingAgent}
+                            scheduling={scheduling}
+                            openAgentPicker={openAgentPicker}
+                            handleScheduleRun={handleScheduleRun}
+                        />
+                    </div>
+                )}
+
                 <div className="mb-10">
                     <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
                     {isEditing ? (
@@ -807,50 +827,98 @@ function PlanTab(props) {
 
                     <div className="space-y-6">
                         <div>
-                            <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
-                            <span className={`text-xs px-2.5 py-1 rounded font-bold uppercase tracking-wider
-                                ${task.status === 'done' ? 'bg-green-500/20 text-green-400' : 'bg-accent-subtle text-accent-primary'}
-                            `}>
-                                {task.status.replace('_', ' ')}
-                            </span>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Priority</label>
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityColors[task.priority] }} />
-                                <span className="text-sm text-text-secondary capitalize">{task.priority}</span>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
-                            <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
-                                    {task.assignee ? task.assignee[0].toUpperCase() : '?'}
-                                </div>
+                            <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
+                            {isEditing ? (
                                 <select
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg flex-1"
-                                    value={task.assignee || ''}
-                                    onChange={e => saveAssignee(e.target.value)}
+                                    id="task-status"
+                                    aria-label="Status"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    value={formData.status}
+                                    onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                >
+                                    {STATUS_OPTIONS.map(s => (
+                                        <option key={s.value} value={s.value}>{s.label}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <span className={`text-xs px-2.5 py-1 rounded font-bold uppercase tracking-wider
+                                    ${task.status === 'done' ? 'bg-green-500/20 text-green-400' : 'bg-accent-subtle text-accent-primary'}
+                                `}>
+                                    {task.status.replace('_', ' ')}
+                                </span>
+                            )}
+                        </div>
+
+                        <div>
+                            <label htmlFor="task-priority" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Priority</label>
+                            {isEditing ? (
+                                <select
+                                    id="task-priority"
+                                    aria-label="Priority"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full capitalize"
+                                    value={formData.priority}
+                                    onChange={e => setFormData({ ...formData, priority: e.target.value })}
+                                >
+                                    {PRIORITY_OPTIONS.map(p => (
+                                        <option key={p} value={p}>{p}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityColors[task.priority] }} />
+                                    <span className="text-sm text-text-secondary capitalize">{task.priority}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        <div>
+                            <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
+                            {isEditing ? (
+                                <select
+                                    id="task-assignee"
+                                    aria-label="Assignee"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    value={formData.assignee}
+                                    onChange={e => setFormData({ ...formData, assignee: e.target.value })}
                                 >
                                     <option value="">Unassigned</option>
                                     {profiles.map(p => (
                                         <option key={p.id} value={p.name}>{p.display_name}</option>
                                     ))}
                                 </select>
-                            </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
+                                        {task.assignee ? task.assignee[0].toUpperCase() : '?'}
+                                    </div>
+                                    <span className="text-sm text-text-secondary">{task.assignee || 'Unassigned'}</span>
+                                </div>
+                            )}
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Labels</label>
-                            <div className="flex flex-wrap gap-1.5">
-                                {(task.tags || []).length > 0 ? task.tags.map(t => (
-                                    <span key={t} className="text-[10px] font-medium bg-bg-app px-2 py-0.5 rounded border border-border-subtle text-text-secondary">
-                                        {t}
-                                    </span>
-                                )) : <span className="text-xs text-text-tertiary italic">None</span>}
-                            </div>
+                            <label htmlFor="task-tags" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Labels</label>
+                            {isEditing ? (
+                                <input
+                                    id="task-tags"
+                                    aria-label="Tags"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    placeholder="comma, separated, tags"
+                                    value={(formData.tags || []).join(', ')}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean),
+                                    })}
+                                />
+                            ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {(task.tags || []).length > 0 ? task.tags.map(t => (
+                                        <span key={t} className="text-[10px] font-medium bg-bg-app px-2 py-0.5 rounded border border-border-subtle text-text-secondary">
+                                            {t}
+                                        </span>
+                                    )) : <span className="text-xs text-text-tertiary italic">None</span>}
+                                </div>
+                            )}
                         </div>
 
                         <div>

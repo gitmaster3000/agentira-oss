@@ -15,6 +15,7 @@ vi.mock('../api', () => ({
         listAttachments: vi.fn(() => Promise.resolve([])),
         addComment: vi.fn(() => Promise.resolve({})),
         updateTask: vi.fn(() => Promise.resolve({})),
+        moveTask: vi.fn(() => Promise.resolve({})),
         forge: {
             listTaskRuns: vi.fn(() => Promise.resolve([])),
             listAgents: vi.fn(() => Promise.resolve([])),
@@ -37,7 +38,7 @@ function baseTask(overrides = {}) {
         priority: 'medium',
         assignee: '',
         dod_items: [],
-        tags: [],
+        tags: ['alpha'],
         branch: '',
         pr_url: '',
         repos: [],
@@ -58,7 +59,7 @@ function renderTaskPage() {
     );
 }
 
-describe('TaskPage — edit mode (AP-353)', () => {
+describe('TaskPage — detail view (AP-353)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         api.getTask.mockResolvedValue(baseTask());
@@ -68,41 +69,70 @@ describe('TaskPage — edit mode (AP-353)', () => {
         ]);
     });
 
-    it('exposes an Edit affordance on the task page', async () => {
+    it('has no separate Agent tab', async () => {
         renderTaskPage();
         await screen.findByText('My task');
-        expect(screen.getByTitle('Edit task')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^agent$/i })).toBeNull();
     });
 
-    it('reveals editable Title and Description prefilled with the task', async () => {
+    it('does not show a run-status pill in the header for a failed run', async () => {
+        api.forge.listTaskRuns.mockResolvedValue([
+            { id: 'r1', status: 'failed', created_at: '2026-06-02T00:00:00Z', summary: 'boom' },
+        ]);
+        renderTaskPage();
+        const heading = await screen.findByRole('heading', { name: 'My task' });
+        // The header row must not carry a "Failed" status badge in the corner.
+        const headerRow = heading.parentElement;
+        expect(headerRow.textContent).not.toMatch(/Failed/);
+    });
+
+    it('shows the run info inline on the main page (not behind a tab)', async () => {
+        api.forge.listTaskRuns.mockResolvedValue([
+            { id: 'r1', status: 'completed', created_at: '2026-06-02T00:00:00Z', summary: 'all done' },
+        ]);
+        renderTaskPage();
+        await screen.findByText('My task');
+        expect(await screen.findByText('all done')).toBeInTheDocument();
+    });
+
+    it('exposes an Edit affordance and reveals editable core + detail fields', async () => {
         renderTaskPage();
         await screen.findByText('My task');
         fireEvent.click(screen.getByTitle('Edit task'));
 
         expect(screen.getByLabelText('Title').value).toBe('My task');
         expect(screen.getByLabelText('Description').value).toBe('the original description');
+        expect(screen.getByLabelText('Status').value).toBe('todo');
+        expect(screen.getByLabelText('Priority').value).toBe('medium');
+        expect(screen.getByLabelText('Tags').value).toBe('alpha');
     });
 
-    it('saves edited Title and Description via updateTask', async () => {
+    it('saves edited details, tags and status', async () => {
         renderTaskPage();
         await screen.findByText('My task');
         fireEvent.click(screen.getByTitle('Edit task'));
 
-        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed task' } });
-        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'new body' } });
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed' } });
+        fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'high' } });
+        fireEvent.change(screen.getByLabelText('Tags'), { target: { value: 'alpha, beta' } });
+        fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in_progress' } });
         fireEvent.click(screen.getByRole('button', { name: /save/i }));
 
         await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
             'T1',
-            expect.objectContaining({ title: 'Renamed task', description: 'new body' }),
+            expect.objectContaining({
+                title: 'Renamed',
+                priority: 'high',
+                tags: ['alpha', 'beta'],
+            }),
         ));
+        expect(api.moveTask).toHaveBeenCalledWith('T1', 'in_progress');
     });
 
     it('Cancel exits edit mode without saving', async () => {
         renderTaskPage();
         await screen.findByText('My task');
         fireEvent.click(screen.getByTitle('Edit task'));
-
         fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'discard me' } });
         fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
 
@@ -111,13 +141,11 @@ describe('TaskPage — edit mode (AP-353)', () => {
         expect(screen.getByTitle('Edit task')).toBeInTheDocument();
     });
 
-    it('can start an agent run from the Agent tab (regression guard)', async () => {
+    it('can start an agent run from the main page (regression guard)', async () => {
         renderTaskPage();
         await screen.findByText('My task');
 
-        fireEvent.click(screen.getByRole('button', { name: /agent/i }));
         fireEvent.click(await screen.findByRole('button', { name: /run with agent/i }));
-
         fireEvent.click(await screen.findByText('Implementer'));
 
         await waitFor(() =>
