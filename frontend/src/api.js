@@ -179,6 +179,19 @@ export const api = {
     updateEpic: (id, data) => request(`/epics/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteEpic: (id) => request(`/epics/${id}`, { method: 'DELETE' }),
     getEpicTasks: (id) => request(`/epics/${id}/tasks`),
+    // AP-351: Epic Planning — editable default prompt + start a planning run.
+    getEpicPlanTemplate: (id) => request(`/epics/${id}/plan-template`),
+    planEpic: (id, data) => request(`/epics/${id}/plan`, { method: 'POST', body: JSON.stringify(data) }),
+    listEpicAttachments: (id) => request(`/epics/${id}/attachments`),
+    uploadEpicAttachment: (id, file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const token = getToken();
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return fetch(`${API_BASE}/epics/${id}/attachments`, { method: 'POST', body: formData, headers })
+            .then(res => { if (!res.ok) throw new Error(`Upload failed (${res.status})`); return res.json(); });
+    },
 
     // Tasks
     listTasks: (projectId, status, assignee, priority) => {

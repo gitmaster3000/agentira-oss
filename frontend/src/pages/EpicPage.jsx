@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Pencil, Trash2, ListTodo, Check, X } from 'lucide-react';
+import { Pencil, Trash2, ListTodo, Check, X, Sparkles, Paperclip, Upload } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Breadcrumbs } from '../components/Breadcrumbs';
@@ -37,6 +37,13 @@ export function EpicPage() {
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [form, setForm] = useState({ title: '', description: '', color: '#7c4dff' });
+    const [showPlan, setShowPlan] = useState(false);
+    const [attachments, setAttachments] = useState([]);
+
+    const loadAttachments = React.useCallback(async () => {
+        try { setAttachments(await api.listEpicAttachments(epicId)); } catch { /* ignore */ }
+    }, [epicId]);
+    useEffect(() => { loadAttachments(); }, [loadAttachments]);
 
     useEffect(() => {
         let cancelled = false;
@@ -158,6 +165,13 @@ export function EpicPage() {
                 ) : (
                     <>
                         <button
+                            onClick={() => setShowPlan(true)}
+                            className="btn-primary px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1.5"
+                            title="Plan this epic with an agent"
+                        >
+                            <Sparkles className="w-4 h-4" /> Plan Epic
+                        </button>
+                        <button
                             onClick={startEdit}
                             className="flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-bg-hover text-text-secondary text-sm font-medium"
                             title="Edit epic"
@@ -219,6 +233,12 @@ export function EpicPage() {
                 <Stat label="Done" value={`${done} / ${total}`} color="#2ecc71" />
             </div>
 
+            <EpicAttachments
+                epicId={epicId}
+                attachments={attachments}
+                onChange={loadAttachments}
+            />
+
             <div className="card flex flex-col flex-1 min-h-0">
                 <h2 className="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2 flex-shrink-0">
                     <ListTodo className="w-5 h-5" /> Tasks
@@ -250,6 +270,166 @@ export function EpicPage() {
                     </div>
                 )}
             </div>
+            </div>
+
+            {showPlan && (
+                <PlanEpicModal
+                    epic={epic}
+                    onClose={() => setShowPlan(false)}
+                    onStarted={(run) => navigate(ROUTES.FORGE_RUN(run.id))}
+                />
+            )}
+        </div>
+    );
+}
+
+function EpicAttachments({ epicId, attachments, onChange }) {
+    const [uploading, setUploading] = useState(false);
+    const handleUpload = async (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        setUploading(true);
+        try {
+            await api.uploadEpicAttachment(epicId, file);
+            await onChange();
+        } catch (err) {
+            alert('Upload failed: ' + (err.message || err));
+        } finally {
+            setUploading(false);
+        }
+    };
+    return (
+        <div className="card flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                    <Paperclip className="w-4 h-4" /> Attachments
+                </h2>
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-bg-hover text-text-secondary text-xs font-medium cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" /> {uploading ? 'Uploading…' : 'Upload'}
+                    <input type="file" className="hidden" onChange={handleUpload} disabled={uploading} />
+                </label>
+            </div>
+            {attachments.length === 0 ? (
+                <p className="text-sm text-text-tertiary">No files attached.</p>
+            ) : (
+                <ul className="space-y-1">
+                    {attachments.map(a => (
+                        <li key={a.id} className="flex items-center gap-2 text-sm">
+                            <button
+                                onClick={() => api.downloadAttachment(a.id, a.filename)}
+                                className="text-accent hover:underline truncate text-left"
+                                title={a.filename}
+                            >
+                                {a.filename}
+                            </button>
+                            <span className="text-[10px] text-text-tertiary flex-shrink-0">
+                                {Math.max(1, Math.round((a.size_bytes || 0) / 1024))} KB
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+function PlanEpicModal({ epic, onClose, onStarted }) {
+    const [agents, setAgents] = useState([]);
+    const [agentId, setAgentId] = useState('');
+    const [prompt, setPrompt] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [starting, setStarting] = useState(false);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const [ags, tpl] = await Promise.all([
+                    api.forge.listAgents(),
+                    api.getEpicPlanTemplate(epic.id),
+                ]);
+                if (cancelled) return;
+                // Only agents bound to a runtime can actually run.
+                const runnable = (Array.isArray(ags) ? ags : []).filter(a => a.runtime_id);
+                setAgents(runnable);
+                setAgentId(runnable[0]?.id || '');
+                setPrompt(tpl?.prompt || '');
+            } catch (err) {
+                if (!cancelled) setError(err.message || 'Failed to load');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [epic.id]);
+
+    const handleStart = async () => {
+        if (!agentId) return;
+        setStarting(true);
+        setError(null);
+        try {
+            const run = await api.planEpic(epic.id, { agent_id: agentId, prompt });
+            onStarted(run);
+        } catch (err) {
+            setError(err.message || 'Failed to start planning run');
+            setStarting(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+            <div className="card w-full max-w-2xl flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-accent" />
+                    <h2 className="text-lg font-bold text-text-primary">Plan epic: {epic.title}</h2>
+                </div>
+                <p className="text-sm text-text-tertiary -mt-2">
+                    An agent will break this epic into board tasks. Pick the agent and tweak the request below.
+                </p>
+                {loading ? (
+                    <div className="text-text-tertiary text-sm py-6 text-center">Loading…</div>
+                ) : (
+                    <>
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase mb-2 text-text-tertiary tracking-wider">Agent</label>
+                            {agents.length === 0 ? (
+                                <p className="text-sm text-red-400">No runnable agent available. Bind an agent to a runtime first.</p>
+                            ) : (
+                                <select
+                                    className="input w-full"
+                                    value={agentId}
+                                    onChange={e => setAgentId(e.target.value)}
+                                >
+                                    {agents.map(a => (
+                                        <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold uppercase mb-2 text-text-tertiary tracking-wider">Planning request</label>
+                            <textarea
+                                className="input resize-none h-40 w-full"
+                                value={prompt}
+                                onChange={e => setPrompt(e.target.value)}
+                                placeholder="What should the agent plan?"
+                            />
+                        </div>
+                    </>
+                )}
+                {error && <p className="text-sm text-red-400">{error}</p>}
+                <div className="flex justify-end gap-2">
+                    <button onClick={onClose} className="btn-ghost px-4 py-2 rounded-xl text-sm font-medium">Cancel</button>
+                    <button
+                        onClick={handleStart}
+                        disabled={loading || starting || !agentId}
+                        className="btn-primary px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Sparkles className="w-4 h-4" /> {starting ? 'Starting…' : 'Start planning'}
+                    </button>
+                </div>
             </div>
         </div>
     );
