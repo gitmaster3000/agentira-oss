@@ -139,6 +139,11 @@ export function TaskPage() {
     const [pickingAgent, setPickingAgent] = useState(false);
     const [scheduling, setScheduling] = useState(false);
 
+    // Edit mode for the core task fields (title + description). Status,
+    // priority and assignee stay inline-editable in the Plan tab.
+    const [isEditing, setIsEditing] = useState(false);
+    const [formData, setFormData] = useState({ title: '', description: '' });
+
     // Single source of truth for live run state (DoD: "Live run state
     // propagates from Pulse query (single source)"). One poll feeds both the
     // header status pill and the Agent tab — nothing else fetches runs.
@@ -249,6 +254,26 @@ export function TaskPage() {
         loadTask();
     };
 
+    const startEditing = () => {
+        setFormData({ title: task.title || '', description: task.description || '' });
+        setIsEditing(true);
+    };
+
+    const cancelEditing = () => setIsEditing(false);
+
+    const handleSave = async () => {
+        try {
+            await api.updateTask(taskId, {
+                title: formData.title,
+                description: formData.description,
+            });
+            setIsEditing(false);
+            loadTask();
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
     const openAgentPicker = async () => {
         setPickingAgent(true);
         try {
@@ -329,21 +354,59 @@ export function TaskPage() {
 
                 {/* Header */}
                 <div className="flex items-start justify-between gap-4 mb-6">
-                    <h1 className="text-3xl font-bold text-text-primary">{task.title}</h1>
-                    {runStatus && (
-                        <span
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold text-white flex-shrink-0"
-                            style={{ backgroundColor: runStatus.bg }}
-                        >
-                            {runActive && (
-                                <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                                </span>
-                            )}
-                            {runStatus.label}
-                        </span>
+                    {isEditing ? (
+                        <input
+                            aria-label="Title"
+                            className="flex-1 text-3xl font-bold text-text-primary bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent-primary"
+                            value={formData.title}
+                            onChange={e => setFormData({ ...formData, title: e.target.value })}
+                            autoFocus
+                        />
+                    ) : (
+                        <h1 className="text-3xl font-bold text-text-primary">{task.title}</h1>
                     )}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        {runStatus && !isEditing && (
+                            <span
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold text-white"
+                                style={{ backgroundColor: runStatus.bg }}
+                            >
+                                {runActive && (
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
+                                    </span>
+                                )}
+                                {runStatus.label}
+                            </span>
+                        )}
+                        {isEditing ? (
+                            <>
+                                <button
+                                    onClick={handleSave}
+                                    title="Save changes"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-accent-primary hover:opacity-90 transition-opacity"
+                                >
+                                    <Check className="w-3.5 h-3.5" /> Save
+                                </button>
+                                <button
+                                    onClick={cancelEditing}
+                                    title="Cancel"
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary border border-border-subtle hover:text-text-primary transition-colors"
+                                >
+                                    <X className="w-3.5 h-3.5" /> Cancel
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={startEditing}
+                                title="Edit task"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary border border-border-subtle hover:text-text-primary transition-colors"
+                            >
+                                <Pencil className="w-3.5 h-3.5" /> Edit
+                            </button>
+                        )}
+                    </div>
                 </div>
 
                 {/* Tab bar */}
@@ -370,6 +433,9 @@ export function TaskPage() {
                 {tab === 'plan' && (
                     <PlanTab
                         task={task}
+                        isEditing={isEditing}
+                        formData={formData}
+                        setFormData={setFormData}
                         profiles={profiles}
                         saveAssignee={saveAssignee}
                         priorityColors={priorityColors}
@@ -694,7 +760,7 @@ function CommentsSection({ user, comment, setComment, handleComment, activities,
 
 function PlanTab(props) {
     const {
-        task, profiles, saveAssignee, priorityColors, dodItems, newDodText, setNewDodText,
+        task, isEditing, formData, setFormData, profiles, saveAssignee, priorityColors, dodItems, newDodText, setNewDodText,
         toggleDodItem, addDodItem, removeDodItem, projectRepos,
         branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
@@ -707,11 +773,21 @@ function PlanTab(props) {
             <div className="flex-1 min-w-0">
                 <div className="mb-10">
                     <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
-                    <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm break-words overflow-x-auto">
-                        {task.description
-                            ? <Markdown>{task.description}</Markdown>
-                            : <span className="italic text-text-tertiary">No description provided.</span>}
-                    </div>
+                    {isEditing ? (
+                        <textarea
+                            aria-label="Description"
+                            className="w-full min-h-[12rem] text-base text-text-primary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm focus:outline-none focus:border-accent-primary resize-y"
+                            value={formData.description}
+                            onChange={e => setFormData({ ...formData, description: e.target.value })}
+                            placeholder="Describe this task… (Markdown supported)"
+                        />
+                    ) : (
+                        <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm break-words overflow-x-auto">
+                            {task.description
+                                ? <Markdown>{task.description}</Markdown>
+                                : <span className="italic text-text-tertiary">No description provided.</span>}
+                        </div>
+                    )}
                 </div>
 
                 {/* Comments live in the main column now (no separate tab). */}
