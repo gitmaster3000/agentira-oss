@@ -107,6 +107,15 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         return () => clearInterval(interval);
     }, [task.id]);
 
+    // Keep the read-only Branch/PR display in sync when the task's values
+    // change without the id changing — e.g. after saving in edit mode (the
+    // parent refetches the same task) or a webhook update. Without this the
+    // [task.id] effect above never re-runs and edits appear not to persist.
+    useEffect(() => {
+        setBranchValue(task.branch || '');
+        setPrUrlValue(task.pr_url || '');
+    }, [task.branch, task.pr_url]);
+
     const loadTaskRuns = async () => {
         try {
             const data = await api.forge.listTaskRuns(task.id);

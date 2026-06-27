@@ -88,6 +88,18 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
         ));
     });
 
+    it('reflects Branch & PR after a post-save refetch (same task id)', async () => {
+        const { rerender } = render(<Harness task={baseTask({ branch: 'feature/old', pr_url: '' })} />);
+        expect(await screen.findByText('feature/old')).toBeInTheDocument();
+
+        // Parent refetches the same task with the saved values.
+        rerender(<Harness task={baseTask({ branch: 'feature/new', pr_url: 'https://github.com/acme/web/pull/9' })} />);
+
+        expect(await screen.findByText('feature/new')).toBeInTheDocument();
+        expect(screen.queryByText('feature/old')).not.toBeInTheDocument();
+        expect(screen.getByText('web#9')).toBeInTheDocument();
+    });
+
     it('Cancel reverts edits without calling updateTask', async () => {
         render(<Harness task={baseTask()} />);
         fireEvent.click(await screen.findByTitle('Edit'));
