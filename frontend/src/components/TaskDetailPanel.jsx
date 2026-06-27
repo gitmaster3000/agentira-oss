@@ -70,6 +70,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [newDodText, setNewDodText] = useState('');
     const [taskRuns, setTaskRuns] = useState([]);
     const [profiles, setProfiles] = useState([]);
+    const [epics, setEpics] = useState([]);
     const [forgeAgents, setForgeAgents] = useState([]);
     const [pickingAgent, setPickingAgent] = useState(false);
     const [scheduling, setScheduling] = useState(false);
@@ -101,6 +102,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
         if (task.project_id) api.getProjectMembers(task.project_id).then(setProfiles).catch(() => {});
+        if (task.project_id) api.getEpics(task.project_id).then(d => setEpics(Array.isArray(d) ? d : [])).catch(() => {});
         const interval = setInterval(() => { loadActivity(); loadTaskRuns(); }, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
@@ -286,11 +288,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: '#7c8db5', whiteSpace: 'nowrap' }}>
                     {task.key || task.id}
                 </span>
-                {task.epic_name && (
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '.04em', whiteSpace: 'nowrap', background: `${task.epic_color || '#c9b8ff'}22`, color: task.epic_color || '#c9b8ff' }}>
-                        {task.epic_name}
-                    </span>
-                )}
                 <div className="flex-1" />
                 {isEditing ? (
                     <>
@@ -518,6 +515,19 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 >
                                     <option value="">Unassigned</option>
                                     {profiles.map(p => <option key={p.id} value={p.name}>{p.display_name}</option>)}
+                                </select>
+                            </span>
+                            <span className="text-text-tertiary">Epic</span>
+                            <span className="inline-flex items-center" style={{ gap: 7 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: task.epic_id ? (task.epic_color || '#c9b8ff') : 'transparent', flexShrink: 0 }} />
+                                <select
+                                    aria-label="Epic"
+                                    className="ghost-select"
+                                    value={task.epic_id || ''}
+                                    onChange={e => saveField({ epic_id: e.target.value })}
+                                >
+                                    <option value="">No epic</option>
+                                    {epics.map(ep => <option key={ep.id} value={ep.id}>{ep.title}</option>)}
                                 </select>
                             </span>
                         </div>

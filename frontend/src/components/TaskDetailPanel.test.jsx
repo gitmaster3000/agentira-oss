@@ -11,6 +11,8 @@ vi.mock('../api', () => ({
         listAttachments: vi.fn(() => Promise.resolve([])),
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
+        getEpics: vi.fn(() => Promise.resolve([])),
+        moveTask: vi.fn(() => Promise.resolve({})),
         updateTask: vi.fn(() => Promise.resolve({})),
         forge: { listTaskRuns: vi.fn(() => Promise.resolve([])) },
     },
@@ -105,6 +107,33 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
         fireEvent.click(await screen.findByTitle('Edit'));
         expect(screen.queryByTitle('Close')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+    });
+
+    it('shows the epic as a dropdown in the details rows (like assignee)', async () => {
+        api.getEpics.mockResolvedValue([
+            { id: 'E1', title: 'Onboarding' },
+            { id: 'E2', title: 'Billing' },
+        ]);
+        render(<Harness task={baseTask({ epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' })} />);
+
+        const select = await screen.findByLabelText('Epic');
+        expect(select.tagName).toBe('SELECT');
+        await waitFor(() => expect(select.value).toBe('E1'));
+        // Options come from the project's epics.
+        expect(screen.getByRole('option', { name: 'Billing' })).toBeInTheDocument();
+    });
+
+    it('saves the epic via updateTask when the dropdown changes (no edit mode)', async () => {
+        api.getEpics.mockResolvedValue([{ id: 'E1', title: 'Onboarding' }]);
+        render(<Harness task={baseTask()} />);
+
+        const select = await screen.findByLabelText('Epic');
+        await waitFor(() => expect(screen.getByRole('option', { name: 'Onboarding' })).toBeInTheDocument());
+        fireEvent.change(select, { target: { value: 'E1' } });
+
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ epic_id: 'E1' }),
+        ));
     });
 
     it('shows the repo a multi-repo task maps its Branch & PR to', async () => {
