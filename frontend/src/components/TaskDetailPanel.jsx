@@ -319,9 +319,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         </button>
                     </>
                 )}
-                <button onClick={onClose} title="Close" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
-                    <X className="w-4 h-4" />
-                </button>
+                {/* In edit mode the Cancel button covers dismissal, so the
+                    standalone close (X) is hidden to avoid a redundant cross. */}
+                {!isEditing && (
+                    <button onClick={onClose} title="Close" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                        <X className="w-4 h-4" />
+                    </button>
+                )}
             </div>
 
             {/* Title */}

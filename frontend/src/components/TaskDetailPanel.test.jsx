@@ -98,6 +98,15 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
         expect(screen.queryByLabelText('Branch')).not.toBeInTheDocument();
     });
 
+    it('hides the standalone close (X) in edit mode — Cancel covers it', async () => {
+        render(<Harness task={baseTask()} />);
+        expect(screen.getByTitle('Close')).toBeInTheDocument();
+
+        fireEvent.click(await screen.findByTitle('Edit'));
+        expect(screen.queryByTitle('Close')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+    });
+
     it('shows the repo a multi-repo task maps its Branch & PR to', async () => {
         render(<Harness task={baseTask({ repo_name: 'frontend', repos: ['frontend', 'backend'] })} />);
         expect(await screen.findByText('frontend')).toBeInTheDocument();
