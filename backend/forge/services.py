@@ -1274,7 +1274,8 @@ def get_active_runs() -> dict:
 
 
 def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = None,
-              status: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[dict]:
+              status: Optional[str] = None, outcome: Optional[str] = None,
+              limit: int = 100, offset: int = 0) -> list[dict]:
     with _session() as db:
         q = db.query(Run)
         if agent_id:
@@ -1282,7 +1283,17 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
         if project_id:
             q = q.filter(Run.project_id == project_id)
         if status:
+            try:
+                RunStatus(status)
+            except ValueError:
+                raise ValueError(f"invalid run status: {status!r}")
             q = q.filter(Run.status == status)
+        if outcome:
+            try:
+                RunOutcome(outcome)
+            except ValueError:
+                raise ValueError(f"invalid run outcome: {outcome!r}")
+            q = q.filter(Run.outcome == outcome)
         # AP-190: the Runs list is one row per (agent, task) — the work-view of
         # that task's chat — NOT a per-turn is_work-filtered view. `is_work`
         # used to hide a task run until it committed something, so an agent

@@ -436,9 +436,14 @@ def get_active_runs():
 
 @router.get("/runs")
 def list_runs(agent_id: Optional[str] = None, project_id: Optional[str] = None,
-              status: Optional[str] = None, limit: int = 100, offset: int = 0):
-    return services.list_runs(agent_id=agent_id, project_id=project_id,
-                              status=status, limit=limit, offset=offset)
+              status: Optional[str] = None, outcome: Optional[str] = None,
+              limit: int = 100, offset: int = 0):
+    try:
+        return services.list_runs(agent_id=agent_id, project_id=project_id,
+                                  status=status, outcome=outcome,
+                                  limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @router.post("/runs", status_code=201)
