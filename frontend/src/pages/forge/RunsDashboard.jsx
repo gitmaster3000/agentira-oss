@@ -7,7 +7,6 @@ const STATUS_STYLES = {
     queued:        { bg: '#5f6368', label: 'Queued' },
     pending:       { bg: '#5f6368', label: 'Pending' },
     running:       { bg: '#f1c40f', label: 'Running' },
-    waiting_human: { bg: '#ff9800', label: 'Waiting' },
     blocked:       { bg: '#e91e63', label: 'Blocked' },
     completed:     { bg: '#2ecc71', label: 'Completed' },
     failed:        { bg: '#e74c3c', label: 'Failed' },
@@ -79,7 +78,6 @@ export function RunsDashboard() {
                     <option value="">All statuses</option>
                     <option value="queued">Queued</option>
                     <option value="running">Running</option>
-                    <option value="waiting_human">Waiting (Human)</option>
                     <option value="blocked">Blocked</option>
                     <option value="completed">Completed</option>
                     <option value="failed">Failed</option>

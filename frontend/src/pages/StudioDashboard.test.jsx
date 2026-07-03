@@ -55,11 +55,11 @@ describe('StudioDashboard (Home cockpit)', () => {
     });
 
     it('lists running runs under LIVE NOW and waiting runs under NEEDS YOU', async () => {
-        api.forge.listRuns.mockImplementation(({ status }) =>
+        api.forge.listRuns.mockImplementation(({ status, outcome }) =>
             Promise.resolve(
                 status === 'running'
                     ? [{ id: 'r1', agent_name: 'Implementer', task_title: 'Add retry', task_key: 'ACM-1', project_id: 'p1' }]
-                    : status === 'waiting_human'
+                    : outcome === 'needs_input'
                         ? [{ id: 'r9', agent_name: 'Reviewer', task_title: 'Approve PR', task_key: 'ACM-2' }]
                         : [],
             ),

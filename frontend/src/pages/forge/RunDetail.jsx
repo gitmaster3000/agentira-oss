@@ -146,7 +146,7 @@ export function RunDetail() {
     // Transient states (pausing/cancelling/resuming) are intentionally
     // excluded — the daemon hasn't confirmed yet, so a second Stop would
     // race the first. The reconciler escalates stuck transients.
-    const isActive = ['queued', 'pending', 'running', 'waiting_human',
+    const isActive = ['queued', 'pending', 'running',
                       'blocked', 'paused'].includes(run.status);
     // AP-112: READY = the prompt-editor screen. Hide the top
     // pause/resume/stop controls there — they're meaningless before

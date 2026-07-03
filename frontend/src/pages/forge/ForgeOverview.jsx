@@ -154,7 +154,6 @@ function RunStatusBadge({ status }) {
         queued:        { bg: '#5f6368', label: 'Queued' },
         pending:       { bg: '#5f6368', label: 'Pending' },
         running:       { bg: '#f1c40f', label: 'Running' },
-        waiting_human: { bg: '#ff9800', label: 'Waiting' },
         blocked:       { bg: '#e91e63', label: 'Blocked' },
         completed:     { bg: '#2ecc71', label: 'Done' },
         failed:        { bg: '#e74c3c', label: 'Failed' },
