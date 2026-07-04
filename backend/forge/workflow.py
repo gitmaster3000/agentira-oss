@@ -377,6 +377,38 @@ def _rejection_demotion(db, *, run: Run, task: Task,
     return None
 
 
+def _review_approved(db, *, run: Run, task: Task) -> bool:
+    """Incident fix (2026-07-04, PR #167 merged before its review verdict):
+    a run finishing `succeeded` in the review column only proves the
+    reviewer's SESSION completed cleanly — it is NOT approval. A run that
+    rejects (REQUEST_CHANGES) still reports `succeeded`, and a stray/
+    wrong-role run on the same task (e.g. a mistaken re-dispatch) looks
+    identical to an approving one if the driver trusts the column alone.
+
+    Per AGENTIRA_VISION.md §5.3, only EVIDENCE moves state forward: require
+    an explicit `REVIEW: APPROVE` comment, posted by THIS run's own agent,
+    logged after the run started. `Activity.actor` is server-injected from
+    the authenticated MCP session (see `mcp_server.actor_ctx`) — not
+    prompt-writable text — so this can't be spoofed by run content, and it
+    ties the merge to the specific run that produced it.
+    """
+    if not run.agent_id:
+        return False
+    agent = db.get(Agent, run.agent_id)
+    profile = db.get(Profile, agent.profile_id) if agent and agent.profile_id else None
+    if not profile:
+        return False
+    from backend.models import Activity
+    row = (db.query(Activity)
+             .filter(Activity.task_id == task.id,
+                     Activity.actor == profile.name,
+                     Activity.action == "commented",
+                     Activity.created_at >= run.created_at,
+                     Activity.detail.like("REVIEW: APPROVE%"))
+             .first())
+    return row is not None
+
+
 def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
                                demotion: dict) -> dict:
     """AP-252: route a rejected task to whoever owes the fix.
@@ -550,6 +582,33 @@ def advance_after_run(run_id: str) -> dict:
             if spec.integrate is not None:
                 fails = [f for f in fails
                          if f.name not in ("pr_url_set", "has_branch_or_pr")]
+                if not _review_approved(db, run=run, task=task):
+                    from backend.models import Activity
+                    db.add(Activity(
+                        project_id=task.project_id, task_id=task.id,
+                        actor="workflow", action="commented",
+                        detail=("⛔ **Merge refused** — this run succeeded, but "
+                                "no reviewer approval evidence (`REVIEW: "
+                                "APPROVE`) was found on this task since the "
+                                "run started. The branch stays unmerged until "
+                                "the reviewer records an approval verdict."),
+                    ))
+                    db.commit()
+                    try:
+                        from backend.forge.services import _notify_admins
+                        _notify_admins(
+                            db, type_="workflow.merge_refused",
+                            title=f"{task.key or task.id}: merge refused — "
+                                  f"no approval evidence",
+                            link=f"/projects/{task.project_id}/tasks/{task.id}")
+                        db.commit()
+                    except Exception:  # noqa: BLE001 — best-effort
+                        pass
+                    logger.warning(
+                        "workflow: %s merge refused — no approval evidence "
+                        "(run=%s agent=%s)", task.key or task.id, run.id,
+                        run.agent_id)
+                    return {"advanced": False, "reason": "no_approval_evidence"}
             if fails:
                 logger.info("workflow: %s gate blocks %s->%s: %s",
                             task.key or task.id, current, target,
