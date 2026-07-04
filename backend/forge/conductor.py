@@ -35,23 +35,21 @@ from sqlalchemy import select
 
 from backend.db import SessionLocal
 from backend.models import Profile, Project, Task, Status, Role
-from backend.forge.models import Agent, Run, RunStatus, AgentMessage, ForgeRuntime
+from backend.forge.models import Agent, Run, RunStatus, ForgeRuntime
 
 logger = logging.getLogger("agentira.forge.conductor")
 
 # Tick cadence (seconds) — each tick is one Conductor action.
 TICK_INTERVAL_S = 60
 
-# AP-119: a RUNNING/PENDING run that has shown no activity for this
-# long is a zombie — its daemon-side process died without a
-# trigger-complete (daemon crash, WS drop, OOM). A healthy run streams
-# events continuously, so prolonged silence is a reliable staleness
-# signal. The reconciler marks such runs FAILED so they stop showing
-# as "running" forever and can't be stopped.
-STALE_RUN_SILENCE_MINUTES = 20
-
 # Identity of the Conductor agent.
 CONDUCTOR_NAME = "Conductor"
+
+# Upper bound on rows a facts-gathering query pulls into memory in one go
+# (gather_planning_facts, gather_progress_facts). These scan grows-forever
+# tables (Task) on every tick/plan-interval; unbounded .all() would OOM the
+# same way the unbounded /api/notifications history did (2026-07-04 incident).
+FACTS_SCAN_LIMIT = 200
 
 # Prompts are configuration, not code (AP-152/157): every Conductor prompt —
 # the agent system prompt and the per-turn planning/report templates — lives
@@ -310,73 +308,29 @@ def survey_workspace() -> dict:
     return {"agents": agents_view}
 
 
-def reconcile_stale_runs() -> list[dict]:
-    """AP-119: fail runs stuck RUNNING/PENDING with no recent activity.
-
-    A run whose daemon-side process died without posting a
-    trigger-complete (daemon crash, WS drop, OOM) stays RUNNING forever
-    — it shows as "running" and the user can't stop it. We detect these
-    by silence: a healthy run streams events continuously, so a run
-    with no message newer than STALE_RUN_SILENCE_MINUTES is a zombie.
-    """
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        minutes=STALE_RUN_SILENCE_MINUTES)
-    reconciled: list[dict] = []
-    with SessionLocal() as db:
-        live = (db.query(Run)
-                  .filter(Run.status.in_([RunStatus.RUNNING,
-                                          RunStatus.PENDING]))
-                  .all())
-        for run in live:
-            last_msg = (db.query(AgentMessage.created_at)
-                          .filter(AgentMessage.run_id == run.id)
-                          .order_by(AgentMessage.created_at.desc())
-                          .first())
-            last_activity = (last_msg[0] if last_msg
-                             else (run.started_at or run.created_at))
-            if last_activity is None:
-                continue
-            if last_activity.tzinfo is None:
-                last_activity = last_activity.replace(tzinfo=timezone.utc)
-            if last_activity < cutoff:
-                run.status = RunStatus.FAILED
-                run.error = (f"Stale — no activity for over "
-                             f"{STALE_RUN_SILENCE_MINUTES} min; the daemon "
-                             f"likely lost this run.")
-                run.finished_at = datetime.now(timezone.utc)
-                reconciled.append({"run": run.id, "agent": run.agent_id})
-        if reconciled:
-            db.commit()
-            logger.warning("Reconciled %d stale run(s): %s",
-                           len(reconciled), [r["run"] for r in reconciled])
-    return reconciled
-
-
 def run_tick() -> dict:
     """One Conductor action — workspace-wide.
 
-    First reconciles zombie runs (AP-119), then for each conductor-
-    enabled worker agent below its concurrency cap, picks its next FRESH
-    todo task, dispatches it, and moves the task to in_progress so it is
-    claimed exactly once. Per-agent failures are logged and skipped —
-    one bad row must not stall the fleet.
+    For each conductor-enabled worker agent below its concurrency cap,
+    picks its next FRESH todo task, dispatches it, and moves the task to
+    in_progress so it is claimed exactly once. Per-agent failures are
+    logged and skipped — one bad row must not stall the fleet.
+
+    Zombie-run reconciliation (AP-119) lives solely in
+    `backend.forge.reconciler.reconcile_stale_runs`, scheduled independently
+    every `reconciler.RECONCILE_INTERVAL_S` — this tick used to run its own
+    duplicate sweep of the same non-terminal runs; that duplicate was
+    removed (2026-07-04 query-hygiene sweep) in favor of the single,
+    heartbeat-based reconciler.
     """
     global _LAST_TICK
     if not _conductor_active():
         # Keep the same shape as a normal tick — `skipped` is always the
         # list of skipped-agent records; `disabled` is the off marker.
-        _LAST_TICK = {"disabled": True,
-                      "dispatched": [], "skipped": [], "reconciled": []}
+        _LAST_TICK = {"disabled": True, "dispatched": [], "skipped": []}
         return _LAST_TICK
     dispatched: list[dict] = []
     skipped: list[dict] = []
-
-    # Run monitoring: clear zombies before dispatching new work.
-    try:
-        stale = reconcile_stale_runs()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("reconcile_stale_runs failed: %s", exc)
-        stale = []
 
     with SessionLocal() as db:
         in_progress_id = _in_progress_status_id(db)
@@ -427,8 +381,7 @@ def run_tick() -> dict:
                 logger.exception("Conductor tick failed for agent=%s: %s", agent.id, exc)
                 skipped.append({"agent": agent.id, "reason": "exception", "error": str(exc)})
 
-    _LAST_TICK = {"dispatched": dispatched, "skipped": skipped,
-                  "reconciled": stale}
+    _LAST_TICK = {"dispatched": dispatched, "skipped": skipped}
     return _LAST_TICK
 
 
@@ -664,6 +617,7 @@ def gather_planning_facts() -> dict:
                               Task.id.notin_(tasks_with_runs),
                               (Task.assignee == "") | (Task.assignee.is_(None)))
                       .order_by(Task.created_at.asc())
+                      .limit(FACTS_SCAN_LIMIT)
                       .all())
             for t in rows:
                 tasks.append({
@@ -751,9 +705,10 @@ def run_planning_turn() -> dict:
 # A task in `in_progress` or `review` whose latest run has shown no
 # activity for this long is "stalled" — surface it to the Conductor for
 # judgment (re-dispatch / reassign / escalate). The threshold deliberately
-# floors at the run-staleness reaper window (STALE_RUN_SILENCE_MINUTES=20)
-# so we never flag a run that the reconciler is about to mark FAILED on
-# its own — the watchdog is for the cases reconciliation can't classify.
+# floors well above the reconciler's stale-run window
+# (backend.forge.reconciler.STALE_RUN_THRESHOLD_S, 120s) so we never flag
+# a run that the reconciler is about to mark FAILED on its own — the
+# watchdog is for the cases reconciliation can't classify.
 STALLED_NO_ACTIVITY_MINUTES = 30
 
 # Most recent progress-check turn result — observability for /status.
@@ -833,6 +788,8 @@ def gather_progress_facts(
         rows = (db.query(Task)
                   .filter(Task.project_id.in_(managed_project_ids),
                           Task.status_id.in_(active_status_ids))
+                  .order_by(Task.created_at.asc())
+                  .limit(FACTS_SCAN_LIMIT)
                   .all())
 
         # Status id → name (one query, lookup map — avoids N+1).
@@ -841,12 +798,21 @@ def gather_progress_facts(
                                  .filter(Status.id.in_(active_status_ids))
                                  .all()}
 
+        # Latest run per task — one query for all rows (was one Run query
+        # per task in the loop). Ordering by (task_id, created_at desc)
+        # means the first row seen for a task_id is its latest run.
+        task_ids = [t.id for t in rows]
+        latest_run_by_task: dict[str, Run] = {}
+        if task_ids:
+            for r in (db.query(Run)
+                        .filter(Run.task_id.in_(task_ids))
+                        .order_by(Run.task_id, Run.created_at.desc())
+                        .all()):
+                latest_run_by_task.setdefault(r.task_id, r)
+
         now = datetime.now(timezone.utc)
         for t in rows:
-            run = (db.query(Run)
-                     .filter(Run.task_id == t.id)
-                     .order_by(Run.created_at.desc())
-                     .first())
+            run = latest_run_by_task.get(t.id)
             if run is None:
                 continue   # task without a run is planning's concern
             last_activity = _run_last_activity(run)

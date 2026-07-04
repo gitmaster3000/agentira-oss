@@ -17,9 +17,7 @@ import pytest
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor
-from backend.forge.models import (
-    Agent, Run, RunStatus, ForgeRuntime, AgentMessage, MessageRole,
-)
+from backend.forge.models import Agent, Run, RunStatus, ForgeRuntime
 
 
 @pytest.fixture(autouse=True)
@@ -219,60 +217,6 @@ def test_survey_workspace_reports_next_task():
     mine = [a for a in snap["agents"] if a["agent"] == agent_id]
     assert len(mine) == 1
     assert mine[0]["next_task"]["id"] == task_id
-
-
-# ── AP-119: stale-run reconciler ─────────────────────────────────────────
-
-def _mk_run(agent_id, *, status, age_minutes, task_id=None):
-    from datetime import datetime, timedelta, timezone
-    ts = datetime.now(timezone.utc) - timedelta(minutes=age_minutes)
-    rid = uuid.uuid4().hex[:12]
-    with forge_services._session() as db:
-        db.add(Run(id=rid, agent_id=agent_id, task_id=task_id,
-                   status=status, started_at=ts, created_at=ts))
-        db.commit()
-    return rid
-
-
-def test_reconcile_fails_zombie_running_run():
-    """A RUNNING run silent past the threshold is marked FAILED."""
-    agent_id, _, _ = _mk_setup()
-    rid = _mk_run(agent_id, status=RunStatus.RUNNING, age_minutes=45)
-    out = conductor.reconcile_stale_runs()
-    assert any(r["run"] == rid for r in out)
-    with forge_services._session() as db:
-        assert db.get(Run, rid).status == RunStatus.FAILED
-
-
-def test_reconcile_leaves_fresh_running_run_alone():
-    agent_id, _, _ = _mk_setup()
-    rid = _mk_run(agent_id, status=RunStatus.RUNNING, age_minutes=2)
-    conductor.reconcile_stale_runs()
-    with forge_services._session() as db:
-        assert db.get(Run, rid).status == RunStatus.RUNNING
-
-
-def test_reconcile_uses_recent_message_as_activity():
-    """A run is NOT stale if it has a recent message, even if old."""
-    agent_id, _, _ = _mk_setup()
-    rid = _mk_run(agent_id, status=RunStatus.RUNNING, age_minutes=90)
-    with forge_services._session() as db:
-        db.add(AgentMessage(agent_id=agent_id, run_id=rid,
-                            role=MessageRole.ASSISTANT, content="still working"))
-        db.commit()
-    conductor.reconcile_stale_runs()
-    with forge_services._session() as db:
-        assert db.get(Run, rid).status == RunStatus.RUNNING
-
-
-def test_run_tick_reports_reconciled():
-    agent_id, _, _ = _mk_setup()
-    _mk_run(agent_id, status=RunStatus.RUNNING, age_minutes=45)
-    with patch.object(forge_services, "schedule_task_run",
-                      lambda **kw: {"run_id": "x"}):
-        result = conductor.run_tick()
-    assert "reconciled" in result
-    assert len(result["reconciled"]) == 1
 
 
 # ── tick_agent: event-driven "agent freed" scheduling ────────────────────
