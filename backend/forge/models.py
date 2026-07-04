@@ -370,3 +370,31 @@ class WebhookLog(Base):
     success: Mapped[bool]       = mapped_column(default=False)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class DispatchIntent(Base):
+    """Durable outbox row for a daemon-bound WS frame (AP-390).
+
+    Written by WsHub.dispatch_* before any send attempt so a dispatch
+    triggered in a process that doesn't hold the daemon's WS socket
+    (flowty-mcp serving finish_run, a redeploy window, a second replica)
+    survives until the flowty-api delivery loop — or the daemon's next
+    WS registration — sends it through a live connection. The payload is
+    the complete ready-to-send frame; delivery is at-least-once (the
+    daemon dedups by event_id and its inflight registry keys by scope).
+    """
+    __tablename__ = "forge_dispatch_intents"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    kind: Mapped[str]           = mapped_column(String(20), default="trigger")  # trigger|integrate|cancel
+    event_id: Mapped[str]       = mapped_column(String(80), default="", index=True)
+    runtime_id: Mapped[str]     = mapped_column(String(40), default="", index=True)
+    agent_id: Mapped[str]       = mapped_column(String(40), default="")
+    run_id: Mapped[str]         = mapped_column(String(40), default="")
+    task_id: Mapped[str]        = mapped_column(String(40), default="")
+    payload_json: Mapped[str]   = mapped_column(Text, default="{}")
+    status: Mapped[str]         = mapped_column(String(12), default="pending", index=True)  # pending|delivered|failed
+    attempts: Mapped[int]       = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

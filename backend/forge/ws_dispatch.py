@@ -74,10 +74,6 @@ class WsHub:
     def __init__(self) -> None:
         self._conns: dict[str, DaemonConnection] = {}  # daemon_id → conn
         self._lock = asyncio.Lock()
-        # runtime_id → [(event_id, payload), ...] triggers queued because no
-        # daemon was online at dispatch time. Drained on the next matching
-        # registration; expired (and surfaced as a failed run) after TTL.
-        self._pending: dict[str, list[tuple[str, dict]]] = {}
 
     async def connect(self, conn: DaemonConnection) -> None:
         async with self._lock:
@@ -97,18 +93,16 @@ class WsHub:
         await self._deliver_pending(conn)
 
     async def _deliver_pending(self, conn: DaemonConnection) -> None:
-        """Flush any triggers queued for redelivery while no daemon owning
-        one of `conn`'s runtimes was online."""
-        to_send: list[tuple[str, dict]] = []
-        async with self._lock:
-            for runtime_id in conn.runtime_ids:
-                queued = self._pending.pop(runtime_id, None)
-                if queued:
-                    to_send.extend(queued)
-        for event_id, payload in to_send:
-            await conn.send(event_id, payload)
-            logger.info("Redelivered queued trigger trace=%s → daemon=%s",
-                        event_id, conn.daemon_id[:8])
+        """Flush any frames queued in the durable outbox (AP-390) while no
+        daemon owning one of `conn`'s runtimes was online. The outbox rows
+        are written by dispatch_* in whatever process handled the trigger;
+        this drain plus the flowty-api sweep are the delivery paths."""
+        from backend.forge import dispatch_outbox as outbox
+        for v in outbox.pending_for_runtimes(conn.runtime_ids):
+            await conn.send(v["event_id"], v["payload"])
+            outbox.mark_delivered(v["id"])
+            logger.info("Redelivered queued %s %s → daemon=%s",
+                        v["kind"], v["event_id"], conn.daemon_id[:8])
 
     async def disconnect(self, daemon_id: str, expected: "DaemonConnection | None" = None) -> None:
         """Remove the daemon iff the current registration matches `expected`.
@@ -150,27 +144,38 @@ class WsHub:
             "prompt": prompt,
             **runtime_args,
         }
+        # AP-390: persist the frame BEFORE any send attempt. This process's
+        # hub may not hold the daemon's socket at all (finish_run served by
+        # the flowty-mcp service, a redeploy window, a second replica) — the
+        # row is what guarantees delivery: the flowty-api sweep or the
+        # daemon's next WS registration sends it. TTL expiry with no daemon
+        # surfaces the drop (dispatch_outbox._fail_intent).
+        from backend.forge import dispatch_outbox as outbox
+        intent_id = outbox.write_intent(
+            kind="trigger", event_id=trace_id, runtime_id=runtime_id,
+            payload=payload, agent_id=agent_id, run_id=run_id,
+        )
+
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
 
-        # No daemon online with this runtime. Rather than fail the run
-        # immediately (the failure mode that bit AP-361: a daemon that was
-        # actually alive but had been silently deregistered by a half-open
-        # WS), queue the trigger for redelivery on the daemon's next
-        # registration. Only after DISPATCH_REDELIVER_TTL_S with no
-        # reconnect do we surface the drop.
         if not targets:
             logger.warning(
-                "Dispatch queued for redelivery: no daemon online for runtime=%s "
-                "trace=%s kind=%s agent=%s run=%s ttl=%ss",
+                "Dispatch queued in outbox: no daemon online in this process "
+                "for runtime=%s trace=%s kind=%s agent=%s run=%s intent=%s ttl=%ss",
                 runtime_id[:8] if runtime_id else "-",
-                trace_id, kind, agent_id, run_id or "-", DISPATCH_REDELIVER_TTL_S,
+                trace_id, kind, agent_id, run_id or "-",
+                intent_id or "WRITE-FAILED", DISPATCH_REDELIVER_TTL_S,
             )
-            async with self._lock:
-                self._pending.setdefault(runtime_id, []).append((trace_id, payload))
-            asyncio.ensure_future(self._expire_pending(
-                runtime_id=runtime_id, trace_id=trace_id, agent_id=agent_id, run_id=run_id,
-            ))
+            if intent_id is None:
+                # DB down AND no daemon: nothing can carry the frame — fail
+                # loudly now instead of hanging the run forever.
+                try:
+                    from backend.forge import services as _svc
+                    _svc.mark_dispatch_dropped(
+                        agent_id=agent_id, trace_id=trace_id, run_id=run_id or None)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("mark_dispatch_dropped failed: %s", exc)
             return
 
         for conn in targets:
@@ -179,37 +184,7 @@ class WsHub:
                 "Dispatched trigger trace=%s kind=%s agent=%s run=%s → daemon=%s",
                 trace_id, kind, agent_id, run_id or "-", conn.daemon_id[:8],
             )
-
-    async def _expire_pending(self, *, runtime_id: str, trace_id: str,
-                              agent_id: str, run_id: str) -> None:
-        """After the redelivery TTL, drop `trace_id` from the pending queue
-        (if it's still there — `_deliver_pending` removes it on redelivery)
-        and surface the failure the same way an instant drop used to."""
-        await asyncio.sleep(DISPATCH_REDELIVER_TTL_S)
-        async with self._lock:
-            queued = self._pending.get(runtime_id)
-            if not queued:
-                return
-            remaining = [item for item in queued if item[0] != trace_id]
-            expired = len(remaining) != len(queued)
-            if remaining:
-                self._pending[runtime_id] = remaining
-            else:
-                self._pending.pop(runtime_id, None)
-        if not expired:
-            return  # already redelivered
-        logger.warning(
-            "Dispatch TTL expired with no daemon reconnect: runtime=%s trace=%s "
-            "agent=%s run=%s — marking dropped",
-            runtime_id[:8] if runtime_id else "-", trace_id, agent_id, run_id or "-",
-        )
-        try:
-            from backend.forge import services as _svc
-            _svc.mark_dispatch_dropped(
-                agent_id=agent_id, trace_id=trace_id, run_id=run_id or None,
-            )
-        except Exception as exc:  # noqa: BLE001 — best-effort surface
-            logger.warning("mark_dispatch_dropped failed: %s", exc)
+        outbox.mark_delivered(intent_id)
 
     async def dispatch_signal(self, *, runtime_id: str, signal: str,
                               trace_id: str = "", run_id: str = "",
@@ -257,16 +232,29 @@ class WsHub:
             "target_branch": target_branch,
             "push": push,
         }
+        # AP-390: durable outbox — an integrate triggered from finish_run
+        # lands in the flowty-mcp process, whose hub never has the daemon.
+        # The row keeps the merge alive until a process with the socket
+        # (flowty-api sweep / daemon reconnect drain) delivers it.
+        from backend.forge import dispatch_outbox as outbox
+        intent_id = outbox.write_intent(
+            kind="integrate", event_id=event_id, runtime_id=runtime_id,
+            payload=payload, run_id=run_id, task_id=task_id,
+        )
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
         if not targets:
-            logger.warning("Integrate dropped: no daemon online for runtime=%s task=%s",
-                           runtime_id[:8] if runtime_id else "-", task_id)
-            return False
+            logger.warning(
+                "Integrate queued in outbox: no daemon online in this process "
+                "for runtime=%s task=%s intent=%s",
+                runtime_id[:8] if runtime_id else "-", task_id,
+                intent_id or "WRITE-FAILED")
+            return intent_id is not None
         for conn in targets:
             await conn.send(event_id, payload)
             logger.info("Dispatched integrate task=%s branch=%s → daemon=%s",
                         task_id, branch, conn.daemon_id[:8])
+        outbox.mark_delivered(intent_id)
         return True
 
     async def dispatch_cancel(self, *, runtime_id: str, trace_id: str = "",
@@ -290,6 +278,20 @@ class WsHub:
         }
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
+        if not targets:
+            # AP-390: a cancel issued from a hub-less process (or a redeploy
+            # window) still has to reach the daemon — queue it durably; the
+            # flowty-api sweep or the reconnect drain carries it.
+            from backend.forge import dispatch_outbox as outbox
+            intent_id = outbox.write_intent(
+                kind="cancel", event_id=event_id, runtime_id=runtime_id,
+                payload=payload, run_id=run_id)
+            logger.warning(
+                "Cancel queued in outbox: no daemon online in this process "
+                "for runtime=%s run=%s intent=%s",
+                runtime_id[:8] if runtime_id else "-", run_id or "-",
+                intent_id or "WRITE-FAILED")
+            return
         for conn in targets:
             await conn.send(event_id, payload)
             logger.info("Dispatched cancel trace=%s run=%s → daemon=%s",
