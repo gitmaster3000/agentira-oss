@@ -116,16 +116,23 @@ class DaemonWsClient:
                 try:
                     raw = ws.recv(timeout=30)
                 except TimeoutError:
-                    # Lib-managed ping handles keepalive. recv-timeout is
-                    # just a wake to check self._stop — don't spam the
-                    # server with extra frames.
+                    # Lib-managed ping handles socket-level keepalive, but a
+                    # half-open proxy hop can absorb those silently without
+                    # ever surfacing an error here. Send an app-level ping
+                    # too so the server can detect and deregister us if it's
+                    # not getting through — see handle_daemon_ws heartbeat.
+                    ws.send(json.dumps({"type": "ping"}))
                     continue
                 try:
                     msg = json.loads(raw)
                 except Exception:
                     continue
 
-                if msg.get("type") == "trigger":
+                if msg.get("type") == "ping":
+                    ws.send(json.dumps({"type": "pong"}))
+                elif msg.get("type") == "pong":
+                    continue
+                elif msg.get("type") == "trigger":
                     logger.info(
                         "WS trigger received: trace=%s kind=%s agent=%s run=%s",
                         msg.get("trace_id", ""),
