@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -22,6 +24,20 @@ logger = logging.getLogger("agentira.forge.ws_dispatch")
 
 _SEND_BUF = 16          # outbound message buffer per daemon
 _DEDUP_RING = 128       # event IDs to remember per daemon (deduplicate)
+
+# AP-361 follow-up: a redeployed-but-idle daemon WS can go half-open — the
+# TCP socket looks alive to both sides but frames never arrive. Neither side
+# notices via ordinary recv() until something actually tries to write, so we
+# probe with an app-level ping and close/deregister if no frame (data or
+# pong) has been seen within the timeout. Config, not hardcoded, per incident
+# follow-up.
+WS_HEARTBEAT_INTERVAL_S = float(os.environ.get("FORGE_WS_HEARTBEAT_INTERVAL_S", "20"))
+WS_HEARTBEAT_TIMEOUT_S = float(os.environ.get("FORGE_WS_HEARTBEAT_TIMEOUT_S", "45"))
+
+# How long a trigger with no daemon online waits in the redelivery queue
+# before the run is failed. Matches the daemon's reconnect backoff ceiling
+# with headroom (see _RECONNECT_DELAYS in agentira_cli/daemon/ws_client.py).
+DISPATCH_REDELIVER_TTL_S = float(os.environ.get("FORGE_DISPATCH_REDELIVER_TTL_S", "300"))
 
 
 class DaemonConnection:
@@ -58,6 +74,10 @@ class WsHub:
     def __init__(self) -> None:
         self._conns: dict[str, DaemonConnection] = {}  # daemon_id → conn
         self._lock = asyncio.Lock()
+        # runtime_id → [(event_id, payload), ...] triggers queued because no
+        # daemon was online at dispatch time. Drained on the next matching
+        # registration; expired (and surfaced as a failed run) after TTL.
+        self._pending: dict[str, list[tuple[str, dict]]] = {}
 
     async def connect(self, conn: DaemonConnection) -> None:
         async with self._lock:
@@ -74,6 +94,21 @@ class WsHub:
             except Exception:
                 pass
         logger.info("Daemon connected: %s runtimes=%s", conn.daemon_id[:8], conn.runtime_ids)
+        await self._deliver_pending(conn)
+
+    async def _deliver_pending(self, conn: DaemonConnection) -> None:
+        """Flush any triggers queued for redelivery while no daemon owning
+        one of `conn`'s runtimes was online."""
+        to_send: list[tuple[str, dict]] = []
+        async with self._lock:
+            for runtime_id in conn.runtime_ids:
+                queued = self._pending.pop(runtime_id, None)
+                if queued:
+                    to_send.extend(queued)
+        for event_id, payload in to_send:
+            await conn.send(event_id, payload)
+            logger.info("Redelivered queued trigger trace=%s → daemon=%s",
+                        event_id, conn.daemon_id[:8])
 
     async def disconnect(self, daemon_id: str, expected: "DaemonConnection | None" = None) -> None:
         """Remove the daemon iff the current registration matches `expected`.
@@ -118,24 +153,24 @@ class WsHub:
         async with self._lock:
             targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
 
-        # No daemon online with this runtime — the trigger would vanish
-        # silently and the run row would stay stuck in PENDING/RUNNING
-        # forever. Mark the run failed (if any) and write a SYSTEM message
-        # to the chat thread so the user sees what happened.
+        # No daemon online with this runtime. Rather than fail the run
+        # immediately (the failure mode that bit AP-361: a daemon that was
+        # actually alive but had been silently deregistered by a half-open
+        # WS), queue the trigger for redelivery on the daemon's next
+        # registration. Only after DISPATCH_REDELIVER_TTL_S with no
+        # reconnect do we surface the drop.
         if not targets:
             logger.warning(
-                "Dispatch dropped: no daemon online for runtime=%s "
-                "trace=%s kind=%s agent=%s run=%s",
+                "Dispatch queued for redelivery: no daemon online for runtime=%s "
+                "trace=%s kind=%s agent=%s run=%s ttl=%ss",
                 runtime_id[:8] if runtime_id else "-",
-                trace_id, kind, agent_id, run_id or "-",
+                trace_id, kind, agent_id, run_id or "-", DISPATCH_REDELIVER_TTL_S,
             )
-            try:
-                from backend.forge import services as _svc
-                _svc.mark_dispatch_dropped(
-                    agent_id=agent_id, trace_id=trace_id, run_id=run_id or None,
-                )
-            except Exception as exc:  # noqa: BLE001 — best-effort surface
-                logger.warning("mark_dispatch_dropped failed: %s", exc)
+            async with self._lock:
+                self._pending.setdefault(runtime_id, []).append((trace_id, payload))
+            asyncio.ensure_future(self._expire_pending(
+                runtime_id=runtime_id, trace_id=trace_id, agent_id=agent_id, run_id=run_id,
+            ))
             return
 
         for conn in targets:
@@ -144,6 +179,37 @@ class WsHub:
                 "Dispatched trigger trace=%s kind=%s agent=%s run=%s → daemon=%s",
                 trace_id, kind, agent_id, run_id or "-", conn.daemon_id[:8],
             )
+
+    async def _expire_pending(self, *, runtime_id: str, trace_id: str,
+                              agent_id: str, run_id: str) -> None:
+        """After the redelivery TTL, drop `trace_id` from the pending queue
+        (if it's still there — `_deliver_pending` removes it on redelivery)
+        and surface the failure the same way an instant drop used to."""
+        await asyncio.sleep(DISPATCH_REDELIVER_TTL_S)
+        async with self._lock:
+            queued = self._pending.get(runtime_id)
+            if not queued:
+                return
+            remaining = [item for item in queued if item[0] != trace_id]
+            expired = len(remaining) != len(queued)
+            if remaining:
+                self._pending[runtime_id] = remaining
+            else:
+                self._pending.pop(runtime_id, None)
+        if not expired:
+            return  # already redelivered
+        logger.warning(
+            "Dispatch TTL expired with no daemon reconnect: runtime=%s trace=%s "
+            "agent=%s run=%s — marking dropped",
+            runtime_id[:8] if runtime_id else "-", trace_id, agent_id, run_id or "-",
+        )
+        try:
+            from backend.forge import services as _svc
+            _svc.mark_dispatch_dropped(
+                agent_id=agent_id, trace_id=trace_id, run_id=run_id or None,
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort surface
+            logger.warning("mark_dispatch_dropped failed: %s", exc)
 
     async def dispatch_signal(self, *, runtime_id: str, signal: str,
                               trace_id: str = "", run_id: str = "",
@@ -460,10 +526,33 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
         return
 
     pump_task = asyncio.create_task(conn.write_pump())
+    # AP-361: a redeployed proxy can leave the TCP socket half-open — the
+    # daemon side stops delivering frames but recv() here never raises, so
+    # the hub keeps a dead connection registered forever and every dispatch
+    # to it silently vanishes. Poll receive_text() with a bounded wait; on
+    # each timeout, probe with an app-level ping, and give up (deregister)
+    # once WS_HEARTBEAT_TIMEOUT_S has passed with no frame of any kind.
+    last_activity = time.monotonic()
     try:
         while True:
-            # keep-alive: read pings, ignore other messages
-            await ws.receive_text()
+            try:
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=WS_HEARTBEAT_INTERVAL_S)
+            except asyncio.TimeoutError:
+                if time.monotonic() - last_activity > WS_HEARTBEAT_TIMEOUT_S:
+                    logger.warning(
+                        "Daemon %s heartbeat timeout (no frames for %.0fs) — deregistering",
+                        daemon_id[:8], WS_HEARTBEAT_TIMEOUT_S,
+                    )
+                    break
+                await ws.send_json({"type": "ping"})
+                continue
+            last_activity = time.monotonic()
+            try:
+                frame = json.loads(raw)
+            except Exception:
+                frame = None
+            if isinstance(frame, dict) and frame.get("type") == "ping":
+                await ws.send_json({"type": "pong"})
     except (WebSocketDisconnect, Exception):
         pass
     finally:
