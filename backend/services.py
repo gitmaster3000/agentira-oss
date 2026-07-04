@@ -770,10 +770,16 @@ def remove_project_member(project_id: str, profile_name: str) -> bool:
         if not pm:
             return False
         
-        # Clear assignments for this user in this project
+        # Clear assignments for this user in this project. A direct field
+        # write outside TaskService, but audited: it's a legitimate
+        # cascade cleanup and it logs an activity row per task below —
+        # allow_task_write() makes that an explicit, visible exception
+        # rather than a silent bypass.
+        from backend.models import allow_task_write
         tasks = db.query(Task).filter_by(project_id=p.id, assignee=profile_name).all()
         for t in tasks:
-            t.assignee = ""
+            with allow_task_write():
+                t.assignee = ""
             _log_activity(
                 db, 
                 actor="system", 
@@ -964,9 +970,10 @@ def update_task(
     )
 
 
-def move_task(task_id: str, new_status: str, actor: str = "system") -> dict:
+def move_task(task_id: str, new_status: str, actor: str = "system",
+              skip_gates: bool = False) -> dict:
     from backend import tasks
-    return tasks.TaskService().move(task_id, new_status, actor)
+    return tasks.TaskService().move(task_id, new_status, actor, skip_gates)
 
 
 def delete_task(task_id: str) -> bool:

@@ -21,7 +21,7 @@ from backend import services
 from backend import agent_notifier
 from backend.auth import has_permission
 from backend.notifications import broker
-from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo
+from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
 
 logger = logging.getLogger("agentira.tasks")
@@ -70,6 +70,20 @@ _UPDATE_FIELDS = (
      "coerce": lambda v: v if v.strip() else None,
      "label": lambda raw, val: f"epic_id → {val}"},
 )
+
+
+def _is_project_member(db, project_id: str, profile_name: str) -> bool:
+    """True if the named profile belongs to the project — either the
+    human-facing ProjectMember join row, or (for agents, per
+    backend.forge.workflow.pick_role_agent) a matching
+    Profile.default_project_id."""
+    prof = db.query(Profile).filter(Profile.name == profile_name).first()
+    if not prof:
+        return False
+    if prof.default_project_id == project_id:
+        return True
+    return db.query(ProjectMember).filter_by(
+        project_id=project_id, profile_id=prof.id).first() is not None
 
 
 def resolve(task_type: str = "task") -> "TaskService":
@@ -268,11 +282,25 @@ class TaskService:
                     continue
                 attr = spec["name"]
                 val = spec["coerce"](raw) if "coerce" in spec else raw
+                # AP-374: an automated hand-off (the workflow driver) may only
+                # assign to a current project member — this is exactly the
+                # channel that let a non-member agent take a task over the
+                # ORM-write bypass. Human/admin reassignment via the API
+                # keeps its existing, more permissive behavior (ad-hoc
+                # cross-project assignment is an intentional escape hatch —
+                # see test_list_tasks_scoping).
+                if attr == "assignee" and actor == "workflow" and val:
+                    if not _is_project_member(db, task.project_id, val):
+                        raise PermissionError(
+                            f"workflow cannot assign task {task_id} to "
+                            f"'{val}': not a member of project {task.project_id}"
+                        )
                 cur = spec["current"](task) if "current" in spec else getattr(task, attr)
                 if val == cur:
                     continue
                 frm, to = spec["diff"](cur, val) if "diff" in spec else (cur, val)
-                setattr(task, attr, val)
+                with allow_task_write():
+                    setattr(task, attr, val)
                 diff[attr] = {"from": frm, "to": to}
                 changes.append(spec["label"](raw, val) if "label" in spec
                                else f"{attr} → {val}")
@@ -336,7 +364,8 @@ class TaskService:
             return services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
 
     # ── move ──────────────────────────────────────────────────────────────
-    def move(self, task_id: str, new_status: str, actor: str = "system") -> dict:
+    def move(self, task_id: str, new_status: str, actor: str = "system",
+             skip_gates: bool = False) -> dict:
         from backend.auth import check_transition
 
         with services._session() as db:
@@ -352,11 +381,17 @@ class TaskService:
             check_transition(db, actor, old, new_status)
 
             # AP-158: per-project column-exit gates (opt-in via gates_enabled).
-            if task.project and getattr(task.project, "gates_enabled", False):
+            # skip_gates is an explicit, visible escape hatch for the workflow
+            # driver's two-phase `integrate` advance: it already verified
+            # stronger evidence (a real merge, daemon-confirmed) than the
+            # pr_url/branch proxy gates check, and re-running them here would
+            # be a spurious re-entrant failure, not a real block.
+            if not skip_gates and task.project and getattr(task.project, "gates_enabled", False):
                 from backend import gates as _gates
                 _gates.enforce(task, from_status=old, to_status=new_status)
 
-            task.status_id = services._get_status_id(db, new_status)
+            with allow_task_write():
+                task.status_id = services._get_status_id(db, new_status)
 
             services._log_activity(
                 db, actor, "task.move", f"{old} → {new_status}",

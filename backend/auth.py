@@ -19,7 +19,13 @@ def get_permissions(db: Session, actor: str) -> set[str]:
     get the wildcard '*' — they operate workspace-wide and must see and
     act across every project, not just ones they're a member of.
     """
-    if actor == "system":
+    # "workflow" is the backend.forge.workflow driver's fixed actor name — a
+    # trusted internal caller (not a real profile) that already re-derives
+    # its own gate-equivalent checks (see workflow.advance_after_run) before
+    # calling TaskService. Same trust level as "system", named separately so
+    # the activity trail can tell automated hand-offs apart from manual
+    # admin actions.
+    if actor in ("system", "workflow"):
         return {"*"}
 
     profile = db.query(Profile).filter(Profile.name == actor).first()
