@@ -1492,6 +1492,11 @@ def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
     )
     for prof in admins:
         db.add(Notification(
+            # Explicit org stamp: this helper also runs from background jobs
+            # (conductor tick/scheduler) where no request org context exists
+            # for the before_flush hook to stamp from. The recipient's own
+            # org is always the right tenant for their notification.
+            org_id=prof.org_id,
             profile_id=prof.id,
             type=type_,
             title=title[:255],
@@ -1517,6 +1522,9 @@ def _notify_project_members(db, *, project_id: str | None, type_: str,
     )
     for prof in members:
         db.add(Notification(
+            # Explicit org stamp — see _notify_admins: background dispatch
+            # paths have no request org context for before_flush to stamp.
+            org_id=prof.org_id,
             profile_id=prof.id,
             type=type_,
             title=title[:255],
