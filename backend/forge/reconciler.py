@@ -22,6 +22,7 @@ from backend.db import SessionLocal
 from backend.forge.models import (
     Run, RunStatus, RunOutcome,
 )
+from backend.forge.runs import RECONCILED_ERROR
 from backend.forge.services import _notify_admins, _broadcast_status
 
 logger = logging.getLogger("agentira.forge.reconciler")
@@ -109,7 +110,10 @@ def reconcile_stale_runs() -> dict:
             run.finished_at = now
             if run.outcome is None:
                 run.outcome = RunOutcome.FAILED
-            run.error = "Run reconciled as failed — daemon stopped reporting it."
+            # Exactly this message is what heartbeat_runtimes' resurrection
+            # path matches on (AP-371) — a daemon-reported live run with this
+            # verdict is flipped back to RUNNING.
+            run.error = RECONCILED_ERROR
             _broadcast_status(run.id, RunStatus.FAILED)
             agent_name = run.agent.name if run.agent else "agent"
             _notify_admins(

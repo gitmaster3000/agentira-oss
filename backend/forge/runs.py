@@ -22,6 +22,13 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# The reconciler's verdict for a run its daemon stopped reporting. Kept here
+# (the Run lifecycle owner) so the resurrection path in
+# services.heartbeat_runtimes can recognize — and reverse — exactly this
+# verdict when the daemon proves the run alive again. AP-371.
+RECONCILED_ERROR = "Run reconciled as failed — daemon stopped reporting it."
+
+
 def _utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -118,6 +125,10 @@ def get_or_create_task_run(db, *, agent_id: str, task_id: str,
         # turn's terminal verdict + interrupt bookkeeping; completion re-stamps.
         run.status = RunStatus.RUNNING
         run.started_at = _utc_now()
+        # AP-371: the reused row carries last_heartbeat_at from its previous
+        # life — stale beyond the reconciler threshold, so without a fresh
+        # stamp the sweep kills the new turn before the daemon's first report.
+        run.last_heartbeat_at = _utc_now()
         run.finished_at = None
         run.duration_ms = None
         run.outcome = None
@@ -243,6 +254,11 @@ def start(run_id: str) -> dict | None:
         agent_name = agent.name if agent else "Agent"
         r.status = RunStatus.RUNNING
         r.started_at = _utc_now()
+        # AP-371: a prepared (READY) run can be dispatched minutes after
+        # creation, so the reconciler's created_at grace window is long gone.
+        # Starting IS a liveness proof — stamp it, giving the daemon a full
+        # threshold before the sweep may judge this run.
+        r.last_heartbeat_at = _utc_now()
         broadcast_status(run_id, RunStatus.RUNNING)
         if agent:
             agent.status = AgentStatus.BUSY

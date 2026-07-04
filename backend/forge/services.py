@@ -731,6 +731,31 @@ def heartbeat_runtimes(daemon_id: str, providers: list[str],
                .filter(Run.id.in_(live_run_ids))
                .update({Run.last_heartbeat_at: now},
                        synchronize_session=False))
+            # AP-371: resurrection. A daemon reporting a run in flight is
+            # authoritative proof of life — if the reconciler lost the race
+            # and already flipped that run to FAILED, reverse exactly that
+            # verdict (and only that one: a real failure or a user cancel
+            # has a different error and must stay terminal). Without this,
+            # the run keeps executing and finishing while the UI shows a
+            # dead run forever.
+            from backend.forge.runs import RECONCILED_ERROR, broadcast_status
+            zombies = (db.query(Run)
+                         .filter(Run.id.in_(live_run_ids),
+                                 Run.status == RunStatus.FAILED,
+                                 Run.error == RECONCILED_ERROR)
+                         .all())
+            for z in zombies:
+                z.status = RunStatus.RUNNING
+                z.error = None
+                z.finished_at = None
+                if z.outcome == RunOutcome.FAILED:
+                    z.outcome = None  # reconciler's stamp, not the agent's
+                broadcast_status(z.id, RunStatus.RUNNING)
+            if zombies:
+                _dispatch_logger.warning(
+                    "heartbeat: resurrected %d reconciler-failed run(s) the "
+                    "daemon reports alive: %s",
+                    len(zombies), [z.id for z in zombies])
         db.commit()
         return {"updated": len(updated)}
 
@@ -3561,6 +3586,9 @@ def resume_run(run_id: str) -> dict:
         if r and r.status == RunStatus.PAUSED:
             r.status = RunStatus.PENDING
             r.interrupt_intent = None
+            # AP-371: re-arm the liveness clock — the paused row's stamp is
+            # stale, and the reconciler sweeps PENDING rows too.
+            r.last_heartbeat_at = datetime.now(timezone.utc)
             db.commit()
             _broadcast_status(run_id, RunStatus.PENDING)
     return dispatch_pending_run(run_id=run_id, resume=True)
