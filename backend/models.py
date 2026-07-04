@@ -1,10 +1,12 @@
 """SQLAlchemy ORM models for AgentIRA."""
 
+import contextvars
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Table, Column
+from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Table, Column, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import inspect as _sa_inspect
 
 from backend.db import Base
 
@@ -501,6 +503,48 @@ class Task(Base):
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="task", cascade="all, delete-orphan")
     commits: Mapped[list["TaskCommit"]] = relationship(back_populates="task", cascade="all, delete-orphan",
                                                         order_by="TaskCommit.committed_at.desc()")
+
+
+# ── Write guard: Task.status_id/assignee only through the service layer ──
+# Any activity on a task (move, assign) must flow through TaskService
+# (backend.tasks) so auth checks, gates, activity logging, and agent
+# wake/delivery aren't skipped. Direct ORM writes to these two fields on an
+# already-persistent row are a bypass — see backend/tasks.py TaskService and
+# the task board rule this enforces. Fresh (not-yet-flushed) rows are exempt
+# so TaskService.create()'s own constructor call is unaffected.
+_task_write_token: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "task_service_write_token", default=False)
+
+
+class allow_task_write:
+    """Context manager marking the current call as an authorized
+    TaskService mutation. Used exclusively by backend.tasks.TaskService
+    (and the one audited legacy cleanup in backend.services) — everything
+    else must go through TaskService.update()/move()."""
+
+    def __enter__(self):
+        self._token = _task_write_token.set(True)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        _task_write_token.reset(self._token)
+        return False
+
+
+def _guard_task_write(target, value, oldvalue, initiator):
+    if _task_write_token.get():
+        return value
+    if _sa_inspect(target).persistent:
+        raise RuntimeError(
+            f"direct write to Task.{initiator.key} bypasses the service "
+            "layer — use TaskService.update()/move() "
+            "(backend.services.update_task()/move_task()) instead."
+        )
+    return value
+
+
+event.listen(Task.status_id, "set", _guard_task_write, retval=True)
+event.listen(Task.assignee, "set", _guard_task_write, retval=True)
 
 
 class Activity(Base):

@@ -447,14 +447,33 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
     feedback = (review_note.detail if review_note
                 else "(no review comment found — re-read the task feed)")
 
-    task.assignee = impl.name
+    task_id, impl_id, impl_name = task.id, impl.id, impl.name
+    from backend import services as core_task_services
+    try:
+        core_task_services.update_task(task_id, assignee=impl_name, actor="workflow")
+    except PermissionError:
+        # AP-374: the resolved hand-back target is no longer a project
+        # member (e.g. removed since their prior run) — same "can't hand
+        # back automatically" escalation as no-agent-resolvable, not a
+        # silent reassignment.
+        activities_repo.add_task_comment(
+            db, project_id=task.project_id, task_id=task.id,
+            detail=(f"🚩 **Needs attention** — review rejected this task "
+                    f"({demotion['from']}→{demotion['to']} by "
+                    f"{demotion['actor']}), but the hand-back target "
+                    f"'{impl_name}' is no longer a project member. A human "
+                    f"should look at this."))
+        db.commit()
+        logger.warning("workflow: %s rejection hand-back to %s blocked — "
+                       "not a project member", task_key, impl_name)
+        return {"advanced": False, "reason": "review_rejected",
+                "escalated": True}
     activities_repo.add_task_comment(
         db, project_id=task.project_id, task_id=task.id,
         detail=(f"↩️ **Review rejected — handed back to {impl.name}** "
                 f"({demotion['from']}→{demotion['to']} by {demotion['actor']}). "
                 f"Corrective run dispatched with the reviewer's feedback."))
     db.commit()
-    task_id, impl_id, impl_name = task.id, impl.id, impl.name
 
     if not policy.dispatch:
         logger.info("workflow: %s rejected — reassigned to %s (no dispatch, "
@@ -594,14 +613,19 @@ def advance_after_run(run_id: str) -> dict:
                     return {"advanced": False, "reason": "no_role_agent",
                             "role": spec.assign_role}
 
-            task.status_id = target_status.id
-            if next_agent:
-                task.assignee = next_agent.name
-            db.commit()
             task_id, task_key = task.id, (task.key or task.id)
             task_branch, task_pr_url = task.branch or "", task.pr_url or ""
             next_agent_id = next_agent.id if next_agent else None
             next_agent_name = next_agent.name if next_agent else None
+
+        # Outside the session: route through TaskService so auth (AP-374),
+        # gates, activity logging (AP-375), and agent wake all come from
+        # the one place instead of a raw ORM write here.
+        from backend import services as core_task_services
+        core_task_services.move_task(task_id, target, actor="workflow")
+        if next_agent_name:
+            core_task_services.update_task(task_id, assignee=next_agent_name,
+                                           actor="workflow")
 
         result: dict = {"advanced": True, "to": target,
                         "assignee": next_agent_name}
@@ -697,17 +721,24 @@ def complete_integration(*, task_id: str, run_id: str | None,
         target_status = db.query(Status).filter(Status.name == target).first()
         if not target_status:
             return {"ok": False, "error": f"unknown_column_{target}"}
-        task.status_id = target_status.id
-        db.add(Activity(
-            project_id=task.project_id, task_id=task.id, actor="workflow",
-            action="commented",
-            detail=(f"✅ **Integrated** — branch merged into "
-                    f"{(spec.integrate.target_branch if spec and spec.integrate else 'main')} "
-                    f"and pushed. Task advanced to **{target}**."),
-        ))
-        db.commit()
         task_id_, task_key = task.id, (task.key or task.id)
         project_id_ = task.project_id
+
+        # TaskService, not a raw write: auth (AP-374), activity logging
+        # (AP-375), and agent wake come from the one place. skip_gates=True
+        # is the explicit re-entrancy escape hatch — the merge just
+        # completed is stronger evidence than the pr_url/branch gates this
+        # transition would otherwise re-check (see docstring above).
+        from backend import services as core_task_services
+        core_task_services.move_task(task_id_, target, actor="workflow",
+                                     skip_gates=True)
+        core_task_services.add_comment(
+            task_id_,
+            (f"✅ **Integrated** — branch merged into "
+             f"{(spec.integrate.target_branch if spec and spec.integrate else 'main')} "
+             f"and pushed. Task advanced to **{target}**."),
+            actor="workflow",
+        )
 
         # Slice 3: the target column's on_enter may dispatch a follow-up role
         # — done dispatches `documentation` so docs are written AFTER review,
