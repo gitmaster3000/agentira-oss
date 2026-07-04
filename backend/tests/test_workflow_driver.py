@@ -384,8 +384,16 @@ def test_rejection_handback_budget_exhausted_escalates(db_session):
 
 # ── Slice 2: two-phase integration (review -> done via daemon merge) ─────
 
-def _setup_review_success(db_session):
-    """A succeeded REVIEWER run on a task sitting in `review`."""
+def _setup_review_success(db_session, *, with_approval=True,
+                          reviewer_name="senior reviewer"):
+    """A succeeded REVIEWER run on a task sitting in `review`.
+
+    Post-incident fix (2026-07-04, PR #167 merged before its verdict): a
+    clean run is no longer enough to merge — an explicit `REVIEW: APPROVE`
+    comment from the reviewer is required as evidence. `with_approval`
+    defaults True so this fixture still represents the normal "reviewer
+    approved" path; pass False to reproduce the incident shape (a run
+    finishes `succeeded` in review with no approval verdict logged)."""
     with db_session() as db:
         proj = core_services.create_project("P")
         pid = proj["id"]
@@ -393,11 +401,11 @@ def _setup_review_success(db_session):
         p.workflow_enabled = True
         p.repo_url = "file:///tmp/fake-remote.git"
         db.commit()
-        reviewer_id = _mk_agent(db, "senior reviewer")
+        reviewer_id = _mk_agent(db, reviewer_name)
         _bind(db, reviewer_id, pid)
         t = Task(project_id=pid, title="Build feature",
                  status_id=_status_id(db, "review"),
-                 priority=TaskPriority.HIGH, assignee="senior reviewer",
+                 priority=TaskPriority.HIGH, assignee=reviewer_name,
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
@@ -405,6 +413,12 @@ def _setup_review_success(db_session):
                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
                   worktree_branch="agent/x/task/y")
         db.add(run); db.commit()
+        if with_approval:
+            from backend.models import Activity
+            db.add(Activity(project_id=pid, task_id=t.id, actor=reviewer_name,
+                            action="commented",
+                            detail="REVIEW: APPROVE — correct and complete."))
+            db.commit()
         return pid, t.id, run.id
 
 
@@ -420,6 +434,44 @@ def test_review_success_requests_integration_not_advance(db_session):
     with db_session() as db:   # not advanced yet — two-phase
         t = db.get(Task, task_id)
         assert db.get(Status, t.status_id).name == "review"
+
+
+def test_review_success_without_approval_evidence_refuses_merge(db_session):
+    """Incident fix regression: a run finishing `succeeded` in review is NOT
+    itself approval evidence — without a REVIEW: APPROVE comment from the
+    reviewer, the driver refuses to merge and posts a visible refusal."""
+    pid, task_id, run_id = _setup_review_success(db_session, with_approval=False)
+    with patch("backend.forge.services._dispatch_coro") as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out == {"advanced": False, "reason": "no_approval_evidence"}
+    mock_dispatch.assert_not_called()
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"   # stays put
+        from backend.models import Activity
+        acts = db.query(Activity).filter(Activity.task_id == task_id).all()
+        assert any("Merge refused" in (a.detail or "") for a in acts)
+
+
+def test_incident_unapproved_concurrent_task_not_merged(db_session):
+    """Incident shape (2026-07-04, PR #167 merged 3 minutes before its
+    REQUEST_CHANGES verdict): two tasks in review at once, one reviewer-
+    approved and one still awaiting a verdict — only the approved task's
+    branch is dispatched for merge."""
+    pid_a, task_a, run_a = _setup_review_success(
+        db_session, with_approval=True, reviewer_name="reviewer-a")
+    pid_b, task_b, run_b = _setup_review_success(
+        db_session, with_approval=False, reviewer_name="reviewer-b")
+
+    sent = []
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: (sent.append(coro), coro.close())):
+        out_a = workflow.advance_after_run(run_a)
+        out_b = workflow.advance_after_run(run_b)
+
+    assert out_a.get("integration_requested") is True
+    assert out_b == {"advanced": False, "reason": "no_approval_evidence"}
+    assert len(sent) == 1   # only the approved task's merge was dispatched
 
 
 def test_complete_integration_ok_advances_to_done(db_session):
