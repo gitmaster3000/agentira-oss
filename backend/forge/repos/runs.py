@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Sequence
 
 from backend.forge.models import Run
 
@@ -28,3 +29,23 @@ def count_agent_runs_since(db, *, task_id: str, agent_id: str,
                       Run.agent_id == agent_id,
                       Run.created_at >= since)
               .count())
+
+
+def latest_runs_by_task(db, task_ids: Sequence[str]) -> dict[str, Run]:
+    """Most recent run per task_id, for the given tasks — one query, no
+    N+1. Used by the Conductor picker to tell "run once existed" apart
+    from "run is live right now"."""
+    if not task_ids:
+        return {}
+    out: dict[str, Run] = {}
+    for r in (db.query(Run)
+                .filter(Run.task_id.in_(task_ids))
+                .order_by(Run.task_id, Run.created_at.desc())
+                .all()):
+        out.setdefault(r.task_id, r)
+    return out
+
+
+def count_runs_for_task(db, task_id: str) -> int:
+    """Total runs a task has ever had — the auto-redispatch attempt count."""
+    return db.query(Run).filter(Run.task_id == task_id).count()

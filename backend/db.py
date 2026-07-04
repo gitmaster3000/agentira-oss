@@ -646,6 +646,10 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT TRUE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_plan_interval_minutes", "INTEGER DEFAULT 10 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT TRUE NOT NULL")
+            # Runaway-guard recovery policy: cooldown + attempt cap for
+            # re-picking a FAILED/CANCELLED task's auto-dispatch.
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_redispatch_cooldown_minutes", "INTEGER DEFAULT 30 NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_redispatch_max_attempts", "INTEGER DEFAULT 3 NOT NULL")
             # AP-155: agent-level sandbox containment mode.
             runtime_added |= _ensure_column(conn, "profiles", "sandbox_mode", "VARCHAR(20)")
             # AP-302: personal git access token + cached validity.

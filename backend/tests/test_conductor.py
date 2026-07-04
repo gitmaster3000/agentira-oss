@@ -10,6 +10,7 @@ Verifies:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -154,10 +155,9 @@ def test_run_tick_respects_max_concurrent_runs():
 # ── Runaway-guard tests (the "schedules indefinitely" fix) ───────────────
 
 def test_pick_next_excludes_task_that_already_has_a_run():
-    """Core runaway guard: a todo task that already has a Run is never
-    auto-picked again — even if it's still in todo (e.g. its run failed
-    and nothing moved it). Without this the Conductor re-dispatches the
-    same task every tick forever."""
+    """Runaway guard: a todo task whose run just failed is NOT immediately
+    re-picked — it must wait out the redispatch cooldown first. Without
+    this the Conductor would re-dispatch the same task every tick forever."""
     agent_id, project_id, task_id = _mk_setup()
     with forge_services._session() as db:
         db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
@@ -166,7 +166,122 @@ def test_pick_next_excludes_task_that_already_has_a_run():
     chosen = conductor.pick_next_unblocked(
         project_id=project_id, agent_id=agent_id,
     )
-    assert chosen is None, "task with an existing run must not be re-picked"
+    assert chosen is None, "a freshly-failed run must not be re-picked immediately"
+
+
+def test_pick_next_excludes_task_with_active_run():
+    """A task with a live (non-terminal) run must never be double-dispatched,
+    regardless of cooldown/attempts — this is the "never double-dispatch"
+    half of the runaway guard."""
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.RUNNING))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is None
+
+
+def test_pick_next_excludes_task_with_completed_run():
+    """COMPLETED runs stay ineligible forever — the workflow driver owns
+    post-success flow, not re-dispatch."""
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.COMPLETED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(hours=2)))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is None
+
+
+def test_pick_next_recovers_failed_task_after_cooldown():
+    """The self-healing path: once the redispatch cooldown has elapsed, a
+    FAILED task becomes auto-pickable again (within the attempt budget)."""
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.FAILED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(minutes=31)))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is not None and chosen.id == task_id
+
+
+def test_pick_next_recovers_cancelled_task_after_cooldown():
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.CANCELLED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(minutes=31)))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is not None and chosen.id == task_id
+
+
+def test_pick_next_respects_redispatch_attempt_cap():
+    """Even past cooldown, recovery stops once max_attempts total runs on
+    the task have been burned — the bounded half of self-healing."""
+    agent_id, project_id, task_id = _mk_setup()
+    old = datetime.now(timezone.utc) - timedelta(minutes=31)
+    with forge_services._session() as db:
+        # Default conductor_redispatch_max_attempts is 3 — pre-seed exactly
+        # that many failed runs so the budget is already spent.
+        for _ in range(3):
+            db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                       task_id=task_id, status=RunStatus.FAILED,
+                       finished_at=old))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is None, "attempt budget exhausted — must not re-pick"
+
+
+def test_pick_next_recovery_configurable_cooldown_and_attempts():
+    """Cooldown + max_attempts are config on the Conductor's own profile,
+    not hardcoded — a shorter cooldown or larger budget takes effect."""
+    agent_id, project_id, task_id = _mk_setup()
+    cond = conductor.get_or_create_conductor()
+    forge_services.update_agent(cond["id"], conductor_redispatch_cooldown_minutes=1)
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.FAILED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(minutes=2)))
+        db.commit()
+    chosen = conductor.pick_next_unblocked(
+        project_id=project_id, agent_id=agent_id,
+    )
+    assert chosen is not None and chosen.id == task_id
+
+
+def test_run_tick_records_recovery_activity():
+    """DoD: when the tick re-dispatches a recovered task, it's recorded
+    visibly on the task feed so a human can see the system healed itself."""
+    agent_id, project_id, task_id = _mk_setup()
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.FAILED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(minutes=31)))
+        db.commit()
+    with patch.object(forge_services, "schedule_task_run",
+                      lambda **kw: {"run_id": "r-recovered"}):
+        result = conductor.run_tick()
+    assert result["dispatched"] and result["dispatched"][0]["task"] == task_id
+    from backend.models import Activity
+    with forge_services._session() as db:
+        notes = (db.query(Activity)
+                   .filter(Activity.task_id == task_id, Activity.action == "commented")
+                   .all())
+    assert any("Auto-recovered" in n.detail for n in notes)
 
 
 def test_run_tick_moves_dispatched_task_to_in_progress():

@@ -92,6 +92,45 @@ def test_gather_planning_facts_excludes_assigned_tasks(test_db):
     assert task_id not in [t["id"] for t in facts["unassigned_tasks"]]
 
 
+def test_gather_planning_facts_excludes_task_with_active_run(test_db):
+    agent_id, _, task_id = _mk_setup()
+    from backend.forge.models import Run, RunStatus
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.RUNNING))
+        db.commit()
+    facts = conductor.gather_planning_facts()
+    assert task_id not in [t["id"] for t in facts["unassigned_tasks"]]
+
+
+def test_gather_planning_facts_excludes_task_with_completed_run(test_db):
+    agent_id, _, task_id = _mk_setup()
+    from datetime import datetime, timedelta, timezone
+    from backend.forge.models import Run, RunStatus
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.COMPLETED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(hours=1)))
+        db.commit()
+    facts = conductor.gather_planning_facts()
+    assert task_id not in [t["id"] for t in facts["unassigned_tasks"]]
+
+
+def test_gather_planning_facts_recovers_failed_task_after_cooldown(test_db):
+    """A recovered (unassigned) task also becomes visible to the planner
+    again — so it can be re-assigned, not just re-dispatched as-is."""
+    agent_id, _, task_id = _mk_setup()
+    from datetime import datetime, timedelta, timezone
+    from backend.forge.models import Run, RunStatus
+    with forge_services._session() as db:
+        db.add(Run(id=uuid.uuid4().hex[:12], agent_id=agent_id,
+                   task_id=task_id, status=RunStatus.FAILED,
+                   finished_at=datetime.now(timezone.utc) - timedelta(minutes=31)))
+        db.commit()
+    facts = conductor.gather_planning_facts()
+    assert task_id in [t["id"] for t in facts["unassigned_tasks"]]
+
+
 # ── run_planning_turn ──────────────────────────────────────────────────
 
 def test_planning_skips_when_nothing_unassigned(test_db):
