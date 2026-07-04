@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -1160,12 +1160,13 @@ notifications = APIRouter(prefix="/api/notifications", tags=["notifications"],
                           dependencies=[Depends(get_current_user)])
 
 @notifications.get("")
-def api_list_notifications(actor: str = Depends(get_current_user), unread_only: bool = True):
+def api_list_notifications(actor: str = Depends(get_current_user), unread_only: bool = True,
+                           limit: int = Query(100, ge=1, le=200)):
     with services._session() as db:
         prof = services._get_profile_by_name(db, actor)
         if not prof:
             raise HTTPException(404, "Profile not found")
-        return services.list_notifications(prof.id, unread_only=unread_only)
+        return services.list_notifications(prof.id, unread_only=unread_only, limit=limit)
 
 @notifications.patch("/{notification_id}/read")
 def api_mark_notification_read(notification_id: str, actor: str = Depends(get_current_user)):

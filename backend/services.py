@@ -385,12 +385,13 @@ def _log_activity(
     return activity
 
 
-def list_notifications(profile_id: str, unread_only: bool = True) -> list[dict]:
+def list_notifications(profile_id: str, unread_only: bool = True,
+                       limit: int = 100) -> list[dict]:
     with _session() as db:
         q = db.query(Notification).filter(Notification.profile_id == profile_id)
         if unread_only:
             q = q.filter(Notification.read == False)
-        notifs = q.order_by(Notification.created_at.desc()).all()
+        notifs = q.order_by(Notification.created_at.desc()).limit(limit).all()
         return [
             {
                 "id": n.id,
