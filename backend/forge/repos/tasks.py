@@ -7,6 +7,7 @@ through here instead of inline `db.query(...)`.
 from __future__ import annotations
 
 import os
+from typing import Iterable
 
 from backend.models import Task
 
@@ -17,6 +18,32 @@ def resolve_ref(db, task_ref: str) -> Task | None:
     if task:
         return task
     return db.query(Task).filter(Task.key == task_ref.upper()).first()
+
+
+def todo_candidates(db, *, project_id: str, status_id: str,
+                    assignee: str) -> list[Task]:
+    """Todo tasks assigned to `assignee` in `project_id`, oldest first — the
+    Conductor picker's candidate pool, before run-eligibility filtering."""
+    return (db.query(Task)
+              .filter(Task.project_id == project_id,
+                      Task.status_id == status_id,
+                      Task.assignee == assignee)
+              .order_by(Task.created_at.asc())
+              .all())
+
+
+def unassigned_todo_candidates(db, *, project_ids: Iterable[str],
+                               status_id: str, limit: int) -> list[Task]:
+    """Unassigned todo tasks across `project_ids`, oldest first, capped at
+    `limit` — the planning turn's candidate pool, before run-eligibility
+    filtering."""
+    return (db.query(Task)
+              .filter(Task.project_id.in_(project_ids),
+                      Task.status_id == status_id,
+                      (Task.assignee == "") | (Task.assignee.is_(None)))
+              .order_by(Task.created_at.asc())
+              .limit(limit)
+              .all())
 
 
 def delete_with_children(db, task: Task) -> None:

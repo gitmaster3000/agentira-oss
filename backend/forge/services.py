@@ -985,6 +985,7 @@ _AGENT_TO_PROFILE_MIRROR = {
     "conductor_tick_seconds", "conductor_report_time",
     "conductor_report_enabled", "conductor_plan_interval_minutes",
     "conductor_active",
+    "conductor_redispatch_cooldown_minutes", "conductor_redispatch_max_attempts",
     # AP-155 sandbox config — lives on Profile.
     "sandbox_mode",
 }

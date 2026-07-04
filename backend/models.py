@@ -239,6 +239,11 @@ class Profile(Base):
     # Master on/off for the Conductor (on its own profile). When False the
     # queue tick, planning turn, and daily report all no-op.
     conductor_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # Runaway-guard recovery policy: a task whose latest run is
+    # FAILED/CANCELLED becomes auto-pickable again after this many minutes
+    # from finished_at, up to conductor_redispatch_max_attempts total runs.
+    conductor_redispatch_cooldown_minutes: Mapped[int] = mapped_column(default=30, nullable=False)
+    conductor_redispatch_max_attempts: Mapped[int] = mapped_column(default=3, nullable=False)
     # AP-155: agent-level containment policy for dispatched runs. NULL =
     # workspace default ("off"). Project-level override wins if set; see
     # backend.sandbox.resolve_mode. Values: off | cwd | strict | container.
