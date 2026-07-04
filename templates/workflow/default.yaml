@@ -30,6 +30,12 @@
 #                     fallback: any | none — `any` picks the least-loaded
 #                              eligible agent when no name matches; `none`
 #                              leaves the task un-advanced (safer for review).
+#                     prompt:  templates/workflow/prompts/<prompt>.md — hand-
+#                              off instructions dispatched to the role
+#                              (config, customer-readable). Empty -> defaults
+#                              to a file named after the role itself (e.g.
+#                              role "reviewer" -> prompts/reviewer.md).
+#                              Missing file -> dispatch proceeds without it.
 
 columns:
   - name: backlog

@@ -64,6 +64,28 @@ def _load_prompt_file(name: str) -> str:
         return ""
 
 
+def _role_handoff_prompt(flow: "Workflow", role_name: str, *,
+                         branch: str = "", pr_url: str = "") -> str:
+    """The hand-off instructions for a dispatched role (reviewer,
+    documentation, ...) — column semantics must not depend on agent persona.
+
+    Resolution order: the role's `prompt` override (customer config, via
+    `Project.workflow_roles_json`) -> a system template file named after the
+    role -> '' (missing file is legal — roles are user-definable). Loaded
+    file is returned with {{BRANCH}} / {{PR_URL}} substituted, same mechanism
+    as gate_bounce's {{FAILURES}}."""
+    role = flow.roles.get(role_name)
+    prompt_name = (role.prompt if role and role.prompt else role_name)
+    content = _load_prompt_file(prompt_name)
+    if not content:
+        logger.info("workflow: no hand-off prompt file for role=%s "
+                    "(prompt=%s) — dispatching without it", role_name,
+                    prompt_name)
+        return ""
+    return content.replace("{{BRANCH}}", branch or "(no branch set)") \
+                  .replace("{{PR_URL}}", pr_url or "(no PR URL set)")
+
+
 # ── Schema (standard parser + safety: yaml.safe_load → Pydantic) ─────────
 
 class IntegrateSpec(BaseModel):
@@ -107,6 +129,9 @@ class RoleSpec(BaseModel):
     match: list[str] = Field(default_factory=list)
     exclude_previous_assignee: bool = False
     fallback: str = "none"          # "any" | "none"
+    # Hand-off prompt file (templates/workflow/prompts/<prompt>.md). Empty ->
+    # defaults to the role's own name (e.g. role "reviewer" -> reviewer.md).
+    prompt: str = ""
 
     @validator("fallback")
     def fallback_known(cls, v):  # noqa: N805
@@ -574,6 +599,7 @@ def advance_after_run(run_id: str) -> dict:
                 task.assignee = next_agent.name
             db.commit()
             task_id, task_key = task.id, (task.key or task.id)
+            task_branch, task_pr_url = task.branch or "", task.pr_url or ""
             next_agent_id = next_agent.id if next_agent else None
             next_agent_name = next_agent.name if next_agent else None
 
@@ -582,10 +608,16 @@ def advance_after_run(run_id: str) -> dict:
         if spec.dispatch and next_agent_id:
             # Dispatch outside the session (schedule_task_run owns its own).
             # The Conductor tick only dispatches `todo` and skips tasks that
-            # already have a run — hand-offs dispatch here.
+            # already have a run — hand-offs dispatch here. The dispatched
+            # role gets its own hand-off instructions, not the bare
+            # implementer prompt — column semantics must not depend on
+            # agent persona (AP-361 review-worked-by-accident gap).
+            handoff_prompt = _role_handoff_prompt(
+                flow, spec.assign_role, branch=task_branch, pr_url=task_pr_url)
             from backend.forge import services
             d = services.schedule_task_run(task_id=task_id,
-                                           agent_id=next_agent_id)
+                                           agent_id=next_agent_id,
+                                           extra_context=handoff_prompt)
             if isinstance(d, dict) and d.get("error"):
                 logger.warning("workflow: hand-off dispatch failed %s -> %s: %s",
                                task_key, next_agent_name, d["error"])
@@ -681,7 +713,7 @@ def complete_integration(*, task_id: str, run_id: str | None,
         # — done dispatches `documentation` so docs are written AFTER review,
         # about what actually merged. Skipped silently when the project has
         # no matching agent (fallback: none).
-        doc_agent_id = doc_agent_name = None
+        doc_agent_id = doc_agent_name = doc_role = None
         target_col = flow.column(target)
         enter = target_col.on_enter if target_col else None
         if enter and enter.dispatch_role:
@@ -691,11 +723,16 @@ def complete_integration(*, task_id: str, run_id: str | None,
                                     previous_agent_id=None)
                 if a is not None:
                     doc_agent_id, doc_agent_name = a.id, a.name
+                    doc_role = enter.dispatch_role
+        task_branch, task_pr_url = task.branch or "", task.pr_url or ""
 
     result = {"ok": True, "advanced": True, "to": target}
     if doc_agent_id:
+        handoff_prompt = _role_handoff_prompt(
+            flow, doc_role, branch=task_branch, pr_url=task_pr_url)
         from backend.forge import services
-        d = services.schedule_task_run(task_id=task_id_, agent_id=doc_agent_id)
+        d = services.schedule_task_run(task_id=task_id_, agent_id=doc_agent_id,
+                                       extra_context=handoff_prompt)
         if isinstance(d, dict) and d.get("error"):
             logger.warning("workflow: docs dispatch failed %s -> %s: %s",
                            task_key, doc_agent_name, d["error"])
