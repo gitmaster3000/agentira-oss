@@ -101,6 +101,33 @@ Daemon process (local)
   └── PID file + log file in ~/.agentira/
 ```
 
+### WS keepalive + dispatch redelivery (AP-361 follow-up)
+
+A redeploy or idle proxy hop can leave the daemon's WS half-open: the TCP
+socket looks alive to both sides but frames stop flowing. Neither side's
+`recv()` raises on its own, so without an active probe the server would keep
+a dead connection registered forever, and every dispatch to it would vanish
+silently — this is what happened in the AP-361 incident (daemon alive,
+dispatch dropped, run failed with "Daemon offline at dispatch").
+
+Both sides now probe with an app-level `{"type": "ping"}` / `{"type":
+"pong"}` frame in addition to the WS library's own ping/pong:
+
+- **Daemon** (`agentira_cli/daemon/ws_client.py`): sends a ping whenever its
+  30s `recv` times out, and replies to server pings with a pong.
+- **Server** (`backend/forge/ws_dispatch.py::handle_daemon_ws`): waits up to
+  `FORGE_WS_HEARTBEAT_INTERVAL_S` (default 20s) for any frame; on timeout,
+  sends a ping. If `FORGE_WS_HEARTBEAT_TIMEOUT_S` (default 45s) passes with
+  no frame of any kind, it deregisters the daemon from the hub so the next
+  dispatch doesn't try (and silently drop against) a dead connection.
+
+If no daemon is online for a runtime at dispatch time, the trigger is no
+longer failed instantly. It's queued in `WsHub._pending` and redelivered the
+next time a daemon registers for that runtime; only after
+`FORGE_DISPATCH_REDELIVER_TTL_S` (default 300s / 5 min) with no reconnect
+does the run get marked failed via `mark_dispatch_dropped`. All three
+intervals are env-configurable, not hardcoded.
+
 ## Supervision (auto-restart on crash)
 
 ### macOS (launchd) — manual setup
