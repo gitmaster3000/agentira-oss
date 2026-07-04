@@ -141,11 +141,47 @@ def test_advance_hands_off_to_reviewer(db_session):
     assert out["to"] == "review"
     assert out["assignee"] == "senior reviewer"           # != implementer
     assert out["run_id"] == "next123"
-    mock_dispatch.assert_called_once_with(task_id=task_id, agent_id=reviewer_id)
+    kwargs = mock_dispatch.call_args.kwargs
+    assert kwargs["task_id"] == task_id
+    assert kwargs["agent_id"] == reviewer_id
+    # AP-361 follow-up: the reviewer gets review hand-off instructions, not
+    # the bare implementer prompt — with the task's branch substituted.
+    assert "reviewing this task" in kwargs["extra_context"]
+    assert "do NOT re-implement" in kwargs["extra_context"]
+    assert "agent/x/task/y" in kwargs["extra_context"]     # {{BRANCH}}
     with db_session() as db:
         t = db.get(Task, task_id)
         assert db.get(Status, t.status_id).name == "review"
         assert t.assignee == "senior reviewer"
+
+
+def test_implementer_prompt_unchanged_by_role_handoff(db_session):
+    """The implementer's own dispatch (via prepare_task_run/schedule_task_run
+    directly, not the workflow hand-off) still gets the bare task prompt —
+    the role hand-off prompt is only added on top for the NEXT agent."""
+    from backend.forge import services as forge_services
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        prompt = forge_services._build_task_prompt(t)
+    assert "reviewing this task" not in prompt
+    assert "do NOT re-implement" not in prompt
+    assert "Work on this task" in prompt
+
+
+def test_missing_role_prompt_file_dispatches_without_block(db_session):
+    """A role with no prompt file (user-definable roles are legal without
+    one) still dispatches — just without the extra_context block."""
+    pid, task_id, run_id, impl_id, reviewer_id = _setup_review_scenario(db_session)
+    flow = workflow.system_workflow()
+    flow.roles["reviewer"].prompt = "does_not_exist_prompt"
+    with patch.object(workflow, "effective_workflow", return_value=flow), \
+         patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}) as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["advanced"] is True
+    kwargs = mock_dispatch.call_args.kwargs
+    assert kwargs["extra_context"] == ""
 
 
 def test_no_advance_when_workflow_disabled(db_session):
@@ -424,7 +460,11 @@ def test_integration_ok_dispatches_documentation_role(db_session):
     assert out["advanced"] is True and out["to"] == "done"
     assert out.get("docs_agent") == "Documentation Expert"
     assert out.get("docs_run_id") == "docs1"
-    mock_dispatch.assert_called_once()
+    kwargs = mock_dispatch.call_args.kwargs
+    assert kwargs["task_id"] == task_id
+    assert kwargs["agent_id"] == doc_id
+    assert "documenting this task" in kwargs["extra_context"]
+    assert "agent/x/task/y" in kwargs["extra_context"]     # {{BRANCH}}
 
 
 def test_integration_ok_without_doc_agent_skips_docs(db_session):
