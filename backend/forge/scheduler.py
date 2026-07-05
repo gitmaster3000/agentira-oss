@@ -73,6 +73,22 @@ class ForgeScheduler:
         )
         logger.info("Stale-run reconciler scheduled every %ss.",
                     _reconciler.RECONCILE_INTERVAL_S)
+        # AP-390: dispatch-outbox delivery sweep. Frames written by a
+        # process that doesn't hold the daemon's WS socket (flowty-mcp
+        # serving finish_run, redeploy windows) are delivered here,
+        # through THIS process's hub.
+        import os as _os
+        from backend.forge import dispatch_outbox as _dispatch_outbox
+        sweep_s = float(_os.environ.get("FORGE_OUTBOX_SWEEP_INTERVAL_S", "5"))
+        self._scheduler.add_job(
+            _dispatch_outbox.run_delivery_sweep,
+            trigger=IntervalTrigger(seconds=sweep_s),
+            id="dispatch_outbox_sweep",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Dispatch-outbox sweep scheduled every %ss.", sweep_s)
         logger.info("Forge scheduler started.")
 
     def _reschedule_conductor(self) -> int:
