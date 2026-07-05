@@ -32,6 +32,7 @@ capping the "schedules runs indefinitely" runaway case.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -759,17 +760,83 @@ def _compose_planning_prompt(facts: dict) -> str:
             .replace("{{TASKS}}", tasks))
 
 
+def _record_planning_turn(
+    *, trigger: str, status: str, facts: dict, model: str | None = None,
+    duration_ms: int | None = None, conversation_scope_key: str | None = None,
+    decisions: list[dict] | None = None,
+) -> str | None:
+    """Persist a PlanningTurn row (AP-401 transparency record). Never raises
+    into the caller — a logging failure must not break the planning turn."""
+    try:
+        from backend.forge.repos import planning_turns as pt_repo
+        with SessionLocal() as db:
+            row = pt_repo.create_planning_turn(
+                db, trigger=trigger, status=status, model=model,
+                duration_ms=duration_ms, facts_snapshot=facts,
+                decisions=decisions, conversation_scope_key=conversation_scope_key)
+            db.commit()
+            return row.id
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to record planning turn (status=%s)", status)
+        return None
+
+
+def record_planning_decision(
+    turn_id: str, *, action: str, reason: str, task_id: str | None = None,
+    agent: str | None = None, project_id: str | None = None,
+) -> None:
+    """Append one decision to a PlanningTurn's durable record, e.g.
+    `action="assigned"` / `"dispatched"` / `"skipped"` with a `reason`
+    string. When `task_id` is given, the decision ALSO lands on that
+    task's activity feed via the service layer with `actor=CONDUCTOR_NAME`
+    (AP-376 invariant) — so a task-touching Conductor decision shows up
+    next to every other actor's activity, not just in this audit table."""
+    from backend.forge.repos import planning_turns as pt_repo
+    decision = {"action": action, "task_id": task_id, "agent": agent, "reason": reason}
+    with SessionLocal() as db:
+        pt_repo.append_decision(db, turn_id, decision)
+        if task_id:
+            from backend.forge.repos import activities as activities_repo
+            activities_repo.add_task_comment(
+                db, project_id=project_id, task_id=task_id,
+                detail=f"🧭 **Conductor** {action}: {reason}", actor=CONDUCTOR_NAME)
+        db.commit()
+
+
+def get_recent_planning_turns(limit: int = 20) -> list[dict]:
+    """Recent PlanningTurn records, newest first — powers the Conductor
+    feed (workflow-editor spec §9: activity-feed rows deep-link to tasks)."""
+    from backend.forge.repos import planning_turns as pt_repo
+    with SessionLocal() as db:
+        return pt_repo.list_recent(db, limit=limit)
+
+
 def run_planning_turn() -> dict:
     """Dispatch one LLM planning turn to the Conductor — it assigns the
     unassigned todo backlog to agents. Skips (token-free) when there is
-    nothing to plan or the Conductor has no runtime."""
+    nothing to plan or the Conductor has no runtime.
+
+    Every invocation produces a durable `PlanningTurn` record (AP-401) —
+    facts snapshot, model, duration, and a skip/dispatch reason — even
+    when it skips. A dispatched turn's `decisions` list starts empty and
+    fills in asynchronously as the Conductor's LLM turn actually assigns
+    tasks (see `record_planning_decision`, called from wherever those
+    assignments land); the full transcript lives in the Conductor's own
+    conversation (`conversation_scope_key`).
+    """
     global _LAST_PLAN
+    start = time.monotonic()
     if not _conductor_active():
         _LAST_PLAN = {"skipped": "conductor_disabled"}
         return _LAST_PLAN
     facts = gather_planning_facts()
     if not facts["unassigned_tasks"] or not facts["agents"]:
         _LAST_PLAN = {"skipped": "nothing to plan"}
+        _record_planning_turn(
+            trigger="cron", status="skipped", facts=facts,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            decisions=[{"action": "skipped", "task_id": None, "agent": None,
+                       "reason": "nothing to plan — no unassigned tasks or no agents"}])
         return _LAST_PLAN
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
@@ -778,22 +845,39 @@ def run_planning_turn() -> dict:
             return _LAST_PLAN
         if not prof.runtime_id:
             _LAST_PLAN = {"skipped": "no_runtime"}
+            _record_planning_turn(
+                trigger="cron", status="skipped", facts=facts, model=prof.model,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                decisions=[{"action": "skipped", "task_id": None, "agent": None,
+                           "reason": "conductor has no runtime bound"}])
             return _LAST_PLAN
         conductor_id = prof.id
+        conductor_model = prof.model
 
     prompt = _compose_planning_prompt(facts)
+    scope_key = "chat:default"
     try:
         from backend.forge import services
         services.send_runtime_message(
-            conductor_id, content=prompt, scope_key="chat:default")
+            conductor_id, content=prompt, scope_key=scope_key)
         _LAST_PLAN = {"ok": True, "at": datetime.now(timezone.utc).isoformat(),
                       "unassigned": len(facts["unassigned_tasks"]),
                       "agents": len(facts["agents"])}
+        _record_planning_turn(
+            trigger="cron", status="dispatched", facts=facts, model=conductor_model,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            conversation_scope_key=scope_key)
         logger.info("Conductor planning turn dispatched (%d unassigned).",
                     len(facts["unassigned_tasks"]))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Planning turn dispatch failed: %s", exc)
         _LAST_PLAN = {"error": str(exc)}
+        _record_planning_turn(
+            trigger="cron", status="error", facts=facts, model=conductor_model,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            conversation_scope_key=scope_key,
+            decisions=[{"action": "error", "task_id": None, "agent": None,
+                       "reason": str(exc)}])
     return _LAST_PLAN
 
 
