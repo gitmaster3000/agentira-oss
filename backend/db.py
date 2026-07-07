@@ -37,14 +37,28 @@ APP_DATABASE_URL = os.getenv("AGENTIRA_APP_DB_URL", DATABASE_URL)
 _app_is_postgres = APP_DATABASE_URL.startswith("postgres")
 
 _connect_args = {"check_same_thread": False} if _is_sqlite else {}
+# Pool sizing for Postgres: several background schedulers (conductor tick,
+# planning turn, progress check, stale-run reconciler, dispatch-outbox sweep)
+# each open sync sessions from their own threads, on top of request-path
+# sessions. The default pool_size=5/no-pre_ping was too small — under any
+# query latency spike, background jobs alone can exhaust it, so every HTTP
+# request then blocks up to pool_timeout waiting for a connection and the
+# whole app looks dead (prod incident 2026-07-07). pool_pre_ping recycles
+# connections Railway/Postgres dropped silently instead of erroring on use.
+_pool_kwargs = {} if _is_sqlite else {
+    "pool_pre_ping": True,
+    "pool_size": 20,
+    "max_overflow": 20,
+    "pool_recycle": 1800,
+}
 # Privileged engine — superuser; bypasses RLS. Used for bootstrap, migrations,
 # login and any explicitly-privileged cross-org work.
-engine = create_engine(DATABASE_URL, echo=False, connect_args=_connect_args)
+engine = create_engine(DATABASE_URL, echo=False, connect_args=_connect_args, **_pool_kwargs)
 # Scoped engine — runs as the app role so RLS is enforced. Identical to the
 # privileged engine when AGENTIRA_APP_DB_URL is unset (dev).
 app_engine = (
     engine if APP_DATABASE_URL == DATABASE_URL
-    else create_engine(APP_DATABASE_URL, echo=False)
+    else create_engine(APP_DATABASE_URL, echo=False, **_pool_kwargs)
 )
 
 
