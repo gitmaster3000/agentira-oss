@@ -1,0 +1,39 @@
+<!-- @dsCard group="Brand" viewport="700x180" subtitle="Mark, wordmark & gradient" name="Logo" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 28px; display: flex; align-items: center; gap: 40px; }
+  .block { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .lab { font: var(--type-meta); color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--tracking-eyebrow); }
+  .word { display: flex; align-items: center; gap: 12px; }
+  .word .t { font-size: 24px; font-weight: var(--weight-bold); letter-spacing: -0.01em; color: var(--text-primary); }
+  .grad { width: 200px; height: 56px; border-radius: var(--radius-2xl); background: var(--brand-gradient); }
+  svg.mk { display: block; }
+</style>
+</head>
+<body>
+  <div class="block">
+    <svg class="mk" width="56" height="56" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Agentira">
+      <defs><linearGradient id="ag" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#c9b8ff"/><stop offset="1" stop-color="#80cbc4"/></linearGradient></defs>
+      <rect width="64" height="64" rx="16" fill="url(#ag)"/>
+      <path d="M22 44 L32 19 L42 44 M26 36 H38" stroke="#0e1117" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <div class="lab">Mark</div>
+  </div>
+  <div class="block">
+    <div class="word">
+      <svg class="mk" width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Agentira">
+        <defs><linearGradient id="agw" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#c9b8ff"/><stop offset="1" stop-color="#80cbc4"/></linearGradient></defs>
+        <rect width="64" height="64" rx="16" fill="url(#agw)"/>
+        <path d="M22 44 L32 19 L42 44 M26 36 H38" stroke="#0e1117" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      <span class="t">Agentira</span>
+    </div>
+    <div class="lab">Wordmark</div>
+  </div>
+  <div class="block"><div class="grad"></div><div class="lab">Brand gradient</div></div>
+</body>
+</html>

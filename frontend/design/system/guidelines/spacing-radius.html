@@ -1,0 +1,51 @@
+<!-- @dsCard group="Spacing" viewport="700x340" subtitle="4px rhythm + radii scale" name="Spacing & radius" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px 28px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 14px; }
+  .section { margin-bottom: 24px; }
+  .scale { display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; align-items: center; gap: 14px; }
+  .row .tok { width: 72px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); flex: none; }
+  .row .px  { width: 36px; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); flex: none; }
+  .bar { height: 12px; border-radius: 3px; background: var(--brand-lavender); }
+  .radii { display: flex; gap: 18px; flex-wrap: wrap; }
+  .rad { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .rbox { width: 60px; height: 48px; background: var(--surface-card); border: 1px solid var(--border-strong); }
+  .rlbl { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+  .rname { font: var(--type-meta); font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+</style>
+</head>
+<body>
+  <div class="section">
+    <div class="eyebrow">Spacing — 4px base</div>
+    <div class="scale">
+      <div class="row"><span class="tok">space-2</span><span class="px">4</span><div class="bar" style="width:4px"></div></div>
+      <div class="row"><span class="tok">space-4</span><span class="px">8</span><div class="bar" style="width:8px"></div></div>
+      <div class="row"><span class="tok">space-6</span><span class="px">12</span><div class="bar" style="width:12px"></div></div>
+      <div class="row"><span class="tok">space-8</span><span class="px">16</span><div class="bar" style="width:16px"></div></div>
+      <div class="row"><span class="tok">space-12</span><span class="px">24</span><div class="bar" style="width:24px"></div></div>
+      <div class="row"><span class="tok">space-16</span><span class="px">32</span><div class="bar" style="width:32px"></div></div>
+      <div class="row"><span class="tok">space-20</span><span class="px">40</span><div class="bar" style="width:40px"></div></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="eyebrow">Radii</div>
+    <div class="radii">
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-xs)"></div><span class="rname">xs</span><span class="rlbl">2px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-sm)"></div><span class="rname">sm</span><span class="rlbl">5px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-md)"></div><span class="rname">md</span><span class="rlbl">6px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-lg)"></div><span class="rname">lg</span><span class="rlbl">8px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-xl)"></div><span class="rname">xl</span><span class="rlbl">10px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-2xl)"></div><span class="rname">2xl</span><span class="rlbl">12px</span></div>
+      <div class="rad"><div class="rbox" style="border-radius:var(--radius-pill)"></div><span class="rname">pill</span><span class="rlbl">999px</span></div>
+    </div>
+  </div>
+</body>
+</html>

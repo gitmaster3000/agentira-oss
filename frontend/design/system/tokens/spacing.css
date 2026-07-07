@@ -1,0 +1,40 @@
+/* ============================================================
+   Agentira — Spacing, radius & sizing tokens
+   A dense 4px-based rhythm; chrome packs tight, content breathes.
+   ============================================================ */
+
+:root {
+  /* ---- Spacing scale (4px base) ---- */
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  10px;
+  --space-6:  12px;
+  --space-7:  14px;
+  --space-8:  16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-16: 32px;
+  --space-20: 40px;
+
+  /* ---- Radii ---- */
+  --radius-xs:   2px;   /* status dots, key squares */
+  --radius-sm:   5px;   /* small chips */
+  --radius-md:   6px;   /* tags, task cards */
+  --radius-lg:   8px;   /* buttons, nav items */
+  --radius-xl:   10px;  /* cards, inputs, dropdowns */
+  --radius-2xl:  12px;  /* large panels */
+  --radius-pill: 999px; /* switches, pills, avatars */
+
+  /* ---- Layout dimensions ---- */
+  --sidebar-width:   248px;
+  --topbar-height:   52px;
+  --panel-width:     320px;  /* Pulse dock / detail drawer */
+  --content-measure: 760px;  /* max readable column */
+
+  /* ---- Hit targets ---- */
+  --control-sm: 28px;
+  --control-md: 34px;
+  --control-lg: 40px;
+}

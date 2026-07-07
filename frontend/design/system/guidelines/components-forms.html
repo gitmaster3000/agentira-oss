@@ -1,0 +1,69 @@
+<!-- @dsCard group="Components" viewport="700x320" subtitle="Inputs, select, search & toggle" name="Form fields" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 26px 28px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; max-width: 600px; }
+  .field { display: flex; flex-direction: column; gap: 7px; }
+  .lab { font: var(--type-meta); font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+  .input { width: 100%; padding: 9px 12px; font-family: var(--font-sans); font-size: 13px;
+           border-radius: var(--radius-xl); background: var(--surface-base);
+           border: 1px solid var(--border-default); color: var(--text-primary); }
+  .input::placeholder { color: var(--text-muted); }
+  .input:focus { outline: none; border-color: var(--pulse-blue); box-shadow: var(--ring-focus); }
+  .input.focused { border-color: var(--pulse-blue); box-shadow: var(--ring-focus); }
+  .search { position: relative; }
+  .search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+                width: 15px; height: 15px; color: var(--text-muted); }
+  .search .input { padding-left: 34px; }
+  .toggle { display: inline-flex; align-items: center; gap: 10px; }
+  .switch { width: 38px; height: 22px; border-radius: var(--radius-pill); background: var(--brand-lavender);
+            position: relative; }
+  .switch.off { background: var(--surface-hover); }
+  .knob { position: absolute; top: 2px; left: 18px; width: 18px; height: 18px; border-radius: 50%;
+          background: var(--surface-base); transition: left var(--dur-base) var(--ease-standard); }
+  .switch.off .knob { left: 2px; background: var(--text-muted); }
+  textarea.input { resize: none; font-family: var(--font-sans); }
+</style>
+</head>
+<body>
+  <div class="grid">
+    <div class="field">
+      <span class="lab">Default</span>
+      <input class="input" placeholder="Task title…">
+    </div>
+    <div class="field">
+      <span class="lab">Focused</span>
+      <input class="input focused" value="Wire up Pulse dock">
+    </div>
+    <div class="field">
+      <span class="lab">Search</span>
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input class="input" placeholder="Search tasks, agents, runs…">
+      </div>
+    </div>
+    <div class="field">
+      <span class="lab">Select</span>
+      <select class="input">
+        <option>Assign to Planner</option>
+        <option>Assign to Backend</option>
+      </select>
+    </div>
+    <div class="field" style="grid-column: span 2">
+      <span class="lab">Prompt / textarea</span>
+      <textarea class="input" rows="2">Refactor the auth middleware and add tests.</textarea>
+    </div>
+    <div class="field">
+      <span class="lab">Toggle — on / off</span>
+      <div class="row" style="display:flex;gap:24px;margin-top:2px">
+        <span class="toggle"><span class="switch"><span class="knob"></span></span><span class="lab">Auto-run</span></span>
+        <span class="toggle"><span class="switch off"><span class="knob"></span></span><span class="lab">Paused</span></span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

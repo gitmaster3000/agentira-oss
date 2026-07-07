@@ -1,0 +1,26 @@
+<!-- @dsCard group="Colors" viewport="700x170" subtitle="Layered dark surfaces, sunken → raised" name="Surfaces & borders" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 22px; }
+  .row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .sw { display: flex; flex-direction: column; gap: 7px; }
+  .chip { height: 56px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); }
+  .nm { font: var(--type-meta); color: var(--text-tertiary); font-weight: var(--weight-semibold); }
+  .hex { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="row">
+    <div class="sw"><div class="chip" style="background:var(--surface-sunken)"></div><span class="nm">sunken</span><span class="hex">#0a0c10</span></div>
+    <div class="sw"><div class="chip" style="background:var(--surface-base)"></div><span class="nm">base</span><span class="hex">#0e1117</span></div>
+    <div class="sw"><div class="chip" style="background:var(--surface-raised)"></div><span class="nm">raised</span><span class="hex">#14161b</span></div>
+    <div class="sw"><div class="chip" style="background:var(--surface-nav)"></div><span class="nm">nav</span><span class="hex">#161b22</span></div>
+    <div class="sw"><div class="chip" style="background:var(--surface-card)"></div><span class="nm">card</span><span class="hex">#1c2128</span></div>
+    <div class="sw"><div class="chip" style="background:var(--surface-hover)"></div><span class="nm">hover</span><span class="hex">#272d36</span></div>
+  </div>
+</body>
+</html>

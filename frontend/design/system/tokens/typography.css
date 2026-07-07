@@ -1,0 +1,50 @@
+/* ============================================================
+   Agentira — Typography tokens
+   System UI for product chrome (dense, native-feeling),
+   a true monospace for keys, code, tokens, and config.
+   ============================================================ */
+
+:root {
+  /* ---- Families ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter",
+               "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo",
+               "Cascadia Code", monospace;
+
+  /* ---- Type scale (px — the product is dense; chrome lives at 11–14) ---- */
+  --text-9:   9px;     /* micro pill labels */
+  --text-10:  10px;    /* uppercase eyebrows, badges */
+  --text-11:  11px;    /* meta rows, captions */
+  --text-12:  12px;    /* secondary UI, card body */
+  --text-13:  13px;    /* default UI text, nav items */
+  --text-14:  14px;    /* emphasized body, inputs */
+  --text-16:  16px;    /* card titles, section heads */
+  --text-20:  20px;    /* page H1 (detail pages) */
+  --text-28:  28px;    /* dashboard greeting */
+  --text-36:  36px;    /* hero / marketing */
+
+  /* ---- Weights ---- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-extra:    800;   /* logo mark, section eyebrows */
+
+  /* ---- Line heights ---- */
+  --leading-tight:   1.1;   /* dense headings */
+  --leading-snug:    1.4;   /* UI text */
+  --leading-normal:  1.6;   /* body */
+  --leading-relaxed: 1.7;   /* long-form / prompts */
+
+  /* ---- Letter spacing ---- */
+  --tracking-eyebrow: 0.1em;   /* UPPERCASE SECTION LABELS */
+  --tracking-nav:     0.14em;  /* BUILD / PROJECT sidebar groups */
+  --tracking-tight:  -0.01em;  /* large headings */
+
+  /* ---- Semantic roles ---- */
+  --type-page-title:   var(--weight-semibold) var(--text-20)/var(--leading-tight) var(--font-sans);
+  --type-card-title:   var(--weight-semibold) var(--text-13)/var(--leading-snug) var(--font-sans);
+  --type-body:         var(--weight-regular)  var(--text-13)/var(--leading-normal) var(--font-sans);
+  --type-meta:         var(--weight-regular)  var(--text-11)/var(--leading-snug) var(--font-sans);
+  --type-mono-key:     var(--weight-semibold) var(--text-11)/1 var(--font-mono);
+}

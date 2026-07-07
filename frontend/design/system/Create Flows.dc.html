@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0b0e13}
+  body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter','Helvetica Neue',system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#f0f3f6}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#30363d;border-radius:999px}
+  .frm{background:#14161b;border:1px solid #30363d;border-radius:14px;overflow:hidden;flex-shrink:0;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .fld{background:#1c2128;border:1px solid #30363d;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#e8ebf0}
+  .lbl{font-size:10.5px;font-weight:600;color:#768390;margin-bottom:6px}
+  .arr{display:flex;align-items:center;color:#484f58;flex-shrink:0}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1200px 600px at 70% -10%,rgba(201,184,255,.06),transparent),#0b0e13;padding:30px 40px 60px">
+
+  <!-- top bar -->
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+    <a href="Agentira.dc.html" style="display:inline-flex;align-items:center;gap:7px;text-decoration:none;color:#b1bac4;font-size:12.5px;padding:7px 12px;border:1px solid #30363d;border-radius:9px;background:#14161b"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>Back to Agentira</a>
+    <span style="font-size:11px;color:#5a626c">Create flows · click-through storyboards</span>
+  </div>
+  <h1 style="font-size:26px;font-weight:700;margin:0 0 4px">Creation flows</h1>
+  <p style="font-size:13.5px;color:#768390;margin:0 0 34px;max-width:60ch">The three "+ New" paths — how a teammate spins up a project, files a task, or groups work into an epic. Each frame is one step in the flow.</p>
+
+  <!-- ============ CREATE PROJECT ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:3px;background:#c9b8ff"></span><h2 style="font-size:16px;font-weight:700;margin:0">Create project</h2><span style="font-size:11px;color:#5a626c">· 5 steps</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px">A guided wizard: name it, connect a repo, pick a workflow, bring in people &amp; agents, review.</p>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px;margin-bottom:40px">
+
+    <!-- P1 -->
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#c9b8ff">Step 1</span><span style="font-size:11px;color:#768390">Details</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:18px;height:4px;border-radius:2px;background:#c9b8ff"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:14px">Name your project</div>
+        <div style="margin-bottom:13px"><div class="lbl">PROJECT NAME</div><div class="fld">Payments Platform</div></div>
+        <div style="display:flex;gap:10px;margin-bottom:13px"><div style="flex:1"><div class="lbl">KEY</div><div class="fld" style="font-family:ui-monospace,monospace;color:#c9b8ff">PAY</div></div><div style="flex:2"><div class="lbl">COLOR</div><div class="fld" style="display:flex;align-items:center;gap:8px"><span style="display:flex;gap:5px"><span style="width:16px;height:16px;border-radius:5px;background:#c9b8ff;outline:2px solid #c9b8ff;outline-offset:2px"></span><span style="width:16px;height:16px;border-radius:5px;background:#80cbc4"></span><span style="width:16px;height:16px;border-radius:5px;background:#fdd663"></span><span style="width:16px;height:16px;border-radius:5px;background:#f78da7"></span></span></div></div></div>
+        <div><div class="lbl">DESCRIPTION</div><div class="fld" style="color:#768390;line-height:1.5">Metering, invoicing &amp; reconciliation service.</div></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Cancel</span><span style="font-size:12px;font-weight:600;color:#2d1a6e;background:#c9b8ff;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- P2 -->
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#c9b8ff">Step 2</span><span style="font-size:11px;color:#768390">Repository</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:18px;height:4px;border-radius:2px;background:#c9b8ff"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px">Connect a repository</div>
+        <div style="font-size:11.5px;color:#768390;margin-bottom:14px">Agents read &amp; write code here.</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;background:#1c2128;border:1px solid #c9b8ff66;margin-bottom:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span style="flex:1;font-family:ui-monospace,monospace;font-size:12px;color:#e8ebf0">acme/billing-api</span><span style="width:15px;height:15px;border-radius:50%;background:#c9b8ff;display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#2d1a6e" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:9px;background:#1c2128;border:1px solid #30363d;margin-bottom:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span style="flex:1;font-family:ui-monospace,monospace;font-size:12px;color:#b1bac4">acme/web</span><span style="width:15px;height:15px;border-radius:50%;border:1.5px solid #484f58"></span></div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:9px;border:1px dashed #30363d;color:#768390;font-size:11.5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>Connect a new repo</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#2d1a6e;background:#c9b8ff;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- P3 -->
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#c9b8ff">Step 3</span><span style="font-size:11px;color:#768390">Workflow</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:18px;height:4px;border-radius:2px;background:#c9b8ff"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px">Pick a workflow</div>
+        <div style="font-size:11.5px;color:#768390;margin-bottom:14px">Columns map to states agents move work through.</div>
+        <div style="padding:11px 13px;border-radius:10px;background:#1c2128;border:1px solid #c9b8ff66;margin-bottom:9px"><div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Agent SDLC <span style="font-size:9px;color:#c9b8ff;background:rgba(201,184,255,.12);border-radius:4px;padding:1px 6px;margin-left:4px">RECOMMENDED</span></div><div style="display:flex;gap:5px;flex-wrap:wrap">
+          <span style="font-size:9.5px;color:#b1bac4;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">Backlog</span><span style="font-size:9.5px;color:#b1bac4;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">To do</span><span style="font-size:9.5px;color:#b1bac4;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">In progress</span><span style="font-size:9.5px;color:#b1bac4;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">Review</span><span style="font-size:9.5px;color:#b1bac4;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">Done</span>
+        </div></div>
+        <div style="padding:11px 13px;border-radius:10px;background:#1c2128;border:1px solid #30363d"><div style="font-size:12.5px;font-weight:600;color:#b1bac4;margin-bottom:8px">Kanban (basic)</div><div style="display:flex;gap:5px"><span style="font-size:9.5px;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">To do</span><span style="font-size:9.5px;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">Doing</span><span style="font-size:9.5px;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">Done</span></div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#2d1a6e;background:#c9b8ff;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- P4 -->
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#c9b8ff">Step 4</span><span style="font-size:11px;color:#768390">Team &amp; agents</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:8px;height:4px;border-radius:2px;background:#4a3f6b"></span><span style="width:18px;height:4px;border-radius:2px;background:#c9b8ff"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:14px">Invite people &amp; agents</div>
+        <div class="lbl">PEOPLE</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:#1c2128;margin-bottom:6px"><span style="width:24px;height:24px;border-radius:50%;background:rgba(201,184,255,.16);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">DA</span><div style="flex:1"><div style="font-size:12px">Dana Kim</div></div><span style="font-size:10.5px;color:#768390">admin</span></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:#1c2128;margin-bottom:12px"><span style="width:24px;height:24px;border-radius:50%;background:rgba(128,203,196,.16);color:#80cbc4;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">AX</span><div style="flex:1"><div style="font-size:12px">Alex Rivera</div></div><span style="font-size:10.5px;color:#768390">admin</span></div>
+        <div class="lbl">AGENTS</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:#1c2128"><span style="width:24px;height:24px;border-radius:50%;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">AI</span><div style="flex:1"><div style="font-size:12px">Backend Implementer</div></div><span style="font-size:10.5px;color:#80cbc4">added</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#2d1a6e;background:#c9b8ff;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- P5 -->
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#80cbc4">Step 5</span><span style="font-size:11px;color:#768390">Review</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:18px;height:4px;border-radius:2px;background:#80cbc4"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:14px">Ready to create</div>
+        <div style="border-radius:12px;border:1px solid #30363d;overflow:hidden;margin-bottom:14px"><div style="height:4px;background:#c9b8ff"></div><div style="padding:13px;background:#0e1117"><div style="display:flex;align-items:center;gap:9px;margin-bottom:8px"><span style="width:11px;height:11px;border-radius:3px;background:#c9b8ff"></span><span style="font-size:14px;font-weight:700">Payments Platform</span><span style="font-size:9px;font-family:ui-monospace,monospace;color:#768390;background:#161b22;border:1px solid #30363d;border-radius:4px;padding:1px 6px">PAY</span></div><div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#80cbc4;font-family:ui-monospace,monospace;margin-bottom:8px">acme/billing-api</div><div style="display:flex;gap:8px;font-size:10.5px;color:#768390"><span>Agent SDLC</span><span>·</span><span>2 people</span><span>·</span><span>1 agent</span></div></div></div>
+        <div style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:#80cbc4"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><path d="M22 4 12 14.01l-3-3"></path></svg>Board, backlog &amp; roadmap will be set up automatically.</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#0e1117;background:#80cbc4;padding:7px 16px;border-radius:8px">Create project</span></div>
+    </div>
+  </div>
+
+  <!-- ============ CREATE TASK ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:50%;background:#80cbc4"></span><h2 style="font-size:16px;font-weight:700;margin:0">Create task</h2><span style="font-size:11px;color:#5a626c">· quick compose</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px">One modal from anywhere. File it, set a Definition of Done, then optionally hand it straight to an agent.</p>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px;margin-bottom:40px">
+
+    <!-- T1 trigger -->
+    <div class="frm" style="width:300px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#768390">Trigger · top bar</div>
+      <div style="padding:18px 15px;display:flex;flex-direction:column;align-items:center;gap:14px">
+        <div style="align-self:flex-end;display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New</div>
+        <div style="width:170px;border-radius:11px;background:#1c2128;border:1px solid #30363d;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.5)">
+          <div style="display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;background:#272d36"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg><span style="font-size:12px;color:#e8ebf0">New task</span></div>
+          <div style="display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"></rect><rect x="3" y="14" width="18" height="6" rx="1"></rect></svg><span style="font-size:12px;color:#b1bac4">New epic</span></div>
+          <div style="display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18"></path></svg><span style="font-size:12px;color:#b1bac4">New project</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- T2 compose -->
+    <div class="frm" style="width:360px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:12px;font-weight:600">New task</span><span style="font-size:10px;font-family:ui-monospace,monospace;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:1px 7px">ACM</span><div style="flex:1"></div><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
+      <div style="padding:15px">
+        <div class="fld" style="font-size:14px;font-weight:600;padding:10px 12px;margin-bottom:9px">Add Stripe webhook retry with backoff</div>
+        <div class="fld" style="color:#768390;line-height:1.5;margin-bottom:13px">Webhook deliveries fail silently on transient 5xx. Add bounded retries with jitter…</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:11px">
+          <div><div class="lbl">EPIC</div><div class="fld" style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:2px;background:#c58af9"></span>Payments</div></div>
+          <div><div class="lbl">PRIORITY</div><div class="fld"><span style="font-size:10px;font-weight:700;color:#f78da7;background:rgba(247,141,167,.14);border-radius:4px;padding:2px 8px">High</span></div></div>
+          <div><div class="lbl">ASSIGNEE</div><div class="fld" style="display:flex;align-items:center;gap:6px"><span style="width:18px;height:18px;border-radius:50%;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700">AI</span>Backend Impl.</div></div>
+          <div><div class="lbl">STATUS</div><div class="fld" style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#9aa4b2"></span>To do</div></div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><label style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:#b1bac4"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58"></span>Hand to agent on create</label><div style="flex:1"></div><span style="font-size:12px;font-weight:600;color:#0e1117;background:#80cbc4;padding:7px 16px;border-radius:8px">Create</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- T3 dod -->
+    <div class="frm" style="width:320px">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#768390">Optional · Definition of Done</div>
+      <div style="padding:16px 15px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px">What "done" means</div>
+        <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:9px"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58"></span><span style="color:#e8ebf0">Implementation drafted</span></div>
+        <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:9px"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58"></span><span style="color:#e8ebf0">Tests cover the new path</span></div>
+        <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:12px"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58"></span><span style="color:#e8ebf0">Reviewer approves &amp; merges</span></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:#768390"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>Add criterion</div>
+      </div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- T4 result -->
+    <div class="frm" style="width:300px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#80cbc4">Created · lands on board</div>
+      <div style="padding:18px 15px">
+        <div style="font-size:11px;font-weight:700;color:#768390;margin-bottom:10px">TO DO</div>
+        <div style="border-radius:10px;background:#161b22;border:1px solid #30363d;padding:12px;box-shadow:0 8px 22px rgba(0,0,0,.4)"><div style="font-size:10px;font-family:ui-monospace,monospace;color:#768390;margin-bottom:6px">ACM-149</div><div style="font-size:13px;line-height:1.35;margin-bottom:10px">Add Stripe webhook retry with backoff</div><div style="display:flex;align-items:center;gap:6px"><span style="font-size:9px;font-weight:700;color:#c58af9;background:rgba(197,138,249,.14);border-radius:4px;padding:2px 7px">PAYMENTS</span><span style="font-size:9px;font-weight:700;color:#f78da7;background:rgba(247,141,167,.14);border-radius:4px;padding:2px 7px">High</span><div style="flex:1"></div><span style="width:20px;height:20px;border-radius:50%;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700">AI</span></div></div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#80cbc4;margin-top:12px"><span style="position:relative;display:inline-flex"><span style="width:7px;height:7px;border-radius:50%;background:#80cbc4"></span></span>Handed to Backend Implementer</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CREATE EPIC ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:2px;background:#c58af9"></span><h2 style="font-size:16px;font-weight:700;margin:0">Create epic</h2><span style="font-size:11px;color:#5a626c">· 3 steps</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px">Group related tasks under a dated, colored epic that shows up on the roadmap.</p>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px">
+
+    <!-- E1 -->
+    <div class="frm" style="width:360px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:12px;font-weight:600">New epic</span><div style="flex:1"></div><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
+      <div style="padding:15px">
+        <div style="margin-bottom:13px"><div class="lbl">EPIC NAME</div><div class="fld" style="font-size:14px;font-weight:600">Self-serve onboarding</div></div>
+        <div style="margin-bottom:13px"><div class="lbl">COLOR</div><div class="fld" style="display:flex;align-items:center;gap:8px"><span style="display:flex;gap:6px"><span style="width:18px;height:18px;border-radius:5px;background:#c58af9;outline:2px solid #c58af9;outline-offset:2px"></span><span style="width:18px;height:18px;border-radius:5px;background:#80cbc4"></span><span style="width:18px;height:18px;border-radius:5px;background:#fdd663"></span><span style="width:18px;height:18px;border-radius:5px;background:#38bdf8"></span><span style="width:18px;height:18px;border-radius:5px;background:#f78da7"></span></span></div></div>
+        <div style="display:flex;gap:10px"><div style="flex:1"><div class="lbl">START</div><div class="fld" style="display:flex;align-items:center;gap:7px;color:#b1bac4"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18M8 2v4M16 2v4"></path></svg>Jun 18</div></div><div style="flex:1"><div class="lbl">DUE</div><div class="fld" style="display:flex;align-items:center;gap:7px;color:#b1bac4"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18M8 2v4M16 2v4"></path></svg>Aug 1</div></div></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Cancel</span><span style="font-size:12px;font-weight:600;color:#2d1a6e;background:#c9b8ff;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- E2 -->
+    <div class="frm" style="width:340px">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#768390">Step 2 · Add tasks</div>
+      <div style="padding:15px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">Pull tasks into the epic</div>
+        <div style="font-size:11.5px;color:#768390;margin-bottom:13px">Existing tasks or create new ones.</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;background:#1c2128;border:1px solid #c58af966;margin-bottom:7px"><span style="width:15px;height:15px;border-radius:4px;background:#c58af9;display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#1a1030" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="font-size:10px;font-family:ui-monospace,monospace;color:#768390">ACM-150</span><span style="flex:1;font-size:12px;color:#e8ebf0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Empty state for dashboards</span></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;background:#1c2128;border:1px solid #c58af966;margin-bottom:7px"><span style="width:15px;height:15px;border-radius:4px;background:#c58af9;display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#1a1030" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="font-size:10px;font-family:ui-monospace,monospace;color:#768390">ACM-151</span><span style="flex:1;font-size:12px;color:#e8ebf0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Onboarding checklist API</span></div>
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;background:#1c2128;border:1px solid #30363d"><span style="width:15px;height:15px;border-radius:4px;border:1.5px solid #484f58"></span><span style="font-size:10px;font-family:ui-monospace,monospace;color:#768390">ACM-148</span><span style="flex:1;font-size:12px;color:#b1bac4;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Pagination for the audit log</span></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#0e1117;background:#80cbc4;padding:7px 15px;border-radius:8px">Create epic</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <!-- E3 roadmap -->
+    <div class="frm" style="width:380px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#80cbc4">Created · shows on roadmap</div>
+      <div style="padding:16px 15px">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:14px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg><span style="font-size:13px;font-weight:600">Roadmap</span></div>
+        <div style="display:flex;flex-direction:column;gap:9px">
+          <div><div style="font-size:11px;color:#b1bac4;margin-bottom:5px">Payments</div><div style="height:11px;border-radius:999px;background:#1c2128;position:relative"><div style="position:absolute;left:6%;width:46%;top:0;bottom:0;border-radius:999px;background:#c58af9"></div></div></div>
+          <div><div style="font-size:11px;color:#b1bac4;margin-bottom:5px">Platform</div><div style="height:11px;border-radius:999px;background:#1c2128;position:relative"><div style="position:absolute;left:20%;width:38%;top:0;bottom:0;border-radius:999px;background:#80cbc4"></div></div></div>
+          <div><div style="font-size:11px;color:#e8ebf0;font-weight:600;margin-bottom:5px;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:2px;background:#c58af9"></span>Self-serve onboarding <span style="font-size:9px;color:#c58af9;background:rgba(197,138,249,.14);border-radius:4px;padding:1px 6px">NEW</span></div><div style="height:13px;border-radius:999px;background:#1c2128;position:relative;outline:1px solid #c58af966"><div style="position:absolute;left:42%;width:50%;top:0;bottom:0;border-radius:999px;background:#c58af9"></div></div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#768390;margin-top:14px">2 tasks · Jun 18 → Aug 1</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

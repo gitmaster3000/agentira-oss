@@ -1,0 +1,56 @@
+<!-- @dsCard group="Colors" viewport="700x320" subtitle="Status, priority & semantic feedback colors" name="Semantic · status · priority" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px 28px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 12px; }
+  .section { margin-bottom: 22px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 9px; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 9px;
+          border-radius: var(--radius-pill); font-size: 11px; font-weight: var(--weight-semibold);
+          background: var(--surface-card); border: 1px solid var(--border-default); color: var(--text-tertiary); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .sw { display: flex; flex-direction: column; gap: 7px; }
+  .chip { height: 52px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); }
+  .nm  { font: var(--type-meta); font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+  .hex { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="section">
+    <div class="eyebrow">Board status</div>
+    <div class="pills">
+      <span class="pill"><span class="dot" style="background:var(--text-muted)"></span>Backlog</span>
+      <span class="pill"><span class="dot" style="background:#8ab4f8"></span>To do</span>
+      <span class="pill"><span class="dot" style="background:var(--warning)"></span>In progress</span>
+      <span class="pill"><span class="dot" style="background:var(--accent-purple)"></span>In review</span>
+      <span class="pill"><span class="dot" style="background:var(--success)"></span>Done</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="eyebrow">Priority</div>
+    <div class="pills">
+      <span class="pill"><span class="dot" style="background:var(--priority-critical)"></span>Critical</span>
+      <span class="pill"><span class="dot" style="background:var(--priority-high)"></span>High</span>
+      <span class="pill"><span class="dot" style="background:var(--priority-medium)"></span>Medium</span>
+      <span class="pill"><span class="dot" style="background:var(--priority-low)"></span>Low</span>
+    </div>
+  </div>
+
+  <div>
+    <div class="eyebrow">Semantic feedback</div>
+    <div class="grid">
+      <div class="sw"><div class="chip" style="background:var(--success)"></div><span class="nm">success</span><span class="hex">#2ecc71</span></div>
+      <div class="sw"><div class="chip" style="background:var(--warning)"></div><span class="nm">warning</span><span class="hex">#ff9800</span></div>
+      <div class="sw"><div class="chip" style="background:var(--danger)"></div><span class="nm">danger</span><span class="hex">#f85149</span></div>
+      <div class="sw"><div class="chip" style="background:var(--info)"></div><span class="nm">info</span><span class="hex">#38bdf8</span></div>
+    </div>
+  </div>
+</body>
+</html>

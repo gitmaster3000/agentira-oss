@@ -1,0 +1,33 @@
+<!-- @dsCard group="Spacing" viewport="700x260" subtitle="Border-led depth + the signature live glow" name="Elevation & glow" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 26px 28px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 16px; }
+  .row { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; }
+  .el { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .box { width: 120px; height: 70px; border-radius: var(--radius-xl); background: var(--surface-card);
+         border: 1px solid var(--border-default); }
+  .lbl { font: var(--type-meta); font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+  .glow-demo { width: 150px; height: 70px; border-radius: var(--radius-xl); background: var(--surface-card);
+        border: 1px solid var(--border-default); display: flex; align-items: center; justify-content: center;
+        gap: 7px; color: var(--pulse-blue-bright); font-size: 11px; font-weight: var(--weight-semibold); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pulse-blue);
+              box-shadow: 0 0 8px var(--pulse-blue); }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Elevation · focus · live</div>
+  <div class="row">
+    <div class="el"><div class="box" style="box-shadow:var(--shadow-sm)"></div><span class="lbl">shadow-sm</span></div>
+    <div class="el"><div class="box" style="box-shadow:var(--shadow-card)"></div><span class="lbl">shadow-card</span></div>
+    <div class="el"><div class="box" style="box-shadow:var(--shadow-dropdown)"></div><span class="lbl">shadow-dropdown</span></div>
+    <div class="el"><div class="box" style="box-shadow:var(--ring-focus)"></div><span class="lbl">ring-focus</span></div>
+    <div class="el"><div class="glow-demo agentira-glow"><span class="live-dot"></span>Agent running</div><span class="lbl">.agentira-glow</span></div>
+  </div>
+</body>
+</html>

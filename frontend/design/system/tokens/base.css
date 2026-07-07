@@ -1,0 +1,33 @@
+/* ============================================================
+   Agentira — Base reset & primitives
+   Minimal, dark-first. Sets the app background, default text
+   color, font smoothing, scrollbars and selection.
+   ============================================================ */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--surface-base);
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  font-size: var(--text-13);
+  line-height: var(--leading-snug);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--tint-selection); }
+
+/* Thin, unobtrusive dark scrollbars */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Monospace utility for keys / config / code */
+code, kbd, samp, .agentira-mono { font-family: var(--font-mono); }
