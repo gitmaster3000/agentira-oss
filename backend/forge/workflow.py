@@ -64,7 +64,34 @@ def _load_prompt_file(name: str) -> str:
         return ""
 
 
+def _prompt_overrides(project) -> dict[str, str]:
+    """Per-project prompt-text overrides. `{}` on empty/missing/malformed —
+    system templates always remain the ground truth (they are shipped code)."""
+    if project is None:
+        return {}
+    raw = getattr(project, "workflow_prompts_json", None)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        return {k: v for k, v in data.items()
+                if isinstance(k, str) and isinstance(v, str) and v.strip()}
+    except (ValueError, TypeError):
+        logger.warning("project %s workflow_prompts_json invalid — using "
+                       "system templates", getattr(project, "id", "?"))
+        return {}
+
+
+def _resolve_prompt(project, name: str) -> str:
+    """Effective text for a workflow prompt slug: project override > system
+    template file > ''. Same slug space as `_load_prompt_file`."""
+    return _prompt_overrides(project).get(name) or _load_prompt_file(name)
+
+
 def _role_handoff_prompt(flow: "Workflow", role_name: str, *,
+                         project=None, overrides: dict | None = None,
                          branch: str = "", pr_url: str = "") -> str:
     """The hand-off instructions for a dispatched role (reviewer,
     documentation, ...) — column semantics must not depend on agent persona.
@@ -76,7 +103,10 @@ def _role_handoff_prompt(flow: "Workflow", role_name: str, *,
     as gate_bounce's {{FAILURES}}."""
     role = flow.roles.get(role_name)
     prompt_name = (role.prompt if role and role.prompt else role_name)
-    content = _load_prompt_file(prompt_name)
+    if overrides is not None:
+        content = overrides.get(prompt_name) or _load_prompt_file(prompt_name)
+    else:
+        content = _resolve_prompt(project, prompt_name)
     if not content:
         logger.info("workflow: no hand-off prompt file for role=%s "
                     "(prompt=%s) — dispatching without it", role_name,
@@ -86,16 +116,23 @@ def _role_handoff_prompt(flow: "Workflow", role_name: str, *,
                   .replace("{{PR_URL}}", pr_url or "(no PR URL set)")
 
 
-def resolve_role_prompt(flow: "Workflow", role_name: str) -> str:
+def resolve_role_prompt(flow: "Workflow", role_name: str, *, project=None) -> str:
     """The hand-off prompt template for a role (config, customer-readable) —
     same resolution as `_role_handoff_prompt` but WITHOUT the per-run
     branch/PR substitution, for the read-only workflow UI. '' if none."""
     role = flow.roles.get(role_name)
     prompt_name = (role.prompt if role and role.prompt else role_name)
-    return _load_prompt_file(prompt_name)
+    return _resolve_prompt(project, prompt_name)
 
 
-def column_ui_details(flow: "Workflow") -> dict:
+def role_prompt_slug(flow: "Workflow", role_name: str) -> str:
+    """The prompt-file basename a role resolves to — the key the override
+    JSON uses. Falls back to the role name."""
+    role = flow.roles.get(role_name)
+    return (role.prompt if role and role.prompt else role_name)
+
+
+def column_ui_details(flow: "Workflow", project=None) -> dict:
     """Per-column enrichment for the read-only workflow UI.
 
     For each column:
@@ -121,11 +158,14 @@ def column_ui_details(flow: "Workflow") -> dict:
         to = s.advance_to if s else None
         role = incoming.get(col.name) or (
             col.on_enter.dispatch_role if col.on_enter else None)
+        prompt_slug = role_prompt_slug(flow, role) if role else ""
         details[col.name] = {
             "advance_to": to,
             "gates": gates.describe_transition(col.name, to) if to else [],
             "prompt_role": role,
-            "prompt": resolve_role_prompt(flow, role) if role else "",
+            "prompt_slug": prompt_slug,
+            "prompt": resolve_role_prompt(flow, role, project=project) if role else "",
+            "prompt_is_override": bool(prompt_slug and prompt_slug in _prompt_overrides(project)),
         }
     return details
 
@@ -377,7 +417,8 @@ def _bounce_gate_failure(db, *, task, run, current: str, target: str,
     ))
     db.commit()
 
-    prompt = _load_prompt_file("gate_bounce").replace("{{FAILURES}}", reasons)
+    project = db.get(Project, task.project_id) if task.project_id else None
+    prompt = _resolve_prompt(project, "gate_bounce").replace("{{FAILURES}}", reasons)
     from backend.forge import services
     d = services.schedule_task_run(task_id=task_id, agent_id=agent_id,
                                    extra_context=prompt)
@@ -557,7 +598,8 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
         return {"advanced": False, "reason": "review_rejected",
                 "handed_back": True, "assignee": impl_name}
 
-    prompt = (_load_prompt_file(policy.prompt)
+    project = db.get(Project, task.project_id) if task.project_id else None
+    prompt = (_resolve_prompt(project, policy.prompt)
               .replace("{{REVIEW}}", feedback))
     from backend.forge import services
     d = services.schedule_task_run(task_id=task_id, agent_id=impl_id,
@@ -720,6 +762,7 @@ def advance_after_run(run_id: str) -> dict:
             task_branch, task_pr_url = task.branch or "", task.pr_url or ""
             next_agent_id = next_agent.id if next_agent else None
             next_agent_name = next_agent.name if next_agent else None
+            prompt_overrides = _prompt_overrides(project)
 
         # Outside the session: route through TaskService so auth (AP-374),
         # gates, activity logging (AP-375), and agent wake all come from
@@ -740,7 +783,8 @@ def advance_after_run(run_id: str) -> dict:
             # implementer prompt — column semantics must not depend on
             # agent persona (AP-361 review-worked-by-accident gap).
             handoff_prompt = _role_handoff_prompt(
-                flow, spec.assign_role, branch=task_branch, pr_url=task_pr_url)
+                flow, spec.assign_role, overrides=prompt_overrides,
+                branch=task_branch, pr_url=task_pr_url)
             from backend.forge import services
             d = services.schedule_task_run(task_id=task_id,
                                            agent_id=next_agent_id,
@@ -859,11 +903,13 @@ def complete_integration(*, task_id: str, run_id: str | None,
                     doc_agent_id, doc_agent_name = a.id, a.name
                     doc_role = enter.dispatch_role
         task_branch, task_pr_url = task.branch or "", task.pr_url or ""
+        prompt_overrides = _prompt_overrides(project)
 
     result = {"ok": True, "advanced": True, "to": target}
     if doc_agent_id:
         handoff_prompt = _role_handoff_prompt(
-            flow, doc_role, branch=task_branch, pr_url=task_pr_url)
+            flow, doc_role, overrides=prompt_overrides,
+            branch=task_branch, pr_url=task_pr_url)
         from backend.forge import services
         d = services.schedule_task_run(task_id=task_id_, agent_id=doc_agent_id,
                                        extra_context=handoff_prompt)

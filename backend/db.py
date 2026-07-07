@@ -731,6 +731,8 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "workflow_enabled",
                                     "BOOLEAN DEFAULT FALSE NOT NULL")
             added |= _ensure_column(conn, "projects", "workflow_roles_json", "TEXT")
+            # Per-project prompt-text overrides for workflow hand-off prompts.
+            added |= _ensure_column(conn, "projects", "workflow_prompts_json", "TEXT")
             # AP-297: per-project TTL for cached pre-run checks (NULL = 600s
             # default; 0 = no time expiry, env-change re-runs only).
             added |= _ensure_column(conn, "projects", "ready_checks_ttl_seconds",

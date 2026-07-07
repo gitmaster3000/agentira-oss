@@ -387,6 +387,12 @@ class Project(Base):
     # how roles resolve to agents ({"reviewer": {"match": [...], ...}}).
     # Validated (Pydantic RoleSpec) on use; the flow itself is system config.
     workflow_roles_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Per-project prompt-text overrides for workflow hand-off prompts. JSON
+    # object keyed by prompt slug ("reviewer", "documentation", "gate_bounce",
+    # "rejection_handback", ...): value = the raw markdown that replaces the
+    # system template at templates/workflow/prompts/<slug>.md. Missing key ->
+    # system template. Empty string / clear -> fall back to system.
+    workflow_prompts_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # AP-297: how long a run's cached pre-checks stay trusted before they're
     # re-validated on the next on-ready fetch. NULL = default (600s / 10 min);
     # 0 = never expire by age (only an operational-env change re-runs them).

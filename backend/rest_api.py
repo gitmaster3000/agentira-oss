@@ -632,9 +632,85 @@ def api_get_project_workflow(project_id: str):
         return {
             "workflow_enabled": bool(getattr(p, "workflow_enabled", False)),
             "flow": flow.model_dump(),
-            "columns_ui": _workflow.column_ui_details(flow),
-            "editable": ["workflow_enabled", "workflow_roles_json"],
+            "columns_ui": _workflow.column_ui_details(flow, project=p),
+            "editable": ["workflow_enabled", "workflow_roles_json",
+                         "workflow_prompts_json"],
         }
+
+
+@projects.get("/{project_id}/workflow/prompts")
+def api_get_project_workflow_prompts(project_id: str):
+    """Read the effective hand-off prompts for this project — one entry per
+    prompt slug the flow references. Each entry carries the system default
+    (for comparison), the project override text (if any), the effective
+    text the driver will actually use, and which columns/roles reference it."""
+    from backend.db import SessionLocal
+    from backend.models import Project
+    from backend.forge import workflow as _workflow
+    with SessionLocal() as db:
+        p = db.get(Project, project_id)
+        if not p:
+            raise HTTPException(404, "Project not found")
+        flow = _workflow.effective_workflow(p)
+        overrides = _workflow._prompt_overrides(p)
+        # Slugs the flow references: role prompts (each role) + bounce/reject
+        # policy prompts.
+        slugs: dict[str, dict] = {}
+        # Column → role prompts (surface each column's slug for the UI).
+        ui = _workflow.column_ui_details(flow, project=p)
+        for col_name, det in ui.items():
+            slug = det.get("prompt_slug") or ""
+            if not slug:
+                continue
+            entry = slugs.setdefault(slug, {
+                "slug": slug,
+                "roles": set(),
+                "columns": set(),
+            })
+            if det.get("prompt_role"):
+                entry["roles"].add(det["prompt_role"])
+            entry["columns"].add(col_name)
+        # Bounce + rejection policy prompts (not tied to a column/role).
+        slugs.setdefault("gate_bounce", {
+            "slug": "gate_bounce", "roles": set(), "columns": set()})
+        rej_slug = getattr(flow.rejection, "prompt", "") or "rejection_handback"
+        slugs.setdefault(rej_slug, {
+            "slug": rej_slug, "roles": set(), "columns": set()})
+        out = []
+        for slug, meta in slugs.items():
+            system = _workflow._load_prompt_file(slug)
+            override = overrides.get(slug) or ""
+            out.append({
+                "slug": slug,
+                "roles": sorted(meta["roles"]),
+                "columns": sorted(meta["columns"]),
+                "system_default": system,
+                "override": override,
+                "is_override": bool(override),
+                "effective": override or system,
+            })
+        out.sort(key=lambda e: e["slug"])
+        return {"prompts": out}
+
+
+class WorkflowPromptBody(BaseModel):
+    text: Optional[str] = None  # None or empty -> clear the override
+
+
+@projects.put("/{project_id}/workflow/prompts/{slug}",
+              dependencies=[Depends(require_admin)])
+def api_put_project_workflow_prompt(project_id: str, slug: str,
+                                    body: WorkflowPromptBody):
+    """Set (or clear, with empty/None text) the project's prompt-text
+    override for one slug. RBAC: org admin — same gate as other privileged
+    project config. System templates stay untouched (they are shipped code)."""
+    try:
+        return services.set_workflow_prompt_override(
+            project_id, slug=slug, text=body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError as e:
+        raise HTTPException(404, str(e))
 
 @projects.delete("/{project_id}")
 def api_delete_project(project_id: str):

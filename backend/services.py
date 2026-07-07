@@ -707,6 +707,51 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
         return _project_to_dict(p)
 
 
+def set_workflow_prompt_override(project_id: str, *, slug: str,
+                                 text: Optional[str]) -> dict:
+    """Persist (or clear) a per-project prompt-text override on
+    Project.workflow_prompts_json. Empty / None text removes the slug's
+    override; the driver falls back to the system template.
+
+    slug validity is checked against the union of role-prompt slugs and the
+    bounce/rejection policy prompts — no dumping ground; unknown slugs 400.
+    """
+    import json as _json
+    from backend.forge import workflow as _workflow
+    with _session() as db:
+        p = db.get(Project, project_id)
+        if not p:
+            raise KeyError(f"Project {project_id} not found")
+        flow = _workflow.effective_workflow(p)
+        allowed: set[str] = {"gate_bounce",
+                             getattr(flow.rejection, "prompt", "")
+                             or "rejection_handback"}
+        for role_name, role in flow.roles.items():
+            allowed.add(role.prompt if role.prompt else role_name)
+        allowed.discard("")
+        if slug not in allowed:
+            raise ValueError(
+                f"unknown prompt slug '{slug}' (known: {sorted(allowed)})")
+        current: dict = {}
+        raw = getattr(p, "workflow_prompts_json", None)
+        if raw:
+            try:
+                loaded = _json.loads(raw)
+                if isinstance(loaded, dict):
+                    current = {k: v for k, v in loaded.items()
+                               if isinstance(k, str) and isinstance(v, str)}
+            except ValueError:
+                current = {}
+        if text is None or not text.strip():
+            current.pop(slug, None)
+        else:
+            current[slug] = text
+        p.workflow_prompts_json = _json.dumps(current) if current else None
+        db.commit()
+        return {"slug": slug, "is_override": slug in current,
+                "override": current.get(slug, "")}
+
+
 def delete_project(project_id: str) -> bool:
     """Cascade-delete a project and everything it owns: tasks, epics, members,
     activities, attachments (rows + on-disk files), forge runs, and chats.

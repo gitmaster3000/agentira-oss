@@ -204,7 +204,7 @@ This is critical for the UI to communicate honestly:
 ## 12. Out of scope for the first cut
 
 - **Adding/removing columns** — system config for now; defer to a v2 once roles work is solid.
-- **Per-column custom prompts** beyond the role's standing system_prompt — agents own prompts, columns just route work.
+- ~~**Per-column custom prompts** beyond the role's standing system_prompt~~ — **shipped**: per-project text overrides for each column's hand-off prompt (plus `gate_bounce` / `rejection_handback`) live on `Project.workflow_prompts_json` and are edited from the Workflow page's per-column detail panel. System templates in `templates/workflow/prompts/*.md` stay untouched — they are the shipped defaults, and the override falls back to them when cleared. REST: `GET /api/projects/{id}/workflow/prompts`, `PUT /api/projects/{id}/workflow/prompts/{slug}` (admin-only).
 - **Multi-project workflow templates** library — defer.
 - **Drag-to-reorder columns** — defer.
 - **Reordering arrows** / cycle detection — single linear pipeline only.
