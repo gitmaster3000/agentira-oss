@@ -173,3 +173,29 @@ def test_run_summary_used_when_no_rolling_summary():
     assert "Earlier context (summary): Fixed login redirect bug." in out
     assert "Old attempt" not in out
     assert out.index("Earlier context") < out.index("</conversation history>")
+
+
+# ── row cap bounds the fetch (prod OOM 2026-07-07) ───────────────────────
+
+def test_row_cap_bounds_history_fetch(monkeypatch):
+    """A giant history must not be materialized wholesale: only the newest
+    _CONTEXT_ROW_CAP rows are fetched (the token budget then trims further)."""
+    from backend.forge import context as ctx
+    monkeypatch.setattr(ctx, "_CONTEXT_ROW_CAP", 5)
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with forge_services._session() as db:
+        for i in range(12):
+            db.add(AgentMessage(
+                agent_id=agent_id, role=MessageRole.USER,
+                content=f"r{i}:hello", scope_key=scope,
+                created_at=base + timedelta(minutes=i),
+            ))
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="now",
+        token_budget=100_000)
+    assert "r11:" in out, "newest row kept"
+    assert "r7:" in out, "cap window (newest 5) kept"
+    assert "r6:" not in out, "rows beyond the cap not fetched"

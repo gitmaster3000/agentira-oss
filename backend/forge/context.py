@@ -13,6 +13,9 @@ from __future__ import annotations
 from backend.forge.models import AgentMessage, MessageRole, Run, Conversation
 
 _TOOL_ENTRY_TRUNCATE = 4096   # ~4KB per tool entry
+# Max rows fetched per context rebuild. The token-budget loop is the real
+# limiter; this only stops the query from materializing an unbounded history.
+_CONTEXT_ROW_CAP = 1000
 # Token budget for a rebuilt history preamble (gateway runtimes / when a
 # native session is lost). ~50K tokens keeps real continuity while staying
 # well inside the model context. One budgeted path for every scope — replaces
@@ -85,8 +88,14 @@ def assemble_context(*, agent_id: str, scope_key: str, current: str,
         if scope_key:
             q = q.filter(AgentMessage.scope_key == scope_key)
         # Walk newest→oldest, accumulate until the token budget, then reverse
-        # to chronological order.
-        for m in q.order_by(AgentMessage.created_at.desc()).all():
+        # to chronological order. Hard row cap: without it, .all() materializes
+        # the scope's ENTIRE history (tool blobs included) before the budget
+        # loop runs — on long-lived threads that was multi-GB per dispatch and
+        # the prod OOM crash driver (2026-07-07). The budget loop breaks long
+        # before this cap on any realistic token_budget.
+        for m in (q.order_by(AgentMessage.created_at.desc(),
+                             AgentMessage.id.desc())
+                    .limit(_CONTEXT_ROW_CAP).all()):
             line = _render_history_row(m)
             if line is None:
                 continue
