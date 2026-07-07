@@ -632,6 +632,7 @@ def api_get_project_workflow(project_id: str):
         return {
             "workflow_enabled": bool(getattr(p, "workflow_enabled", False)),
             "flow": flow.model_dump(),
+            "columns_ui": _workflow.column_ui_details(flow),
             "editable": ["workflow_enabled", "workflow_roles_json"],
         }
 

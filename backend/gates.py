@@ -140,6 +140,31 @@ def failures(results: Iterable[GateResult]) -> list[GateResult]:
     return [r for r in results if not r.ok]
 
 
+# Static, task-independent descriptions of each gate — the read-only workflow
+# UI (the runtime `reason` on GateResult is task-specific; this is the rule
+# itself). Keyed by the gate's name.
+_GATE_META: dict[str, str] = {
+    "has_dod": "Task has at least one Definition-of-Done item.",
+    "has_assignee": "Task has an assignee.",
+    "dod_all_checked": "Every Definition-of-Done item is checked.",
+    "has_branch_or_pr": "Task has a branch or a PR URL.",
+    "pr_url_set": "Task has a PR URL linked.",
+}
+
+
+def describe_transition(from_status: str, to_status: str) -> list[dict]:
+    """Static description of the gates guarding a transition — for the
+    read-only workflow UI. Each entry: {name, description}. Empty list when
+    the transition registers no gates (always allowed)."""
+    out: list[dict] = []
+    for fn in _TRANSITION_GATES.get((from_status, to_status), []):
+        # A checker's name is its function name minus the leading underscore
+        # (matches the GateResult.name it produces), resolved without a task.
+        name = fn.__name__.lstrip("_")
+        out.append({"name": name, "description": _GATE_META.get(name, name)})
+    return out
+
+
 def enforce(task: Task, *, from_status: str, to_status: str) -> None:
     """Raise `GateFailure` if any gate fails. No-op on success.
 
