@@ -97,7 +97,7 @@ export function Workflow() {
                 </div>
                 <div style={{ width: '380px', flexShrink: 0, borderLeft: '1px solid #30363d', background: '#0e1117', overflowY: 'auto' }}>
                     {view === 'visual'
-                        ? <ColumnPanel columnName={selected} flow={flow} columnsUi={columnsUi} />
+                        ? <ColumnPanel columnName={selected} flow={flow} columnsUi={columnsUi} projectId={projectId} onPromptSaved={load} />
                         : <RuleCodePane columnName={selected} flow={flow} columnsUi={columnsUi} />}
                 </div>
             </div>
