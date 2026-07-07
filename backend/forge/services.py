@@ -4380,8 +4380,27 @@ def _worktree_cleanup_hint(run_id: str | None) -> dict:
     return {"path": "", "branch": ""}
 
 
+# AP-391 root cause: these two loaders returned a run's ENTIRE message
+# history with uncapped content/tool_input/tool_output. RunDetail polls
+# /runs/{id}/events every 5s; on a long sticky run (Model B) each poll
+# materialized gigabytes, the process RSS stair-stepped up and the
+# container OOM-killed. Bound both: newest-window + per-field trim.
+_RUN_EVENTS_WINDOW = 500        # newest messages returned per call
+_RUN_EVENT_FIELD_CAP = 20_000   # per-field char trim (content / tool IO)
+
+
+def _bounded_message_dict(m: AgentMessage) -> dict:
+    d = _message_to_dict(m)
+    for key in ("content", "tool_input", "tool_output"):
+        v = d.get(key)
+        if isinstance(v, str) and len(v) > _RUN_EVENT_FIELD_CAP:
+            d[key] = v[:_RUN_EVENT_FIELD_CAP] + "…[truncated]"
+    return d
+
+
 def get_trigger_events(trace_id: str) -> list[dict]:
-    """Return all messages tagged with this trace_id, ordered by creation time.
+    """Return the newest messages tagged with this trace_id (bounded window,
+    ascending order within it).
 
     Org-scoped: joins the (RLS-enforced) Agent so only messages whose agent is
     in the caller's org are returned."""
@@ -4390,14 +4409,17 @@ def get_trigger_events(trace_id: str) -> list[dict]:
         msgs = (db.query(AgentMessage)
                 .join(Agent, AgentMessage.agent_id == Agent.id)
                 .filter(AgentMessage.trace_id == trace_id)
-                .order_by(AgentMessage.created_at.asc())
+                .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+                .limit(_RUN_EVENTS_WINDOW)
                 .all())
-        return [_message_to_dict(m) for m in msgs]
+        msgs.reverse()
+        return [_bounded_message_dict(m) for m in msgs]
 
 
 def get_run_events(run_id: str) -> list[dict]:
-    """Return messages tagged with this run_id (covers any number of triggers
-    that fired against the run), ordered by creation time.
+    """Return the newest messages tagged with this run_id (covers any number
+    of triggers that fired against the run; bounded window, ascending order
+    within it).
 
     Org-scoped via the run's project/agent (see _run_org_scope)."""
     with _session() as db:
@@ -4406,9 +4428,11 @@ def get_run_events(run_id: str) -> list[dict]:
             return []
         msgs = (db.query(AgentMessage)
                 .filter(AgentMessage.run_id == run_id)
-                .order_by(AgentMessage.created_at.asc())
+                .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+                .limit(_RUN_EVENTS_WINDOW)
                 .all())
-        return [_message_to_dict(m) for m in msgs]
+        msgs.reverse()
+        return [_bounded_message_dict(m) for m in msgs]
 
 
 def send_runtime_message(
