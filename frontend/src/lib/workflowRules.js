@@ -3,27 +3,11 @@
 // from the Workflow Engine plan (v4 §2, §11): on_enter (PROCESS) +
 // validate_transition (GATE). No Starlark runtime exists yet (plan Phase 1) —
 // this is a read-only renderer of the CURRENT config, not a live rule source.
-
-// Mirrors backend/gates.py _TRANSITION_GATES. All gates today read task
-// fields only (Phase 2 evidence.* providers haven't landed), so every
-// condition is "asserted" — never "verified" — until evidence.* exists.
-const GATE_CHECKS = {
-    'backlog->todo': [
-        { id: 'has_dod', source: 'task', expr: 'task.has_dod', reason: 'Definition of Done required before todo' },
-        { id: 'has_assignee', source: 'task', expr: 'task.assignee', reason: 'assignee required' },
-    ],
-    'todo->in_progress': [
-        { id: 'has_assignee', source: 'task', expr: 'task.assignee', reason: 'assignee required' },
-    ],
-    'in_progress->review': [
-        { id: 'dod_all_checked', source: 'task', expr: 'task.dod_all_checked', reason: 'all DoD items must be checked' },
-        { id: 'has_branch_or_pr', source: 'task', expr: 'task.branch or task.pr_url', reason: 'open a PR or push a branch first' },
-    ],
-    'review->done': [
-        { id: 'pr_url_set', source: 'task', expr: 'task.pr_url', reason: 'PR must be open' },
-        { id: 'dod_all_checked', source: 'task', expr: 'task.dod_all_checked', reason: 'all DoD items must be checked' },
-    ],
-};
+//
+// Gate conditions are NOT hardcoded here — they come from the backend's
+// `columns_ui` payload (`/projects/:id/workflow`), which reads the SAME
+// backend.gates engine that actually blocks a move. This module only shapes
+// that real data for the UI.
 
 /** Process steps a column's on_enter fires: assign / dispatch / notify. */
 export function processSteps(columnName, flow) {
@@ -57,19 +41,25 @@ export function processSteps(columnName, flow) {
     return steps;
 }
 
-/** Gate conditions guarding the column's exit transition, with asserted/verified badges. */
-export function gateConditions(columnName, flow) {
-    const column = flow?.columns?.find((c) => c.name === columnName);
-    const to = column?.on_success?.advance_to;
+/** Gate conditions guarding the column's exit transition — the REAL checks
+ *  from the backend (`columnsUi`), never a UI copy. Each condition:
+ *  { id, expr, reason }. */
+export function gateConditions(columnName, flow, columnsUi) {
+    const detail = columnsUi?.[columnName];
+    const to = detail?.advance_to ?? flow?.columns?.find((c) => c.name === columnName)?.on_success?.advance_to ?? null;
     if (!to) return { to: null, conditions: [] };
-    const conditions = GATE_CHECKS[`${columnName}->${to}`] || [];
+    const conditions = (detail?.gates || []).map((g) => ({
+        id: g.name,
+        expr: `task.${g.name}`,
+        reason: g.description,
+    }));
     return { to, conditions };
 }
 
 /** Read-only Starlark rendering of the column's on_enter + validate_transition. */
-export function renderStarlark(columnName, flow) {
+export function renderStarlark(columnName, flow, columnsUi) {
     const steps = processSteps(columnName, flow);
-    const { to, conditions } = gateConditions(columnName, flow);
+    const { to, conditions } = gateConditions(columnName, flow, columnsUi);
 
     const lines = [`# ${columnName}.star  (generated preview — rendered from the existing workflow config)`];
 

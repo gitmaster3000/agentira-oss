@@ -21,7 +21,7 @@ function useBreadcrumb(activeProjectName) {
     const seg = (leaf) => {
         const map = {
             board: 'Board', backlog: 'Backlog', roadmap: 'Roadmap',
-            overview: 'Overview', settings: 'Settings',
+            overview: 'Overview', settings: 'Settings', workflow: 'Workflow',
         };
         return map[leaf];
     };
@@ -30,6 +30,11 @@ function useBreadcrumb(activeProjectName) {
     if (path.startsWith('/studio/project/')) {
         const leaf = path.split('/').pop();
         const label = seg(leaf) || 'Project';
+        // The workflow page nests deeper than the board — lead with a "Project"
+        // segment so it reads Project → {name} → Workflow.
+        if (leaf === 'workflow') {
+            return [crumbSeg('Project', true), <Chev key="c0" />, crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg(label)];
+        }
         return [crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg(label)];
     }
     if (path.startsWith('/studio/tasks/')) return [crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg('Board', true), <Chev key="c2" />, crumbSeg('Task')];

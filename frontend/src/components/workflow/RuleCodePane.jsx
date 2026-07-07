@@ -11,8 +11,8 @@ function Line({ text }) {
 }
 
 /** Read-only Starlark preview of the selected column's rule (on_enter + gate). */
-export function RuleCodePane({ columnName, flow }) {
-    const lines = renderStarlark(columnName, flow).split('\n');
+export function RuleCodePane({ columnName, flow, columnsUi }) {
+    const lines = renderStarlark(columnName, flow, columnsUi).split('\n');
     return (
         <div style={{ background: '#0a0c10', padding: '22px 24px', minHeight: '332px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
