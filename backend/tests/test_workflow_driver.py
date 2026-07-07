@@ -47,6 +47,31 @@ def test_system_workflow_parses_and_pins_pipeline():
     assert flow.rejection.prompt == "rejection_handback"
 
 
+def test_column_ui_details_exposes_real_gates_and_prompts():
+    # The read-only workflow UI reads gates from the SAME engine that blocks
+    # moves (backend.gates), plus the hand-off prompt for each column.
+    flow = workflow.system_workflow()
+    ui = workflow.column_ui_details(flow)
+
+    # in_progress → review: the real gates guarding that exit.
+    ip = ui["in_progress"]
+    assert ip["advance_to"] == "review"
+    gate_names = {g["name"] for g in ip["gates"]}
+    assert gate_names == {"dod_all_checked", "has_branch_or_pr"}
+    assert all(g["description"] for g in ip["gates"])
+
+    # review is entered by the reviewer role — its prompt template must surface.
+    rv = ui["review"]
+    assert rv["prompt_role"] == "reviewer"
+    assert rv["prompt"].strip()
+
+    # done is terminal (no advance) and entered by the documentation role.
+    dn = ui["done"]
+    assert dn["advance_to"] is None
+    assert dn["gates"] == []
+    assert dn["prompt_role"] == "documentation"
+
+
 def test_customer_override_is_roles_only_and_validated():
     class P:
         id = "p1"

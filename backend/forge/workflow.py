@@ -86,6 +86,50 @@ def _role_handoff_prompt(flow: "Workflow", role_name: str, *,
                   .replace("{{PR_URL}}", pr_url or "(no PR URL set)")
 
 
+def resolve_role_prompt(flow: "Workflow", role_name: str) -> str:
+    """The hand-off prompt template for a role (config, customer-readable) —
+    same resolution as `_role_handoff_prompt` but WITHOUT the per-run
+    branch/PR substitution, for the read-only workflow UI. '' if none."""
+    role = flow.roles.get(role_name)
+    prompt_name = (role.prompt if role and role.prompt else role_name)
+    return _load_prompt_file(prompt_name)
+
+
+def column_ui_details(flow: "Workflow") -> dict:
+    """Per-column enrichment for the read-only workflow UI.
+
+    For each column:
+      advance_to:  the column a successful task moves to (or None — terminal).
+      gates:       the checks a task must pass to LEAVE this column, each
+                   {name, description}, sourced from backend.gates (the same
+                   engine that actually blocks the move) — never a UI copy.
+      prompt_role / prompt: the hand-off template an agent receives when a task
+                   ENTERS this column — resolved from the previous column's
+                   on_success.assign_role, or this column's on_enter.dispatch_
+                   role (e.g. review←reviewer, done←documentation).
+    """
+    from backend import gates
+    # The role dispatched INTO each column (keyed by the target column name).
+    incoming: dict[str, str] = {}
+    for col in flow.columns:
+        s = col.on_success
+        if s and s.advance_to and s.assign_role:
+            incoming[s.advance_to] = s.assign_role
+    details: dict[str, dict] = {}
+    for col in flow.columns:
+        s = col.on_success
+        to = s.advance_to if s else None
+        role = incoming.get(col.name) or (
+            col.on_enter.dispatch_role if col.on_enter else None)
+        details[col.name] = {
+            "advance_to": to,
+            "gates": gates.describe_transition(col.name, to) if to else [],
+            "prompt_role": role,
+            "prompt": resolve_role_prompt(flow, role) if role else "",
+        }
+    return details
+
+
 # ── Schema (standard parser + safety: yaml.safe_load → Pydantic) ─────────
 
 class IntegrateSpec(BaseModel):
