@@ -17,6 +17,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy.orm import selectinload
+
 from backend import services
 from backend import agent_notifier
 from backend.auth import has_permission
@@ -189,7 +191,7 @@ class TaskService:
         actor: str = "system",
     ) -> list[dict]:
         with services._session() as db:
-            q = db.query(Task)
+            q = db.query(Task).options(selectinload(Task.epic), selectinload(Task.status))
 
             if not has_permission(db, actor, "project.view_all"):
                 profile = services._get_profile_by_name(db, actor)
@@ -218,10 +220,12 @@ class TaskService:
             tasks = q.order_by(Task.updated_at.desc()).all()
             ids = [t.id for t in tasks]
             counts = services._batch_attachment_counts(db, ids)
+            commit_counts = services._batch_commit_counts(db, ids)
             active = services._active_run_agents(db, ids)
             out = []
             for t in tasks:
-                d = services._task_to_dict(t, attachments_count=counts.get(t.id, 0))
+                d = services._task_to_dict(t, attachments_count=counts.get(t.id, 0),
+                                            commits_count=commit_counts.get(t.id, 0))
                 info = active.get(t.id)
                 d["agent_active"] = info is not None
                 if info:

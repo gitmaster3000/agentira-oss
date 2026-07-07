@@ -6,7 +6,7 @@ Both REST API and MCP server call into this layer.
 from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.db import SessionLocal, init_db, privileged, set_current_org, _derive_account_type
 from backend.models import (
@@ -108,7 +108,7 @@ def _resolve_task(db: Session, task_ref: str) -> Task | None:
     return db.query(Task).filter(Task.key == task_ref.upper()).first()
 
 
-def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
+def _task_to_dict(t: Task, attachments_count: int = 0, commits_count: int | None = None) -> dict:
     dod = _normalize_dod(_parse_dod(t.dod_items))
     return {
         "id": t.id,
@@ -131,7 +131,7 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "dod_progress": _dod_progress(dod),
         "branch": t.branch or "",
         "pr_url": t.pr_url or "",
-        "commits_count": len(t.commits) if t.commits else 0,
+        "commits_count": commits_count if commits_count is not None else (len(t.commits) if t.commits else 0),
         # AP-154: surface the resolved repo list to clients. Multi-select
         # UI reads this; legacy single-repo callers still get `repo_name`.
         "repo_name": t.repo_name or "",
@@ -211,6 +211,20 @@ def _batch_attachment_counts(db: Session, task_ids: list[str]) -> dict[str, int]
 def _attachment_count(db: Session, task_id: str) -> int:
     from sqlalchemy import func
     return db.query(func.count(Attachment.id)).filter(Attachment.task_id == task_id).scalar() or 0
+
+
+def _batch_commit_counts(db: Session, task_ids: list[str]) -> dict[str, int]:
+    """Return {task_id: count} for all given task IDs in a single query."""
+    from sqlalchemy import func
+    if not task_ids:
+        return {}
+    rows = (
+        db.query(TaskCommit.task_id, func.count(TaskCommit.id))
+        .filter(TaskCommit.task_id.in_(task_ids))
+        .group_by(TaskCommit.task_id)
+        .all()
+    )
+    return {task_id: count for task_id, count in rows}
 
 
 def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
@@ -1531,12 +1545,20 @@ def get_board(project_id: str) -> dict:
         statuses = db.query(Status).order_by(Status.position).all()
         board: dict[str, list[dict]] = {s.name: [] for s in statuses}
 
-        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.updated_at.desc()).all()
+        tasks = (
+            db.query(Task)
+            .options(selectinload(Task.epic), selectinload(Task.status))
+            .filter(Task.project_id == project_id)
+            .order_by(Task.updated_at.desc())
+            .all()
+        )
         ids = [t.id for t in tasks]
         counts = _batch_attachment_counts(db, ids)
+        commit_counts = _batch_commit_counts(db, ids)
         active = _active_run_agents(db, ids)  # so the board card glow lights up
         for t in tasks:
-            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
+            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0),
+                               commits_count=commit_counts.get(t.id, 0))
             info = active.get(t.id)
             d["agent_active"] = info is not None
             if info:
@@ -1556,7 +1578,13 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
+        tasks = (
+            db.query(Task)
+            .options(selectinload(Task.epic), selectinload(Task.status))
+            .filter(Task.project_id == project_id)
+            .order_by(Task.created_at.asc())
+            .all()
+        )
 
         STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
 
