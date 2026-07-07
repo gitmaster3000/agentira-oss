@@ -7,13 +7,33 @@ from sqlalchemy import (
     String, Text, Integer, Float, DateTime, Boolean,
     ForeignKey, Enum as SAEnum, UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from backend.db import Base
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# AP-421: prod OOM #3 — Conductor planning-turn prompts and streamed tool
+# events were landing multi-megabyte rows in forge_messages (up to 2.9MB
+# each; 884MB across the newest 1000 rows of chat:default alone). No caller
+# legitimately needs a row this large — cap every text field at ingestion,
+# regardless of which code path constructs the row.
+MESSAGE_FIELD_CAP = 256 * 1024  # 256KB per field
+_TRUNCATION_MARKER = "\n\n[... truncated, exceeded {} byte cap ...]".format(MESSAGE_FIELD_CAP)
+
+
+def _cap_text(value: str | None) -> str | None:
+    if value is None or len(value.encode("utf-8", errors="ignore")) <= MESSAGE_FIELD_CAP:
+        return value
+    # Truncate on the character axis (simple, avoids splitting multi-byte
+    # sequences mid-codepoint on len() growth) then append the marker.
+    truncated = value[:MESSAGE_FIELD_CAP]
+    while len(truncated.encode("utf-8", errors="ignore")) > MESSAGE_FIELD_CAP:
+        truncated = truncated[:-100]
+    return truncated + _TRUNCATION_MARKER
 
 
 def _new_id() -> str:
@@ -298,6 +318,10 @@ class AgentMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     agent: Mapped["Agent"] = relationship(back_populates="messages")
+
+    @validates("content", "tool_input", "tool_output")
+    def _validate_text_fields(self, key, value):
+        return _cap_text(value)
 
 
 # ── WebhookLog ──────────────────────────────────────────────────────────
