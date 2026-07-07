@@ -1,8 +1,10 @@
 """list_all_conversations: the global /chat list aggregating every agent's chats.
 
 Backs GET /forge/chats — one row per (agent, scope_key), newest first, with
-agent name and a last-message preview so the frontend can render the chat
-picker without one call per agent.
+agent name and a human scope label so the frontend can render the chat picker
+without one call per agent. The message preview is intentionally NOT computed
+here (it was a full-table window scan); message text loads lazily when a
+conversation is opened, so last_message comes back empty ("").
 """
 
 from __future__ import annotations
@@ -55,7 +57,7 @@ def test_aggregates_across_agents_newest_first():
     # Newest conversation first.
     assert chats[0]["agent_id"] == b
     assert chats[0]["agent_name"] == "Beta"
-    assert chats[0]["last_message"] == "hi from b"
+    assert chats[0]["last_message"] == ""     # lazy — loaded on open
     assert chats[1]["agent_id"] == a
 
 
@@ -69,7 +71,7 @@ def test_separate_row_per_scope_with_counts():
     by_scope = {c["scope_key"]: c for c in chats}
     assert by_scope["chat:default"]["message_count"] == 1
     assert by_scope["task:T1"]["message_count"] == 2
-    assert by_scope["task:T1"]["last_message"] == "three"
+    assert by_scope["task:T1"]["last_message"] == ""   # lazy — loaded on open
 
 
 # ── AP-309: a blank Agent.name rendered a red "?" / "Agent" row in the
@@ -90,6 +92,27 @@ def test_blank_name_falls_back_to_profile_name():
     chats = fs.list_all_conversations()
     assert chats[0]["agent_id"] == aid
     assert chats[0]["agent_name"] == "Gamma"
+
+
+def test_scope_labels_resolved_in_batch():
+    """The human scope label is still resolved (now via a single batched
+    Project/Task lookup, not a db.get() per scope)."""
+    from backend.models import Project
+
+    with fs._session() as db:
+        p = Project(name="Acme")
+        db.add(p)
+        db.commit()
+        pid = p.id
+
+    a = _agent("Alpha")
+    _msg(a, "chat:default", "one", 1)
+    _msg(a, f"chat:project:{pid}", "two", 2)
+
+    chats = fs.list_all_conversations()
+    by_scope = {c["scope_key"]: c for c in chats}
+    assert by_scope["chat:default"]["label"] == "General"
+    assert by_scope[f"chat:project:{pid}"]["label"] == "About Acme"
 
 
 def test_orphaned_thread_is_excluded():

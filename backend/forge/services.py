@@ -1,7 +1,9 @@
 """Forge service layer — business logic for Agents, Runs, Messages, Webhooks."""
 
 from __future__ import annotations
+import os
 import json
+import json as _json
 import functools
 from datetime import datetime, timezone
 from typing import Optional
@@ -9,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from backend.db import SessionLocal
-from backend.models import Profile, Role
+from backend.models import Profile
 from backend.forge.models import (
     Agent, Run, AgentMessage, WebhookLog, Conversation,
     AgentStatus, RunStatus, RunOutcome, MessageRole,
@@ -1174,7 +1176,7 @@ def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
 def list_agent_projects(agent_id: str) -> list[dict]:
     """AP-86: projects this agent is assigned to. After the bot↔agent merge,
     agent.id == profile.id, so we walk the profile's ProjectMember rows."""
-    from backend.models import Profile, Project, ProjectMember
+    from backend.models import Project, ProjectMember
     with _session() as db:
         # agent.id == profile.id post-merge; fall back to profile_id for any
         # transitional rows where they still differ.
@@ -1690,8 +1692,6 @@ def list_conversations(agent_id: str) -> list[dict]:
             row["session_id"] = c.runtime_session_id or ""
             if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
                 row["last_used_at"] = _iso(c.last_used_at)
-        # Pretty label per scope
-        from backend.models import Project as _Project
         out = []
         for sk, row in merged.items():
             label = _scope_label(db, sk)
@@ -1756,44 +1756,54 @@ def list_all_conversations() -> list[dict]:
             row["session_id"] = c.runtime_session_id or ""
             if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
                 row["last_used_at"] = _iso(c.last_used_at)
-        # Batched last-message-per-thread — this loop scaled to hundreds of
-        # threads and was the slow path behind /forge/chats.
-        from backend.forge.repos import messages as messages_repo
-        last_map = messages_repo.last_message_per_thread(db) if merged else {}
+        # The /chat page renders instantly from just the agent list + each
+        # agent's scoped conversations; the actual message text is fetched
+        # lazily when a conversation is opened. So skip the message preview
+        # here — computing it meant a full-table window scan over every
+        # message, the slow path behind /forge/chats. Batch the scope labels
+        # (one query for all Projects, one for all Tasks) to kill the former
+        # per-scope N+1.
+        from backend.forge.repos import conversations as conv_repo
+        projects, tasks = conv_repo.label_source_names(db, [sk for _aid, sk in merged])
 
         out = []
         for (aid, sk), row in merged.items():
-            row["label"] = _scope_label(db, sk)
-            content = last_map.get((aid, sk), "")
-            row["last_message"] = content[:200] if content else ""
+            row["label"] = _format_scope_label(sk, projects, tasks)
+            row["last_message"] = ""     # lazy — loaded when the chat is opened
             out.append(row)
         out.sort(key=lambda r: r["last_used_at"] or "", reverse=True)
         return out
 
 
-def _scope_label(db, scope_key: str) -> str:
-    """Render a scope key as a human label, e.g.
-    chat:project:abc → 'Chat — <project name>'
-    chat:default     → 'Chat — no project'
+def _format_scope_label(scope_key: str, projects: dict[str, str],
+                        tasks: dict[str, str]) -> str:
+    """Render a scope key as a human label using pre-fetched name maps, e.g.
+    chat:project:abc → 'About <project name>'
+    chat:default     → 'General'
     run:abc          → 'Task run abc'
     """
     if scope_key.startswith("chat:project:"):
         pid = scope_key.split(":", 2)[2]
-        from backend.models import Project as _Project
-        p = db.get(_Project, pid)
-        return f"About {p.name}" if p else f"About project {pid[:8]}"
+        name = projects.get(pid)
+        return f"About {name}" if name else f"About project {pid[:8]}"
     if scope_key == "chat:default":
         return "General"
     if scope_key.startswith("chat:user:"):
         return f"General ({scope_key[10:14]})"
     if scope_key.startswith("task:"):
-        from backend.models import Task as _Task
         tid = scope_key.split(":", 1)[1]
-        t = db.get(_Task, tid)
-        return f"Task {t.title}" if (t and t.title) else f"Task {tid[:8]}"
+        title = tasks.get(tid)
+        return f"Task {title}" if title else f"Task {tid[:8]}"
     if scope_key.startswith("run:"):
         return f"Task run {scope_key.split(':',1)[1][:8]}"
     return scope_key
+
+
+def _scope_label(db, scope_key: str) -> str:
+    """Single-scope convenience wrapper over the batched formatter."""
+    from backend.forge.repos import conversations as conv_repo
+    projects, tasks = conv_repo.label_source_names(db, [scope_key])
+    return _format_scope_label(scope_key, projects, tasks)
 
 
 def create_message(*, agent_id: str, role: str, content: str,
@@ -2089,9 +2099,6 @@ def get_model_pricing() -> dict:
 
 
 # ── OpenClaw config (direct file access) ──────────────────────────────
-
-import os
-import json as _json
 
 _OPENCLAW_CONFIG_PATH = os.environ.get(
     "FORGE_OPENCLAW_CONFIG",
@@ -2409,7 +2416,6 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
     - env_extra: dict of env vars to inject (AGENTIRA_RUN_ID, etc.)
     - run_token: per-run uuid the agent uses to authenticate finish_run
     """
-    import asyncio
     import uuid
     from backend.forge.ws_dispatch import hub
 
@@ -3512,7 +3518,6 @@ def _signal_run(run_id: str, frame_type: str, target_status: "RunStatus | None")
     """Shared body for pause/resume — both fire a WS frame to the daemon
     and optionally flip the Run state. Cancel uses a different path
     because it's terminal and races the daemon's complete event."""
-    import asyncio
     from backend.forge.ws_dispatch import hub
     with _session() as db:
         run = db.query(Run).filter(Run.id == run_id).first()
@@ -3645,7 +3650,6 @@ def stop_chat(*, agent_id: str, scope_key: str) -> dict:
     the run (so the agent's working memory is preserved and a follow-up
     message resumes it via claude --resume).
     """
-    import asyncio
     from backend.forge.ws_dispatch import hub
     if not agent_id or not scope_key:
         return {"error": "agent_id and scope_key required"}
@@ -4352,7 +4356,7 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         from backend.forge import conductor as _conductor
         _conductor.tick_agent(agent_id)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("tick_agent after completion failed: %s", exc)
+        _dispatch_logger.warning("tick_agent after completion failed: %s", exc)
 
     # AP-123: tell the daemon to tear down the per-run worktree on the
     # terminal completion path. PAUSED branches return earlier and skip
