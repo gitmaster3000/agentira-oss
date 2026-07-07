@@ -171,6 +171,7 @@ export const api = {
     // Board
     getBoard: (projectId) => request(`/projects/${projectId}/board`),
     getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
+    getProjectWorkflow: (projectId) => request(`/projects/${projectId}/workflow`),
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),

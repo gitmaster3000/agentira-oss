@@ -21,6 +21,7 @@ import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
 import { Chat } from './pages/Chat';
 import { EpicPage } from './pages/EpicPage';
+import { Workflow } from './pages/Workflow';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
@@ -87,6 +88,7 @@ export default function App() {
                             <Route path="board" element={<Board />} />
                             <Route path="backlog" element={<Backlog />} />
                             <Route path="roadmap" element={<RoadmapView />} />
+                            <Route path="workflow" element={<Workflow />} />
                             <Route path="settings" element={<ProjectSettings />} />
                         </Route>
                         {/* Legacy flat board route — redirect to the new nested form. */}

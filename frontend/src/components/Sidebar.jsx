@@ -12,6 +12,7 @@ import {
     BarChart3,
     Cpu,
     Radio,
+    Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { ROUTES } from '../routes';
 import { useCurrentProjectId } from '../currentProject';
@@ -44,6 +45,7 @@ export function Sidebar() {
         { icon: LayoutGrid, label: 'Board', path: ROUTES.STUDIO_PROJECT_BOARD(projectId) },
         { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId) },
         { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId) },
+        { icon: WorkflowIcon, label: 'Workflow', path: ROUTES.STUDIO_PROJECT_WORKFLOW(projectId) },
         { icon: SettingsIcon, label: 'Settings', path: ROUTES.STUDIO_PROJECT_SETTINGS(projectId) },
     ];
 
