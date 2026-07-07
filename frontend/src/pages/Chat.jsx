@@ -51,6 +51,7 @@ function groupByAgent(convos) {
 
 export function Chat() {
     const [convos, setConvos] = useState([]);
+    const [convosLoading, setConvosLoading] = useState(true);   // first load only
     const [sel, setSel] = useState(null);          // {agent_id, scope_key, agent_name, label}
     const [scopeOpen, setScopeOpen] = useState(false);
     const [messages, setMessages] = useState([]);
@@ -89,6 +90,7 @@ export function Chat() {
                 } : null));
             }
         } catch { /* transient */ }
+        finally { setConvosLoading(false); }
     }, []);
 
     useEffect(() => {
@@ -273,7 +275,13 @@ export function Chat() {
                     <span className="ml-auto text-[11px] text-text-tertiary">{agents.length} agents</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                    {agents.length === 0 && (
+                    {convosLoading && agents.length === 0 && (
+                        <div className="flex items-center justify-center gap-2 text-xs text-text-tertiary py-8 px-4">
+                            <Loader className="w-4 h-4 animate-spin" />
+                            Loading conversations…
+                        </div>
+                    )}
+                    {!convosLoading && agents.length === 0 && (
                         <div className="text-xs text-text-tertiary text-center py-8 px-4">
                             No conversations yet.
                         </div>
@@ -304,7 +312,7 @@ export function Chat() {
                                         </span>
                                     </div>
                                     <div className="text-xs text-text-secondary truncate">
-                                        {top.last_message || '—'}
+                                        {top.last_message || top.label || '—'}
                                     </div>
                                     {a.scopes.length > 1 && (
                                         <div className="text-[11px] text-text-tertiary">
@@ -370,9 +378,11 @@ export function Chat() {
                                                 >
                                                     <span className="flex-1 min-w-0">
                                                         <span className="block text-xs text-text-primary truncate">{c.label}</span>
-                                                        <span className="block text-[10px] text-text-tertiary truncate">
-                                                            {c.last_message || '—'}
-                                                        </span>
+                                                        {c.last_message && (
+                                                            <span className="block text-[10px] text-text-tertiary truncate">
+                                                                {c.last_message}
+                                                            </span>
+                                                        )}
                                                     </span>
                                                     {c.scope_key === sel.scope_key && (
                                                         <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
