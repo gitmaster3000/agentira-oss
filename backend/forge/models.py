@@ -398,3 +398,34 @@ class DispatchIntent(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlanningTurn(Base):
+    """A durable, auditable record of one Conductor planning turn (AP-401).
+
+    Today a planning turn's reasoning lived only in server logs — this row
+    is the transparent record: what the Conductor saw (facts_snapshot) and
+    what it decided (decisions), so the loop can be audited from the board
+    instead of SSH-ing into logs. `decisions` is appended to as individual
+    decisions land (see `planning_turns.append_decision`) — a turn that
+    dispatches async (LLM tool calls arrive later) starts with an empty
+    list and fills in over time; a turn that skips synchronously (nothing
+    to plan) is recorded complete immediately.
+    """
+    __tablename__ = "forge_planning_turns"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    trigger: Mapped[str]        = mapped_column(String(20), default="cron")  # "cron" | "event"
+    status: Mapped[str]         = mapped_column(String(20), default="dispatched")  # dispatched|skipped|error
+    model: Mapped[str | None]   = mapped_column(String(120), nullable=True)
+    token_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[int | None]  = mapped_column(Integer, nullable=True)
+    # JSON blob: {agents: [...], unassigned_tasks: [...]} — the facts the
+    # Conductor reasoned over. Lean by construction (gather_planning_facts
+    # already caps rows/description length) — never a full transcript.
+    facts_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON list of {action, task_id, agent, reason} — one per decision.
+    decisions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where the full transcript lives — the Conductor's own conversation.
+    conversation_scope_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

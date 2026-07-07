@@ -172,7 +172,7 @@ This is critical for the UI to communicate honestly:
 ## 9. Pages that link here
 
 - **Project Overview** — small "workflow at a glance" card with a stripped-down pipeline (no inspector), click → opens the full Workflow page
-- **Conductor page (Forge)** — "active workflows" list links to per-project Workflow pages
+- **Conductor page (Forge)** — "active workflows" list links to per-project Workflow pages. The same page also carries the **Planning turns** feed (AP-401): every planning turn's facts snapshot + decisions, expandable, deep-linking task-touching decisions to the task — same pattern as the canvas activity-feed rows below.
 - **Task page** — a small "in pipeline" widget showing current column + next hand-off destination + arrow to "view workflow"
 - **Activity feed** — workflow-actor rows (advance, bounce, escalate, integrate) deep-link to the relevant arrow/node on the canvas
 

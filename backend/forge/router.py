@@ -668,6 +668,15 @@ def conductor_plan_now():
     return _conductor.run_planning_turn()
 
 
+@router.get("/conductor/planning-turns")
+def conductor_planning_turns(limit: int = 20):
+    """Recent planning-turn audit records (AP-401 transparency): facts
+    snapshot, decisions with reasons, model, cost, duration — powers the
+    Conductor feed on the Forge page (workflow-editor spec §9)."""
+    from backend.forge import conductor as _conductor
+    return {"planning_turns": _conductor.get_recent_planning_turns(limit=limit)}
+
+
 @router.get("/projects/{project_id}/digest")
 def get_project_digest(project_id: str, since: str = "24h"):
     """AP-84: aggregated run summary for a project over a recent window.
