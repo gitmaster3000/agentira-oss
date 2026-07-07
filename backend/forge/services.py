@@ -1756,17 +1756,16 @@ def list_all_conversations() -> list[dict]:
             row["session_id"] = c.runtime_session_id or ""
             if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
                 row["last_used_at"] = _iso(c.last_used_at)
+        # Batched last-message-per-thread — this loop scaled to hundreds of
+        # threads and was the slow path behind /forge/chats.
+        from backend.forge.repos import messages as messages_repo
+        last_map = messages_repo.last_message_per_thread(db) if merged else {}
+
         out = []
         for (aid, sk), row in merged.items():
             row["label"] = _scope_label(db, sk)
-            # ponytail: per-chat preview query; chat counts are small (dozens).
-            last_msg = (db.query(AgentMessage.content)
-                          .filter(AgentMessage.agent_id == aid,
-                                  AgentMessage.scope_key == sk,
-                                  AgentMessage.content != "")
-                          .order_by(AgentMessage.created_at.desc())
-                          .first())
-            row["last_message"] = (last_msg[0][:200] if last_msg else "")
+            content = last_map.get((aid, sk), "")
+            row["last_message"] = content[:200] if content else ""
             out.append(row)
         out.sort(key=lambda r: r["last_used_at"] or "", reverse=True)
         return out

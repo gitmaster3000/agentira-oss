@@ -23,6 +23,7 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
+from backend.repos import tasks as core_tasks_repo
 
 logger = logging.getLogger("agentira.tasks")
 
@@ -189,7 +190,7 @@ class TaskService:
         actor: str = "system",
     ) -> list[dict]:
         with services._session() as db:
-            q = db.query(Task)
+            q = core_tasks_repo.with_list_relations(db.query(Task))
 
             if not has_permission(db, actor, "project.view_all"):
                 profile = services._get_profile_by_name(db, actor)
@@ -218,10 +219,12 @@ class TaskService:
             tasks = q.order_by(Task.updated_at.desc()).all()
             ids = [t.id for t in tasks]
             counts = services._batch_attachment_counts(db, ids)
+            commit_counts = core_tasks_repo.batch_commit_counts(db, ids)
             active = services._active_run_agents(db, ids)
             out = []
             for t in tasks:
-                d = services._task_to_dict(t, attachments_count=counts.get(t.id, 0))
+                d = services._task_to_dict(t, attachments_count=counts.get(t.id, 0),
+                                            commits_count=commit_counts.get(t.id, 0))
                 info = active.get(t.id)
                 d["agent_active"] = info is not None
                 if info:

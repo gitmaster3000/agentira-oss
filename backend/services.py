@@ -108,7 +108,7 @@ def _resolve_task(db: Session, task_ref: str) -> Task | None:
     return db.query(Task).filter(Task.key == task_ref.upper()).first()
 
 
-def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
+def _task_to_dict(t: Task, attachments_count: int = 0, commits_count: int | None = None) -> dict:
     dod = _normalize_dod(_parse_dod(t.dod_items))
     return {
         "id": t.id,
@@ -131,7 +131,7 @@ def _task_to_dict(t: Task, attachments_count: int = 0) -> dict:
         "dod_progress": _dod_progress(dod),
         "branch": t.branch or "",
         "pr_url": t.pr_url or "",
-        "commits_count": len(t.commits) if t.commits else 0,
+        "commits_count": commits_count if commits_count is not None else (len(t.commits) if t.commits else 0),
         # AP-154: surface the resolved repo list to clients. Multi-select
         # UI reads this; legacy single-repo callers still get `repo_name`.
         "repo_name": t.repo_name or "",
@@ -1528,15 +1528,24 @@ def get_board(project_id: str) -> dict:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
+        from backend.repos import tasks as core_tasks_repo
+
         statuses = db.query(Status).order_by(Status.position).all()
         board: dict[str, list[dict]] = {s.name: [] for s in statuses}
 
-        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.updated_at.desc()).all()
+        tasks = (
+            core_tasks_repo.with_list_relations(db.query(Task))
+            .filter(Task.project_id == project_id)
+            .order_by(Task.updated_at.desc())
+            .all()
+        )
         ids = [t.id for t in tasks]
         counts = _batch_attachment_counts(db, ids)
+        commit_counts = core_tasks_repo.batch_commit_counts(db, ids)
         active = _active_run_agents(db, ids)  # so the board card glow lights up
         for t in tasks:
-            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0))
+            d = _task_to_dict(t, attachments_count=counts.get(t.id, 0),
+                               commits_count=commit_counts.get(t.id, 0))
             info = active.get(t.id)
             d["agent_active"] = info is not None
             if info:
@@ -1556,7 +1565,14 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at.asc()).all()
+        from backend.repos import tasks as core_tasks_repo
+
+        tasks = (
+            core_tasks_repo.with_list_relations(db.query(Task))
+            .filter(Task.project_id == project_id)
+            .order_by(Task.created_at.asc())
+            .all()
+        )
 
         STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
 
