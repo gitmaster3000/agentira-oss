@@ -146,8 +146,16 @@ async def deliver_pending() -> dict:
         if created is not None and created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         if created is not None and (now - created).total_seconds() > _ttl_s():
-            _fail_intent(v)
-            failed += 1
+            try:
+                _fail_intent(v)
+                failed += 1
+            except Exception as exc:  # noqa: BLE001 — one bad row must not
+                # stop the sweep from processing the rest, or bubble into
+                # the caller's event loop (prod incident: an unguarded
+                # exception here starved every other pending intent and
+                # was mistaken for the whole backend going down).
+                logger.warning("outbox _fail_intent crashed for %s: %s",
+                                v.get("id"), exc)
     return {"delivered": delivered, "failed": failed}
 
 
@@ -183,7 +191,11 @@ def _fail_intent(v: dict) -> None:
         "outbox TTL expired with no daemon: kind=%s event=%s run=%s task=%s "
         "— marking dropped", v["kind"], v["event_id"], v["run_id"] or "-",
         v["task_id"] or "-")
-    if v["kind"] == "trigger":
+    if v["kind"] == "trigger" and v["agent_id"]:
+        # No agent_id means there's no chat scope to surface this in —
+        # writing the SYSTEM message would just be an orphan row (or an
+        # FK violation on Postgres). Skip cleanly; the warning above is
+        # the record of what happened.
         try:
             from backend.forge import services as _svc
             _svc.mark_dispatch_dropped(
