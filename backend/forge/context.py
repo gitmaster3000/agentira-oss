@@ -16,6 +16,13 @@ _TOOL_ENTRY_TRUNCATE = 4096   # ~4KB per tool entry
 # Max rows fetched per context rebuild. The token-budget loop is the real
 # limiter; this only stops the query from materializing an unbounded history.
 _CONTEXT_ROW_CAP = 1000
+# Per-field fetch cap for USER/ASSISTANT content, applied SQL-side. A single
+# stored message can be megabytes (Conductor planning prompts with full board
+# dumps — see AP-205); the row cap alone doesn't bound memory when individual
+# rows are that big (prod OOM #3, 2026-07-07: newest 1000 rows of the
+# Conductor's chat:default scope totalled 884MB). ~100K chars ≈ 25K tokens,
+# already half the default budget — nothing legitimate needs more per row.
+_CONTENT_FETCH_CAP = 100_000
 # Token budget for a rebuilt history preamble (gateway runtimes / when a
 # native session is lost). ~50K tokens keeps real continuity while staying
 # well inside the model context. One budgeted path for every scope — replaces
@@ -79,8 +86,25 @@ def assemble_context(*, agent_id: str, scope_key: str, current: str,
     rendered_rev: list[str] = []
     used = 0
     summary: str | None = None
+    from sqlalchemy import func
+
     with _session() as db:
-        q = (db.query(AgentMessage)
+        # Fetch only the fields the renderer reads, truncated in SQL. Loading
+        # full AgentMessage rows pulls every blob column into memory; the
+        # renderer truncates tool entries to _TOOL_ENTRY_TRUNCATE anyway, so
+        # fetching more than that (+1 so the renderer still detects overflow
+        # and appends its ellipsis) is pure waste — and on blob-heavy scopes
+        # it was gigabytes of waste per dispatch.
+        tool_cap = _TOOL_ENTRY_TRUNCATE + 1
+        q = (db.query(
+                AgentMessage.role,
+                AgentMessage.tool_name,
+                func.substr(AgentMessage.content, 1,
+                            _CONTENT_FETCH_CAP).label("content"),
+                func.substr(AgentMessage.tool_input, 1,
+                            tool_cap).label("tool_input"),
+                func.substr(AgentMessage.tool_output, 1,
+                            tool_cap).label("tool_output"))
                .filter(AgentMessage.agent_id == agent_id,
                        AgentMessage.role.in_(roles)))
         # Scope filter: only this conversation. Empty scope_key (legacy rows)

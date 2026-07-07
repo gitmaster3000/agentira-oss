@@ -199,3 +199,38 @@ def test_row_cap_bounds_history_fetch(monkeypatch):
     assert "r11:" in out, "newest row kept"
     assert "r7:" in out, "cap window (newest 5) kept"
     assert "r6:" not in out, "rows beyond the cap not fetched"
+
+
+# ── field fetch caps bound per-row memory (prod OOM #3, 2026-07-07) ──────
+
+def test_giant_rows_fetched_truncated():
+    """Megabyte USER rows (Conductor board dumps) and tool blobs must be
+    truncated SQL-side: the assembled context carries at most
+    _CONTENT_FETCH_CAP chars of content and ~_TOOL_ENTRY_TRUNCATE of a tool
+    entry, never the full stored blob."""
+    from backend.forge import context as ctx
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    giant_user = "U" * (ctx._CONTENT_FETCH_CAP + 50_000)
+    giant_tool = "T" * (ctx._TOOL_ENTRY_TRUNCATE * 3)
+    with forge_services._session() as db:
+        db.add(AgentMessage(
+            agent_id=agent_id, role=MessageRole.USER,
+            content=giant_user, scope_key=scope, created_at=base))
+        db.add(AgentMessage(
+            agent_id=agent_id, role=MessageRole.TOOL,
+            content="tool", tool_output=giant_tool, tool_name=None,
+            scope_key=scope,
+            created_at=base + timedelta(minutes=1)))
+        db.commit()
+    out = forge_services.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="now",
+        token_budget=1_000_000)
+    # Tool entry: renderer keeps _TOOL_ENTRY_TRUNCATE chars + ellipsis; the
+    # SQL fetch cap must still let the renderer detect the overflow.
+    assert ("T" * ctx._TOOL_ENTRY_TRUNCATE) + "…" in out
+    assert "T" * (ctx._TOOL_ENTRY_TRUNCATE + 2) not in out
+    # USER content: capped at the SQL fetch limit, not the stored size.
+    assert "U" * ctx._CONTENT_FETCH_CAP in out
+    assert "U" * (ctx._CONTENT_FETCH_CAP + 1) not in out
