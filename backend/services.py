@@ -213,7 +213,7 @@ def _attachment_count(db: Session, task_id: str) -> int:
     return db.query(func.count(Attachment.id)).filter(Attachment.task_id == task_id).scalar() or 0
 
 
-def _project_to_dict(p: Project) -> dict:
+def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
     return {
         "id": p.id,
         "key_prefix": p.key_prefix or "PROJ",
@@ -247,7 +247,7 @@ def _project_to_dict(p: Project) -> dict:
         # 0 = never expire by age (re-run only when the environment changes).
         "ready_checks_ttl_seconds": getattr(p, "ready_checks_ttl_seconds", None),
         "created_at": p.created_at.isoformat(),
-        "task_count": len(p.tasks),
+        "task_count": len(p.tasks) if task_count is None else task_count,
         "members": [m.profile.name for m in p.members],
     }
 
@@ -578,9 +578,19 @@ def list_projects(actor: str = "system") -> list[dict]:
     - Admin / 'project.view_all': Sees all projects.
     - Others: Sees only projects they are a member of.
     """
+    from backend.repos import projects as projects_repo
+    from sqlalchemy.orm import selectinload
+
+    member_eager = selectinload(Project.members).selectinload(ProjectMember.profile)
+
     with _session() as db:
         if has_permission(db, actor, "project.view_all"):
-            projects = db.query(Project).order_by(Project.created_at.desc()).all()
+            projects = (
+                db.query(Project)
+                .options(member_eager)
+                .order_by(Project.created_at.desc())
+                .all()
+            )
         else:
             profile = _get_profile_by_name(db, actor)
             if not profile:
@@ -589,10 +599,12 @@ def list_projects(actor: str = "system") -> list[dict]:
                 db.query(Project)
                 .join(ProjectMember)
                 .filter(ProjectMember.profile_id == profile.id)
+                .options(member_eager)
                 .order_by(Project.created_at.desc())
                 .all()
             )
-        return [_project_to_dict(p) for p in projects]
+        counts = projects_repo.task_counts_by_project(db, [p.id for p in projects])
+        return [_project_to_dict(p, task_count=counts.get(p.id, 0)) for p in projects]
 
 
 def get_project(project_id: str) -> dict | None:
