@@ -398,6 +398,9 @@ export const api = {
         runConductorTick: () => request('/forge/conductor/tick', { method: 'POST' }),
         runConductorPlan: () => request('/forge/conductor/plan', { method: 'POST' }),
         runConductorReport: () => request('/forge/conductor/report', { method: 'POST' }),
+        // AP-401: transparency feed — recent planning-turn audit records.
+        getPlanningTurns: (limit = 20) =>
+            request(`/forge/conductor/planning-turns?limit=${limit}`),
 
         // Events
         listEvents: (params = {}) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
     Radio, Power, Clock, RefreshCw, ListChecks, FileText, Bot,
-    CheckCircle, AlertTriangle, Download,
+    CheckCircle, AlertTriangle, Download, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { api } from '../../api';
 
@@ -97,6 +97,7 @@ function openReportPdf(safeHtml, at) {
 export function ConductorPage() {
     const [data, setData] = useState(null);
     const [messages, setMessages] = useState([]);
+    const [planningTurns, setPlanningTurns] = useState([]);
     const [form, setForm] = useState(null);
     const [saving, setSaving] = useState(false);
     const [busy, setBusy] = useState('');      // which run-now action is in flight
@@ -117,6 +118,9 @@ export function ConductorPage() {
                     limit: 40, scope_key: 'chat:default',
                 }).then((m) => Array.isArray(m) && setMessages(m)).catch(() => {});
             }
+            api.forge.getPlanningTurns(20)
+                .then((r) => setPlanningTurns(r?.planning_turns || []))
+                .catch(() => {});
         } catch (err) {
             console.error('Failed to load conductor:', err);
         }
@@ -306,6 +310,21 @@ export function ConductorPage() {
                 )}
             </div>
 
+            {/* AP-401: transparency feed — every planning turn, auditable */}
+            <div className="card space-y-2">
+                <h2 className="text-sm font-semibold text-text-primary">Planning turns</h2>
+                <p className="text-xs text-text-tertiary">
+                    Every planning turn's facts and decisions, durably recorded — no more SSH-ing into logs.
+                </p>
+                {planningTurns.length === 0 ? (
+                    <p className="text-sm text-text-tertiary">No planning turns recorded yet.</p>
+                ) : (
+                    <div className="space-y-1 max-h-[420px] overflow-y-auto">
+                        {planningTurns.map((t) => <PlanningTurnRow key={t.id} turn={t} />)}
+                    </div>
+                )}
+            </div>
+
             {/* Recent reports / planning turns */}
             <div className="card space-y-3">
                 <style>{REPORT_CSS}</style>
@@ -318,6 +337,72 @@ export function ConductorPage() {
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+const STATUS_STYLE = {
+    dispatched: 'text-accent-primary',
+    skipped: 'text-text-tertiary',
+    error: 'text-red-400',
+};
+
+function PlanningTurnRow({ turn }) {
+    const [open, setOpen] = useState(false);
+    const decisions = turn.decisions || [];
+    const facts = turn.facts_snapshot || {};
+    const taskCount = (facts.unassigned_tasks || []).length;
+    const agentCount = (facts.agents || []).length;
+
+    return (
+        <div className="rounded-md border border-border-subtle/40">
+            <button
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-bg-hover"
+                onClick={() => setOpen((v) => !v)}
+            >
+                {open ? <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
+                    : <ChevronRight className="w-3.5 h-3.5 text-text-tertiary" />}
+                <span className={`font-medium ${STATUS_STYLE[turn.status] || ''}`}>{turn.status}</span>
+                <span className="text-text-tertiary">
+                    {turn.created_at ? new Date(turn.created_at).toLocaleString() : ''}
+                </span>
+                <span className="text-text-tertiary">
+                    {agentCount} agent(s), {taskCount} task(s) seen
+                </span>
+                {decisions.length > 0 && (
+                    <span className="text-text-tertiary">— {decisions.length} decision(s)</span>
+                )}
+                <span className="ml-auto text-text-tertiary text-xs">
+                    {turn.model || ''}{turn.duration_ms != null ? ` · ${turn.duration_ms}ms` : ''}
+                    {turn.token_cost != null ? ` · $${turn.token_cost.toFixed(4)}` : ''}
+                </span>
+            </button>
+            {open && (
+                <div className="px-3 pb-2 space-y-1.5 text-sm">
+                    {decisions.length === 0 ? (
+                        <p className="text-text-tertiary">
+                            No decisions recorded yet
+                            {turn.conversation_scope_key ? ' — full transcript below.' : '.'}
+                        </p>
+                    ) : (
+                        decisions.map((d, i) => (
+                            <div key={i} className="text-text-secondary">
+                                <span className="font-medium text-text-primary">{d.action}</span>
+                                {d.agent ? ` → ${d.agent}` : ''}
+                                {d.task_id ? (
+                                    <>
+                                        {' '}
+                                        <Link to={`/studio/tasks/${d.task_id}`} className="text-accent-primary hover:underline">
+                                            task
+                                        </Link>
+                                    </>
+                                ) : ''}
+                                {d.reason ? ` — ${d.reason}` : ''}
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
         </div>
     );
 }
