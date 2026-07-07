@@ -69,6 +69,8 @@ export function AppSidebar({ open = false }) {
 
     const is = {
         home: path === '/studio',
+        inbox: path === '/studio/inbox',
+        mywork: path === '/studio/my-work',
         chat: path === '/chat',
         agents: path.startsWith('/forge/agents'),
         runs: path.startsWith('/forge/runs'),
@@ -79,6 +81,7 @@ export function AppSidebar({ open = false }) {
         board: path.includes('/board') || path.startsWith('/studio/tasks/'),
         backlog: path.includes('/backlog'),
         roadmap: path.includes('/roadmap'),
+        workflow: path.includes('/workflow'),
         projSettings: path.includes('/project/') && path.includes('/settings'),
     };
 
@@ -117,10 +120,10 @@ export function AppSidebar({ open = false }) {
                 {/* global */}
                 <NavRow active={is.home} onClick={() => navigate('/studio')} label="Home"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg>} />
-                <NavRow active={false} onClick={() => navigate('/studio')} label="Inbox"
+                <NavRow active={is.inbox} onClick={() => navigate('/studio/inbox')} label="Inbox"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>}
                     badge={unread > 0 ? <span style={{ fontSize: '10px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 6px' }}>{unread}</span> : null} />
-                <NavRow active={false} onClick={() => navigate('/studio')} label="My Work"
+                <NavRow active={is.mywork} onClick={() => navigate('/studio/my-work')} label="My Work"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>} />
                 <NavRow active={is.chat} onClick={() => navigate('/chat')} label="Chat"
                     icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
@@ -162,7 +165,7 @@ export function AppSidebar({ open = false }) {
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>} />
                     <NavRow active={is.roadmap} onClick={() => navigate(projPath('roadmap'))} label="Roadmap"
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>} />
-                    <NavRow active={false} onClick={() => navigate(projPath('settings'))} label="Workflow"
+                    <NavRow active={is.workflow} onClick={() => navigate(projPath('workflow'))} label="Workflow"
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1" /></svg>} />
                     <NavRow active={is.projSettings} onClick={() => navigate(projPath('settings'))} label="Settings"
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8" /></svg>} />

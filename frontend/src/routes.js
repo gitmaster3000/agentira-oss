@@ -12,6 +12,8 @@ export const ROUTES = {
 
     // Studio
     STUDIO: '/studio',
+    INBOX: '/studio/inbox',
+    MY_WORK: '/studio/my-work',
     STUDIO_BOARD: (projectId) => `/studio/board/${projectId}`,
     STUDIO_PROJECT: (projectId) => `/studio/project/${projectId}`,
     STUDIO_PROJECT_BOARD: (projectId) => `/studio/project/${projectId}/board`,

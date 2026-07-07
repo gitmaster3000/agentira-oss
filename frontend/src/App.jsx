@@ -21,6 +21,8 @@ import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
 import { Chat } from './pages/Chat';
 import { EpicPage } from './pages/EpicPage';
+import { Inbox } from './pages/Inbox';
+import { MyWork } from './pages/MyWork';
 import { Workflow } from './pages/Workflow';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
@@ -82,6 +84,8 @@ export default function App() {
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
                         <Route index element={<StudioDashboard />} />
+                        <Route path="inbox" element={<Inbox />} />
+                        <Route path="my-work" element={<MyWork />} />
                         <Route path="project/:projectId" element={<ProjectLayout />}>
                             <Route index element={<Navigate to="overview" replace />} />
                             <Route path="overview" element={<ProjectOverview />} />
