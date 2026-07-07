@@ -1756,28 +1756,10 @@ def list_all_conversations() -> list[dict]:
             row["session_id"] = c.runtime_session_id or ""
             if c.last_used_at and (not row["last_used_at"] or _iso(c.last_used_at) > row["last_used_at"]):
                 row["last_used_at"] = _iso(c.last_used_at)
-        # Batched last-message-per-thread: one row_number() window query
-        # instead of one query per (agent_id, scope_key) — this loop scaled
-        # to hundreds of threads and was the slow path behind /forge/chats.
-        last_map: dict[tuple[str, str], str] = {}
-        if merged:
-            ranked = (
-                db.query(
-                    AgentMessage.agent_id,
-                    AgentMessage.scope_key,
-                    AgentMessage.content,
-                    func.row_number().over(
-                        partition_by=(AgentMessage.agent_id, AgentMessage.scope_key),
-                        order_by=AgentMessage.created_at.desc(),
-                    ).label("rn"),
-                )
-                .filter(AgentMessage.scope_key.isnot(None), AgentMessage.content != "")
-                .subquery()
-            )
-            rows = (db.query(ranked.c.agent_id, ranked.c.scope_key, ranked.c.content)
-                      .filter(ranked.c.rn == 1)
-                      .all())
-            last_map = {(aid, sk): content for aid, sk, content in rows}
+        # Batched last-message-per-thread — this loop scaled to hundreds of
+        # threads and was the slow path behind /forge/chats.
+        from backend.forge.repos import messages as messages_repo
+        last_map = messages_repo.last_message_per_thread(db) if merged else {}
 
         out = []
         for (aid, sk), row in merged.items():

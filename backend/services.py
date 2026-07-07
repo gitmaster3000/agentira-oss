@@ -6,7 +6,7 @@ Both REST API and MCP server call into this layer.
 from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from backend.db import SessionLocal, init_db, privileged, set_current_org, _derive_account_type
 from backend.models import (
@@ -211,20 +211,6 @@ def _batch_attachment_counts(db: Session, task_ids: list[str]) -> dict[str, int]
 def _attachment_count(db: Session, task_id: str) -> int:
     from sqlalchemy import func
     return db.query(func.count(Attachment.id)).filter(Attachment.task_id == task_id).scalar() or 0
-
-
-def _batch_commit_counts(db: Session, task_ids: list[str]) -> dict[str, int]:
-    """Return {task_id: count} for all given task IDs in a single query."""
-    from sqlalchemy import func
-    if not task_ids:
-        return {}
-    rows = (
-        db.query(TaskCommit.task_id, func.count(TaskCommit.id))
-        .filter(TaskCommit.task_id.in_(task_ids))
-        .group_by(TaskCommit.task_id)
-        .all()
-    )
-    return {task_id: count for task_id, count in rows}
 
 
 def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
@@ -1542,19 +1528,20 @@ def get_board(project_id: str) -> dict:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
+        from backend.repos import tasks as core_tasks_repo
+
         statuses = db.query(Status).order_by(Status.position).all()
         board: dict[str, list[dict]] = {s.name: [] for s in statuses}
 
         tasks = (
-            db.query(Task)
-            .options(selectinload(Task.epic), selectinload(Task.status))
+            core_tasks_repo.with_list_relations(db.query(Task))
             .filter(Task.project_id == project_id)
             .order_by(Task.updated_at.desc())
             .all()
         )
         ids = [t.id for t in tasks]
         counts = _batch_attachment_counts(db, ids)
-        commit_counts = _batch_commit_counts(db, ids)
+        commit_counts = core_tasks_repo.batch_commit_counts(db, ids)
         active = _active_run_agents(db, ids)  # so the board card glow lights up
         for t in tasks:
             d = _task_to_dict(t, attachments_count=counts.get(t.id, 0),
@@ -1578,9 +1565,10 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
+        from backend.repos import tasks as core_tasks_repo
+
         tasks = (
-            db.query(Task)
-            .options(selectinload(Task.epic), selectinload(Task.status))
+            core_tasks_repo.with_list_relations(db.query(Task))
             .filter(Task.project_id == project_id)
             .order_by(Task.created_at.asc())
             .all()

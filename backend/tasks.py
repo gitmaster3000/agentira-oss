@@ -17,14 +17,13 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy.orm import selectinload
-
 from backend import services
 from backend import agent_notifier
 from backend.auth import has_permission
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
+from backend.repos import tasks as core_tasks_repo
 
 logger = logging.getLogger("agentira.tasks")
 
@@ -191,7 +190,7 @@ class TaskService:
         actor: str = "system",
     ) -> list[dict]:
         with services._session() as db:
-            q = db.query(Task).options(selectinload(Task.epic), selectinload(Task.status))
+            q = core_tasks_repo.with_list_relations(db.query(Task))
 
             if not has_permission(db, actor, "project.view_all"):
                 profile = services._get_profile_by_name(db, actor)
@@ -220,7 +219,7 @@ class TaskService:
             tasks = q.order_by(Task.updated_at.desc()).all()
             ids = [t.id for t in tasks]
             counts = services._batch_attachment_counts(db, ids)
-            commit_counts = services._batch_commit_counts(db, ids)
+            commit_counts = core_tasks_repo.batch_commit_counts(db, ids)
             active = services._active_run_agents(db, ids)
             out = []
             for t in tasks:
