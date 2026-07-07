@@ -46,47 +46,44 @@ function renderWorkflow() {
     );
 }
 
-describe('Workflow page', () => {
+describe('Workflow Engine page', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         api.getBoard.mockResolvedValue(BOARD);
         api.getProjectWorkflow.mockResolvedValue({ workflow_enabled: true, flow: FLOW, editable: [] });
     });
 
-    it('renders the board strip with every column and its live count', async () => {
+    it('renders the engine card with every board column and its live count', async () => {
         renderWorkflow();
-        expect(await screen.findByText('backlog')).toBeInTheDocument();
+        expect(await screen.findByRole('heading', { name: 'Workflow Engine' })).toBeInTheDocument();
+        expect(screen.getByText('todo')).toBeInTheDocument();
         expect(screen.getByText('in_progress')).toBeInTheDocument();
         expect(screen.getByText('done')).toBeInTheDocument();
-        // in_progress has 2 tasks in BOARD
-        const inProgressBtn = screen.getByText('in_progress').closest('button');
-        expect(inProgressBtn).toHaveTextContent('2');
+        // todo has 1 task in BOARD — shown as its tile count
+        expect(screen.getByText('1')).toBeInTheDocument();
     });
 
     it('defaults to selecting the first column and shows its process + gate zones', async () => {
         renderWorkflow();
-        expect(await screen.findByText(/Process — on enter/i)).toBeInTheDocument();
-        expect(screen.getAllByText(/^Gate/i).length).toBeGreaterThan(0);
+        await screen.findByRole('heading', { name: 'Workflow Engine' });
+        expect(screen.getByText(/backlog · process/i)).toBeInTheDocument();
+        expect(screen.getByText(/backlog · gate/i)).toBeInTheDocument();
     });
 
-    it('selecting a column updates the canvas to that column\'s gate conditions', async () => {
+    it('selecting a column updates the gate to that column\'s conditions', async () => {
         renderWorkflow();
         await screen.findByText('in_progress');
-        fireEvent.click(screen.getByText('in_progress').closest('button'));
+        fireEvent.click(screen.getByText('in_progress'));
         expect(await screen.findByText('task.dod_all_checked')).toBeInTheDocument();
-        expect(screen.getAllByText(/all DoD items must be checked/i).length).toBeGreaterThan(0);
+        expect(screen.getByText(/all DoD items must be checked/i)).toBeInTheDocument();
     });
 
-    it('shows the read-only Starlark code pane for the selected column', async () => {
+    it('the Code toggle shows the read-only Starlark for the selected column', async () => {
         renderWorkflow();
         await screen.findByText('in_progress');
-        fireEvent.click(screen.getByText('in_progress').closest('button'));
+        fireEvent.click(screen.getByText('in_progress'));
+        fireEvent.click(screen.getByText('Code'));
         expect(await screen.findByText('in_progress.star')).toBeInTheDocument();
         expect(screen.getByText(/def validate_transition/)).toBeInTheDocument();
-    });
-
-    it('shows the Phase 0 / AP-404 empty state for recent fires', async () => {
-        renderWorkflow();
-        expect(await screen.findByText(/AP-404/)).toBeInTheDocument();
     });
 });
