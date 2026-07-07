@@ -49,8 +49,8 @@ const COLUMNS_UI = {
         prompt_role: null,
         prompt: '',
     },
-    review: { advance_to: 'done', gates: [], prompt_role: 'reviewer', prompt: 'Review the branch and approve.' },
-    done: { advance_to: null, gates: [], prompt_role: 'documentation', prompt: 'Document the change.' },
+    review: { advance_to: 'done', gates: [], prompt_role: 'reviewer', prompt_slug: 'reviewer', prompt: 'Review the branch and approve.', prompt_is_override: false },
+    done: { advance_to: null, gates: [], prompt_role: 'documentation', prompt_slug: 'documentation', prompt: 'Document the change.', prompt_is_override: false },
 };
 
 function renderWorkflow() {

@@ -172,6 +172,10 @@ export const api = {
     getBoard: (projectId) => request(`/projects/${projectId}/board`),
     getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
     getProjectWorkflow: (projectId) => request(`/projects/${projectId}/workflow`),
+    getWorkflowPrompts: (projectId) => request(`/projects/${projectId}/workflow/prompts`),
+    setWorkflowPromptOverride: (projectId, slug, text) => request(
+        `/projects/${projectId}/workflow/prompts/${encodeURIComponent(slug)}`,
+        { method: 'PUT', body: JSON.stringify({ text }) }),
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),

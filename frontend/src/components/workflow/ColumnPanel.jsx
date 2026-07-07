@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { processSteps, gateConditions } from '../../lib/workflowRules';
+import { api } from '../../api';
 
 // Right-hand detail panel for the selected column: its PROCESS (what runs when
 // a task arrives), its GATE (the real checks that must pass before a task can
@@ -81,21 +82,87 @@ function GateSection({ columnName, flow, columnsUi }) {
     );
 }
 
-function PromptSection({ columnName, columnsUi }) {
+function PromptSection({ columnName, columnsUi, projectId, onSaved }) {
     const detail = columnsUi?.[columnName];
     const role = detail?.prompt_role;
-    const prompt = (detail?.prompt || '').trim();
+    const slug = detail?.prompt_slug || '';
+    const effective = (detail?.prompt || '').trim();
+    const isOverride = !!detail?.prompt_is_override;
+
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+    const [systemDefault, setSystemDefault] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState(null);
+
+    // When entering edit mode, fetch the slug's system-default text for the
+    // "revert" hint and prime the draft with the current override (if any).
+    useEffect(() => {
+        if (!editing || !projectId || !slug) return;
+        let cancelled = false;
+        api.getWorkflowPrompts(projectId).then(({ prompts }) => {
+            if (cancelled) return;
+            const p = (prompts || []).find(x => x.slug === slug);
+            setSystemDefault(p?.system_default || '');
+            setDraft(p?.override || p?.system_default || '');
+        }).catch(err => !cancelled && setError(err.message));
+        return () => { cancelled = true; };
+    }, [editing, projectId, slug]);
+
+    const save = async (textOrNull) => {
+        setSaving(true);
+        setError(null);
+        try {
+            await api.setWorkflowPromptOverride(projectId, slug, textOrNull);
+            setEditing(false);
+            if (onSaved) await onSaved();
+        } catch (err) {
+            setError(err.message || 'Save failed');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
         <div style={{ background: 'rgba(201,184,255,.05)', border: '1px solid rgba(201,184,255,.26)', borderRadius: '12px', padding: '15px 15px' }}>
             <SectionLabel dot="#c9b8ff">Prompt · handed to the agent</SectionLabel>
-            {!prompt ? (
+            {!slug ? (
                 <div style={{ fontSize: '12px', color: '#768390' }}>No prompt template — this column dispatches no role.</div>
             ) : (
                 <>
-                    {role && (
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#c9b8ff', background: 'rgba(201,184,255,.12)', border: '1px solid rgba(201,184,255,.3)', borderRadius: '5px', padding: '3px 8px', marginBottom: '11px' }}>role: {role}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '11px', flexWrap: 'wrap' }}>
+                        {role && (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: '#c9b8ff', background: 'rgba(201,184,255,.12)', border: '1px solid rgba(201,184,255,.3)', borderRadius: '5px', padding: '3px 8px' }}>role: {role}</div>
+                        )}
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '10px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: isOverride ? '#f9c74f' : '#768390', background: isOverride ? 'rgba(249,199,79,.10)' : 'transparent', border: `1px solid ${isOverride ? 'rgba(249,199,79,.35)' : '#30363d'}`, borderRadius: '5px', padding: '3px 8px' }}>
+                            {isOverride ? 'project override' : 'system default'}
+                        </div>
+                        {projectId && !editing && (
+                            <button onClick={() => setEditing(true)} style={{ marginLeft: 'auto', fontSize: '11px', color: '#c9b8ff', background: 'transparent', border: '1px solid rgba(201,184,255,.3)', borderRadius: '6px', padding: '3px 10px', cursor: 'pointer' }}>Edit</button>
+                        )}
+                    </div>
+
+                    {!editing ? (
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '11px', lineHeight: 1.6, color: '#c8cdd4', background: '#0a0c10', border: '1px solid #30363d', borderRadius: '9px', padding: '12px 13px', maxHeight: '260px', overflowY: 'auto' }}>{effective || '(no template — dispatches without a hand-off prompt)'}</pre>
+                    ) : (
+                        <>
+                            <textarea
+                                value={draft}
+                                onChange={(e) => setDraft(e.target.value)}
+                                spellCheck={false}
+                                style={{ width: '100%', minHeight: '220px', boxSizing: 'border-box', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '11px', lineHeight: 1.6, color: '#e8ebf0', background: '#0a0c10', border: '1px solid #30363d', borderRadius: '9px', padding: '10px 12px', resize: 'vertical' }}
+                            />
+                            {error && <div style={{ fontSize: '11px', color: '#f85149', marginTop: '6px' }}>{error}</div>}
+                            <div style={{ display: 'flex', gap: '7px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                <button disabled={saving} onClick={() => save(draft)} style={{ fontSize: '11px', fontWeight: 600, color: '#0e1117', background: '#c9b8ff', border: 'none', borderRadius: '6px', padding: '5px 11px', cursor: saving ? 'wait' : 'pointer' }}>{saving ? 'Saving…' : 'Save override'}</button>
+                                <button disabled={saving} onClick={() => save('')} style={{ fontSize: '11px', color: '#f9c74f', background: 'transparent', border: '1px solid rgba(249,199,79,.35)', borderRadius: '6px', padding: '5px 11px', cursor: saving ? 'wait' : 'pointer' }} title="Delete override and fall back to the system default">Clear override</button>
+                                <button disabled={saving} onClick={() => { setEditing(false); setError(null); }} style={{ fontSize: '11px', color: '#c8cdd4', background: 'transparent', border: '1px solid #30363d', borderRadius: '6px', padding: '5px 11px', cursor: 'pointer' }}>Cancel</button>
+                                {systemDefault && draft !== systemDefault && (
+                                    <button disabled={saving} onClick={() => setDraft(systemDefault)} style={{ fontSize: '11px', color: '#768390', background: 'transparent', border: '1px solid #30363d', borderRadius: '6px', padding: '5px 11px', cursor: 'pointer', marginLeft: 'auto' }} title="Reset the editor to the shipped system default">Load system default</button>
+                                )}
+                            </div>
+                        </>
                     )}
-                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '11px', lineHeight: 1.6, color: '#c8cdd4', background: '#0a0c10', border: '1px solid #30363d', borderRadius: '9px', padding: '12px 13px', maxHeight: '260px', overflowY: 'auto' }}>{prompt}</pre>
                 </>
             )}
         </div>
@@ -103,13 +170,14 @@ function PromptSection({ columnName, columnsUi }) {
 }
 
 /** Detail rail for the selected column: process, gate (real checks), prompt. */
-export function ColumnPanel({ columnName, flow, columnsUi }) {
+export function ColumnPanel({ columnName, flow, columnsUi, projectId, onPromptSaved }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '22px 20px' }}>
             <div style={{ fontSize: '15px', fontWeight: 700, color: '#f0f3f6' }}>{columnName}</div>
             <ProcessSection columnName={columnName} flow={flow} />
             <GateSection columnName={columnName} flow={flow} columnsUi={columnsUi} />
-            <PromptSection columnName={columnName} columnsUi={columnsUi} />
+            <PromptSection columnName={columnName} columnsUi={columnsUi}
+                           projectId={projectId} onSaved={onPromptSaved} />
         </div>
     );
 }
