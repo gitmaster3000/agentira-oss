@@ -149,7 +149,7 @@ class WsHub:
         # the flowty-mcp service, a redeploy window, a second replica) — the
         # row is what guarantees delivery: the flowty-api sweep or the
         # daemon's next WS registration sends it. TTL expiry with no daemon
-        # surfaces the drop (dispatch_outbox._fail_intent).
+        # surfaces the drop (dispatch_outbox._expire_stale).
         from backend.forge import dispatch_outbox as outbox
         intent_id = outbox.write_intent(
             kind="trigger", event_id=trace_id, runtime_id=runtime_id,

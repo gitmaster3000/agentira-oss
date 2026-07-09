@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from backend.db import SessionLocal
 from backend.forge.models import DispatchIntent
@@ -112,12 +112,17 @@ async def deliver_pending() -> dict:
     scheduler tick — the api process is the one holding daemon sockets."""
     from backend.forge.ws_dispatch import hub
 
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=_ttl_s())
+
     delivered = 0
-    failed = 0
+    # Only non-expired rows are deliverable; expired ones are handled below by
+    # a single bulk statement, so they never enter this per-row loop.
     try:
         with SessionLocal() as db:
             rows = (db.query(DispatchIntent)
-                      .filter(DispatchIntent.status == "pending")
+                      .filter(DispatchIntent.status == "pending",
+                              DispatchIntent.created_at >= cutoff)
                       .order_by(DispatchIntent.created_at.asc())
                       .limit(200)
                       .all())
@@ -126,36 +131,23 @@ async def deliver_pending() -> dict:
         logger.warning("outbox sweep query failed: %s", exc)
         return {"delivered": 0, "failed": 0, "error": str(exc)}
 
-    now = datetime.now(timezone.utc)
     for v in views:
         conns = [c for c in hub._conns.values()
                  if v["runtime_id"] in c.runtime_ids]
-        if conns:
-            try:
-                for conn in conns:
-                    await conn.send(v["event_id"], v["payload"])
-                mark_delivered(v["id"])
-                delivered += 1
-                logger.info("outbox delivered %s %s run=%s task=%s → daemon",
-                            v["kind"], v["event_id"], v["run_id"] or "-",
-                            v["task_id"] or "-")
-            except Exception as exc:  # noqa: BLE001
-                _bump_attempts(v["id"], str(exc))
+        if not conns:
             continue
-        created = v["created_at"]
-        if created is not None and created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        if created is not None and (now - created).total_seconds() > _ttl_s():
-            try:
-                _fail_intent(v)
-                failed += 1
-            except Exception as exc:  # noqa: BLE001 — one bad row must not
-                # stop the sweep from processing the rest, or bubble into
-                # the caller's event loop (prod incident: an unguarded
-                # exception here starved every other pending intent and
-                # was mistaken for the whole backend going down).
-                logger.warning("outbox _fail_intent crashed for %s: %s",
-                                v.get("id"), exc)
+        try:
+            for conn in conns:
+                await conn.send(v["event_id"], v["payload"])
+            mark_delivered(v["id"])
+            delivered += 1
+            logger.info("outbox delivered %s %s run=%s task=%s → daemon",
+                        v["kind"], v["event_id"], v["run_id"] or "-",
+                        v["task_id"] or "-")
+        except Exception as exc:  # noqa: BLE001
+            _bump_attempts(v["id"], str(exc))
+
+    failed = _expire_stale(cutoff)
     return {"delivered": delivered, "failed": failed}
 
 
@@ -172,30 +164,49 @@ def _bump_attempts(intent_id: str, err: str) -> None:
         pass
 
 
-def _fail_intent(v: dict) -> None:
-    """TTL exhausted with no daemon: mark failed and surface it the same
-    way the old in-memory expiry did."""
+# Cap on how many expired trigger drops get echoed to chat per sweep. The
+# bulk UPDATE below always clears the *whole* backlog regardless; this only
+# bounds the follow-up per-row SYSTEM messages so a large no-daemon backlog
+# can't turn into a flood of message writes.
+_SURFACE_CAP = 50
+
+
+def _expire_stale(cutoff: datetime) -> int:
+    """Fail every pending intent older than the TTL with still no daemon, in a
+    single bulk UPDATE, and return how many.
+
+    Replaces a per-row path that opened ~3 DB connections per intent (fail +
+    attempts + chat surface). On a large no-daemon backlog that exhausted the
+    connection pool and starved the event loop on every 5s sweep, so
+    /api/statuses stopped answering and the deploy healthcheck failed (prod
+    outage 2026-07-09). One statement clears the backlog off the loop; a
+    bounded sample of surfaceable drops (a trigger with a known agent, so
+    there's a chat scope to write into) is still echoed the same way."""
     try:
         with SessionLocal() as db:
-            (db.query(DispatchIntent)
-               .filter(DispatchIntent.id == v["id"],
-                       DispatchIntent.status == "pending")
-               .update({DispatchIntent.status: "failed",
-                        DispatchIntent.last_error: "ttl_expired_no_daemon"},
-                       synchronize_session=False))
+            surface = [_row_view(r) for r in (
+                db.query(DispatchIntent)
+                  .filter(DispatchIntent.status == "pending",
+                          DispatchIntent.created_at < cutoff,
+                          DispatchIntent.kind == "trigger",
+                          DispatchIntent.agent_id.isnot(None))
+                  .order_by(DispatchIntent.created_at.asc())
+                  .limit(_SURFACE_CAP)
+                  .all())]
+            n = (db.query(DispatchIntent)
+                   .filter(DispatchIntent.status == "pending",
+                           DispatchIntent.created_at < cutoff)
+                   .update({DispatchIntent.status: "failed",
+                            DispatchIntent.last_error: "ttl_expired_no_daemon"},
+                           synchronize_session=False))
             db.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("outbox fail-mark failed (%s): %s", v["id"], exc)
-        return
-    logger.warning(
-        "outbox TTL expired with no daemon: kind=%s event=%s run=%s task=%s "
-        "— marking dropped", v["kind"], v["event_id"], v["run_id"] or "-",
-        v["task_id"] or "-")
-    if v["kind"] == "trigger" and v["agent_id"]:
-        # No agent_id means there's no chat scope to surface this in —
-        # writing the SYSTEM message would just be an orphan row (or an
-        # FK violation on Postgres). Skip cleanly; the warning above is
-        # the record of what happened.
+        logger.warning("outbox bulk-expire failed: %s", exc)
+        return 0
+    if n:
+        logger.warning("outbox: expired %d stale intent(s) past TTL, no daemon "
+                       "connected (surfacing %d to chat)", n, len(surface))
+    for v in surface:
         try:
             from backend.forge import services as _svc
             _svc.mark_dispatch_dropped(
@@ -203,6 +214,7 @@ def _fail_intent(v: dict) -> None:
                 run_id=v["run_id"] or None)
         except Exception as exc:  # noqa: BLE001
             logger.warning("mark_dispatch_dropped failed: %s", exc)
+    return n
 
 
 def run_delivery_sweep() -> None:
