@@ -23,6 +23,7 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
+from backend.forge.repos import transitions as transitions_repo
 from backend.repos import tasks as core_tasks_repo
 
 logger = logging.getLogger("agentira.tasks")
@@ -368,7 +369,7 @@ class TaskService:
 
     # ── move ──────────────────────────────────────────────────────────────
     def move(self, task_id: str, new_status: str, actor: str = "system",
-             skip_gates: bool = False) -> dict:
+             skip_gates: bool = False, record_transition: bool = True) -> dict:
         from backend.auth import check_transition
 
         with services._session() as db:
@@ -391,7 +392,21 @@ class TaskService:
             # be a spurious re-entrant failure, not a real block.
             if not skip_gates and task.project and getattr(task.project, "gates_enabled", False):
                 from backend import gates as _gates
-                _gates.enforce(task, from_status=old, to_status=new_status)
+                import time as _time
+                started = _time.monotonic()
+                results = _gates.evaluate(task, from_status=old, to_status=new_status)
+                failed = _gates.failures(results)
+                transitions_repo.record_gate_evaluation(
+                    db, task_id=task_id, from_status=old, to_status=new_status,
+                    gate_id=f"{old}:{new_status}",
+                    evidence_snapshot=_gate_evidence_snapshot(task),
+                    outcome="block" if failed else "allow",
+                    reason="; ".join(f.reason for f in failed),
+                    duration_ms=int((_time.monotonic() - started) * 1000),
+                )
+                db.commit()
+                if failed:
+                    raise _gates.GateFailure(old, new_status, failed)
 
             with allow_task_write():
                 task.status_id = services._get_status_id(db, new_status)
@@ -402,6 +417,12 @@ class TaskService:
                 diff=json.dumps({"status": {"from": old, "to": new_status}}),
                 notify_users=[task.assignee] if task.assignee and task.assignee != actor else []
             )
+            if record_transition:
+                transitions_repo.record_transition(
+                    db, task_id=task_id, from_status=old, to_status=new_status,
+                    actor_type=_actor_type(db, actor), actor_id=actor,
+                    cause="move", result="allowed",
+                )
 
             db.commit()
             if task.assignee and task.assignee != actor:
@@ -443,3 +464,28 @@ def _parse_dt(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def _gate_evidence_snapshot(task: Task) -> dict:
+    """The task field values the AP-158 local gates read — captured at
+    evaluation time so a block/allow is explainable after the task's fields
+    have since changed."""
+    return {
+        "dod_items": task.dod_items,
+        "assignee": task.assignee,
+        "branch": task.branch,
+        "pr_url": task.pr_url,
+    }
+
+
+def _actor_type(db, actor: str) -> str:
+    """Best-effort classification for transition_events.actor_type, from
+    the profile's stored account_type (human / agentira_agent /
+    external_agent) — falls back to "workflow" for the driver's own actor
+    strings, "system" when no profile resolves."""
+    if actor in ("system", "workflow"):
+        return actor
+    profile = services._get_profile_by_name(db, actor)
+    if not profile:
+        return "system"
+    return "human" if profile.account_type == "human" else "agent"

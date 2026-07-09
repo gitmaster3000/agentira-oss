@@ -36,6 +36,26 @@ class ConductorConfig(BaseModel):
     digest_schedule: str = "daily"
 
 
+class WorkflowRoleOverride(BaseModel):
+    """Per-project workflow role override — mirrors the `roles:` section of
+    templates/workflow/default.yaml (backend/forge/workflow.py:RoleSpec).
+    Structural validation only; the workflow driver owns runtime resolution."""
+    match: list[str] = Field(default_factory=list)
+    exclude_previous_assignee: bool = False
+    fallback: str = "none"          # "any" | "none"
+    prompt: str = ""
+
+    @validator("fallback")
+    def fallback_known(cls, v):
+        if v not in ("any", "none"):
+            raise ValueError("fallback must be 'any' or 'none'")
+        return v
+
+
+_TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
+_DEFAULT_TASKS_DIR = _TEMPLATES_ROOT / "default_tasks"
+
+
 class Template(BaseModel):
     name: str
     version: str = "1.0.0"
@@ -45,6 +65,15 @@ class Template(BaseModel):
     agents: list[TemplateAgent] = Field(default_factory=list)
     ac_check_types: list[ACCheckType] = Field(default_factory=list)
     conductor: ConductorConfig = Field(default_factory=ConductorConfig)
+    # Refs to task-backlog templates under templates/default_tasks/, parsed
+    # by backend/default_tasks.py (e.g. "professionalization" or
+    # "professionalization.yaml").
+    default_tasks: list[str] = Field(default_factory=list)
+    # Workflow pipeline columns (templates/workflow/*.yaml `columns:`), kept
+    # in sync with the board `columns:` above — see SCHEMA.md.
+    workflow_columns: list[str] = Field(default_factory=list)
+    # Per-project workflow role overrides (see WorkflowRoleOverride).
+    workflow_roles: dict[str, WorkflowRoleOverride] = Field(default_factory=dict)
 
     @validator("name")
     def name_not_empty(cls, v):
@@ -62,6 +91,26 @@ class Template(BaseModel):
     def agents_not_empty(cls, v):
         if not v:
             raise ValueError("template must define at least one agent")
+        return v
+
+    @validator("default_tasks", each_item=True)
+    def default_tasks_ref_exists(cls, v):
+        ref = v if v.endswith(".yaml") else f"{v}.yaml"
+        if not (_DEFAULT_TASKS_DIR / ref).exists():
+            raise ValueError(
+                f"default_tasks entry not found: templates/default_tasks/{ref}"
+            )
+        return v
+
+    @validator("workflow_columns")
+    def workflow_columns_match_columns(cls, v, values):
+        if v:
+            columns = values.get("columns") or []
+            unknown = [c for c in v if c not in columns]
+            if unknown:
+                raise ValueError(
+                    f"workflow_columns not present in columns: {unknown}"
+                )
         return v
 
 

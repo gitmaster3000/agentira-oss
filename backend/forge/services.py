@@ -729,17 +729,25 @@ def heartbeat_runtimes(daemon_id: str, providers: list[str],
         live_run_ids = [e.get("run_id") for e in (inflight or [])
                         if e and e.get("run_id")]
         if live_run_ids:
+            # AP-391: heartbeat must never touch a terminal run — the
+            # reconciler (backend/forge/reconciler.py) is the sole writer of
+            # Run.status. A daemon reporting a run_id the backend has already
+            # reconciled to FAILED/COMPLETED/CANCELLED/PAUSED (a stale local
+            # inflight snapshot, a race on reconnect) must not refresh its
+            # liveness clock — that would make a dead run look alive again to
+            # anything reading last_heartbeat_at as a freshness signal.
             (db.query(Run)
-               .filter(Run.id.in_(live_run_ids))
+               .filter(Run.id.in_(live_run_ids),
+                       Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING]))
                .update({Run.last_heartbeat_at: now},
                        synchronize_session=False))
-            # AP-371: resurrection. A daemon reporting a run in flight is
-            # authoritative proof of life — if the reconciler lost the race
-            # and already flipped that run to FAILED, reverse exactly that
-            # verdict (and only that one: a real failure or a user cancel
-            # has a different error and must stay terminal). Without this,
-            # the run keeps executing and finishing while the UI shows a
-            # dead run forever.
+            # AP-371: resurrection, not a violation of AP-391's rule above.
+            # A daemon reporting a run in flight is authoritative proof of
+            # life — if the reconciler lost the race and already flipped
+            # that run to FAILED with its own verdict (matched by the exact
+            # sentinel error string it stamps), reverse exactly that one
+            # verdict. A real failure or a user cancel has a different
+            # error and stays terminal, same as AP-391 intends.
             from backend.forge.runs import RECONCILED_ERROR, broadcast_status
             zombies = (db.query(Run)
                          .filter(Run.id.in_(live_run_ids),
@@ -750,6 +758,7 @@ def heartbeat_runtimes(daemon_id: str, providers: list[str],
                 z.status = RunStatus.RUNNING
                 z.error = None
                 z.finished_at = None
+                z.last_heartbeat_at = now
                 if z.outcome == RunOutcome.FAILED:
                     z.outcome = None  # reconciler's stamp, not the agent's
                 broadcast_status(z.id, RunStatus.RUNNING)
@@ -3889,17 +3898,10 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         db.refresh(r)
         run_payload = _run_to_dict(r)
 
-    # Workflow driver: a successful run may hand the task to the next column's
-    # role-agent (e.g. in_progress -> review, reviewer != implementer). Config
-    # lives in templates/workflow/default.yaml + the project's role overrides;
-    # no-ops unless Project.workflow_enabled. Best-effort — the agent's
-    # finish_run never fails because the hand-off hiccupped.
-    if outcome_enum == RunOutcome.SUCCEEDED:
-        try:
-            from backend.forge import workflow as _workflow
-            _workflow.advance_after_run(run_id)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[finish_run] workflow advance failed: {exc}")
+    # Workflow auto-advance is disabled: a successful run does NOT auto-hand the
+    # task to the next column. The driver (backend/forge/workflow.advance_after_run)
+    # is not wired into run completion — task progression stays manual until the
+    # workflow engine is reviewed and re-enabled deliberately.
 
     return {"ok": True, "run": run_payload}
 

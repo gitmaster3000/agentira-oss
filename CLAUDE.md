@@ -34,6 +34,7 @@
 - Profile stays Profile. Agent = runtime executor. Persona = future role template concept.
 - Push+poll hybrid for notifications (ADR-007).
 - New features go in their own `backend/<domain>.py` (or `backend/forge/<domain>.py`), not appended to `services.py`. Functions, not class hierarchies, unless there's a real polymorphism need. See `backend/attachments.py`, `backend/forge/turns.py`, `backend/forge/live_inflight.py`.
+- **Adding a whole new domain? Read `docs/adding-a-feature.md` first.** It walks the gateway → handler → repo → adapter layering end-to-end, using the deploy feature as the worked reference (where the session/commit lives, when a class is warranted, when an adapter is warranted).
 - **Prompts are configuration, not code.** Agent system prompts live on `Profile.system_prompt` (edited in Agent Settings UI). Task content lives on `Task.description` (edited in Task UI). Don't hardcode prompt text in dispatch code, and never re-apply a code constant on top of a user-edited row (set-if-empty seeds are the only acceptable shape).
 
 ## Plain language for users (product-wide)

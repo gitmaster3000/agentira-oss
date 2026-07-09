@@ -13,12 +13,8 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from backend.db import Base
-from backend import services as core_services
+import backend.db as db_mod
 from backend.forge import services as forge_services
 from backend.forge.models import (
     AgentMessage, ForgeRuntime, RuntimeStatus, MESSAGE_FIELD_CAP,
@@ -26,19 +22,10 @@ from backend.forge.models import (
 
 
 @pytest.fixture(autouse=True)
-def test_db():
-    engine = create_engine("sqlite://",
-                           connect_args={"check_same_thread": False},
-                           poolclass=StaticPool)
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(engine)
-    with patch("backend.services.SessionLocal", TestSession), \
-         patch("backend.forge.services.SessionLocal", TestSession), \
-         patch("backend.forge.runs.SessionLocal", TestSession):
-        db = TestSession()
-        core_services._seed_defaults(db)
-        db.close()
-        yield TestSession
+def test_db(pg):
+    """Shared ephemeral-Postgres harness; org context is already pinned. The
+    bodies use the yielded value as a sessionmaker, so yield the real one."""
+    yield db_mod.SessionLocal
 
 
 class _FakeHub:

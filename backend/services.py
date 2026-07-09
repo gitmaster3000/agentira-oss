@@ -17,6 +17,7 @@ from backend.models import (
 from backend.auth import has_permission
 from backend.notifications import broker
 from backend import agent_notifier
+from backend.deploy.manager import DeploymentManager
 
 import logging
 import os
@@ -246,6 +247,11 @@ def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
         # AP-297: TTL (seconds) for cached pre-run checks. null = default (600);
         # 0 = never expire by age (re-run only when the environment changes).
         "ready_checks_ttl_seconds": getattr(p, "ready_checks_ttl_seconds", None),
+        # Where this project deploys (kind picks the adapter). The opaque
+        # config blob + credential status are fetched separately via
+        # get_project_deploy_settings — not inlined here to keep the token
+        # out of the general project serialization.
+        "deploy_target_kind": getattr(p, "deploy_target_kind", None) or "railway",
         "created_at": p.created_at.isoformat(),
         "task_count": len(p.tasks) if task_count is None else task_count,
         "members": [m.profile.name for m in p.members],
@@ -752,6 +758,31 @@ def set_workflow_prompt_override(project_id: str, *, slug: str,
                 "override": current.get(slug, "")}
 
 
+# Deploy settings are handled by DeploymentManager; this gateway owns the
+# session/commit and funnels REST/MCP calls to it.
+_deploy_manager = DeploymentManager()
+
+
+def get_project_deploy_settings(project_id: str) -> dict:
+    with _session() as db:
+        return _deploy_manager.get_settings(db, project_id)
+
+
+def set_project_deploy_target(project_id: str, *, kind: str,
+                              config: dict | None = None) -> dict:
+    with _session() as db:
+        result = _deploy_manager.set_target(db, project_id, kind=kind, config=config)
+        db.commit()
+        return result
+
+
+def set_deploy_credential(project_id: str, *, kind: str, token: str) -> dict:
+    with _session() as db:
+        result = _deploy_manager.set_credential(db, project_id, kind=kind, token=token)
+        db.commit()
+        return result
+
+
 def delete_project(project_id: str) -> bool:
     """Cascade-delete a project and everything it owns: tasks, epics, members,
     activities, attachments (rows + on-disk files), forge runs, and chats.
@@ -1028,9 +1059,10 @@ def update_task(
 
 
 def move_task(task_id: str, new_status: str, actor: str = "system",
-              skip_gates: bool = False) -> dict:
+              skip_gates: bool = False, record_transition: bool = True) -> dict:
     from backend import tasks
-    return tasks.TaskService().move(task_id, new_status, actor, skip_gates)
+    return tasks.TaskService().move(task_id, new_status, actor, skip_gates,
+                                    record_transition=record_transition)
 
 
 def delete_task(task_id: str) -> bool:

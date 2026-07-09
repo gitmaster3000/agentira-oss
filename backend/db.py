@@ -214,7 +214,9 @@ def init_db():
     from backend.models import (  # noqa: F401
         Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
     )
-    from backend.forge.models import Agent, Run, ForgeRuntime  # noqa: F401
+    from backend.forge.models import (  # noqa: F401
+        Agent, Run, ForgeRuntime, TransitionEvent, GateEvaluation,
+    )
     Base.metadata.create_all(bind=engine)
     run_migrations()
 
@@ -225,7 +227,7 @@ _ORG_SCOPED_TABLES = [
     "profiles", "oauth_accounts", "project_members", "notifications",
     "projects", "project_repos", "epics", "tasks", "task_commits",
     "activities", "attachments", "profile_permissions",
-    "forge_agents", "forge_runtimes",
+    "forge_agents", "forge_runtimes", "deploy_credentials",
 ]
 
 # Default org id used to backfill pre-tenancy rows so org_id can go NOT NULL.
@@ -737,6 +739,12 @@ def run_migrations():
             # default; 0 = no time expiry, env-change re-runs only).
             added |= _ensure_column(conn, "projects", "ready_checks_ttl_seconds",
                                     "INTEGER")
+            # Single-repo deploy target. kind picks the adapter; config_json is
+            # opaque per-kind (adding a provider = new adapter, not a migration).
+            added |= _ensure_column(conn, "projects", "deploy_target_kind",
+                                    "VARCHAR(20) DEFAULT 'railway' NOT NULL")
+            added |= _ensure_column(conn, "projects", "deploy_target_config_json",
+                                    "TEXT")
         # AP-121: tasks gain repo_name pointing at one of the project's repos.
         # AP-154: tasks gain repos_json — JSON list when a task touches more
         # than one of the project's repos. NULL stays back-compat with
@@ -1031,7 +1039,9 @@ def bootstrap_schema(url: str) -> None:
     from backend.models import (  # noqa: F401
         Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
     )
-    from backend.forge.models import Agent, Run, ForgeRuntime  # noqa: F401
+    from backend.forge.models import (  # noqa: F401
+        Agent, Run, ForgeRuntime, TransitionEvent, GateEvaluation,
+    )
     target = create_engine(url, echo=False)
     try:
         Base.metadata.create_all(bind=target)

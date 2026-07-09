@@ -21,9 +21,10 @@ import backend.models  # noqa: F401
 import backend.forge.models  # noqa: F401
 from backend import services as core_services
 from backend.forge import workflow
-from backend.models import Task, TaskPriority, Profile, Role, Status, Project
+from backend.models import Task, TaskPriority, Profile, Role, Status, Project, allow_task_write
 from backend.forge.models import (
     Agent, ForgeRuntime, Run, RunStatus, RunOutcome, RuntimeStatus,
+    TransitionEvent, GateEvaluation,
 )
 
 
@@ -276,14 +277,17 @@ def test_bounce_exhausted_escalates_to_needs_attention(db_session):
 
 
 def test_idempotent_no_double_handoff(db_session):
-    """A newer run on the task means this run's hand-off already happened."""
-    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
-    with db_session() as db:
-        db.add(Run(agent_id=impl_id, task_id=task_id, project_id=pid,
-                   status=RunStatus.RUNNING))
-        db.commit()
-    out = workflow.advance_after_run(run_id)
-    assert out == {"advanced": False, "reason": "already_handed_off"}
+    """AP-402: re-processing the SAME run is a no-op — the driver already
+    recorded a transition_events row for it (explicit fact), so a duplicate
+    finish_run call (webhook retry, race) can't hand the task off twice."""
+    pid, task_id, run_id, impl_id, reviewer_id = _setup_review_scenario(db_session)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}) as mock_dispatch:
+        first = workflow.advance_after_run(run_id)
+        second = workflow.advance_after_run(run_id)
+    assert first["advanced"] is True
+    assert second == {"advanced": False, "reason": "already_handed_off"}
+    mock_dispatch.assert_called_once()   # not re-dispatched on the replay
 
 
 def test_failed_run_never_advances(db_session):
@@ -553,3 +557,144 @@ def test_integration_ok_without_doc_agent_skips_docs(db_session):
     with db_session() as db:
         t = db.get(Task, task_id)
         assert db.get(Status, t.status_id).name == "done"
+
+
+# ── AP-404 Phase 0: transition_events + gate_evaluations audit trail ─────
+
+def _events(db_session, task_id):
+    with db_session() as db:
+        return (db.query(TransitionEvent)
+                  .filter(TransitionEvent.task_id == task_id)
+                  .order_by(TransitionEvent.created_at).all())
+
+
+def test_driver_noop_writes_a_transition_event(db_session):
+    """A driver decision that does NOT advance the task is still a decision —
+    it must be logged, not silent. no_role_agent is the simplest no-op."""
+    _, task_id, run_id, *_ = _setup_review_scenario(db_session, with_reviewer=False)
+    out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "no_role_agent"
+    events = _events(db_session, task_id)
+    assert len(events) == 1
+    assert events[0].actor_type == "workflow"
+    assert events[0].cause == f"run:{run_id}"
+    assert events[0].result == "no_op:no_role_agent"
+
+
+def test_gate_evaluation_recorded_for_driver_check(db_session):
+    pid, task_id, run_id, *_ = _setup_review_scenario(db_session, dod_checked=False)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "bounce1"}):
+        workflow.advance_after_run(run_id)
+    with db_session() as db:
+        rows = (db.query(GateEvaluation)
+                  .filter(GateEvaluation.task_id == task_id).all())
+    assert len(rows) == 1
+    assert rows[0].outcome == "block"
+    assert rows[0].transition == "in_progress:review"
+    snap = json.loads(rows[0].evidence_snapshot)
+    assert "dod_items" in snap
+
+
+def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
+    """AP-383 regression: implement -> review -> rework (rejection) ->
+    approve -> integrate, replayed end to end. Every driver decision along
+    the way — including the rejection hand-back — writes a transition_events
+    row, and the final integration still fires."""
+    from backend.models import Activity
+    with db_session() as db:
+        proj = core_services.create_project("P")
+        pid = proj["id"]
+        p = db.get(Project, pid)
+        p.workflow_enabled = True
+        p.repo_url = "file:///tmp/fake-remote.git"
+        db.commit()
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        reviewer_id = _mk_agent(db, "senior reviewer")
+        _bind(db, reviewer_id, pid)
+        t = Task(project_id=pid, title="Build feature",
+                 status_id=_status_id(db, "in_progress"),
+                 priority=TaskPriority.HIGH, assignee="implementer-1",
+                 creator="system", branch="agent/x/task/y",
+                 dod_items=json.dumps([{"text": "d", "checked": True}]))
+        db.add(t); db.commit()
+        task_id = t.id
+
+    # 1) implement -> review
+    with db_session() as db:
+        run1 = Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
+        db.add(run1); db.commit()
+        run1_id = run1.id
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "r2"}):
+        out1 = workflow.advance_after_run(run1_id)
+    assert out1["advanced"] is True and out1["to"] == "review"
+
+    # 2) reviewer rejects -> rework (hand-back to implementer)
+    with db_session() as db:
+        run2 = Run(agent_id=reviewer_id, task_id=task_id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
+        db.add(run2); db.commit()
+        run2_id = run2.id
+        db.add(Activity(project_id=pid, task_id=task_id, actor="senior reviewer",
+                        action="task.move", detail="review → in_progress",
+                        diff=json.dumps({"status": {"from": "review",
+                                                    "to": "in_progress"}})))
+        db.add(Activity(project_id=pid, task_id=task_id, actor="senior reviewer",
+                        action="commented", detail="Fix the flaky test first."))
+        db.commit()
+        t = db.get(Task, task_id)
+        with allow_task_write():
+            t.status_id = _status_id(db, "in_progress")
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "r3"}) as mock_dispatch:
+        out2 = workflow.advance_after_run(run2_id)
+    assert out2["reason"] == "review_rejected"
+    assert out2.get("handed_back") is True
+    assert mock_dispatch.call_args.kwargs["agent_id"] == impl_id
+
+    # 3) implementer reworks -> review again
+    with db_session() as db:
+        run3 = Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
+        db.add(run3); db.commit()
+        run3_id = run3.id
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "r4"}):
+        out3 = workflow.advance_after_run(run3_id)
+    assert out3["advanced"] is True and out3["to"] == "review"
+
+    # 4) reviewer approves -> integration requested (two-phase)
+    with db_session() as db:
+        run4 = Run(agent_id=reviewer_id, task_id=task_id, project_id=pid,
+                  status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                  worktree_branch="agent/x/task/y")
+        db.add(run4); db.commit()
+        run4_id = run4.id
+        db.add(Activity(project_id=pid, task_id=task_id, actor="senior reviewer",
+                        action="commented", detail="REVIEW: APPROVE looks good."))
+        db.commit()
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: coro.close()):
+        out4 = workflow.advance_after_run(run4_id)
+    assert out4.get("integration_requested") is True
+
+    # 5) daemon reports the merge -> done
+    out5 = workflow.complete_integration(task_id=task_id, run_id=run4_id,
+                                         ok=True, reason="merged")
+    assert out5["advanced"] is True and out5["to"] == "done"
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "done"
+
+    # Every step along the way is in the audit trail — nothing silent.
+    events = _events(db_session, task_id)
+    causes = [e.cause for e in events]
+    results = [e.result for e in events]
+    assert causes == [f"run:{run1_id}", f"run:{run2_id}",
+                      f"run:{run3_id}", f"run:{run4_id}", f"run:{run4_id}"]
+    assert results == ["advanced", "handed_back", "advanced",
+                       "integration_requested", "advanced"]

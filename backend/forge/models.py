@@ -396,6 +396,58 @@ class WebhookLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class TransitionEvent(Base):
+    """AP-404 Phase 0 — the durable log of every task status change.
+
+    Written for every mover of a task's status: the single `TaskService.move`
+    path (UI/API drag, MCP `move_task`) and every workflow-driver decision
+    (advance, gate-blocked, bounce, rejection hand-back, integration), INCLUDING
+    no-ops — a driver deciding "not now" is a decision, not silence. This table
+    (+ `GateEvaluation`) is the audit trail plan v4 §4 requires: any evaluator
+    can be replayed from here instead of grepped from logs.
+    """
+    __tablename__ = "transition_events"
+
+    id: Mapped[str]              = mapped_column(String(12), primary_key=True, default=_new_id)
+    task_id: Mapped[str]         = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
+    from_status: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    to_status: Mapped[str | None]   = mapped_column(String(60), nullable=True)
+    # "human" | "agent" | "workflow" | "mcp" | "system"
+    actor_type: Mapped[str]      = mapped_column(String(20), nullable=False)
+    actor_id: Mapped[str]        = mapped_column(String(120), default="")
+    # Free-text: what triggered the attempt (e.g. "ui_move", "mcp_move_task",
+    # "run:<run_id>" for driver decisions — the run whose finish caused it).
+    cause: Mapped[str]           = mapped_column(String(200), default="")
+    # Free-text: what happened ("advanced" | "blocked" | "no_op:<reason>" |
+    # "bounced" | "escalated" | "handed_back" | "integration_requested" | ...).
+    result: Mapped[str]          = mapped_column(String(60), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class GateEvaluation(Base):
+    """AP-404 Phase 0 — one row per `gates.py` evaluate/enforce call.
+
+    `evidence_snapshot` captures the task field values the gate functions
+    read at evaluation time, plus the per-condition results — so a block can
+    be explained after the fact without re-deriving it from the task's
+    current (possibly since-changed) state.
+    """
+    __tablename__ = "gate_evaluations"
+
+    id: Mapped[str]              = mapped_column(String(12), primary_key=True, default=_new_id)
+    task_id: Mapped[str]         = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
+    # "<from_status>:<to_status>" — the transition this evaluation gated.
+    transition: Mapped[str]      = mapped_column(String(120), nullable=False)
+    gate_id: Mapped[str]         = mapped_column(String(120), nullable=False)
+    # Starlark rule version (Phase 1+). NULL today — v1 gates are plain Python.
+    rule_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    evidence_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    # "allow" | "block" | "rule_error"
+    outcome: Mapped[str]         = mapped_column(String(20), nullable=False)
+    reason: Mapped[str]          = mapped_column(Text, default="")
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
 class DispatchIntent(Base):
     """Durable outbox row for a daemon-bound WS frame (AP-390).
 

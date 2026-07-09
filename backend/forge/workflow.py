@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, validator
 from backend.db import SessionLocal
 from backend.models import Task, Project, Profile, Status
 from backend.forge.models import Agent, Run, RunOutcome, RunStatus
+from backend.forge.repos import transitions as transitions_repo
 from backend import gates
 
 logger = logging.getLogger("agentira.forge.workflow")
@@ -305,13 +306,29 @@ def _status_name(db, status_id: str) -> str | None:
     return row.name if row else None
 
 
+def _gate_evidence_snapshot(task: Task) -> dict:
+    """The task field values the AP-158 local gates read — same shape as
+    backend.tasks._gate_evidence_snapshot, kept local to avoid a cross-module
+    import for a 4-field dict."""
+    return {
+        "dod_items": task.dod_items,
+        "assignee": task.assignee,
+        "branch": task.branch,
+        "pr_url": task.pr_url,
+    }
+
+
 def _already_handed_off(db, run: Run, task: Task) -> bool:
-    """Idempotency guard: if any run on this task was created after this one,
-    the hand-off already happened (or a human re-dispatched) — skip."""
-    newer = (db.query(Run)
-               .filter(Run.task_id == task.id, Run.created_at > run.created_at)
-               .first())
-    return newer is not None
+    """AP-402 idempotency guard: skip if the driver already recorded a
+    decision for THIS run.
+
+    Previously inferred from Run.created_at ("does a newer run exist on this
+    task?") — a race between two finish_run calls landing close together
+    could misjudge that ordering and deadlock the pipeline. Now it's an
+    explicit fact: has a transition_events row with cause="run:<run.id>"
+    already been written? That is unambiguous regardless of timing."""
+    return transitions_repo.has_driver_event_for_run(
+        db, task_id=task.id, run_id=run.id)
 
 
 def _in_flight(db, agent_id: str) -> int:
@@ -619,6 +636,20 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
 
 # ── The driver ────────────────────────────────────────────────────────────
 
+def _log_driver_decision(db, *, task: Task, run: Run, from_status: str | None,
+                         to_status: str | None, result: str) -> None:
+    """Every driver decision — advance or no-op alike — is a transition_events
+    row, tied to the run that caused it (cause="run:<run.id>"). This is what
+    makes `_already_handed_off` (AP-402) an explicit fact instead of a
+    timestamp guess, and closes the "silent no-op" gap plan v4 §4 calls out."""
+    transitions_repo.record_transition(
+        db, task_id=task.id, from_status=from_status, to_status=to_status,
+        actor_type="workflow", actor_id="driver",
+        cause=f"run:{run.id}", result=result,
+    )
+    db.commit()
+
+
 def advance_after_run(run_id: str) -> dict:
     """Drive the board one configured step after a successful run.
 
@@ -649,12 +680,20 @@ def advance_after_run(run_id: str) -> dict:
             # reviewer.
             demotion = _rejection_demotion(db, run=run, task=task, flow=flow)
             if demotion:
-                return _hand_back_after_rejection(
+                result = _hand_back_after_rejection(
                     db, task=task, run=run, flow=flow, demotion=demotion)
+                _log_driver_decision(
+                    db, task=task, run=run, from_status=current, to_status=None,
+                    result=("handed_back" if result.get("handed_back")
+                            else "escalated" if result.get("escalated")
+                            else "no_op:rejection_handling_disabled"))
+                return result
 
             col = flow.column(current) if current else None
             spec = col.on_success if col else None
             if not spec:
+                _log_driver_decision(db, task=task, run=run, from_status=current,
+                                     to_status=None, result="no_op:no_on_success")
                 return {"advanced": False, "reason": f"no_on_success_for_{current}"}
             target = spec.advance_to
 
@@ -663,8 +702,10 @@ def advance_after_run(run_id: str) -> dict:
             # itself: gates exist to stop FAKED progress, and a system-performed
             # merge (verified by the daemon, conflict-aborted) is strictly
             # stronger evidence than a pr_url string. DoD gates still apply.
-            fails = gates.failures(
-                gates.evaluate(task, from_status=current, to_status=target))
+            import time as _time
+            _started = _time.monotonic()
+            all_results = gates.evaluate(task, from_status=current, to_status=target)
+            fails = gates.failures(all_results)
             if spec.integrate is not None:
                 fails = [f for f in fails
                          if f.name not in ("pr_url_set", "has_branch_or_pr")]
@@ -695,6 +736,15 @@ def advance_after_run(run_id: str) -> dict:
                         "(run=%s agent=%s)", task.key or task.id, run.id,
                         run.agent_id)
                     return {"advanced": False, "reason": "no_approval_evidence"}
+            transitions_repo.record_gate_evaluation(
+                db, task_id=task.id, from_status=current, to_status=target,
+                gate_id=f"{current}:{target}",
+                evidence_snapshot=_gate_evidence_snapshot(task),
+                outcome="block" if fails else "allow",
+                reason="; ".join(f.reason for f in fails),
+                duration_ms=int((_time.monotonic() - _started) * 1000),
+            )
+            db.commit()
             if fails:
                 logger.info("workflow: %s gate blocks %s->%s: %s",
                             task.key or task.id, current, target,
@@ -705,11 +755,18 @@ def advance_after_run(run_id: str) -> dict:
                 bounce = _bounce_gate_failure(
                     db, task=task, run=run, current=current, target=target,
                     fails=fails, policy=flow.bounce)
+                _log_driver_decision(
+                    db, task=task, run=run, from_status=current, to_status=target,
+                    result=("bounced" if bounce.get("bounced")
+                            else "escalated" if bounce.get("escalated")
+                            else "no_op:bounce_dispatch_failed"))
                 return {"advanced": False, "reason": "gate_failed",
                         "failures": [f.name for f in fails], **bounce}
 
             target_status = db.query(Status).filter(Status.name == target).first()
             if not target_status:
+                _log_driver_decision(db, task=task, run=run, from_status=current,
+                                     to_status=target, result="no_op:unknown_column")
                 return {"advanced": False, "reason": f"unknown_column_{target}"}
 
             # Two-phase advance (slice 2): when the column's policy says
@@ -724,11 +781,17 @@ def advance_after_run(run_id: str) -> dict:
                 runtime_id = agent.runtime_id if agent else None
                 source_url = _task_source_url(db, task)
                 if not branch or not runtime_id or not source_url:
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current, to_status=target,
+                        result="no_op:integration_missing_info")
                     return {"advanced": False, "reason": "integration_missing_info",
                             "branch": branch, "runtime": bool(runtime_id),
                             "source_url": bool(source_url)}
                 ispec = spec.integrate
                 task_id_, run_id_ = task.id, run.id
+                _log_driver_decision(
+                    db, task=task, run=run, from_status=current, to_status=target,
+                    result="integration_requested")
                 # Send outside the session via the captured app loop.
                 from backend.forge.services import _dispatch_coro
                 from backend.forge.ws_dispatch import hub
@@ -746,6 +809,9 @@ def advance_after_run(run_id: str) -> dict:
             if spec.assign_role:
                 role = flow.roles.get(spec.assign_role)
                 if role is None:
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current, to_status=target,
+                        result="no_op:role_undefined")
                     return {"advanced": False, "reason": "role_undefined",
                             "role": spec.assign_role}
                 next_agent = pick_role_agent(
@@ -755,9 +821,15 @@ def advance_after_run(run_id: str) -> dict:
                     logger.info("workflow: no agent for role=%s on %s — "
                                 "not advancing", spec.assign_role,
                                 task.key or task.id)
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current, to_status=target,
+                        result="no_op:no_role_agent")
                     return {"advanced": False, "reason": "no_role_agent",
                             "role": spec.assign_role}
 
+            _log_driver_decision(db, task=task, run=run, from_status=current,
+                                 to_status=target, result="advanced")
+            db.commit()
             task_id, task_key = task.id, (task.key or task.id)
             task_branch, task_pr_url = task.branch or "", task.pr_url or ""
             next_agent_id = next_agent.id if next_agent else None
@@ -768,7 +840,8 @@ def advance_after_run(run_id: str) -> dict:
         # gates, activity logging (AP-375), and agent wake all come from
         # the one place instead of a raw ORM write here.
         from backend import services as core_task_services
-        core_task_services.move_task(task_id, target, actor="workflow")
+        core_task_services.move_task(task_id, target, actor="workflow",
+                                     record_transition=False)
         if next_agent_name:
             core_task_services.update_task(task_id, assignee=next_agent_name,
                                            actor="workflow")
@@ -860,6 +933,12 @@ def complete_integration(*, task_id: str, run_id: str | None,
                 db.commit()
             except Exception:  # noqa: BLE001 — best-effort notification
                 pass
+            transitions_repo.record_transition(
+                db, task_id=task.id, from_status=current, to_status=None,
+                actor_type="workflow", actor_id="driver",
+                cause=f"run:{run_id}" if run_id else "integration_callback",
+                result="integration_failed")
+            db.commit()
             logger.warning("workflow: integration failed task=%s: %s",
                            task.key or task.id, reason)
             return {"ok": True, "advanced": False, "reason": reason}
@@ -868,6 +947,12 @@ def complete_integration(*, task_id: str, run_id: str | None,
         target_status = db.query(Status).filter(Status.name == target).first()
         if not target_status:
             return {"ok": False, "error": f"unknown_column_{target}"}
+        transitions_repo.record_transition(
+            db, task_id=task.id, from_status=current, to_status=target,
+            actor_type="workflow", actor_id="driver",
+            cause=f"run:{run_id}" if run_id else "integration_callback",
+            result="advanced")
+        db.commit()
         task_id_, task_key = task.id, (task.key or task.id)
         project_id_ = task.project_id
 
@@ -878,7 +963,7 @@ def complete_integration(*, task_id: str, run_id: str | None,
         # transition would otherwise re-check (see docstring above).
         from backend import services as core_task_services
         core_task_services.move_task(task_id_, target, actor="workflow",
-                                     skip_gates=True)
+                                     skip_gates=True, record_transition=False)
         core_task_services.add_comment(
             task_id_,
             (f"✅ **Integrated** — branch merged into "

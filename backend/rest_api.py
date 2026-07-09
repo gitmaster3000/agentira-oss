@@ -71,6 +71,14 @@ class ResetPasswordBody(BaseModel):
 class RepoTokenBody(BaseModel):
     token: str = ""
 
+class DeployTargetUpdate(BaseModel):
+    kind: str
+    config: dict = {}
+
+class DeployCredentialUpdate(BaseModel):
+    kind: str
+    token: str
+
 class InitialTaskSpec(BaseModel):
     title: str
     description: str = ""
@@ -711,6 +719,35 @@ def api_put_project_workflow_prompt(project_id: str, slug: str,
         raise HTTPException(400, str(e))
     except KeyError as e:
         raise HTTPException(404, str(e))
+
+@projects.get("/{project_id}/deploy-settings")
+def api_get_deploy_settings(project_id: str):
+    """The project's deploy target (kind + opaque config) and the non-secret
+    status of the credential for that provider. Never returns a token value."""
+    try:
+        return services.get_project_deploy_settings(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@projects.put("/{project_id}/deploy-settings")
+def api_set_deploy_target(project_id: str, body: DeployTargetUpdate):
+    """Set where this project deploys. Adapter-agnostic — `kind` picks the
+    adapter, `config` is the opaque per-kind blob."""
+    try:
+        return services.set_project_deploy_target(
+            project_id, kind=body.kind, config=body.config)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.put("/{project_id}/deploy-credential")
+def api_set_deploy_credential(project_id: str, body: DeployCredentialUpdate):
+    """Store + probe-verify the cloud-provider token for a target kind. The
+    token is write-only — the response carries validity, never the value."""
+    try:
+        return services.set_deploy_credential(
+            project_id, kind=body.kind, token=body.token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 @projects.delete("/{project_id}")
 def api_delete_project(project_id: str):

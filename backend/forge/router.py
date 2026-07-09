@@ -250,14 +250,11 @@ class IntegrationResult(BaseModel):
 
 @daemon_router.post("/integration-result", dependencies=[Depends(require_admin)])
 def daemon_integration_result(body: IntegrationResult):
-    """Workflow slice 2: the daemon reports the merge outcome; the driver
-    finishes the two-phase advance (done) or surfaces the classified
-    failure on the task without advancing."""
-    from backend.forge import workflow as _workflow
-    return _workflow.complete_integration(
-        task_id=body.task_id, run_id=body.run_id,
-        ok=body.ok, reason=body.reason,
-    )
+    """Workflow slice 2: the daemon reports the merge outcome so the driver can
+    finish its two-phase advance. Disabled while the workflow engine is paused —
+    the driver never initiates an integration in the first place, so this
+    endpoint accepts and ignores rather than advancing a task."""
+    return {"ok": True, "reason": "workflow engine disabled — integration ignored"}
 
 
 @daemon_router.post("/agents/{agent_id}/trigger-events", dependencies=[Depends(require_admin)])

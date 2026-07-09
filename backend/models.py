@@ -398,6 +398,15 @@ class Project(Base):
     # 0 = never expire by age (only an operational-env change re-runs them).
     ready_checks_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Single-repo deploy target for this project. `kind` picks the adapter
+    # (backend/deploy/registry.get_adapter) — "railway" (default), "docker"
+    # (in-Agentira preview only, always available), later "gcp_cloud_run" etc.
+    # `config_json` is deliberately opaque (mirrors DeployTargetConfig.config in
+    # backend/deploy/contract.py) so adding a provider is a new adapter class,
+    # never a schema migration — no per-provider columns here. Multi-repo /
+    # multi-service is out of scope.
+    deploy_target_kind: Mapped[str] = mapped_column(String(20), default="railway", nullable=False)
+    deploy_target_config_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     epics: Mapped[list["Epic"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     tasks: Mapped[list["Task"]] = relationship(back_populates="project", cascade="all, delete-orphan")
@@ -410,6 +419,30 @@ class Project(Base):
         cascade="all, delete-orphan",
         primaryjoin="Project.id == Attachment.project_id",
     )
+
+
+class DeployCredential(Base):
+    """A cloud-provider credential, one row per (org, provider kind).
+
+    Generic on purpose — `kind` matches a `TargetKind` (railway, gcp_cloud_run,
+    ...); the token is verified and used by that kind's adapter
+    (backend/deploy/registry.get_adapter). No provider name appears in this
+    schema beyond the `kind` discriminator, so adding a provider is a new
+    adapter class, never a migration. `token` is never serialized back to a
+    client — only `has_token` + cached validity are exposed. (Plaintext at
+    rest today; encryption-at-rest is a tracked follow-up before wide rollout.)
+    """
+    __tablename__ = "deploy_credentials"
+    __table_args__ = (UniqueConstraint("org_id", "kind", name="uq_deploy_cred_org_kind"),)
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    token: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    token_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    token_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
 class ProjectRepo(Base):

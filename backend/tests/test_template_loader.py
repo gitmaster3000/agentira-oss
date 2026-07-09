@@ -80,3 +80,95 @@ def test_minimal_valid_template(tmp_path):
     assert t.name == "Minimal"
     assert t.version == "1.0.0"  # default
     assert t.agents[0].allowed_tools == []  # default
+    assert t.default_tasks == []  # default
+    assert t.workflow_columns == []  # default
+    assert t.workflow_roles == {}  # default
+
+
+def test_default_tasks_ref_resolved(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithDefaults\n"
+        "columns: [Todo, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "default_tasks:\n"
+        "  - professionalization\n"
+    )
+    t = load_template(f)
+    assert t.default_tasks == ["professionalization"]
+
+
+def test_default_tasks_ref_missing_rejected(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithDefaults\n"
+        "columns: [Todo, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "default_tasks:\n"
+        "  - does-not-exist\n"
+    )
+    with pytest.raises(ValueError):
+        load_template(f)
+
+
+def test_workflow_columns_must_be_subset_of_columns(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithWorkflow\n"
+        "columns: [Todo, In Progress, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "workflow_columns: [Todo, Done]\n"
+    )
+    t = load_template(f)
+    assert t.workflow_columns == ["Todo", "Done"]
+
+
+def test_workflow_columns_unknown_rejected(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithWorkflow\n"
+        "columns: [Todo, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "workflow_columns: [Todo, Review]\n"
+    )
+    with pytest.raises(ValueError):
+        load_template(f)
+
+
+def test_workflow_roles_override_parsed(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithRoles\n"
+        "columns: [Todo, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "workflow_roles:\n"
+        "  reviewer:\n"
+        "    match: [review, senior]\n"
+        "    exclude_previous_assignee: true\n"
+        "    fallback: any\n"
+    )
+    t = load_template(f)
+    assert "reviewer" in t.workflow_roles
+    assert t.workflow_roles["reviewer"].match == ["review", "senior"]
+    assert t.workflow_roles["reviewer"].exclude_previous_assignee is True
+    assert t.workflow_roles["reviewer"].fallback == "any"
+
+
+def test_workflow_roles_bad_fallback_rejected(tmp_path):
+    f = tmp_path / "t.yaml"
+    f.write_text(
+        "name: WithRoles\n"
+        "columns: [Todo, Done]\n"
+        "agents:\n"
+        "  - {name: Solo, role: implementer, model: claude-sonnet-4-5}\n"
+        "workflow_roles:\n"
+        "  reviewer:\n"
+        "    fallback: sometimes\n"
+    )
+    with pytest.raises(ValueError):
+        load_template(f)
