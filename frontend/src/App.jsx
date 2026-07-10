@@ -24,6 +24,7 @@ import { EpicPage } from './pages/EpicPage';
 import { Inbox } from './pages/Inbox';
 import { MyWork } from './pages/MyWork';
 import { Workflow } from './pages/Workflow';
+import { Deploy } from './pages/Deploy';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 import { ForgeOverview } from './pages/forge/ForgeOverview';
@@ -93,6 +94,7 @@ export default function App() {
                             <Route path="backlog" element={<Backlog />} />
                             <Route path="roadmap" element={<RoadmapView />} />
                             <Route path="workflow" element={<Workflow />} />
+                            <Route path="deploy" element={<Deploy />} />
                             <Route path="settings" element={<ProjectSettings />} />
                         </Route>
                         {/* Legacy flat board route — redirect to the new nested form. */}

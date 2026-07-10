@@ -177,6 +177,31 @@ export const api = {
         `/projects/${projectId}/workflow/prompts/${encodeURIComponent(slug)}`,
         { method: 'PUT', body: JSON.stringify({ text }) }),
 
+    // Deploy — see docs/deploy-backend-requirements.md for the contract these
+    // call. The API key is only ever sent, never returned.
+    getDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider`),
+    verifyDeployKey: (projectId, provider, apiKey) => request(`/projects/${projectId}/deploy/provider/verify`, {
+        method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }),
+    }),
+    getDeployRepoAccess: (projectId, provider) => request(
+        `/projects/${projectId}/deploy/provider/repo-access?provider=${encodeURIComponent(provider)}`),
+    connectDeployProvider: (projectId, data) => request(`/projects/${projectId}/deploy/provider`, {
+        method: 'POST', body: JSON.stringify(data),
+    }),
+    reverifyDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider/reverify`, { method: 'POST' }),
+    disconnectDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider`, { method: 'DELETE' }),
+
+    getDeployments: (projectId) => request(`/projects/${projectId}/deployments`),
+    createDeployment: (projectId, branch) => request(`/projects/${projectId}/deployments`, {
+        method: 'POST', body: JSON.stringify({ branch }),
+    }),
+    redeployDeployment: (projectId, deploymentId) => request(
+        `/projects/${projectId}/deployments/${deploymentId}/redeploy`, { method: 'POST' }),
+    stopDeployment: (projectId, deploymentId) => request(
+        `/projects/${projectId}/deployments/${deploymentId}`, { method: 'DELETE' }),
+    getDeploymentLogs: (projectId, deploymentId, cursor = 0) => request(
+        `/projects/${projectId}/deployments/${deploymentId}/logs?cursor=${cursor}`),
+
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),
     getEpic: (id) => request(`/epics/${id}`),

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0b0e13}
+  body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter','Helvetica Neue',system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#f0f3f6}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#30363d;border-radius:999px}
+  ::-webkit-scrollbar-track{background:transparent}
+  .frm{background:#14161b;border:1px solid #30363d;border-radius:14px;overflow:hidden;flex-shrink:0;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .fld{background:#1c2128;border:1px solid #30363d;border-radius:9px;padding:9px 11px;font-size:12.5px;color:#e8ebf0}
+  .lbl{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:#768390;margin-bottom:6px}
+  .arr{display:flex;align-items:center;color:#484f58;flex-shrink:0}
+  .mono{font-family:ui-monospace,'SF Mono','JetBrains Mono',Menlo,monospace}
+  .stripe{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.022) 0 12px,transparent 12px 24px)}
+  .nav{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:9px;font-size:13px;color:#b1bac4}
+  @keyframes livePulse{0%{transform:scale(1);opacity:.55}70%{transform:scale(2.6);opacity:0}100%{opacity:0}}
+  @keyframes softBlink{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes barWork{0%{left:-35%}100%{left:100%}}
+  .lp::after{content:"";position:absolute;inset:0;border-radius:50%;background:currentColor;animation:livePulse 1.8s ease-out infinite}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1200px 620px at 72% -12%,rgba(56,189,248,.06),transparent),#0b0e13;padding:30px 40px 70px">
+
+  <!-- top bar -->
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px">
+    <a href="Agentira.dc.html" style="display:inline-flex;align-items:center;gap:7px;text-decoration:none;color:#b1bac4;font-size:12.5px;padding:7px 12px;border:1px solid #30363d;border-radius:9px;background:#14161b"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"></path></svg>Back to Agentira</a>
+    <span style="font-size:11px;color:#5a626c">Deploy tab · the payoff moment — watch it go live, click it, test it</span>
+  </div>
+  <h1 style="font-size:26px;font-weight:700;margin:0 0 4px;letter-spacing:-.01em">Deploy</h1>
+  <p style="font-size:13.5px;color:#768390;margin:0 0 30px;max-width:70ch">A new per-project tab where the human sees the agents' work <b style="color:#b1bac4;font-weight:600">running live</b> and tests it — no terminal. Connect a provider once, then every push to <span class="mono" style="color:#b1bac4">main</span> redeploys, and any branch previews on demand. Below: the tab in the real Agentira shell first, then every state.</p>
+
+  <!-- ============ IN CONTEXT — FULL APP SHELL ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:2px;background:#2ecc71"></span><h2 style="font-size:16px;font-weight:700;margin:0">In context</h2><span style="font-size:11px;color:#5a626c">· Deploy live in the Agentira shell — new sidebar item under PROJECT</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px;max-width:66ch">The Live card owns the page: status, the clickable live URL, an embedded preview so you test without leaving Agentira, the current commit &amp; who triggered it, and a plain "what's happening" line. Branches sit quietly below.</p>
+
+  <div style="height:900px;display:flex;margin:0 -40px 48px;background:#14161b;overflow:hidden;border-top:1px solid #30363d;border-bottom:1px solid #30363d">
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside style="width:248px;flex-shrink:0;border-right:1px solid #30363d;background:#161b22;display:flex;flex-direction:column">
+      <div style="padding:12px;border-bottom:1px solid #30363d">
+        <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;background:#1c2128;border:1px solid #30363d">
+          <span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">A</span>
+          <div style="flex:1;line-height:1.1"><div style="font-size:13px;font-weight:600">Acme Inc</div><div style="font-size:10px;color:#768390">Agentira workspace</div></div>
+        </div>
+      </div>
+      <div style="padding:10px 12px 4px">
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:#0e1117;border:1px solid #30363d;color:#768390"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span style="font-size:12.5px;flex:1">Search or jump…</span><span class="mono" style="font-size:10px;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 5px;color:#b1bac4">⌘K</span></div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:6px 8px">
+        <div class="nav"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg><span style="flex:1">Home</span></div>
+        <div class="nav"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="flex:1">Inbox</span><span style="font-size:10px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 6px">5</span></div>
+        <div class="nav"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span style="flex:1">My Work</span></div>
+
+        <div style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0">BUILD</div>
+        <div class="nav"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg><span style="flex:1">Agents</span><span style="font-size:10px;color:#768390">6</span></div>
+        <div class="nav"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span style="flex:1">Runs</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex;width:7px;height:7px"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span></span><span style="font-size:10px;color:#38bdf8;font-weight:600">4</span></span></div>
+
+        <div style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0">PROJECT</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;background:#1c2128;border:1px solid #30363d">
+          <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:#c9b8ff"></span>
+          <span style="font-size:13px;font-weight:600;flex:1;color:#c9b8ff">Payments Platform</span>
+          <span style="display:flex;align-items:center;gap:4px;margin-right:2px"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="font-size:10px;color:#38bdf8;font-weight:600">4</span></span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+        </div>
+        <div style="margin:8px 2px 0 9px;padding:7px 0 2px 9px;border-left:2px solid #c9b8ff55">
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"></path></svg><span style="flex:1">Overview</span></div>
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg><span style="flex:1">Board</span><span style="font-size:10px;color:#768390">18</span></div>
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span style="flex:1">Backlog</span></div>
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg><span style="flex:1">Roadmap</span></div>
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="6" rx="1"></rect><rect x="15" y="3" width="6" height="6" rx="1"></rect><rect x="9" y="15" width="6" height="6" rx="1"></rect><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1"></path></svg><span style="flex:1">Workflow</span></div>
+          <!-- NEW: Deploy, active -->
+          <div class="nav" style="background:#1c2128;color:#f0f3f6;font-weight:600;position:relative"><span style="position:absolute;left:-11px;top:6px;bottom:6px;width:2px;border-radius:2px;background:#38bdf8"></span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 5 3 7h8c1-2 3-4 3-7a7 7 0 0 0-7-7z"></path><path d="M9 22h6"></path></svg><span style="flex:1">Deploy</span><span style="display:flex;align-items:center;gap:4px"><span class="lp" style="position:relative;display:inline-flex;width:6px;height:6px;border-radius:50%;background:#2ecc71;color:#2ecc71"></span></span></div>
+          <div class="nav"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"></path></svg><span style="flex:1">Settings</span></div>
+        </div>
+      </div>
+      <div style="border-top:1px solid #30363d;padding:8px">
+        <div class="nav" style="padding:7px 9px"><div style="width:28px;height:28px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div><div style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500;color:#f0f3f6">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder · admin</div></div></div>
+      </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <main style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <!-- top bar -->
+      <header style="height:54px;flex-shrink:0;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#0e1117">
+        <div style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:0">
+          <span style="width:8px;height:8px;border-radius:2px;background:#c9b8ff"></span>
+          <span style="color:#b1bac4">Payments Platform</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5a626c" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg>
+          <span style="font-weight:600;color:#f0f3f6">Deploy</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:9px">
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.3)"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12px;font-weight:600;color:#38bdf8">4 running</span></div>
+          <div style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"></path></svg></div>
+          <div style="padding:7px;color:#b1bac4;position:relative"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg><span style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#ef4444;border:2px solid #0e1117"></span></div>
+        </div>
+      </header>
+
+      <!-- ===== DEPLOY BODY ===== -->
+      <div style="flex:1;overflow-y:auto;min-width:0;position:relative">
+        <!-- STICKY LIVE HEADER -->
+        <div style="{{ barSticky }}top:0;z-index:20;display:flex;align-items:center;gap:10px;padding:12px 40px;background:rgba(20,22,27,.86);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom:1px solid #30363d">
+          <span style="font-size: 12px; font-weight: 800; letter-spacing: .1em; color: #FFFFFF; flex-shrink: 0">PREVIEW</span>
+          <div style="position:relative;flex-shrink:0">
+            <div onClick="{{ toggleMenu }}" style="display:inline-flex;align-items:center;gap:8px;padding:5px 10px;border-radius:8px;background:#1c2128;border:1px solid #3d444d;cursor:pointer;transition:border-color .15s,background .15s" style-hover="background:#22272e;border-color:#57606a">
+              <span style="width:8px;height:8px;border-radius:50%;background:{{ curDot }};flex-shrink:0"></span>
+              <span class="mono" style="font-size:13px;font-weight:600;color:#f0f3f6">{{ curBranch }}</span>
+              <span style="font-size:9.5px;font-weight:700;letter-spacing:.02em;color:{{ curDot }}">{{ curStatus }}</span>
+              <span style="width:1px;height:14px;background:#3d444d;margin:0 1px"></span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#aeb6c0" stroke-width="2.2" style="transform:{{ menuRot }};transition:transform .15s"><path d="M6 9l6 6 6-6"></path></svg>
+            </div>
+            <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;top:calc(100% + 8px);left:0;width:400px;background:#14161b;border:1px solid #30363d;border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.55);z-index:60;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #22272e"><span style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#aeb6c0">SWITCH PREVIEW</span><div style="flex:1"></div><span style="font-size:10px;color:#5a626c">Spin up a preview to test before merge</span></div>
+              <div style="max-height:330px;overflow-y:auto;padding:6px">
+                <sc-for list="{{ branches }}" as="b" hint-placeholder-count="6">
+                  <div onClick="{{ b.select }}" style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;cursor:pointer;background:{{ b.rowBg }}">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ b.dotColor }};flex-shrink:0"></span>
+                    <div style="min-width:0;flex:1">
+                      <div style="display:flex;align-items:center;gap:8px"><span class="mono" style="font-size:12px;font-weight:600;color:#e8ebf0">{{ b.branch }}</span><span style="font-size:9px;font-weight:700;letter-spacing:.02em;color:{{ b.dotColor }}">{{ b.statusLabel }}</span></div>
+                      <div style="font-size:10px;color:#768390;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.commitMsg }}</div>
+                    </div>
+                    <span style="font-size:9.5px;color:#5a626c;flex-shrink:0">{{ b.ago }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="border-top:1px solid #22272e;padding:8px"><div style="display:flex;align-items:center;justify-content:center;gap:7px;padding:8px;border-radius:8px;background:#1c2128;border:1px solid #30363d;font-size:11.5px;font-weight:600;color:#e8ebf0;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>Deploy a new branch preview</div></div>
+            </div></sc-if>
+          </div>
+          <span style="width:1px;height:16px;background:#30363d;flex-shrink:0"></span>
+          <a href="#" class="mono" style="flex:1;font-size:13px;color:#7dd3fc;text-decoration:none;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ curUrl }}</a>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#b1bac4;padding:5px 10px;border:1px solid #30363d;border-radius:7px;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Copy</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#b1bac4;padding:5px 10px;border:1px solid #30363d;border-radius:7px;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>Redeploy</span>
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#04222f;background:#38bdf8;padding:6px 12px;border-radius:8px;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><path d="M15 3h6v6M10 14 21 3"></path></svg>Open</span>
+          <span style="width:1px;height:18px;background:#30363d;flex-shrink:0;margin:0 2px"></span>
+          <span onClick="{{ togglePin }}" title="Pin header" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;cursor:pointer;flex-shrink:0;color:{{ pinColor }};background:{{ pinBg }};border:1px solid {{ pinBorder }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="{{ pinFill }}" stroke="currentColor" stroke-width="2"><path d="M12 17v5M9 10.76V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v6.76a2 2 0 0 0 .58 1.42L18 14H6l2.42-1.82A2 2 0 0 0 9 10.76z"></path></svg></span>
+          <span onClick="{{ togglePreview }}" title="Collapse preview" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;cursor:pointer;flex-shrink:0;color:#b1bac4;border:1px solid #30363d"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="transform:{{ chevRot }}"><path d="M6 9l6 6 6-6"></path></svg></span>
+        </div>
+
+        <div style="padding: 20px 40px; border-radius: 4px">
+          <!-- LIVE CARD -->
+          <sc-if value="{{ previewOpen }}" hint-placeholder-val="{{ true }}"><div style="margin-bottom:20px">
+            <div>
+              <div style="border-radius:12px;border:1px solid #30363d;overflow:hidden;background:#0a0c10">
+                <div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:#161b22;border-bottom:1px solid #22272e">
+                  <span style="display:flex;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:#f85149"></span><span style="width:9px;height:9px;border-radius:50%;background:#ff9800"></span><span style="width:9px;height:9px;border-radius:50%;background:#2ecc71"></span></span>
+                  <span class="mono" style="flex:1;font-size:10.5px;color:#768390;background:#0e1117;border:1px solid #22272e;border-radius:6px;padding:3px 9px;text-align:center">{{ curUrl }}</span>
+                  <span style="display:inline-flex;align-items:center;gap:5px;font-size:9.5px;color:#38bdf8;background:rgba(56,189,248,.1);border-radius:6px;padding:3px 8px"><span style="width:5px;height:5px;border-radius:50%;background:#38bdf8;animation:softBlink 1.3s ease-in-out infinite"></span>embedded preview</span>
+                </div>
+                <div class="stripe" style="height:280px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background-color:#0d1016">
+                  <div style="width:40px;height:40px;border-radius:11px;background:{{ curIconBg }};border:1px solid {{ curIconBorder }};display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ curIcon }}" stroke-width="1.8"><path d="M9 12l2 2 4-4"></path><circle cx="12" cy="12" r="9"></circle></svg></div>
+                  <div style="text-align:center"><div style="font-size:12.5px;font-weight:600;color:#c8cdd4">{{ curPreviewTitle }}</div><div style="font-size:10.5px;color:#5a626c;margin-top:3px">{{ curPreviewSub }}</div></div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;margin-top:14px;flex-wrap:wrap">
+                <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:#c8cdd4"><span class="mono" style="color:#7c8db5;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">{{ curCommit }}</span>{{ curCommitMsg }}</span>
+                <span style="width:4px;height:4px;border-radius:50%;background:#3a4048"></span>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#768390"><span style="width:17px;height:17px;border-radius:50%;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:700">AI</span>pushed by {{ curAuthor }} · {{ curAgo }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 12px;border-radius:9px;background:{{ curMetaBg }};border:1px solid {{ curMetaBorder }}">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="{{ curMetaColor }}" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><path d="M22 4 12 14.01l-3-3"></path></svg>
+                <span style="font-size:11.5px;color:{{ curMetaColor }}">{{ curMeta }}</span>
+              </div>
+            </div>
+          </div></sc-if>
+
+
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============ STATUS PILLS LEGEND ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:3px;background:#38bdf8"></span><h2 style="font-size:16px;font-weight:700;margin:0">Status pills</h2><span style="font-size:11px;color:#5a626c">· state in form + color, never color alone</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 16px;max-width:64ch">Every deployment carries one. Shape, icon and label all encode the state so it reads without color. While anything is <span class="mono" style="color:#7dd3fc">queued</span>/<span class="mono" style="color:#7dd3fc">building</span> the page polls every ~5–10s and the pill stays visibly alive.</p>
+  <div class="frm" style="width:max-content;max-width:100%;margin-bottom:44px;box-shadow:none">
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(240px,1fr));gap:0">
+      <div style="padding:16px 18px;border-right:1px solid #22272e;border-bottom:1px solid #22272e">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#768390;background:rgba(118,131,144,.12);border:1px solid #30363d;border-radius:999px;padding:4px 11px 4px 9px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>Queued</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">Waiting for a build slot. Hollow, patient — nothing has started yet.</div>
+      </div>
+      <div style="padding:16px 18px;border-right:1px solid #22272e;border-bottom:1px solid #22272e">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#38bdf8;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.38);border-radius:999px;padding:4px 11px 4px 9px"><span style="position:relative;display:inline-flex;width:8px;height:8px;color:#38bdf8"><span style="position:absolute;inset:0;border-radius:50%;background:currentColor;animation:softBlink 1.2s ease-in-out infinite"></span></span>Building · 2/4</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">In progress with a live step count. Blinking dot = actively polling.</div>
+      </div>
+      <div style="padding:16px 18px;border-bottom:1px solid #22272e">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#2ecc71;background:rgba(46,204,113,.12);border:1px solid rgba(46,204,113,.38);border-radius:999px;padding:4px 11px 4px 10px"><span class="lp" style="position:relative;display:inline-flex;width:8px;height:8px;border-radius:50%;background:#2ecc71;color:#2ecc71"></span>Live</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">Running &amp; reachable. The one the user waits to turn green.</div>
+      </div>
+      <div style="padding:16px 18px;border-right:1px solid #22272e">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#f85149;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.38);border-radius:999px;padding:4px 11px 4px 9px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><path d="M12 9v4M12 17h.01"></path></svg>Failed</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">Build didn't finish. Triangle = it never ran. Reason shown inline.</div>
+      </div>
+      <div style="padding:16px 18px;border-right:1px solid #22272e">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#f85149;background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.38);border-radius:999px;padding:4px 11px 4px 9px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"></polygon><path d="M12 8v4M12 16h.01"></path></svg>Crashed</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">Built fine, then died at runtime. Octagon = deployed but down.</div>
+      </div>
+      <div style="padding:16px 18px">
+        <span style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#768390;background:transparent;border:1px dashed #484f58;border-radius:999px;padding:4px 11px 4px 9px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64M12 2v10"></path></svg>Stopped</span>
+        <div style="font-size:11px;color:#5a626c;margin-top:10px;line-height:1.5">Preview torn down. Dashed &amp; hollow — gone on purpose, revivable.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EMPTY / NOT CONNECTED ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:50%;background:#c9b8ff"></span><h2 style="font-size:16px;font-weight:700;margin:0">Not connected</h2><span style="font-size:11px;color:#5a626c">· the first thing most users see — inviting, not a form</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px;max-width:64ch">One value prop, one primary CTA, and the supported providers shown plainly. No wall of fields.</p>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px;margin-bottom:44px">
+    <div class="frm" style="width:640px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid #30363d"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 5 3 7h8c1-2 3-4 3-7a7 7 0 0 0-7-7z"></path><path d="M9 22h6M10 18h4"></path></svg><span style="font-size:12.5px;font-weight:600">Deploy</span><span style="font-size:11px;color:#5a626c;margin-left:auto">Payments Platform</span></div>
+      <div style="padding:34px 40px 30px;text-align:center;background:radial-gradient(520px 220px at 50% -20%,rgba(56,189,248,.07),transparent)">
+        <div style="width:56px;height:56px;border-radius:16px;margin:0 auto 18px;background:rgba(56,189,248,.10);border:1px solid rgba(56,189,248,.30);display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="1.8"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91 0z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path></svg></div>
+        <h3 style="font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:-.01em">Ship this project live</h3>
+        <p style="font-size:13px;color:#768390;margin:0 auto 22px;max-width:46ch;line-height:1.6">Connect a cloud provider once. After that, every push to <span class="mono" style="color:#b1bac4">main</span> deploys automatically and you get a live URL — plus one-click previews for any branch, right here in Agentira.</p>
+        <div style="display:inline-flex;align-items:center;gap:8px;background:#38bdf8;color:#04222f;font-size:13px;font-weight:600;padding:10px 20px;border-radius:10px;box-shadow:0 6px 18px rgba(56,189,248,.25)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"></path></svg>Connect a deployment provider</div>
+        <div style="font-size:11px;color:#5a626c;margin-top:12px">Takes about a minute · bring your own API key</div>
+      </div>
+      <div style="padding:16px 22px 22px;border-top:1px solid #22272e">
+        <div class="lbl" style="text-align:center;margin-bottom:12px">SUPPORTED PROVIDERS</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 10px;border-radius:11px;background:#1c2128;border:1px solid rgba(56,189,248,.3)"><span style="width:32px;height:32px;border-radius:9px;background:#0e1117;border:1px solid #30363d;display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#e8ebf0" stroke-width="1.8"><path d="M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"></path></svg></span><div style="font-size:12.5px;font-weight:600">Railway</div><span style="font-size:9px;font-weight:700;letter-spacing:.06em;color:#38bdf8;background:rgba(56,189,248,.14);border-radius:5px;padding:2px 8px">AVAILABLE</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 10px;border-radius:11px;background:#131720;border:1px solid #22272e;opacity:.62"><span style="width:32px;height:32px;border-radius:9px;background:#0e1117;border:1px solid #30363d;display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="1.8"><path d="M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg></span><div style="font-size:12.5px;font-weight:600;color:#b1bac4">Google Cloud</div><span style="font-size:9px;font-weight:700;letter-spacing:.06em;color:#768390;background:rgba(118,131,144,.12);border-radius:5px;padding:2px 8px">COMING</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 10px;border-radius:11px;background:#131720;border:1px solid #22272e;opacity:.62"><span style="width:32px;height:32px;border-radius:9px;background:#0e1117;border:1px solid #30363d;display:flex;align-items:center;justify-content:center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="1.8"><path d="M3 9h4v4H3zM8 9h4v4H8zM13 9h4v4h-4zM8 4h4v4H8z"></path><path d="M2 13h18a2 2 0 0 1-2 5H8a6 6 0 0 1-6-5z"></path></svg></span><div style="font-size:12.5px;font-weight:600;color:#b1bac4">Docker</div><span style="font-size:9px;font-weight:700;letter-spacing:.06em;color:#768390;background:rgba(118,131,144,.12);border-radius:5px;padding:2px 8px">COMING</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- edge: connected, no deploy yet -->
+    <div class="frm" style="width:330px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#768390">Edge · connected, main never deployed</div>
+      <div style="padding:26px 20px;text-align:center">
+        <div style="width:44px;height:44px;border-radius:12px;margin:0 auto 14px;background:rgba(118,131,144,.1);border:1px dashed #484f58;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="1.8"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 5 3 7h8c1-2 3-4 3-7a7 7 0 0 0-7-7z"></path><path d="M9 22h6"></path></svg></div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:6px">No deploy yet</div>
+        <div style="font-size:11.5px;color:#768390;line-height:1.55;margin-bottom:16px">Railway's connected but <span class="mono" style="color:#b1bac4">main</span> hasn't been deployed. Push to <span class="mono" style="color:#b1bac4">main</span>, or trigger the first one now.</div>
+        <div style="display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#04222f;background:#38bdf8;border-radius:9px;padding:8px 15px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"></path></svg>Deploy main now</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ CONNECT FLOW ============ -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><span style="width:9px;height:9px;border-radius:50%;background:#80cbc4"></span><h2 style="font-size:16px;font-weight:700;margin:0">Connect flow</h2><span style="font-size:11px;color:#5a626c">· paste key → verify → grant repo → pick service → connect</span></div>
+  <p style="font-size:12.5px;color:#768390;margin:0 0 18px;max-width:66ch">The whole setup, asked once. The key is verified with a quiet probe and never echoed back. Invalid-key and repo-access-grant are first-class states, not dead ends.</p>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px;margin-bottom:20px">
+
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#38bdf8">Step 1</span><span style="font-size:11px;color:#768390">API key</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:18px;height:4px;border-radius:2px;background:#38bdf8"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:13px"><span style="width:26px;height:26px;border-radius:8px;background:#0e1117;border:1px solid #30363d;display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e8ebf0" stroke-width="1.8"><path d="M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"></path></svg></span><div><div style="font-size:13px;font-weight:600">Railway</div><a href="#" style="font-size:10.5px;color:#38bdf8;text-decoration:none">Where do I find my key? ↗</a></div></div>
+        <div class="lbl">API KEY</div>
+        <div class="fld mono" style="display:flex;align-items:center;gap:8px;letter-spacing:2px;color:#768390">••••••••••••••••••••<div style="flex:1"></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"></path><circle cx="12" cy="12" r="3"></circle></svg></div>
+        <div style="font-size:10.5px;color:#5a626c;margin-top:8px;line-height:1.5">Stored encrypted. We probe it once to verify, then never show it again.</div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Cancel</span><span style="font-size:12px;font-weight:600;color:#04222f;background:#38bdf8;padding:7px 15px;border-radius:8px">Verify key</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#38bdf8">Step 1</span><span style="font-size:11px;color:#768390">Verifying</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:18px;height:4px;border-radius:2px;background:#38bdf8"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div class="lbl">API KEY</div>
+        <div class="fld mono" style="display:flex;align-items:center;gap:8px;letter-spacing:2px;color:#768390;border-color:rgba(56,189,248,.4)">••••••••••••••••••••<div style="flex:1"></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" style="animation:softBlink 1s ease-in-out infinite"><path d="M21 12a9 9 0 1 1-6.22-8.56"></path></svg></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:9px 11px;border-radius:9px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25)"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8;animation:softBlink 1.2s ease-in-out infinite"></span><span style="font-size:11.5px;color:#7dd3fc">Checking with Railway…</span></div>
+        <div style="margin-top:14px;padding:11px;border-radius:10px;background:rgba(46,204,113,.07);border:1px solid rgba(46,204,113,.3)">
+          <div style="display:flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" stroke-width="2.4"><path d="M20 6 9 17l-5-5"></path></svg><span style="font-size:12px;font-weight:600;color:#2ecc71">Key valid</span></div>
+          <div style="font-size:10.5px;color:#768390;margin-top:5px">Account: <b class="mono" style="color:#b1bac4;font-weight:600">acme-prod</b> · 3 services</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#04222f;background:#38bdf8;padding:7px 15px;border-radius:8px">Continue</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#38bdf8">Step 2</span><span style="font-size:11px;color:#768390">Repo access</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#1c4a5c"></span><span style="width:18px;height:4px;border-radius:2px;background:#38bdf8"></span><span style="width:8px;height:4px;border-radius:2px;background:#30363d"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px">Grant access to the repo</div>
+        <div style="font-size:11.5px;color:#768390;margin-bottom:14px">A one-time GitHub App install so Railway can read <span class="mono" style="color:#b1bac4">acme/billing-api</span> and build on push.</div>
+        <div style="display:flex;align-items:center;gap:9px;padding:11px 12px;border-radius:10px;background:#1c2128;border:1px solid #30363d;margin-bottom:12px"><svg width="17" height="17" viewBox="0 0 24 24" fill="#e8ebf0"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49v-1.7c-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.63.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05A9.4 9.4 0 0 1 12 6.85c.85 0 1.71.12 2.51.34 1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.35 4.79-4.58 5.05.36.32.68.94.68 1.9v2.82c0 .27.18.59.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"></path></svg><span class="mono" style="flex:1;font-size:12px;color:#e8ebf0">acme/billing-api</span><span style="font-size:9px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.12);border:1px solid rgba(255,152,0,.3);border-radius:5px;padding:2px 7px">NEEDS ACCESS</span></div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;border-radius:10px;background:#0e1117;border:1px solid #30363d;font-size:12px;font-weight:600;color:#e8ebf0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><path d="M15 3h6v6M10 14 21 3"></path></svg>Grant on GitHub</div>
+        <div style="font-size:10px;color:#5a626c;margin-top:9px;text-align:center;line-height:1.5">Opens GitHub in a new tab · required, can't skip</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#768390;background:#1c2128;border:1px solid #30363d;padding:7px 15px;border-radius:8px">Waiting…</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#80cbc4">Step 3</span><span style="font-size:11px;color:#768390">Service</span><div style="flex:1"></div><div style="display:flex;gap:4px"><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:8px;height:4px;border-radius:2px;background:#3a5651"></span><span style="width:18px;height:4px;border-radius:2px;background:#80cbc4"></span></div></div>
+      <div style="padding:16px 15px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:4px">Which service deploys <span class="mono">main</span>?</div>
+        <div style="font-size:11.5px;color:#768390;margin-bottom:14px">Pick the Railway service that hosts this app.</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:10px;background:#1c2128;border:1px solid rgba(128,203,196,.4);margin-bottom:8px"><span style="width:28px;height:28px;border-radius:8px;background:rgba(128,203,196,.14);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect><path d="M6 6h.01M6 18h.01"></path></svg></span><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:#e8ebf0">billing-api</div><div style="font-size:10px;color:#768390">web service · us-west</div></div><span style="width:16px;height:16px;border-radius:50%;background:#80cbc4;display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3.5"><path d="M18 6 7 17l-5-5"></path></svg></span></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:10px;background:#1c2128;border:1px solid #30363d"><span style="width:28px;height:28px;border-radius:8px;background:rgba(118,131,144,.12);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path></svg></span><div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:#b1bac4">billing-db</div><div style="font-size:10px;color:#768390">postgres · not deployable</div></div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Back</span><span style="font-size:12px;font-weight:600;color:#0e1117;background:#80cbc4;padding:7px 16px;border-radius:8px">Connect</span></div>
+    </div>
+    <div class="arr"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+
+    <div class="frm" style="width:300px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#80cbc4">Connected · first deploy kicks off</div>
+      <div style="padding:26px 18px;text-align:center">
+        <div style="width:46px;height:46px;border-radius:50%;margin:0 auto 14px;background:rgba(46,204,113,.12);border:1px solid rgba(46,204,113,.4);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" stroke-width="2.4"><path d="M20 6 9 17l-5-5"></path></svg></div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:6px">Railway connected</div>
+        <div style="font-size:11.5px;color:#768390;line-height:1.55;margin-bottom:16px"><span class="mono" style="color:#b1bac4">acme/billing-api</span> → <span class="mono" style="color:#b1bac4">billing-api</span>. You won't be asked again.</div>
+        <div style="display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:600;color:#38bdf8;background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.38);border-radius:999px;padding:5px 12px 5px 10px"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8;animation:softBlink 1.2s ease-in-out infinite"></span>Building · deploying main</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- invalid key variant -->
+  <div style="display:flex;align-items:center;gap:8px;margin:0 0 14px"><span style="font-size:11px;color:#5a626c">Edge state ·</span><span style="font-size:11px;color:#b1bac4">invalid / expired key — clear cause &amp; fix</span></div>
+  <div style="display:flex;align-items:stretch;gap:14px;overflow-x:auto;padding-bottom:18px">
+    <div class="frm" style="width:340px">
+      <div style="display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid #30363d"><span style="font-size:11px;font-weight:700;color:#38bdf8">Step 1</span><span style="font-size:11px;color:#768390">API key</span><div style="flex:1"></div><span style="font-size:10px;color:#f85149">verification failed</span></div>
+      <div style="padding:16px 15px">
+        <div class="lbl">API KEY</div>
+        <div class="fld mono" style="display:flex;align-items:center;gap:8px;letter-spacing:2px;color:#768390;border-color:rgba(248,81,73,.45)">••••••••••••••••••••<div style="flex:1"></div><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
+        <div style="margin-top:12px;padding:11px 12px;border-radius:10px;background:rgba(248,81,73,.07);border:1px solid rgba(248,81,73,.32)">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f85149" stroke-width="2.2"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg><span style="font-size:12px;font-weight:600;color:#f85149">Railway rejected this key (401)</span></div>
+          <div style="font-size:11px;color:#c8b0ac;line-height:1.5">It may be expired or revoked. Generate a fresh token in Railway → <span class="mono" style="color:#e8ebf0">Account → Tokens</span> and paste it again. <a href="#" style="color:#7dd3fc;text-decoration:none">Open Railway tokens ↗</a></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 15px;border-top:1px solid #30363d"><span style="font-size:12px;color:#768390;padding:7px 13px">Cancel</span><span style="font-size:12px;font-weight:600;color:#04222f;background:#38bdf8;padding:7px 15px;border-radius:8px">Try again</span></div>
+    </div>
+
+    <!-- provider settings affordance -->
+    <div class="frm" style="width:360px;background:#0e1117">
+      <div style="padding:11px 15px;border-bottom:1px solid #30363d;font-size:11px;color:#768390">Provider settings · quiet, secondary</div>
+      <div style="padding:16px 15px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span style="width:32px;height:32px;border-radius:9px;background:#1c2128;border:1px solid #30363d;display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8ebf0" stroke-width="1.8"><path d="M3 12h18M12 3v18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"></path></svg></span><div style="flex:1"><div style="font-size:13px;font-weight:600">Railway</div><div style="font-size:10.5px;color:#768390">connected 8 days ago</div></div><span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;color:#2ecc71;background:rgba(46,204,113,.12);border:1px solid rgba(46,204,113,.35);border-radius:999px;padding:3px 9px 3px 8px"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6 9 17l-5-5"></path></svg>Key valid</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #1c2128;font-size:11.5px"><span style="color:#768390">Repo</span><span class="mono" style="color:#b1bac4">acme/billing-api</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #1c2128;font-size:11.5px"><span style="color:#768390">Service</span><span class="mono" style="color:#b1bac4">billing-api · us-west</span></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #1c2128;font-size:11.5px"><span style="color:#768390">Key last checked</span><span style="color:#b1bac4">2 min ago</span></div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <span style="flex:1;text-align:center;font-size:11.5px;color:#b1bac4;padding:8px;border:1px solid #30363d;border-radius:8px;background:#1c2128">Re-verify key</span>
+          <span style="flex:1;text-align:center;font-size:11.5px;color:#f85149;padding:8px;border:1px solid rgba(248,81,73,.3);border-radius:8px">Disconnect</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const BRANCHES = [
+  { branch: 'main', url: 'billing-api-production.up.railway.app', dot: '#2ecc71', status: 'LIVE',
+    commit: 'a1f9c2e', msg: 'Add invoice PDF export', author: 'Backend Implementer', ago: '6 min ago',
+    meta: 'Deployed in 47s from push to main · healthy for 6 min', metaColor: '#9fd8b6',
+    metaBg: 'rgba(46,204,113,.06)', metaBorder: 'rgba(46,204,113,.22)',
+    pTitle: 'Your app, running', pSub: 'Live interactive preview renders here · click straight through to test',
+    icon: '#2ecc71', iconBg: 'rgba(46,204,113,.12)', iconBorder: 'rgba(46,204,113,.32)' },
+  { branch: 'feat/usage-metering', url: 'metering-pr.up.railway.app', dot: '#2ecc71', status: 'LIVE',
+    commit: '7d3ab10', msg: 'Meter usage per workspace', author: 'you', ago: '12 min ago',
+    meta: 'Preview live · healthy for 12 min · torn down 24h after last push', metaColor: '#9fd8b6',
+    metaBg: 'rgba(46,204,113,.06)', metaBorder: 'rgba(46,204,113,.22)',
+    pTitle: 'Preview running', pSub: 'Testing usage metering before it merges to main',
+    icon: '#2ecc71', iconBg: 'rgba(46,204,113,.12)', iconBorder: 'rgba(46,204,113,.32)' },
+  { branch: 'fix/webhook-retry', url: 'building…', dot: '#38bdf8', status: 'BUILDING · 2/4',
+    commit: 'c02e88a', msg: 'Retry 5xx with backoff', author: 'you', ago: 'just now',
+    meta: 'Installing dependencies… · step 2 of 4 · polling every 5s', metaColor: '#7dd3fc',
+    metaBg: 'rgba(56,189,248,.06)', metaBorder: 'rgba(56,189,248,.22)',
+    pTitle: 'Building preview…', pSub: 'Your app will appear here the moment the build finishes',
+    icon: '#38bdf8', iconBg: 'rgba(56,189,248,.12)', iconBorder: 'rgba(56,189,248,.32)' },
+  { branch: 'feat/multi-currency', url: '—', dot: '#768390', status: 'NO PREVIEW',
+    commit: 'be1147d', msg: 'Support EUR & GBP invoicing', author: 'you', ago: '3h ago',
+    meta: 'No preview deployed for this branch yet — deploy one to test it', metaColor: '#b1bac4',
+    metaBg: '#1c2128', metaBorder: '#30363d',
+    pTitle: 'No preview yet', pSub: 'Deploy a preview to test this branch before merge',
+    icon: '#768390', iconBg: 'rgba(118,131,144,.12)', iconBorder: '#30363d' },
+  { branch: 'chore/upgrade-node', url: '—', dot: '#f85149', status: 'FAILED',
+    commit: '9a4f210', msg: 'Upgrade Node to 20 LTS', author: 'you', ago: '1h ago',
+    meta: 'Build error: npm ci failed — lockfile out of sync', metaColor: '#e0928d',
+    metaBg: 'rgba(248,81,73,.06)', metaBorder: 'rgba(248,81,73,.22)',
+    pTitle: 'Build failed', pSub: 'npm ci failed — lockfile out of sync. Fix and push to retry.',
+    icon: '#f85149', iconBg: 'rgba(248,81,73,.12)', iconBorder: 'rgba(248,81,73,.32)' },
+  { branch: 'feat/dark-mode', url: '—', dot: '#768390', status: 'STOPPED',
+    commit: '4c7e0d1', msg: 'Dark mode polish', author: 'you', ago: '1d ago',
+    meta: 'Preview torn down after 24h idle · redeploy to bring it back', metaColor: '#b1bac4',
+    metaBg: '#131720', metaBorder: '#30363d',
+    pTitle: 'Preview stopped', pSub: 'Torn down after 24h idle — redeploy to test again',
+    icon: '#768390', iconBg: 'rgba(118,131,144,.1)', iconBorder: '#30363d' },
+];
+
+class Component extends DCLogic {
+  state = { selected: 0, menuOpen: false, previewOpen: true, pinned: true };
+  renderVals() {
+    const pinned = this.state.pinned;
+    const cur = BRANCHES[this.state.selected] || BRANCHES[0];
+    return {
+      branches: BRANCHES.map((b, i) => ({
+        branch: b.branch, dotColor: b.dot, statusLabel: b.status, commitMsg: b.msg, ago: b.ago,
+        rowBg: i === this.state.selected ? 'rgba(56,189,248,.10)' : 'transparent',
+        select: () => this.setState({ selected: i, menuOpen: false }),
+      })),
+      menuOpen: this.state.menuOpen,
+      menuRot: this.state.menuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+      toggleMenu: () => this.setState(s => ({ menuOpen: !s.menuOpen })),
+      curBranch: cur.branch, curDot: cur.dot, curStatus: cur.status, curUrl: cur.url,
+      curCommit: cur.commit, curCommitMsg: cur.msg, curAuthor: cur.author, curAgo: cur.ago,
+      curMeta: cur.meta, curMetaColor: cur.metaColor, curMetaBg: cur.metaBg, curMetaBorder: cur.metaBorder,
+      curPreviewTitle: cur.pTitle, curPreviewSub: cur.pSub,
+      curIcon: cur.icon, curIconBg: cur.iconBg, curIconBorder: cur.iconBorder,
+      previewOpen: this.state.previewOpen,
+      togglePreview: () => this.setState(s => ({ previewOpen: !s.previewOpen })),
+      togglePin: () => this.setState(s => ({ pinned: !s.pinned })),
+      barSticky: pinned ? 'position:sticky;' : 'position:static;',
+      pinColor: pinned ? '#38bdf8' : '#768390',
+      pinBg: pinned ? 'rgba(56,189,248,.12)' : 'transparent',
+      pinBorder: pinned ? 'rgba(56,189,248,.38)' : '#30363d',
+      pinFill: pinned ? '#38bdf8' : 'none',
+      chevRot: this.state.previewOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+    };
+  }
+}
+</script>
+</body>
+</html>
