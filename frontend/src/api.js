@@ -7,6 +7,8 @@
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+const IS_PREVIEW = Boolean(import.meta.env.VITE_PREVIEW_PR);
+
 function getToken() {
     return localStorage.getItem('agentira_token') || '';
 }
@@ -43,6 +45,14 @@ export async function request(endpoint, options = {}) {
     });
 
     if (res.status === 401) {
+        const token = getToken();
+        if (token && token.startsWith('preview-demo-token')) {
+            // Preview demo login: don't kick the user out on 401s.
+            // Some endpoints may return limited/empty data.
+            console.warn('[preview] 401 on API call with demo token (some features may be limited)');
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err?.detail || 'Preview mode: backend rejected request');
+        }
         // Token expired or invalid — force re-login
         localStorage.removeItem('agentira_token');
         localStorage.removeItem('agentira_user');
@@ -87,6 +97,22 @@ export const api = {
     regenerateApiKey: (id) => request(`/service-accounts/${id}/regenerate-key`, { method: 'POST' }),
 
     async login(username, password) {
+        // Special-case for PR previews (local on :3xxx and Railway previews).
+        // Lets you log in with `preview` / `preview1234` without requiring the
+        // target backend to have that account seeded. Subsequent API calls
+        // will still hit the real proxy target (so real data when available).
+        if (username === 'preview' && password === 'preview1234') {
+            const fakeToken = 'preview-demo-token';
+            const fakeUser = {
+                id: 'preview',
+                name: 'preview',
+                display_name: 'Preview User',
+                role: 'member',
+            };
+            localStorage.setItem('agentira_token', fakeToken);
+            return { token: fakeToken, user: fakeUser };
+        }
+
         const res = await fetch(`${API_BASE}/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
