@@ -22,6 +22,7 @@ function useBreadcrumb(activeProjectName) {
         const map = {
             board: 'Board', backlog: 'Backlog', roadmap: 'Roadmap',
             overview: 'Overview', settings: 'Settings', workflow: 'Workflow',
+            deploy: 'Deploy',
         };
         return map[leaf];
     };

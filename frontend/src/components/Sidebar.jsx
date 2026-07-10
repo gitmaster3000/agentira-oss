@@ -13,6 +13,7 @@ import {
     Cpu,
     Radio,
     Workflow as WorkflowIcon,
+    Rocket,
 } from 'lucide-react';
 import { ROUTES } from '../routes';
 import { useCurrentProjectId } from '../currentProject';
@@ -46,6 +47,7 @@ export function Sidebar() {
         { icon: ListTodo, label: 'Backlog', path: ROUTES.STUDIO_PROJECT_BACKLOG(projectId) },
         { icon: TrendingUp, label: 'Roadmap', path: ROUTES.STUDIO_PROJECT_ROADMAP(projectId) },
         { icon: WorkflowIcon, label: 'Workflow', path: ROUTES.STUDIO_PROJECT_WORKFLOW(projectId) },
+        { icon: Rocket, label: 'Deploy', path: ROUTES.STUDIO_PROJECT_DEPLOY(projectId) },
         { icon: SettingsIcon, label: 'Settings', path: ROUTES.STUDIO_PROJECT_SETTINGS(projectId) },
     ];
 

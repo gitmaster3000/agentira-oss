@@ -82,6 +82,7 @@ export function AppSidebar({ open = false }) {
         backlog: path.includes('/backlog'),
         roadmap: path.includes('/roadmap'),
         workflow: path.includes('/workflow'),
+        deploy: path.includes('/deploy'),
         projSettings: path.includes('/project/') && path.includes('/settings'),
     };
 
@@ -167,6 +168,8 @@ export function AppSidebar({ open = false }) {
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>} />
                     <NavRow active={is.workflow} onClick={() => navigate(projPath('workflow'))} label="Workflow"
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1" /></svg>} />
+                    <NavRow active={is.deploy} onClick={() => navigate(projPath('deploy'))} label="Deploy"
+                        icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>} />
                     <NavRow active={is.projSettings} onClick={() => navigate(projPath('settings'))} label="Settings"
                         icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8" /></svg>} />
                 </div>
