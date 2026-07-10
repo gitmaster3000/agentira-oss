@@ -16,13 +16,14 @@ from agentira_cli.runtimes.base import (
 from agentira_cli.runtimes.claude import ClaudeRuntime
 from agentira_cli.runtimes.codex import CodexRuntime
 from agentira_cli.runtimes.gemini import GeminiRuntime
+from agentira_cli.runtimes.grok import GrokRuntime
 from agentira_cli.runtimes.ollama import OllamaRuntime
 from agentira_cli.runtimes.openclaw import OpenClawRuntime
 from agentira_cli.runtimes.opencode import OpenCodeRuntime
 
 
 ALL_RUNTIMES = [
-    ClaudeRuntime, CodexRuntime, GeminiRuntime, OllamaRuntime,
+    ClaudeRuntime, CodexRuntime, GeminiRuntime, GrokRuntime, OllamaRuntime,
     OpenClawRuntime, OpenCodeRuntime,
 ]
 

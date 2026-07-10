@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "_comment": "Shipped model catalog. Regenerate via scripts/refresh_model_catalog.py (needs provider API keys for live ids). Hand-edited entries are fine — the refresh script preserves alias-first ordering. Update cadence: roughly weekly, or whenever a provider ships a new SKU.",
+  "_comment": "Shipped model catalog. Regenerate via scripts/refresh_model_catalog.py (needs provider API keys for live ids). Hand-edited entries are fine \u2014 the refresh script preserves alias-first ordering. Update cadence: roughly weekly, or whenever a provider ships a new SKU.",
   "providers": {
     "anthropic": {
       "last_updated": "2026-06-02",
@@ -76,6 +76,17 @@
         "gemini-3-flash-preview",
         "gemini-3.1-pro-preview",
         "gemini-3.1-flash-lite-preview"
+      ]
+    },
+    "grok": {
+      "last_updated": "2026-07-10",
+      "models": [
+        "grok-3",
+        "grok-2",
+        "grok-beta",
+        "grok-1",
+        "grok-3-latest",
+        "grok-2-latest"
       ]
     }
   }

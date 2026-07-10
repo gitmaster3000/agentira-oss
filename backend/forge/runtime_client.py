@@ -367,6 +367,7 @@ _ADAPTERS: dict[str, RuntimeAdapter] = {
     "zeroclaw": OpenClawAdapter(),   # same protocol for now
     "ollama":   OllamaAdapter(),
     "openai":   GenericAdapter(),
+    "grok":     GenericAdapter(),    # xAI Grok API (OpenAI-compatible)
     "generic":  GenericAdapter(),
 }
 

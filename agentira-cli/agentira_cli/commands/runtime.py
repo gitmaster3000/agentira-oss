@@ -4,7 +4,7 @@ import typer
 
 from ..runtimes.registry import SUPPORTED, detect_all
 
-app = typer.Typer(help="Inspect and manage local CLI runtimes (claude, codex, ...)")
+app = typer.Typer(help="Inspect and manage local CLI runtimes (claude, codex, grok, ...)")
 
 
 @app.command("list")
@@ -23,6 +23,7 @@ def list_runtimes(
                         "binary_path": d.binary_path,
                         "version": d.version,
                         "capabilities": d.capabilities,
+                        "models": d.models,
                     }
                     for d in detected
                 ],
@@ -56,3 +57,5 @@ def detect_one(provider: str) -> None:
         typer.echo(f"{provider}: not found on PATH")
         raise typer.Exit(1)
     typer.echo(f"{provider}: {rt.binary_path} ({rt.version or 'unknown version'})")
+    if rt.models:
+        typer.echo(f"  models: {', '.join(rt.models)}")
