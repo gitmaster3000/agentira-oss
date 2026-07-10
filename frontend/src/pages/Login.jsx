@@ -6,9 +6,8 @@ import { ROUTES } from '../routes';
 import { Pencil } from 'lucide-react';
 
 export function Login() {
-    const IS_PREVIEW = Boolean(import.meta.env.VITE_PREVIEW_PR);
-    const [username, setUsername] = useState(IS_PREVIEW ? 'preview' : '');
-    const [password, setPassword] = useState(IS_PREVIEW ? 'preview1234' : '');
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [authConfig, setAuthConfig] = useState({ google: false, github: false });
     const { login, loginWithOAuth } = useAuth();
@@ -87,12 +86,6 @@ export function Login() {
 
                 <div className="card space-y-5">
                     <h2 className="text-headline-sm text-text-primary text-center">Sign in</h2>
-
-                    {IS_PREVIEW && (
-                        <div className="text-center text-label-sm text-text-tertiary bg-bg-app border border-border-subtle rounded-md py-1.5">
-                            Preview mode — credentials pre-filled: <span className="font-mono font-semibold">preview / preview1234</span>
-                        </div>
-                    )}
 
                     {successMessage && <div className="p-3 text-body-sm text-green-400 bg-green-900/20 border border-green-800 rounded-md">{successMessage}</div>}
                     {error && <div className="p-3 text-body-sm text-red-400 bg-red-900/20 border border-red-800 rounded-md">{error}</div>}
