@@ -241,3 +241,48 @@ export interface Notification {
   read: boolean;
   link: { route: string; params: Record<string, string> };
 }
+
+// ─── Deploy (AP-429) ──────────────────────────────────────────────────────
+// See docs/deploy-backend-requirements.md for the full contract.
+// GET /projects/{id}/deploy/provider            → DeployConnection | {connected:false}
+// GET /projects/{id}/deployments                → {branches: BranchEntry[]}
+// POST /projects/{id}/deployments               → Deployment
+export interface DeployConnection {
+  connected: boolean;
+  provider?: 'railway' | 'gcp' | 'docker';
+  repo?: string;                 // "owner/name"
+  service_name?: string;
+  service_region?: string | null;
+  key_valid?: boolean;
+  key_checked_at?: ISODate;
+  connected_at?: ISODate;
+}
+
+export type DeployStatus = 'queued' | 'building' | 'live' | 'failed' | 'crashed' | 'stopped';
+
+export interface Deployment {
+  id: ID;
+  status: DeployStatus;
+  url?: string | null;
+  step?: number | null;
+  total_steps?: number | null;
+  status_reason: string;         // always non-empty per spec §4
+  trigger: 'push' | 'manual' | 'preview';
+  updated_at: ISODate;
+  events?: Array<{ status: string; at: ISODate }>;
+}
+
+export interface BranchEntry {
+  branch: string;
+  is_main: boolean;
+  commit_sha: string;
+  commit_message: string;
+  author: string;
+  author_is_agent: boolean;
+  committed_at: ISODate;
+  deployment?: Deployment | null;
+}
+
+export interface DeploymentsResponse {
+  branches: BranchEntry[];
+}
