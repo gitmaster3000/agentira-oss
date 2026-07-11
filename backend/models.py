@@ -508,11 +508,11 @@ class Task(Base):
     # Task type discriminator — a task can be a plain task, a bug, etc.
     # Type-specific behavior lives in backend.tasks.TaskService subclasses.
     type: Mapped[str] = mapped_column(String(20), default="task", nullable=False)
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
-    status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False)
+    status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False, index=True)
     priority: Mapped[TaskPriority] = mapped_column(SAEnum(TaskPriority), default=TaskPriority.MEDIUM)
     assignee: Mapped[str] = mapped_column(String(120), default="")
     creator: Mapped[str] = mapped_column(String(120), default="")
