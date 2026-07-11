@@ -1744,7 +1744,10 @@ function ConfigTab({ agent, onSaved }) {
         }
         setSaving(true);
         try {
-            await api.forge.updateAgent(agent.id, form);
+            // default_project_id is a nullable FK server-side; the "— none —"
+            // option is value="" which the backend rejects. Send null, not "".
+            const payload = { ...form, default_project_id: form.default_project_id || null };
+            await api.forge.updateAgent(agent.id, payload);
             // Re-fetch the resolved MCP config so the "Live config" preview
             // reflects what just got saved (otherwise it stays stale).
             const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
