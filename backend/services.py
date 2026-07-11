@@ -6,7 +6,7 @@ Both REST API and MCP server call into this layer.
 from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.db import SessionLocal, init_db, privileged, set_current_org, _derive_account_type
 from backend.models import (
@@ -212,6 +212,32 @@ def _batch_attachment_counts(db: Session, task_ids: list[str]) -> dict[str, int]
 def _attachment_count(db: Session, task_id: str) -> int:
     from sqlalchemy import func
     return db.query(func.count(Attachment.id)).filter(Attachment.task_id == task_id).scalar() or 0
+
+
+def _with_profile_relations(query):
+    """Eager-load the relationships _profile_to_dict() touches (AP-433).
+    Without this, serializing N profiles fires 3N extra SELECTs — roles,
+    extra_permissions (+ its nested .permission), project_memberships —
+    the N+1 behind list_profiles/list_project_members' multi-second loads."""
+    return query.options(
+        selectinload(Profile.roles),
+        selectinload(Profile.extra_permissions).selectinload(ProfilePermission.permission),
+        selectinload(Profile.project_memberships),
+    )
+
+
+def _batch_epic_task_counts(db: Session, epic_ids: list[str]) -> dict[str, int]:
+    """Return {epic_id: count} for all given epic IDs in a single query."""
+    from sqlalchemy import func
+    if not epic_ids:
+        return {}
+    rows = (
+        db.query(Task.epic_id, func.count(Task.id))
+        .filter(Task.epic_id.in_(epic_ids))
+        .group_by(Task.epic_id)
+        .all()
+    )
+    return {epic_id: count for epic_id, count in rows}
 
 
 def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
@@ -842,7 +868,17 @@ def list_project_members(project_id: str) -> list[dict]:
         p = db.get(Project, project_id)
         if not p:
             return []
-        members = db.query(ProjectMember).filter_by(project_id=p.id).all()
+        members = (
+            db.query(ProjectMember)
+            .filter_by(project_id=p.id)
+            .options(
+                selectinload(ProjectMember.profile).selectinload(Profile.roles),
+                selectinload(ProjectMember.profile).selectinload(Profile.extra_permissions)
+                    .selectinload(ProfilePermission.permission),
+                selectinload(ProjectMember.profile).selectinload(Profile.project_memberships),
+            )
+            .all()
+        )
         return [_profile_to_dict(pm.profile) for pm in members]
 
 
@@ -884,7 +920,7 @@ def remove_project_member(project_id: str, profile_name: str) -> bool:
 
 # ── Epic operations ─────────────────────────────────────────────────────
 
-def _epic_to_dict(e: Epic) -> dict:
+def _epic_to_dict(e: Epic, task_count: Optional[int] = None) -> dict:
     return {
         "id": e.id,
         "project_id": e.project_id,
@@ -894,7 +930,7 @@ def _epic_to_dict(e: Epic) -> dict:
         "assignee": e.assignee,
         "creator": e.creator,
         "color": e.color,
-        "task_count": len(e.tasks),
+        "task_count": len(e.tasks) if task_count is None else task_count,
         "created_at": e.created_at.isoformat(),
     }
 
@@ -935,7 +971,8 @@ def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[
             q = q.filter(Epic.project_id == project_id)
 
         epics = q.order_by(Epic.created_at.desc()).all()
-        return [_epic_to_dict(e) for e in epics]
+        counts = _batch_epic_task_counts(db, [e.id for e in epics])
+        return [_epic_to_dict(e, task_count=counts.get(e.id, 0)) for e in epics]
 
 def get_epic(epic_id: str) -> dict | None:
     """Single-epic fetch — returns the dict or None if not found."""
@@ -2244,7 +2281,7 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
 
 def list_profiles(role: Optional[str] = None) -> list[dict]:
     with _session() as db:
-        q = db.query(Profile)
+        q = _with_profile_relations(db.query(Profile))
         if role:
             q = q.filter(Profile.roles.any(Role.name == role))
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]

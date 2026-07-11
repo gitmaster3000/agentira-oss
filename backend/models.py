@@ -509,7 +509,7 @@ class Task(Base):
     # Type-specific behavior lives in backend.tasks.TaskService subclasses.
     type: Mapped[str] = mapped_column(String(20), default="task", nullable=False)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
-    epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
+    epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False, index=True)

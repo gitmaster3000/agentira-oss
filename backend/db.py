@@ -946,6 +946,35 @@ def run_migrations():
                 _sqlite_rebuild_forge_agents_profile_id_nullable(conn)
                 conn.commit()
 
+        # AP-433: Task.project_id / Task.status_id gained index=True on the
+        # model (#208), but create_all() only creates indexes as part of
+        # creating a NEW table (checkfirst=True skips tables that already
+        # exist) — on any real deploy `tasks` already exists, so the model
+        # change alone never touches it. Board/backlog/list_tasks all filter
+        # by project_id; add the indexes explicitly so that's true in prod.
+        if "tasks" in tables:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_project_id ON tasks(project_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_status_id ON tasks(status_id)"))
+            # list_epics batch-counts tasks per epic_id (AP-433 N+1 fix,
+            # replacing len(epic.tasks)) — index the column that query groups by.
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_epic_id ON tasks(epic_id)"))
+            conn.commit()
+
+        # AP-433: project_members.project_id is covered by the leading
+        # column of the (project_id, profile_id) unique constraint, but the
+        # reverse lookup (profile_id alone — Profile.project_memberships,
+        # used by list_profiles/_profile_to_dict) isn't covered by that
+        # composite index. Needed once list_profiles moves off per-row
+        # lazy-loads.
+        if "project_members" in tables:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_project_members_profile_id "
+                "ON project_members(profile_id)"))
+            conn.commit()
+
         # Multi-tenancy: org_id columns + backfill + Postgres RLS.
         _migrate_orgs(conn)
 
