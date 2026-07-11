@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { api } from '../api';
@@ -14,7 +14,7 @@ const PRIORITY = {
     low:      { color: '#768390', bg: 'rgba(118,131,144,.14)' },
 };
 
-export function TaskCard({ task, onUpdate, onDelete }) {
+export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
     const handleDragStart = (e) => {
@@ -136,4 +136,4 @@ export function TaskCard({ task, onUpdate, onDelete }) {
             </div>
         </div>
     );
-}
+});

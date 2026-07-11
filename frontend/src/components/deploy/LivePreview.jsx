@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { CircleCheck, AlertTriangle, OctagonAlert, Power, Rocket, Clock, ScrollText } from 'lucide-react';
 import { C, MONO, STATUS, statusOf, timeAgo } from './theme';
 
@@ -46,8 +46,8 @@ function Placeholder({ status }) {
     const [title, sub] = PLACEHOLDER[status] || PLACEHOLDER.none;
     const color = STATUS[status]?.color || C.textDim;
     return (
-        <div className="dp-stripe" style={{ height: 380, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#0d1016' }}>
-            <div style={{ width: 40, height: 40, borderRadius: 11, background: tone.bg, border: `1px solid ${tone.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ height: 520, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: C.bg }}>
+            <div style={{ width: 40, height: 40, borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon className="w-5 h-5" style={{ color }} strokeWidth={1.8} />
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -62,7 +62,7 @@ function Placeholder({ status }) {
  * The hero: a browser chrome around the running app, then the commit that
  * produced it, then the plain-language reason line.
  */
-export function LivePreview({ entry, onOpenLogs }) {
+export const LivePreview = memo(function LivePreview({ entry, onOpenLogs }) {
     const d = entry.deployment;
     const status = statusOf(d);
     const tone = TONE[status] || TONE.none;
@@ -71,36 +71,17 @@ export function LivePreview({ entry, onOpenLogs }) {
     const failed = status === 'failed' || status === 'crashed';
 
     return (
-        <div style={{ marginBottom: 20 }}>
-            <div style={{ borderRadius: 12, border: `1px solid ${C.border}`, overflow: 'hidden', background: C.void }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 11px', background: C.surface, borderBottom: `1px solid ${C.borderSoft}` }}>
-                    <span style={{ display: 'flex', gap: 5 }}>
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: C.bad }} />
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: C.warn }} />
-                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: C.good }} />
-                    </span>
-                    <span style={{ flex: 1, fontFamily: MONO, fontSize: 10.5, color: C.textDim, background: C.bg, border: `1px solid ${C.borderSoft}`, borderRadius: 6, padding: '3px 9px', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {url || '—'}
-                    </span>
-                    {status === 'live' && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 9.5, color: C.info, background: 'rgba(56,189,248,.1)', borderRadius: 6, padding: '3px 8px' }}>
-                            <span className="dp-blink" style={{ width: 5, height: 5, borderRadius: '50%', background: C.info }} />
-                            embedded preview
-                        </span>
-                    )}
-                </div>
-
-                {status === 'live' && url ? (
-                    <iframe
-                        title={`${entry.branch} preview`}
-                        src={url}
-                        sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
-                        style={{ display: 'block', width: '100%', height: 380, border: 'none', background: '#fff' }}
-                    />
-                ) : (
-                    <Placeholder status={status} />
-                )}
-            </div>
+        <div style={{ marginBottom: 10 }}>
+            {status === 'live' && url ? (
+                <iframe
+                    title={`${entry.branch} preview`}
+                    src={url}
+                    sandbox="allow-scripts allow-forms allow-same-origin allow-popups"
+                    style={{ display: 'block', width: '100%', height: 520, border: 'none', background: '#fff' }}
+                />
+            ) : (
+                <Placeholder status={status} />
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11.5, color: '#c8cdd4' }}>
@@ -133,4 +114,4 @@ export function LivePreview({ entry, onOpenLogs }) {
             </div>
         </div>
     );
-}
+});

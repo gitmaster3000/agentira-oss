@@ -7,6 +7,8 @@
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
+const IS_PREVIEW = Boolean(import.meta.env.VITE_PREVIEW_PR);
+
 function getToken() {
     return localStorage.getItem('agentira_token') || '';
 }
@@ -179,28 +181,156 @@ export const api = {
 
     // Deploy — see docs/deploy-backend-requirements.md for the contract these
     // call. The API key is only ever sent, never returned.
-    getDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider`),
-    verifyDeployKey: (projectId, provider, apiKey) => request(`/projects/${projectId}/deploy/provider/verify`, {
-        method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }),
-    }),
-    getDeployRepoAccess: (projectId, provider) => request(
-        `/projects/${projectId}/deploy/provider/repo-access?provider=${encodeURIComponent(provider)}`),
-    connectDeployProvider: (projectId, data) => request(`/projects/${projectId}/deploy/provider`, {
-        method: 'POST', body: JSON.stringify(data),
-    }),
-    reverifyDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider/reverify`, { method: 'POST' }),
-    disconnectDeployProvider: (projectId) => request(`/projects/${projectId}/deploy/provider`, { method: 'DELETE' }),
+    // In preview mode (local PR previews), return a mock connected state so the
+    // full Deploy UI (including top bar) renders for demo/testing even if backend
+    // doesn't implement the endpoints yet.
+    getDeployProvider: (projectId) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({
+                connected: true,
+                provider: 'railway',
+                repo: 'acme/billing-api',
+                service_name: 'billing-api',
+                service_region: 'us-west',
+                key_valid: true,
+                key_checked_at: new Date(Date.now() - 120000).toISOString(),
+                connected_at: new Date(Date.now() - 8 * 86400000).toISOString(),
+            });
+        }
+        return request(`/projects/${projectId}/deploy/provider`).catch(err => {
+            if (err.message === 'Not Found' || err.message.includes('404')) {
+                return { connected: false };
+            }
+            throw err;
+        });
+    },
+    verifyDeployKey: (projectId, provider, apiKey) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ valid: true, account: 'preview-acme', services: [{ id: 'svc1', name: 'billing-api', type: 'web service', region: 'us-west', deployable: true }] });
+        }
+        return request(`/projects/${projectId}/deploy/provider/verify`, {
+            method: 'POST', body: JSON.stringify({ provider, api_key: apiKey }),
+        });
+    },
+    getDeployRepoAccess: (projectId, provider) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ repo: 'acme/billing-api', granted: true });
+        }
+        return request(
+            `/projects/${projectId}/deploy/provider/repo-access?provider=${encodeURIComponent(provider)}`);
+    },
+    connectDeployProvider: (projectId, data) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ connected: true, provider: data.provider, repo: data.repo, service_name: 'billing-api', service_region: 'us-west', key_valid: true, connected_at: new Date().toISOString() });
+        }
+        return request(`/projects/${projectId}/deploy/provider`, {
+            method: 'POST', body: JSON.stringify(data),
+        });
+    },
+    reverifyDeployProvider: (projectId) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ connected: true, provider: 'railway', key_valid: true, key_checked_at: new Date().toISOString() });
+        }
+        return request(`/projects/${projectId}/deploy/provider/reverify`, { method: 'POST' });
+    },
+    disconnectDeployProvider: (projectId) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve();
+        }
+        return request(`/projects/${projectId}/deploy/provider`, { method: 'DELETE' });
+    },
 
-    getDeployments: (projectId) => request(`/projects/${projectId}/deployments`),
-    createDeployment: (projectId, branch) => request(`/projects/${projectId}/deployments`, {
-        method: 'POST', body: JSON.stringify({ branch }),
-    }),
-    redeployDeployment: (projectId, deploymentId) => request(
-        `/projects/${projectId}/deployments/${deploymentId}/redeploy`, { method: 'POST' }),
-    stopDeployment: (projectId, deploymentId) => request(
-        `/projects/${projectId}/deployments/${deploymentId}`, { method: 'DELETE' }),
-    getDeploymentLogs: (projectId, deploymentId, cursor = 0) => request(
-        `/projects/${projectId}/deployments/${deploymentId}/logs?cursor=${cursor}`),
+    getDeployments: (projectId) => {
+        if (IS_PREVIEW) {
+            // Mock data so the full Deploy UI (PreviewBar + LivePreview + BranchList) shows.
+            const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
+            return Promise.resolve({
+                branches: [
+                    {
+                        branch: 'main',
+                        is_main: true,
+                        commit_sha: 'a1f9c2e0000',
+                        commit_message: 'Add invoice PDF export',
+                        author: 'Backend Implementer',
+                        author_is_agent: true,
+                        committed_at: iso(360000),
+                        deployment: {
+                            id: 'd_main',
+                            status: 'live',
+                            url: 'https://billing-api-production.up.railway.app',
+                            trigger: 'push',
+                            updated_at: iso(360000),
+                            status_reason: 'Deployed in 47s from push to main · healthy for 6 min',
+                        },
+                    },
+                    {
+                        branch: 'feat/usage-metering',
+                        is_main: false,
+                        commit_sha: '7d3ab100000',
+                        commit_message: 'Meter usage per workspace',
+                        author: 'you',
+                        author_is_agent: false,
+                        committed_at: iso(720000),
+                        deployment: {
+                            id: 'd_meter',
+                            status: 'live',
+                            url: 'https://metering-pr.up.railway.app',
+                            trigger: 'preview',
+                            updated_at: iso(720000),
+                            status_reason: 'Preview live · healthy for 12 min · torn down 24h after last push',
+                        },
+                    },
+                    {
+                        branch: 'fix/webhook-retry',
+                        is_main: false,
+                        commit_sha: 'c02e88a0000',
+                        commit_message: 'Retry 5xx with backoff',
+                        author: 'you',
+                        author_is_agent: false,
+                        committed_at: iso(10000),
+                        deployment: {
+                            id: 'd_fix',
+                            status: 'building',
+                            step: 2,
+                            total_steps: 4,
+                            updated_at: iso(10000),
+                            status_reason: 'Installing dependencies… · step 2 of 4',
+                        },
+                    },
+                ],
+            });
+        }
+        return request(`/projects/${projectId}/deployments`);
+    },
+    createDeployment: (projectId, branch) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ id: 'd_new', status: 'queued', updated_at: new Date().toISOString(), status_reason: 'Queued — waiting for a build slot.' });
+        }
+        return request(`/projects/${projectId}/deployments`, {
+            method: 'POST', body: JSON.stringify({ branch }),
+        });
+    },
+    redeployDeployment: (projectId, deploymentId) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ id: deploymentId, status: 'queued', updated_at: new Date().toISOString(), status_reason: 'Queued — waiting for a build slot.' });
+        }
+        return request(
+            `/projects/${projectId}/deployments/${deploymentId}/redeploy`, { method: 'POST' });
+    },
+    stopDeployment: (projectId, deploymentId) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve();
+        }
+        return request(
+            `/projects/${projectId}/deployments/${deploymentId}`, { method: 'DELETE' });
+    },
+    getDeploymentLogs: (projectId, deploymentId, cursor = 0) => {
+        if (IS_PREVIEW) {
+            return Promise.resolve({ lines: [{ level: 'info', text: 'Mock log line for preview' }], next_cursor: 1, done: true });
+        }
+        return request(
+            `/projects/${projectId}/deployments/${deploymentId}/logs?cursor=${cursor}`);
+    },
 
     // Epics
     getEpics: (projectId) => request(projectId ? `/epics/?project_id=${projectId}` : '/epics/'),

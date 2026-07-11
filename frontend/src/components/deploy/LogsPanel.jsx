@@ -5,6 +5,7 @@ import { C, MONO, IN_FLIGHT, statusOf, timeAgo } from './theme';
 import { StatusPill } from './StatusPill';
 
 const LEVEL_COLOR = { error: C.bad, warn: C.warn, info: C.textMuted, debug: C.textFaint };
+const MAX_LOG_LINES = 300; // Perf fix for AP-433: prevent unbounded growth during long builds that makes UI slow / high mem
 
 // Timeline of the deployment's own history, so a red state has a story.
 function Timeline({ events }) {
@@ -39,7 +40,11 @@ export function LogsPanel({ projectId, deployment, onClose }) {
         try {
             const res = await api.getDeploymentLogs(projectId, deployment.id, cursorRef.current);
             if (res.lines?.length) {
-                setLines(prev => [...prev, ...res.lines]);
+                setLines(prev => {
+                    const next = [...prev, ...res.lines];
+                    // Cap to keep memory + render cost low even for very long running deploys
+                    return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+                });
                 cursorRef.current = res.next_cursor;
                 setCursor(res.next_cursor);
             }

@@ -290,12 +290,14 @@ export function ProjectLayout() {
 
     // Overview / Settings get a clean header (no filters, no activity feed).
     // Board / Backlog / Roadmap keep the heavy header.
+    // Deploy gets no extra project header so its own PreviewBar sits directly under shell topbar.
     const isBoardView = /\/(board|backlog|roadmap)(\/|$)/.test(location.pathname)
         || /\/project\/[^/]+\/?$/.test(location.pathname);
+    const isDeployView = /\/deploy(\/|$)/.test(location.pathname);
 
     return (
-        <div className="flex flex-row h-full overflow-hidden w-full relative">
-            <div className="flex flex-col flex-1 overflow-hidden min-w-0">
+        <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
+            <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
                 {isBoardView ? (
                     /* Clean single-row board toolbar (design: Agentira.dc.html board screen). */
                     <header className="px-4 flex items-center gap-3 shrink-0 border-b" style={{ height: 53 }}>
@@ -318,7 +320,7 @@ export function ProjectLayout() {
                             <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
                         )}
                     </header>
-                ) : (
+                ) : isDeployView ? null : (
                     <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
                         <div className="flex-1 min-w-0">
                             <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
@@ -327,7 +329,7 @@ export function ProjectLayout() {
                     </header>
                 )}
 
-                <div className="flex-1 overflow-hidden relative">
+                <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
                     <Outlet context={filters} />
                 </div>
             </div>

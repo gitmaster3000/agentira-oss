@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Copy, Check, RefreshCw, ExternalLink, Pin, Plus } from 'lucide-react';
+import React, { useEffect, useRef, useState, memo } from 'react';
+import { ChevronDown, Copy, Check, RefreshCw, ExternalLink, Plus, Pin } from 'lucide-react';
 import { C, MONO, STATUS, statusOf, timeAgo } from './theme';
 import { StatusDot } from './StatusPill';
 
@@ -69,12 +69,12 @@ function BranchMenu({ entries, selectedBranch, onSelect, onDeployNew, onClose })
 const chip = { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.textMuted, padding: '5px 10px', border: `1px solid ${C.border}`, borderRadius: 7, flexShrink: 0, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' };
 
 /**
- * The sticky header of the Deploy tab: which preview you're looking at, its
- * URL, and the actions that act on it. Pin keeps it stuck while you scroll.
+ * The header bar of the Deploy tab: branch selector, URL, actions.
+ * Arrow hides the bar; pin toggles sticky.
  */
-export function PreviewBar({
+export const PreviewBar = memo(function PreviewBar({
     entries, selectedBranch, onSelectBranch, onDeployNew,
-    onRedeploy, previewOpen, onTogglePreview, pinned, onTogglePin, busy,
+    onRedeploy, pinned, onTogglePin, busy,
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -165,14 +165,6 @@ export function PreviewBar({
             >
                 <Pin className="w-3.5 h-3.5" fill={pinned ? C.info : 'none'} />
             </button>
-            <button
-                onClick={onTogglePreview}
-                title={previewOpen ? 'Collapse preview' : 'Expand preview'}
-                aria-expanded={previewOpen}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 7, cursor: 'pointer', flexShrink: 0, color: C.textMuted, background: 'transparent', border: `1px solid ${C.border}` }}
-            >
-                <ChevronDown className="w-3.5 h-3.5" style={{ transform: previewOpen ? 'none' : 'rotate(-90deg)' }} strokeWidth={2.2} />
-            </button>
         </div>
     );
-}
+});

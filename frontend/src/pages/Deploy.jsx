@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useOutletContext } from 'react-router-dom';
 import { api } from '../api';
 import { C, DEPLOY_KEYFRAMES, IN_FLIGHT, statusOf } from '../components/deploy/theme';
@@ -33,7 +33,7 @@ export function Deploy() {
     const [showWizard, setShowWizard] = useState(false);
     const [logsFor, setLogsFor] = useState(null);
     const [busyBranch, setBusyBranch] = useState(null);
-    const [previewOpen, setPreviewOpen] = useState(true);
+    const [barVisible, setBarVisible] = useState(true);
     const [pinned, setPinned] = useState(true);
 
     const branchListRef = useRef(null);
@@ -68,7 +68,7 @@ export function Deploy() {
     }, [entries, selectedBranch]);
 
     // Poll only while something is in flight. Stop as soon as everything settles.
-    const anyInFlight = entries.some(e => IN_FLIGHT.has(statusOf(e.deployment)));
+    const anyInFlight = useMemo(() => entries.some(e => IN_FLIGHT.has(statusOf(e.deployment))), [entries]);
     const loadRef = useRef(loadDeployments);
     useEffect(() => { loadRef.current = loadDeployments; }, [loadDeployments]);
     useEffect(() => {
@@ -79,8 +79,19 @@ export function Deploy() {
         return () => clearInterval(t);
     }, [anyInFlight]);
 
-    const runAction = async (branch, fn) => {
+    // Compute current early (before any conditional returns) so useMemo is always called in same order (Rules of Hooks).
+    const current = useMemo(() => entries.find(e => e.branch === selectedBranch) || entries[0], [entries, selectedBranch]);
+
+    const runAction = useCallback(async (branch, fn, optimistic) => {
         setBusyBranch(branch);
+        if (optimistic) {
+            // Optimistic update for snappy UI (AP-433 perf): show queued/building immediately so action doesn't feel slow
+            setEntries(prev => prev.map(e => {
+                if (e.branch !== branch) return e;
+                const base = e.deployment || { id: 'opt-' + Date.now() };
+                return { ...e, deployment: { ...base, status: optimistic, status_reason: 'Queued — starting…', updated_at: new Date().toISOString() } };
+            }));
+        }
         try {
             await fn();
             await loadDeployments();
@@ -89,23 +100,23 @@ export function Deploy() {
         } finally {
             setBusyBranch(null);
         }
-    };
+    }, [loadDeployments]);
 
-    const deployBranch = (entry) => runAction(entry.branch, () => api.createDeployment(projectId, entry.branch));
-    const redeployEntry = (entry) => runAction(entry.branch, () => (
+    const deployBranch = useCallback((entry) => runAction(entry.branch, () => api.createDeployment(projectId, entry.branch), 'queued'), [runAction, projectId]);
+    const redeployEntry = useCallback((entry) => runAction(entry.branch, () => (
         entry.deployment
             ? api.redeployDeployment(projectId, entry.deployment.id)
             : api.createDeployment(projectId, entry.branch)
-    ));
-    const stopDeployment = (deploymentId) => {
+    ), 'queued'), [runAction, projectId]);
+    const stopDeployment = useCallback((deploymentId) => {
         const entry = entries.find(e => e.deployment?.id === deploymentId);
-        return runAction(entry?.branch, () => api.stopDeployment(projectId, deploymentId));
-    };
+        return runAction(entry?.branch, () => api.stopDeployment(projectId, deploymentId), 'stopped');
+    }, [entries, runAction, projectId]);
 
-    const openLogs = (deploymentId) => {
+    const openLogs = useCallback((deploymentId) => {
         const entry = entries.find(e => e.deployment?.id === deploymentId);
         if (entry) setLogsFor({ ...entry.deployment, branch: entry.branch });
-    };
+    }, [entries]);
 
     if (loading) return <div className="p-8 text-center text-text-secondary">Loading deployments…</div>;
 
@@ -113,7 +124,7 @@ export function Deploy() {
 
     if (!connection) {
         return (
-            <div style={{ height: '100%', overflowY: 'auto', background: C.bg }}>
+            <div style={{ background: C.bg }}>
                 {styleTag}
                 {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
                 <NotConnected projectName={projectName} onConnect={() => setShowWizard(true)} />
@@ -131,13 +142,13 @@ export function Deploy() {
     const mainEntry = entries.find(e => e.is_main);
     if (entries.length === 0 || (mainEntry && !mainEntry.deployment && entries.every(e => !e.deployment))) {
         return (
-            <div style={{ height: '100%', overflowY: 'auto', background: C.bg }}>
+            <div style={{ background: C.bg }}>
                 {styleTag}
                 {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
                 <NoDeployYet
                     providerName={connection.provider}
                     busy={!!busyBranch}
-                    onDeployMain={() => runAction('main', () => api.createDeployment(projectId, mainEntry?.branch || 'main'))}
+                    onDeployMain={() => runAction('main', () => api.createDeployment(projectId, mainEntry?.branch || 'main'), 'queued')}
                 />
                 <div style={{ padding: '0 40px 40px', display: 'flex', justifyContent: 'center' }}>
                     <ProviderSettings projectId={projectId} connection={connection} onChanged={load} />
@@ -146,29 +157,34 @@ export function Deploy() {
         );
     }
 
-    const current = entries.find(e => e.branch === selectedBranch) || entries[0];
-
     return (
-        <div style={{ height: '100%', overflowY: 'auto', background: C.bg, color: C.text }}>
+        <>
             {styleTag}
 
-            <PreviewBar
-                entries={entries}
-                selectedBranch={current.branch}
-                onSelectBranch={setSelectedBranch}
-                onDeployNew={() => branchListRef.current?.scrollIntoView({ behavior: 'smooth' })}
-                onRedeploy={() => redeployEntry(current)}
-                previewOpen={previewOpen}
-                onTogglePreview={() => setPreviewOpen(o => !o)}
-                pinned={pinned}
-                onTogglePin={() => setPinned(p => !p)}
-                busy={busyBranch === current.branch}
-            />
+            {barVisible && (
+                <PreviewBar
+                    entries={entries}
+                    selectedBranch={current.branch}
+                    onSelectBranch={setSelectedBranch}
+                    onDeployNew={() => branchListRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                    onRedeploy={() => redeployEntry(current)}
+                    pinned={pinned}
+                    onTogglePin={() => setPinned(p => !p)}
+                    busy={busyBranch === current.branch}
+                />
+            )}
 
             {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
 
-            <div style={{ padding: '20px 40px 48px' }}>
-                {previewOpen && <LivePreview entry={current} onOpenLogs={openLogs} />}
+            <div style={{ padding: '8px 16px 20px', minHeight: 0 }}>
+                <button
+                    onClick={() => setBarVisible(!barVisible)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.textMuted, padding: '5px 10px', border: `1px solid ${C.border}`, borderRadius: 7, background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 8 }}
+                >
+                    {barVisible ? 'Hide preview bar' : 'Show preview bar'}
+                </button>
+
+                <LivePreview entry={current} onOpenLogs={openLogs} />
 
                 <div ref={branchListRef} style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                     <div style={{ flex: '1 1 520px', minWidth: 0 }}>
@@ -186,7 +202,7 @@ export function Deploy() {
             </div>
 
             {logsFor && <LogsPanel projectId={projectId} deployment={logsFor} onClose={() => setLogsFor(null)} />}
-        </div>
+        </>
     );
 }
 

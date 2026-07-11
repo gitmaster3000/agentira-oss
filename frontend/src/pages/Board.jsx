@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
@@ -36,7 +36,7 @@ export function Board() {
         }
     };
 
-    const getFilteredColumns = () => {
+    const filteredColumns = useMemo(() => {
         if (!board) return {};
         const filtered = {};
         for (const [colId, tasks] of Object.entries(board.columns)) {
@@ -49,8 +49,7 @@ export function Board() {
             });
         }
         return filtered;
-    };
-    const filteredColumns = getFilteredColumns();
+    }, [board, searchQuery, filterPriority, filterAssignee, filterEpic]);
 
     return (
         <div className="h-full overflow-x-auto overflow-y-hidden p-3.5">

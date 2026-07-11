@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProjectLayout } from './pages/ProjectLayout';
@@ -19,7 +19,6 @@ import { CliAuth } from './pages/CliAuth';
 import { Settings } from './pages/Settings';
 import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
-import { Chat } from './pages/Chat';
 import { EpicPage } from './pages/EpicPage';
 import { Inbox } from './pages/Inbox';
 import { MyWork } from './pages/MyWork';
@@ -27,14 +26,16 @@ import { Workflow } from './pages/Workflow';
 import { Deploy } from './pages/Deploy';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
-import { ForgeOverview } from './pages/forge/ForgeOverview';
-import { AgentsDashboard } from './pages/forge/AgentsDashboard';
-import { RuntimesDashboard } from './pages/forge/RuntimesDashboard';
-import { AgentDetail } from './pages/forge/AgentDetail';
-import { RunsDashboard } from './pages/forge/RunsDashboard';
-import { RunDetail } from './pages/forge/RunDetail';
-import { ConductorPage } from './pages/forge/ConductorPage';
-import { ForgeSettings } from './pages/forge/ForgeSettings';
+// Lazy loaded for perf (AP-433): these are heavier surfaces; split them out of main bundle to speed initial load and reduce memory pressure on deploy/other flows.
+const Chat = lazy(() => import('./pages/Chat'));
+const ForgeOverview = lazy(() => import('./pages/forge/ForgeOverview'));
+const AgentsDashboard = lazy(() => import('./pages/forge/AgentsDashboard'));
+const RuntimesDashboard = lazy(() => import('./pages/forge/RuntimesDashboard'));
+const AgentDetail = lazy(() => import('./pages/forge/AgentDetail'));
+const RunsDashboard = lazy(() => import('./pages/forge/RunsDashboard'));
+const RunDetail = lazy(() => import('./pages/forge/RunDetail'));
+const ConductorPage = lazy(() => import('./pages/forge/ConductorPage'));
+const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings'));
 import { ROUTES } from './routes';
 import { PreviewBanner } from './components/PreviewBanner';
 
@@ -106,7 +107,7 @@ export default function App() {
 
                     {/* Global Chat page (design §2.4) — in-shell, GET /forge/chats */}
                     <Route path={ROUTES.CHAT} element={<RequireAuth><Layout /></RequireAuth>}>
-                        <Route index element={<Chat />} />
+                        <Route index element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading chat…</div>}><Chat /></Suspense>} />
                     </Route>
 
                     {/* Root redirect */}
@@ -119,14 +120,14 @@ export default function App() {
 
                     {/* Forge routes */}
                     <Route path="/forge" element={<RequireAuth><ForgeLayout /></RequireAuth>}>
-                        <Route index element={<ForgeOverview />} />
-                        <Route path="agents" element={<AgentsDashboard />} />
-                        <Route path="agents/:agentId" element={<AgentDetail />} />
-                        <Route path="conductor" element={<ConductorPage />} />
-                        <Route path="runtimes" element={<RuntimesDashboard />} />
-                        <Route path="runs" element={<RunsDashboard />} />
-                        <Route path="runs/:runId" element={<RunDetail />} />
-                        <Route path="settings" element={<ForgeSettings />} />
+                        <Route index element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><ForgeOverview /></Suspense>} />
+                        <Route path="agents" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading agents…</div>}><AgentsDashboard /></Suspense>} />
+                        <Route path="agents/:agentId" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading agent…</div>}><AgentDetail /></Suspense>} />
+                        <Route path="conductor" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><ConductorPage /></Suspense>} />
+                        <Route path="runtimes" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><RuntimesDashboard /></Suspense>} />
+                        <Route path="runs" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading runs…</div>}><RunsDashboard /></Suspense>} />
+                        <Route path="runs/:runId" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading run…</div>}><RunDetail /></Suspense>} />
+                        <Route path="settings" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><ForgeSettings /></Suspense>} />
                     </Route>
 
                     {/* Phase-0 token smoke (dev only — not linked from chrome) */}

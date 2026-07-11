@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { Clock, AlertTriangle, OctagonAlert, Power } from 'lucide-react';
 import { C, STATUS } from './theme';
 
@@ -39,7 +39,7 @@ function Glyph({ status, color }) {
  * @param {'queued'|'building'|'live'|'failed'|'crashed'|'stopped'|'none'} props.status
  * @param {string} [props.detail] e.g. "2/4" — appended as "Building · 2/4"
  */
-export function StatusPill({ status, detail }) {
+export const StatusPill = memo(function StatusPill({ status, detail }) {
     const s = STATUS[status] || STATUS.none;
     const label = detail ? `${s.label} · ${detail}` : s.label;
     return (
@@ -58,13 +58,13 @@ export function StatusPill({ status, detail }) {
             {label}
         </span>
     );
-}
+});
 
 // The compact form used inside the branch switcher rows: dot + uppercase label.
-export function StatusDot({ status }) {
+export const StatusDot = memo(function StatusDot({ status }) {
     const s = STATUS[status] || STATUS.none;
     return <span style={{ width: 8, height: 8, borderRadius: '50%', background: s.color, flexShrink: 0 }} />;
-}
+});
 
 export function statusColor(status) {
     return (STATUS[status] || STATUS.none).color;

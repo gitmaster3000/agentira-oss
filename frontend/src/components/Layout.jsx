@@ -25,7 +25,7 @@ export function Layout() {
 
     return (
         <ShellDataProvider>
-            <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0e1117' }}>
+            <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: '#0e1117' }}>
                 {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
                 <AppSidebar open={navOpen} />
                 <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

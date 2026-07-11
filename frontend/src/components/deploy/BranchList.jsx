@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { ExternalLink, Play, RefreshCw, Square, ScrollText } from 'lucide-react';
 import { C, MONO, statusOf, timeAgo } from './theme';
 import { StatusPill } from './StatusPill';
@@ -9,7 +9,7 @@ const rowBtn = { display: 'inline-flex', alignItems: 'center', gap: 5, fontSize:
 // primary action on the right, everything else quiet.
 const PAGE = 8;
 
-function Row({ entry, onPreview, onRedeploy, onStop, onOpenLogs, busyBranch }) {
+const Row = memo(function Row({ entry, onPreview, onRedeploy, onStop, onOpenLogs, busyBranch }) {
     const d = entry.deployment;
     const status = statusOf(d);
     const busy = busyBranch === entry.branch;
@@ -70,7 +70,7 @@ function Row({ entry, onPreview, onRedeploy, onStop, onOpenLogs, busyBranch }) {
             )}
         </div>
     );
-}
+});
 
 export function BranchList({ entries, onPreview, onRedeploy, onStop, onOpenLogs, busyBranch }) {
     const [expanded, setExpanded] = useState(false);

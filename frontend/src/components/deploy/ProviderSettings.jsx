@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Check, CircleAlert } from 'lucide-react';
 import { api } from '../../api';
 import { C, MONO, timeAgo } from './theme';
@@ -16,7 +16,7 @@ function Row({ label, value }) {
 /**
  * Quiet, secondary. Never competes with the Live card.
  */
-export function ProviderSettings({ projectId, connection, onChanged }) {
+export const ProviderSettings = memo(function ProviderSettings({ projectId, connection, onChanged }) {
     const [busy, setBusy] = useState(false);
     const [confirmDisconnect, setConfirmDisconnect] = useState(false);
     const keyValid = connection.key_valid;
@@ -81,4 +81,4 @@ export function ProviderSettings({ projectId, connection, onChanged }) {
             </div>
         </div>
     );
-}
+});
