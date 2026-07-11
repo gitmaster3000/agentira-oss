@@ -27,15 +27,18 @@ import { Deploy } from './pages/Deploy';
 import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 // Lazy loaded for perf (AP-433): these are heavier surfaces; split them out of main bundle to speed initial load and reduce memory pressure on deploy/other flows.
+// These pages use named exports (no `export default`) — lazy() resolves
+// `.default`, so plain `import(...)` here left every one of them undefined
+// (React error #306 on every Forge/Chat route). Map the named export in.
 const Chat = lazy(() => import('./pages/Chat'));
-const ForgeOverview = lazy(() => import('./pages/forge/ForgeOverview'));
-const AgentsDashboard = lazy(() => import('./pages/forge/AgentsDashboard'));
-const RuntimesDashboard = lazy(() => import('./pages/forge/RuntimesDashboard'));
-const AgentDetail = lazy(() => import('./pages/forge/AgentDetail'));
-const RunsDashboard = lazy(() => import('./pages/forge/RunsDashboard'));
-const RunDetail = lazy(() => import('./pages/forge/RunDetail'));
-const ConductorPage = lazy(() => import('./pages/forge/ConductorPage'));
-const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings'));
+const ForgeOverview = lazy(() => import('./pages/forge/ForgeOverview').then(m => ({ default: m.ForgeOverview })));
+const AgentsDashboard = lazy(() => import('./pages/forge/AgentsDashboard').then(m => ({ default: m.AgentsDashboard })));
+const RuntimesDashboard = lazy(() => import('./pages/forge/RuntimesDashboard').then(m => ({ default: m.RuntimesDashboard })));
+const AgentDetail = lazy(() => import('./pages/forge/AgentDetail').then(m => ({ default: m.AgentDetail })));
+const RunsDashboard = lazy(() => import('./pages/forge/RunsDashboard').then(m => ({ default: m.RunsDashboard })));
+const RunDetail = lazy(() => import('./pages/forge/RunDetail').then(m => ({ default: m.RunDetail })));
+const ConductorPage = lazy(() => import('./pages/forge/ConductorPage').then(m => ({ default: m.ConductorPage })));
+const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m => ({ default: m.ForgeSettings })));
 import { ROUTES } from './routes';
 import { PreviewBanner } from './components/PreviewBanner';
 
