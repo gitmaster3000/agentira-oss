@@ -193,6 +193,31 @@ export function ProjectLayout() {
         } catch (err) { console.error('[ProjectLayout] loadEpics error:', err); }
     }, [projectId]);
 
+    // Optimistic board update for fast DnD moves (AP board perf). Mutates local state immediately
+    // so the card visually moves before the network roundtrip finishes. Full reload on error.
+    const applyMove = useCallback((taskId, newStatus) => {
+        setBoard(prev => {
+            if (!prev || !prev.columns) return prev;
+            const columns = {};
+            let movedTask = null;
+            Object.keys(prev.columns).forEach(col => {
+                const list = prev.columns[col] || [];
+                const idx = list.findIndex(t => String(t.id) === String(taskId) || String(t.key) === String(taskId));
+                if (idx !== -1) {
+                    movedTask = { ...list[idx], status: newStatus };
+                    columns[col] = list.filter((_, i) => i !== idx);
+                } else {
+                    columns[col] = [...list];
+                }
+            });
+            if (movedTask) {
+                if (!columns[newStatus]) columns[newStatus] = [];
+                columns[newStatus] = [movedTask, ...columns[newStatus]];
+            }
+            return { ...prev, columns };
+        });
+    }, []);
+
     const lastActivityIdRef = useRef(null);
 
     const checkForUpdates = useCallback(async () => {
@@ -285,6 +310,7 @@ export function ProjectLayout() {
     const filters = {
         searchQuery, filterPriority, filterAssignee, filterEpic, board,
         reloadBoard: loadBoard,
+        applyMove,
         requestSelectTask,
     };
 

@@ -21,18 +21,26 @@ const COLUMNS = [
 ];
 
 export function Board() {
-    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, reloadBoard, requestSelectTask } = useOutletContext();
+    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, reloadBoard, applyMove, requestSelectTask } = useOutletContext();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const handleDrop = async (e, status) => {
         const taskId = e.dataTransfer.getData('taskId');
         if (!taskId) return;
+
+        // Optimistic update: move the card in UI immediately for snappy feel.
+        // (Root cause of "7s move": no optimistic + full board reload after every move.)
+        if (applyMove) applyMove(taskId, status);
+
         try {
             await api.moveTask(taskId, status);
+            // Reconcile with server (picks up computed fields like agent_active).
+            // Because we applied optimistic already, the user sees the move instantly;
+            // this GET happens in the background of the perceived action.
             reloadBoard();
         } catch (err) {
             alert(err.message || "Failed to move task");
-            reloadBoard();
+            reloadBoard();  // revert to server truth
         }
     };
 
