@@ -1034,9 +1034,21 @@ def update_agent(agent_id: str, **fields) -> dict | None:
                 raise ValueError(f"invalid sandbox_mode: {fields['sandbox_mode']!r}")
             fields["sandbox_mode"] = v
             sandbox_clear_to_none = v is None
+        # Empty-string "" from the "— none —" project option means "generic
+        # agent, no project." default_project_id is a nullable FK on both
+        # Agent and Profile — left as "" it fails the FK (no project has id
+        # "") and the PATCH 500s. Coerce to NULL; clear explicitly below the
+        # skip-None loop, same as sandbox_mode.
+        project_clear_to_none = False
+        if "default_project_id" in fields:
+            v = (fields["default_project_id"] or "").strip() or None
+            fields["default_project_id"] = v
+            project_clear_to_none = v is None
         for k, v in fields.items():
             if v is not None and hasattr(a, k):
                 setattr(a, k, v)
+        if project_clear_to_none:
+            a.default_project_id = None
         # Mirror runtime-relevant fields onto the linked profile so the
         # post-merge "agent IS the profile" view stays consistent.
         prof = db.get(Profile, a.profile_id) if a.profile_id else None
@@ -1051,6 +1063,8 @@ def update_agent(agent_id: str, **fields) -> dict | None:
             # None as "no change requested." Apply the clear here.
             if sandbox_clear_to_none and hasattr(prof, "sandbox_mode"):
                 prof.sandbox_mode = None
+            if project_clear_to_none and hasattr(prof, "default_project_id"):
+                prof.default_project_id = None
         db.commit()
         db.refresh(a)
         return _agent_to_dict(a)

@@ -1341,6 +1341,85 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+# ── HTTP request/response logging ────────────────────────────────────────
+# Access-log line per request + full context on 5xx (method, path, status,
+# duration, and the request body for failing writes). uvicorn's own access
+# log doesn't capture the body, so a 500 like the default_project_id="" FK
+# violation needed a DB-log dig to diagnose. This puts the payload right
+# next to the traceback in the deploy logs. Its own stdout handler so it
+# shows regardless of uvicorn's logger config.
+import time as _time
+import json as _json
+import logging as _http_logging
+
+_http_log = _http_logging.getLogger("agentira.http")
+if not _http_log.handlers:
+    _h = _http_logging.StreamHandler()
+    _h.setFormatter(_http_logging.Formatter("%(levelname)s: %(message)s"))
+    _http_log.addHandler(_h)
+    _http_log.setLevel(_http_logging.INFO)
+    _http_log.propagate = False
+
+_SECRET_HINTS = ("token", "key", "secret", "password", "authorization")
+_BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_BODY_MAX = 16384  # don't buffer large/file payloads
+
+
+def _mask_body(raw: bytes) -> str:
+    if not raw:
+        return ""
+    text = raw[:_BODY_MAX].decode("utf-8", "replace")
+    try:
+        data = _json.loads(text)
+    except Exception:
+        return text[:1000]
+
+    def scrub(o):
+        if isinstance(o, dict):
+            return {k: ("****" if any(s in k.lower() for s in _SECRET_HINTS)
+                        else scrub(v)) for k, v in o.items()}
+        if isinstance(o, list):
+            return [scrub(v) for v in o]
+        return o
+
+    try:
+        return _json.dumps(scrub(data))[:2000]
+    except Exception:
+        return "<unserializable>"
+
+
+@app.middleware("http")
+async def _http_request_logger(request: Request, call_next):
+    start = _time.perf_counter()
+    ct = request.headers.get("content-type", "")
+    clen = int(request.headers.get("content-length") or 0)
+    body = b""
+    if (request.method in _BODY_METHODS and "multipart/form-data" not in ct
+            and 0 < clen <= _BODY_MAX):
+        body = await request.body()
+        # Replay the buffered body so downstream handlers still read it.
+        async def _receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+        request._receive = _receive
+    try:
+        response = await call_next(request)
+    except Exception:
+        dur = (_time.perf_counter() - start) * 1000
+        _http_log.error("%s %s -> 500 (%.0fms) unhandled body=%s",
+                        request.method, request.url.path, dur,
+                        _mask_body(body), exc_info=True)
+        raise
+    dur = (_time.perf_counter() - start) * 1000
+    if response.status_code >= 500:
+        _http_log.error("%s %s -> %d (%.0fms) body=%s", request.method,
+                        request.url.path, response.status_code, dur,
+                        _mask_body(body))
+    else:
+        _http_log.info("%s %s -> %d (%.0fms)", request.method,
+                       request.url.path, response.status_code, dur)
+    return response
+
+
 # Admin-only: issue member invites for the caller's own org.
 admin_invites = APIRouter(prefix="/api/invites", tags=["invites"],
                           dependencies=[Depends(require_admin)])
