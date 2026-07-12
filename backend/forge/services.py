@@ -3834,6 +3834,12 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
     One sink for every trigger kind (chat, run_step, …). Messages are tagged
     with `trace_id` so the UI can group a turn, and with `run_id` when present
     so run-detail views still query by run.
+
+    Consecutive `type=text` deltas for the same trace are **coalesced into
+    one growing ASSISTANT row**. Token-streaming runtimes (OpenClaw, etc.)
+    emit many small text events per reply; inserting a row per event made
+    the chat UI show each word as its own bubble. A tool_use / tool_result
+    breaks the open text stream so post-tool narration is a new message.
     """
     # Pick up the scope_key stashed at dispatch time so assistant/tool
     # messages land in the same conversation as the user prompt that
@@ -3850,36 +3856,75 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"ok": False, "error": "Agent not found"}
+
+        open_text: AgentMessage | None = None
+
+        def _latest_open_text() -> AgentMessage | None:
+            """If the last message on this trace is pure assistant text,
+            keep growing it; otherwise start a new bubble."""
+            last = (db.query(AgentMessage)
+                      .filter(AgentMessage.trace_id == trace_id)
+                      .order_by(AgentMessage.created_at.desc(),
+                                AgentMessage.id.desc())
+                      .first())
+            if (last is not None
+                    and last.role == MessageRole.ASSISTANT
+                    and not last.tool_name):
+                return last
+            return None
+
         for evt in events:
             evt_type = evt.get("type", "")
             if evt_type == "text":
                 content = evt.get("text", "")
                 if not content:
                     continue
-                role = MessageRole.ASSISTANT
-                tool_name = None
+                if open_text is None:
+                    open_text = _latest_open_text()
+                if open_text is not None:
+                    open_text.content = (open_text.content or "") + content
+                    if evt.get("model"):
+                        open_text.model_used = evt.get("model") or open_text.model_used
+                else:
+                    open_text = AgentMessage(
+                        agent_id=agent_id,
+                        run_id=run_id,
+                        trace_id=trace_id,
+                        scope_key=scope or None,
+                        role=MessageRole.ASSISTANT,
+                        content=content,
+                        model_used=evt.get("model", "") or "",
+                    )
+                    db.add(open_text)
             elif evt_type == "tool_use":
-                role = MessageRole.TOOL
-                content = evt.get("tool", "")
-                tool_name = evt.get("tool")
+                open_text = None
+                db.add(AgentMessage(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                    scope_key=scope or None,
+                    role=MessageRole.TOOL,
+                    content=evt.get("tool", "") or "",
+                    tool_name=evt.get("tool"),
+                    tool_input=(json.dumps(evt.get("input"))
+                                if evt.get("input") is not None else None),
+                    model_used=evt.get("model", "") or "",
+                ))
             elif evt_type == "tool_result":
-                role = MessageRole.TOOL
-                content = evt.get("output", "")
-                tool_name = evt.get("tool")
+                open_text = None
+                db.add(AgentMessage(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                    scope_key=scope or None,
+                    role=MessageRole.TOOL,
+                    content=evt.get("output", "") or "",
+                    tool_name=evt.get("tool"),
+                    tool_output=evt.get("output"),
+                    model_used=evt.get("model", "") or "",
+                ))
             else:
                 continue
-            db.add(AgentMessage(
-                agent_id=agent_id,
-                run_id=run_id,
-                trace_id=trace_id,
-                scope_key=scope or None,
-                role=role,
-                content=content,
-                tool_name=tool_name,
-                tool_input=json.dumps(evt.get("input")) if evt.get("input") is not None else None,
-                tool_output=evt.get("output") if evt_type == "tool_result" else None,
-                model_used=evt.get("model", ""),
-            ))
         db.commit()
         return {"ok": True, "count": len(events)}
 
