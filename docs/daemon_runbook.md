@@ -56,6 +56,28 @@ agentira daemon restart
 
 **Root cause:** Usually the backend restarted or the network dropped. The reconnect loop handles this, but if the daemon process wedged before the loop could fire, restart is the fix.
 
+### 1b. Agent fails with `missing scope: operator.write`
+
+**Symptoms:** OpenClaw dispatch logs `missing scope: operator.write` (or the daemon
+error tells you to run `agentira daemon pair`).
+
+**Cause:** The daemon is not registered as a write-scoped OpenClaw device (or is
+still authenticating with the shared gateway token without a signed device
+identity). OpenClaw clears operator scopes for unbound clients.
+
+**Fix:**
+```bash
+openclaw devices list --json   # find displayName agentira-daemon; scopes must include operator.write
+agentira daemon pair           # re-register
+# if pending:
+openclaw devices approve <requestId>
+agentira daemon pair
+agentira daemon restart
+```
+
+Never edit scopes by hand in `openclaw.json`. Device identity lives in
+`~/.agentira/openclaw-device.json`.
+
 ### 2. Daemon comes back in dry_run mode
 
 **Symptoms:** `agentira daemon status` shows "Mode: DRY-RUN". Triggers are received (visible in logs) but no subprocess spawns.

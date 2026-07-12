@@ -19,6 +19,9 @@ CONFIG_FILE = HOME / "config.json"
 CREDENTIALS_FILE = HOME / "credentials.json"
 # Throttle GitHub release checks (daemon startup + `daemon update --check`).
 UPDATE_CHECK_CACHE_FILE = HOME / "update_check.json"
+# OpenClaw device identity + issued device token (mode 0600). Used for
+# operator.write agent dispatch — not the shared gateway.auth.token.
+OPENCLAW_DEVICE_FILE = HOME / "openclaw-device.json"
 WORKSPACES_DIR = HOME / "workspaces"
 # AP-197: daemon-owned clones of git workspaces. The daemon clones a project's
 # remote here and branches per-task worktrees off it, so it never reaches into

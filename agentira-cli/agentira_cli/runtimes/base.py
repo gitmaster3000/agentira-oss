@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any, Awaitable, Callable, ClassVar, Optional
+
+logger = logging.getLogger("agentira.runtime")
 
 
 # ── Capability flags ──────────────────────────────────────────────────────
@@ -76,10 +79,45 @@ class DetectedRuntime:
     gateway_token: str = ""
 
 
-class Runtime:
-    """Base class for a CLI runtime provider.
+@dataclass
+class TurnRequest:
+    """One agent turn handed to a Runtime adapter.
 
-    Subclasses set class attrs and override build_args/parse_event in later phases.
+    Daemon builds this; adapters own wire protocol + auth. Do not branch on
+    provider strings in the daemon — call Runtime.execute_turn(req).
+    """
+
+    prompt: str
+    binary_path: str = ""
+    gateway_url: str = ""
+    gateway_token: str = ""
+    agent_name: str = ""
+    agent_id: str = ""
+    scope_key: str = ""
+    model: str = ""
+    system_prompt: str = ""
+    mcp_config_json: str = ""
+    mcp_strict: bool = False
+    resume_session_id: str = ""
+    workdir: str = ""
+    env_extra: Optional[dict] = None
+    env_strip: Optional[set] = None
+    on_event: Any = None  # async callable(event_list)
+    on_proc: Any = None   # called with spawned proc (CLI only)
+    stdout_log_path: str = ""
+    stderr_log_path: str = ""
+    trace_id: str = ""
+    run_id: str = ""
+    daemon_id: str = ""
+    env_teardown: Any = None  # optional teardown ctx for inflight
+
+
+class Runtime:
+    """Runtime adapter (ADR 009).
+
+    Subclasses set frozen ClassVars and override contract methods.
+    Execution is polymorphic via execute_turn — the daemon must not
+    branch on provider == \"openclaw\" / capability string sets for routing.
     """
 
     provider: ClassVar[str] = ""
@@ -89,6 +127,24 @@ class Runtime:
     capabilities: ClassVar[tuple[str, ...]] = ()
     fallback_paths: ClassVar[tuple[str, ...]] = ()  # absolute paths to probe if not on PATH
     models: ClassVar[tuple[str, ...]] = ()  # supported model identifiers (first = default)
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Freeze identity: provider must be a non-empty str ClassVar set on the
+        # subclass body (not mutated later). capabilities must be a tuple.
+        if cls is Runtime:
+            return
+        if not isinstance(cls.provider, str) or not cls.provider:
+            raise TypeError(f"{cls.__name__}.provider must be a non-empty str")
+        if not isinstance(cls.capabilities, tuple):
+            raise TypeError(
+                f"{cls.__name__}.capabilities must be a tuple (immutable), "
+                f"got {type(cls.capabilities).__name__}"
+            )
+        # Re-bind as the subclass's own attrs so accidental instance/class
+        # mutation of a shared list is impossible for capabilities.
+        cls.provider = str(cls.provider)
+        cls.capabilities = tuple(cls.capabilities)
 
     @classmethod
     def build_args(cls, prompt: str, **kwargs) -> list[str]:
@@ -155,6 +211,68 @@ class Runtime:
             "do. This summary replaces the full transcript on reopen, so keep "
             "everything a fresh start would need and drop the play-by-play."
         )
+
+    # ── Execution (polymorphic) ─────────────────────────────────────────
+    #
+    # Daemon calls execute_turn(req). Default = CLI stream-json. Gateway
+    # adapters (OpenClaw, Ollama) override. This is the only dispatch
+    # surface — no provider-string switches in core.
+
+    @classmethod
+    async def execute_turn(cls, req: TurnRequest):
+        """Run one turn. Default: CLI stream-json via executor.run_cli_stream.
+
+        OpenClaw / Ollama override. Returns StreamResult.
+        """
+        from agentira_cli.daemon.executor import run_cli_stream
+
+        result = await run_cli_stream(
+            cls,
+            req.binary_path,
+            req.prompt,
+            model=req.model,
+            system_prompt=req.system_prompt,
+            on_event=req.on_event,
+            on_proc=req.on_proc,
+            workdir=req.workdir or None,
+            mcp_config_json=req.mcp_config_json or None,
+            mcp_strict=req.mcp_strict,
+            resume_session_id=req.resume_session_id,
+            env_extra=req.env_extra,
+            env_strip=req.env_strip,
+            stdout_log_path=req.stdout_log_path or None,
+            stderr_log_path=req.stderr_log_path or None,
+        )
+        # AP-133: claude session-file missing — retry once without --resume.
+        session_lost = bool(
+            req.resume_session_id
+            and not result.success
+            and "No conversation found with session ID" in (result.error or "")
+        )
+        if session_lost:
+            logger.warning(
+                "session_not_found trace=%s — retrying without --resume",
+                req.trace_id,
+            )
+            result = await run_cli_stream(
+                cls,
+                req.binary_path,
+                req.prompt,
+                model=req.model,
+                system_prompt=req.system_prompt,
+                on_event=req.on_event,
+                on_proc=req.on_proc,
+                workdir=req.workdir or None,
+                mcp_config_json=req.mcp_config_json or None,
+                mcp_strict=req.mcp_strict,
+                resume_session_id="",
+                env_extra=req.env_extra,
+                env_strip=req.env_strip,
+                stdout_log_path=req.stdout_log_path or None,
+                stderr_log_path=req.stderr_log_path or None,
+            )
+            result.session_lost = True
+        return result
 
     @classmethod
     def detect(cls) -> DetectedRuntime | None:

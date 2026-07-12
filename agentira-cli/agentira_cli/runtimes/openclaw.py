@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from .base import Runtime, derive_session_handle as _derive_session_handle
+from .base import Runtime, TurnRequest, derive_session_handle as _derive_session_handle
 
 logger = logging.getLogger("agentira.runtime.openclaw")
 
@@ -51,6 +51,105 @@ class OpenClawRuntime(Runtime):
         Stable: same scope -> same key -> same thread (with KV cache
         warm)."""
         return _derive_session_handle(agent_id=agent_id, scope_key=scope_key)
+
+    @classmethod
+    async def execute_turn(cls, req: TurnRequest):
+        """Native OpenClaw WS path: device registration + chat.send stream.
+
+        Device pairing / operator.write lives here — not in daemon core.
+        """
+        from agentira_cli.daemon.executor import run_openclaw_ws
+        from agentira_cli.runtimes.openclaw_device import (
+            RegistrationError,
+            RegistrationPendingError,
+            ensure_registered,
+        )
+
+        # Register MCPs (and the clean runner) right before we talk to it
+        # so THIS agent's token + memory + MCP servers are visible.
+        if req.mcp_config_json:
+            try:
+                reg = register_agentira_mcps(json.loads(req.mcp_config_json))
+                if reg.get("failed"):
+                    logger.warning("MCP register (openclaw) partial: %s", reg["failed"])
+            except Exception as exc:
+                logger.warning(
+                    "MCP register (openclaw) failed trace=%s: %s",
+                    req.trace_id, exc,
+                )
+
+        session_key = req.resume_session_id
+        if not session_key:
+            try:
+                session_key = cls.derive_session_handle(
+                    agent_id=req.agent_id, scope_key=req.scope_key,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "derive_session_handle failed trace=%s: %s",
+                    req.trace_id, exc,
+                )
+
+        # pid=0 inflight so heartbeats keep the scope live for the WS turn.
+        if req.scope_key:
+            try:
+                from agentira_cli.daemon import inflight as _inflight_reg
+                _inflight_reg.record(
+                    scope_key=req.scope_key,
+                    trace_id=req.trace_id,
+                    run_id=req.run_id,
+                    pid=0,
+                    daemon_id=req.daemon_id,
+                    env_teardown=req.env_teardown,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "inflight record (openclaw ws) skipped trace=%s: %s",
+                    req.trace_id, exc,
+                )
+
+        try:
+            device_identity = ensure_registered(
+                gateway_url=req.gateway_url,
+                gateway_token=req.gateway_token,
+            )
+        except RegistrationPendingError as exc:
+            logger.error(
+                "openclaw device pairing pending trace=%s: %s",
+                req.trace_id, exc,
+            )
+            raise RuntimeError(str(exc)) from exc
+        except RegistrationError as exc:
+            logger.error(
+                "openclaw device registration failed trace=%s: %s",
+                req.trace_id, exc,
+            )
+            raise RuntimeError(str(exc)) from exc
+        except Exception as exc:
+            logger.error(
+                "openclaw device registration error trace=%s: %s",
+                req.trace_id, exc,
+            )
+            raise RuntimeError(
+                f"OpenClaw device registration failed: {exc}. "
+                "Run: agentira daemon pair"
+            ) from exc
+
+        return await run_openclaw_ws(
+            req.gateway_url,
+            req.gateway_token,
+            req.agent_name,
+            req.prompt,
+            model=req.model,
+            system_prompt=req.system_prompt,
+            on_event=req.on_event,
+            session_key=session_key,
+            resume_session_id=req.resume_session_id,
+            stdout_log_path=req.stdout_log_path or None,
+            stderr_log_path=req.stderr_log_path or None,
+            trace_id=req.trace_id,
+            device_identity=device_identity,
+        )
 
     @classmethod
     def introspect(cls, binary_path: str) -> dict:

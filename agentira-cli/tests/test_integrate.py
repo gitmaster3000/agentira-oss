@@ -84,10 +84,12 @@ def test_conflict_aborts_and_reports(remote_and_sources):
     ok, reason = integrate_branch(source_url=url, branch="agent/b/task/2")
     assert not ok
     assert reason.startswith("merge_conflict")
-    # Clone left clean on main — no half-merged state.
-    assert _git(clone, "status", "--porcelain").strip() == ""
-    assert "same.txt" in _git(clone, "show", "main:same.txt") or \
-           _git(clone, "show", "main:same.txt") == "version A\n"
+    # Bare master left clean — no half-merged state, no leftover integrate worktrees.
+    assert "MERGE_HEAD" not in _git(clone, "show-ref")
+    wt_list = _git(clone, "worktree", "list", "--porcelain")
+    assert "agentira-integrate-" not in wt_list
+    # First integrate's content still on main (version A).
+    assert _git(clone, "show", "main:same.txt") == "version A\n"
 
 
 def test_missing_inputs_fail_cleanly():

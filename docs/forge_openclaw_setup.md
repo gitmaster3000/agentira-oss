@@ -9,8 +9,30 @@ Forge is the management plane for OpenClaw agents. Communication uses:
 ## Prerequisites
 
 1. OpenClaw running locally (default: `http://127.0.0.1:18789`)
-2. Gateway token from `~/.openclaw/openclaw.json` → `gateway.auth.token`
-3. Hooks token from `~/.openclaw/openclaw.json` → `hooks.token`
+2. Gateway token from `~/.openclaw/openclaw.json` → `gateway.auth.token` (the daemon reads this only for one-time device pairing — you do not paste it into Agentira for WS execution)
+3. Hooks token from `~/.openclaw/openclaw.json` → `hooks.token` (HTTP triggers only)
+
+### Daemon ↔ OpenClaw registration (automatic)
+
+The local Agentira daemon registers itself as an OpenClaw **device** with
+`operator.write` on start (and on demand via `agentira daemon pair`). Identity
+and the issued device token live in `~/.agentira/openclaw-device.json` (mode
+0600). Agent execution uses that device token — not the shared gateway token.
+
+```bash
+agentira daemon pair          # force re-register / show pending status
+openclaw devices list --json  # confirm displayName agentira-daemon has operator.write
+```
+
+If pairing needs a manual approve (rare on loopback):
+
+```bash
+openclaw devices approve <requestId>
+agentira daemon pair
+agentira daemon restart
+```
+
+Never hand-edit scopes in `openclaw.json`.
 
 ## Step 1: Enable Chat Completions in OpenClaw
 

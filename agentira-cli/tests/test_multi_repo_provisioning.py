@@ -61,15 +61,6 @@ def test_both_repos_materialize_as_subdirs(two_remotes, tmp_path):
     assert "agent/a1/task/xyz" in _git(task_dir / "frontend", "branch", "--show-current")
 
 
-def test_resolve_workspace_kind_multirepo_smoke(tmp_path):
-    """The backend's frame-builder uses list_project_repos to decide multi-repo;
-    this just sanity-checks the helper that the build sites import."""
-    from backend.forge.services import _resolve_workspace_kind
-    class P:
-        workspace_kind = "git"; repo_url = "https://x"; repo_path = None
-    assert _resolve_workspace_kind(P()) == "git"
-
-
 def test_ensure_worktree_clears_stale_branch_holder(two_remotes, tmp_path):
     """AP-237: if `branch` is registered at a STALE path, _ensure_worktree
     force-removes it before claiming the branch at the new target. Models

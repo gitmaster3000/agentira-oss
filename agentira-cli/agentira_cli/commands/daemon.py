@@ -322,6 +322,51 @@ def restart(
     _restart_impl(dry_run=dry_run, api_key=api_key)
 
 
+@app.command("pair")
+def pair(
+    force: bool = typer.Option(
+        True, "--force/--no-force",
+        help="Re-register even if a device token already exists",
+    ),
+) -> None:
+    """Register this daemon as an OpenClaw device with operator.write.
+
+    Uses the local gateway token only for pairing. Agent execution then
+    authenticates with the issued device token (stored in
+    ~/.agentira/openclaw-device.json).
+    """
+    from agentira_cli.runtimes.openclaw import OpenClawRuntime
+    from agentira_cli.runtimes.openclaw_device import (
+        RegistrationError,
+        RegistrationPendingError,
+        ensure_registered,
+    )
+
+    info = OpenClawRuntime.introspect("openclaw")
+    url = info.get("gateway_url") or ""
+    tok = info.get("gateway_token") or ""
+    if not url or not tok:
+        typer.echo(
+            "OpenClaw gateway URL/token not found. "
+            "Is OpenClaw installed and configured (~/.openclaw/openclaw.json)?",
+            err=True,
+        )
+        raise typer.Exit(1)
+    try:
+        ident = ensure_registered(
+            gateway_url=url, gateway_token=tok, force=force,
+        )
+    except RegistrationPendingError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(2)
+    except RegistrationError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1)
+    typer.echo("✓ OpenClaw device registered")
+    typer.echo(f"  device_id: {ident.device_id}")
+    typer.echo(f"  scopes:    {', '.join(ident.scopes)}")
+
+
 def _probe_ws_connected(api_url: str, daemon_id: str) -> bool | None:
     """Ask the backend whether this daemon's WS is currently connected.
 

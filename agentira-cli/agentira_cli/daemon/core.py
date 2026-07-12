@@ -468,14 +468,14 @@ class AgentiraDaemon:
         """Execute a single trigger frame dispatched from the WS hub.
 
         One path for chat, run_step, and any future trigger kinds. The daemon
-        does not branch on `kind` — that's a server-side audit field. We route
-        on capability (http_gateway for ollama etc, native WS for openclaw,
-        else CLI stream-json).
+        does not branch on `kind` — that's a server-side audit field. Execution
+        is polymorphic: `runtime_cls.execute_turn(req)` — adapters own their
+        wire protocol (CLI stream, Ollama HTTP, OpenClaw WS + device auth).
         """
-        from agentira_cli.daemon.executor import run_cli_stream, run_gateway, run_openclaw_ws
         from agentira_cli.daemon.materializer import (
             materialize, compose_system_prompt, ensure_memory_dirs,
         )
+        from agentira_cli.runtimes.base import TurnRequest
 
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "") or ""
@@ -696,7 +696,6 @@ class AgentiraDaemon:
         runtime_info = next(
             (r for r in self._registered if r.get("provider") == provider), {}
         )
-        capabilities = runtime_info.get("capabilities", [])
         binary_path = runtime_info.get("binary_path", "")
         gateway_url = frame.get("gateway_url") or runtime_info.get("gateway_url", "")
         gateway_token = frame.get("gateway_token") or runtime_info.get("gateway_token", "")
@@ -908,122 +907,35 @@ class AgentiraDaemon:
         error = ""
         input_tokens = 0
         output_tokens = 0
-        session_lost = False  # AP-133: flipped when we retry after --resume miss
+        session_lost = False  # AP-133: set by CLI adapter when session file missing
         try:
-            if "http_gateway" in capabilities:
-                # ollama and other pure HTTP gateways stay on the non-streaming
-                # completions path for now.
-                result = await run_gateway(
-                    gateway_url, gateway_token, agent_name, prompt,
-                    model=model, system_prompt=system_prompt, on_event=on_event,
-                    provider=provider,
-                    session_key="",
-                )
-            elif provider == "openclaw":
-                # Native WS path for OpenClaw.
-                # Register MCPs (and the clean runner) right before we talk to it
-                # so THIS agent's token + memory + MCP servers are visible to the
-                # runner, while the user's own OpenClaw agent configs stay out of
-                # the picture.
-                if mcp_config_json:
-                    try:
-                        import json as _json
-                        from agentira_cli.runtimes.openclaw import register_agentira_mcps
-                        reg = register_agentira_mcps(_json.loads(mcp_config_json))
-                        if reg["failed"]:
-                            logger.warning("MCP register (openclaw) partial: %s", reg["failed"])
-                    except Exception as exc:
-                        logger.warning("MCP register (openclaw) failed trace=%s: %s",
-                                       trace_id, exc)
-
-                # Use the long-lived session key for native resume if the backend
-                # provided one from a prior turn (stored in Conversation.runtime_session_id).
-                # Fall back to deriving the canonical key for this (agent, scope).
-                # This is the equivalent of passing --resume <id> for CLI agents:
-                # the key identifies the persistent thread under the agentira-runner
-                # in OpenClaw; we send only the new prompt on resume turns.
-                gw_session_key = resume_session_id
-                if not gw_session_key and runtime_cls is not None:
-                    try:
-                        gw_session_key = runtime_cls.derive_session_handle(
-                            agent_id=agent_id, scope_key=scope_key,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug("derive_session_handle failed trace=%s: %s",
-                                     trace_id, exc)
-
-                # pid=0 record so heartbeats keep the scope live (running glow,
-                # Stop button, last_heartbeat_at) for the duration of the WS turn.
-                try:
-                    from agentira_cli.daemon import inflight as _inflight_reg
-                    _inflight_reg.record(
-                        scope_key=scope_key, trace_id=trace_id,
-                        run_id=run_id, pid=0,
-                        daemon_id=self._daemon_id,
-                        env_teardown=env_teardown_ctx,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("inflight record (openclaw ws) skipped trace=%s: %s",
-                                 trace_id, exc)
-
-                # resume_session_id from backend (prior runtime_session_id stored
-                # on the Conversation for this scope). Passed so the WS path can
-                # do a true lightweight native resume (only new prompt, no re-send
-                # of system/history). The gw_session_key is the stable long-lived key.
-                result = await run_openclaw_ws(
-                    gateway_url, gateway_token, agent_name, prompt,
-                    model=model, system_prompt=system_prompt, on_event=on_event,
-                    session_key=gw_session_key,
-                    resume_session_id=resume_session_id,
-                    stdout_log_path=stdout_log_path or None,
-                    stderr_log_path=stderr_log_path or None,
-                    trace_id=trace_id,
-                )
-            else:
-                result = await run_cli_stream(
-                    runtime_cls, binary_path, prompt,
-                    model=model, system_prompt=system_prompt, on_event=on_event,
-                    on_proc=on_proc,
-                    workdir=str(cwd_path) if cwd_path else None,
-                    mcp_config_json=mcp_config_json or None,
-                    mcp_strict=mcp_strict,
-                    resume_session_id=resume_session_id,
-                    env_extra=env_extra,
-                    env_strip=env_strip,
-                    stdout_log_path=stdout_log_path or None,
-                    stderr_log_path=stderr_log_path or None,
-                )
-                # AP-133: graceful recovery when the stamped session_id
-                # isn't on disk anymore (path mismatch, daemon restart
-                # that wiped ~/.claude, cross-machine resume). Detect the
-                # claude-code signature, retry once WITHOUT --resume, and
-                # tell the backend to clear the stale id from the scope.
-                session_lost = bool(
-                    resume_session_id
-                    and not result.success
-                    and "No conversation found with session ID"
-                        in (result.error or "")
-                )
-                if session_lost:
-                    logger.warning(
-                        "session_not_found trace=%s — claude couldn't find "
-                        "session %s. Retrying without --resume; conversation "
-                        "history will be rebuilt from AgentMessage on the "
-                        "next chat turn.",
-                        trace_id, resume_session_id[:8])
-                    result = await run_cli_stream(
-                        runtime_cls, binary_path, prompt,
-                        model=model, system_prompt=system_prompt,
-                        on_event=on_event, on_proc=on_proc,
-                        workdir=str(cwd_path) if cwd_path else None,
-                        mcp_config_json=mcp_config_json or None,
-                        mcp_strict=mcp_strict,
-                        resume_session_id="",  # fresh
-                        env_extra=env_extra,
-                    env_strip=env_strip,
-                        stdout_log_path=stdout_log_path or None,
-                        stderr_log_path=stderr_log_path or None,
-                    )
+            turn = TurnRequest(
+                prompt=prompt,
+                binary_path=binary_path,
+                gateway_url=gateway_url,
+                gateway_token=gateway_token,
+                agent_name=agent_name,
+                agent_id=agent_id,
+                scope_key=scope_key,
+                model=model,
+                system_prompt=system_prompt,
+                mcp_config_json=mcp_config_json or "",
+                mcp_strict=mcp_strict,
+                resume_session_id=resume_session_id,
+                workdir=str(cwd_path) if cwd_path else "",
+                env_extra=env_extra,
+                env_strip=env_strip,
+                on_event=on_event,
+                on_proc=on_proc,
+                stdout_log_path=stdout_log_path or "",
+                stderr_log_path=stderr_log_path or "",
+                trace_id=trace_id,
+                run_id=run_id,
+                daemon_id=self._daemon_id,
+                env_teardown=env_teardown_ctx,
+            )
+            result = await runtime_cls.execute_turn(turn)
+            session_lost = bool(getattr(result, "session_lost", False))
             success = result.success
             error = result.error
             input_tokens = result.input_tokens

@@ -103,6 +103,8 @@ class StreamResult:
         self.session_id: Optional[str] = None
         self.input_tokens = 0
         self.output_tokens = 0
+        # Set by Runtime.execute_turn when a CLI session id was lost and retried.
+        self.session_lost: bool = False
 
 
 async def run_cli_stream(
@@ -554,6 +556,7 @@ async def run_openclaw_ws(
     stdout_log_path: Optional[str] = None,
     stderr_log_path: Optional[str] = None,
     trace_id: str = "",
+    device_identity=None,
 ) -> StreamResult:
     """Native WS execution for OpenClaw using long-lived sessionKey for resume.
 
@@ -591,7 +594,16 @@ async def run_openclaw_ws(
             logger.warning("stderr log open failed (%s): %s", stderr_log_path, exc)
 
     ws_base = gateway_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
-    ws_url = f"{ws_base}/?auth.token={gateway_token}" if gateway_token else ws_base
+    # Prefer device token for execution auth; shared gateway token is registration-only.
+    auth_token = ""
+    auth_kind = "token"
+    if device_identity is not None and getattr(device_identity, "device_token", ""):
+        auth_token = device_identity.device_token
+        auth_kind = "deviceToken"
+    elif gateway_token:
+        auth_token = gateway_token
+        auth_kind = "token"
+    ws_url = f"{ws_base}/?auth.token={auth_token}" if auth_token else ws_base
 
     # === Long-lived sessionKey for native resume (like claude --resume) ===
     # The sessionKey (derived deterministically from agent+scope) is the
@@ -629,30 +641,78 @@ async def run_openclaw_ws(
             return
 
         try:
-            ws = websocket.create_connection(ws_url, timeout=45)
+            # suppress_origin: OpenClaw refuses silent local pairing when a
+            # browser Origin header is present (websocket-client default).
+            ws = websocket.create_connection(
+                ws_url, timeout=45, suppress_origin=True,
+            )
 
             # 1. challenge
             try:
                 ch = json.loads(ws.recv())
             except Exception:
                 ch = {}
+            nonce = ""
+            if isinstance(ch, dict) and ch.get("event") == "connect.challenge":
+                nonce = (ch.get("payload") or {}).get("nonce") or ""
 
-            # 2. connect — canonical backend identity + negotiated protocol
+            # 2. connect — device-token auth when registered; signed device keeps scopes
+            connect_kwargs: dict = {
+                "user_agent": "agentira-daemon",
+                "auth_kind": auth_kind,
+                "display_name": "agentira-daemon",
+            }
+            if device_identity is not None and nonce:
+                try:
+                    from agentira_cli.runtimes.openclaw_device import (
+                        EXEC_CLIENT_ID,
+                        EXEC_CLIENT_MODE,
+                        build_device_connect_field,
+                    )
+                    from agentira_cli.runtimes.openclaw_scopes import default_requested_scopes
+
+                    scopes = list(getattr(device_identity, "scopes", None) or default_requested_scopes())
+                    connect_kwargs["device"] = build_device_connect_field(
+                        identity=device_identity,
+                        client_id=EXEC_CLIENT_ID,
+                        client_mode=EXEC_CLIENT_MODE,
+                        role="operator",
+                        scopes=scopes,
+                        token=auth_token,
+                        nonce=nonce,
+                        platform=__import__("platform").system().lower() or "unknown",
+                    )
+                    connect_kwargs["scopes"] = scopes
+                    connect_kwargs["client_id"] = EXEC_CLIENT_ID
+                    connect_kwargs["client_mode"] = EXEC_CLIENT_MODE
+                except Exception as exc:
+                    logger.warning("openclaw device sign failed: %s", exc)
+
             ws.send(
                 json.dumps(
                     {
                         "type": "req",
                         "id": "c1",
                         "method": "connect",
-                        "params": build_connect_params(
-                            gateway_token, user_agent="agentira-daemon"
-                        ),
+                        "params": build_connect_params(auth_token, **connect_kwargs),
                     }
                 )
             )
             hello = json.loads(ws.recv())
             if not hello.get("ok"):
-                ev_queue.put({"_fatal": hello.get("error") or hello})
+                err = hello.get("error") or hello
+                # Surface a clearer remedy for the classic missing-write failure.
+                msg = err if isinstance(err, str) else (err.get("message") if isinstance(err, dict) else str(err))
+                if isinstance(msg, str) and "operator.write" in msg:
+                    err = {
+                        "code": (err.get("code") if isinstance(err, dict) else "INVALID_REQUEST"),
+                        "message": (
+                            f"{msg}. Daemon OpenClaw device lacks operator.write. "
+                            "Run: agentira daemon pair && agentira daemon restart. "
+                            "Check: openclaw devices list"
+                        ),
+                    }
+                ev_queue.put({"_fatal": err})
                 return
 
             # 3. subscribe for transcript events on our session (best-effort)
@@ -673,27 +733,20 @@ async def run_openclaw_ws(
                 except Exception:
                     pass
 
-            # 4. send the turn — use long-lived sessionKey + minimal payload on resume
+            # 4. send the turn via chat.send (requires operator.write).
+            # OpenClaw 2026.x schema: sessionKey + message + idempotencyKey
+            # (not a messages[] array). Prepend system on first turn only.
+            import uuid as _uuid
             send_id = "s1"
-            if is_resume:
-                # Lightweight native resume using the long-lived sessionKey:
-                # send ONLY the new user message. The entire prior conversation
-                # (including the system prompt we sent on first turn) lives in
-                # the OpenClaw runner thread for that sessionKey. This is the
-                # equivalent of claude --resume <session> — no history rebuild.
-                send_params: dict = {
-                    "sessionKey": skey,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "agentId": runner_target,
-                }
-            else:
-                # First turn for this key: include system so Agentira layers
-                # its prompt/config on the clean runner.
-                send_params: dict = {
-                    "sessionKey": session_key,
-                    "messages": messages,
-                    "agentId": runner_target,
-                }
+            turn_key = skey or session_key or resume_session_id
+            body = prompt
+            if system_prompt and not is_resume:
+                body = f"{system_prompt}\n\n{prompt}"
+            send_params: dict = {
+                "sessionKey": turn_key or f"agentira:{runner_target}",
+                "message": body,
+                "idempotencyKey": str(_uuid.uuid4()),
+            }
 
             ws.send(
                 json.dumps(

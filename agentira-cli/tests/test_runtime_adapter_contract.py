@@ -67,8 +67,40 @@ def test_every_adapter_implements_the_contract(rt):
     assert callable(rt.derive_session_handle)
     assert callable(rt.clear_handle)
     assert callable(rt.build_args)
+    assert callable(rt.execute_turn)
     # clear_handle is a safe no-op by default.
     assert rt.clear_handle(agent_id="x", scope_key="task:t") is None
+    # provider frozen as non-empty str; capabilities immutable tuple
+    assert isinstance(rt.provider, str) and rt.provider
+    assert isinstance(rt.capabilities, tuple)
+
+
+def test_openclaw_execute_turn_is_not_base_default():
+    """OpenClaw must own its WS/device path — not inherit CLI execute_turn."""
+    assert OpenClawRuntime.execute_turn is not Runtime.execute_turn
+    assert OpenClawRuntime.execute_turn.__qualname__.startswith("OpenClawRuntime")
+
+
+def test_ollama_execute_turn_is_not_base_default():
+    assert OllamaRuntime.execute_turn is not Runtime.execute_turn
+
+
+def test_cli_adapters_use_base_execute_turn():
+    """Claude etc. keep the default CLI stream path via MRO, not a string gate."""
+    for rt in (ClaudeRuntime, CodexRuntime, GeminiRuntime, GrokRuntime, OpenCodeRuntime):
+        assert rt.execute_turn is Runtime.execute_turn or (
+            rt.execute_turn.__func__ is Runtime.execute_turn.__func__  # type: ignore[attr-defined]
+        )
+
+
+def test_daemon_core_has_no_openclaw_string_dispatch():
+    """Guard: dispatch must not re-grow `provider == \"openclaw\"` routing."""
+    import inspect
+    from agentira_cli.daemon import core as core_mod
+    src = inspect.getsource(core_mod.AgentiraDaemon._execute)
+    assert 'provider == "openclaw"' not in src
+    assert "provider == 'openclaw'" not in src
+    assert "execute_turn" in src
 
 
 def test_openclaw_derives_a_real_session_key():

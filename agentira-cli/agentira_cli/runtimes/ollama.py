@@ -19,7 +19,7 @@ import os
 import urllib.error
 import urllib.request
 
-from .base import DetectedRuntime, Runtime
+from .base import DetectedRuntime, Runtime, TurnRequest
 
 logger = logging.getLogger("agentira.runtime.ollama")
 
@@ -34,6 +34,23 @@ class OllamaRuntime(Runtime):
     # No static model catalog — models are whatever the user has pulled.
     # introspect() populates from /api/tags.
     models = ()
+
+    @classmethod
+    async def execute_turn(cls, req: TurnRequest):
+        """HTTP completions path (no device auth)."""
+        from agentira_cli.daemon.executor import run_gateway
+
+        return await run_gateway(
+            req.gateway_url,
+            req.gateway_token,
+            req.agent_name,
+            req.prompt,
+            model=req.model,
+            system_prompt=req.system_prompt,
+            on_event=req.on_event,
+            provider=cls.provider,
+            session_key="",
+        )
 
     @classmethod
     def detect(cls) -> DetectedRuntime | None:

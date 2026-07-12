@@ -59,6 +59,26 @@ def test_connect_params_use_canonical_identity():
     assert params["auth"] == {"token": "tok"}
 
 
+def test_connect_params_device_token_auth():
+    params = build_connect_params(
+        "dev-tok",
+        user_agent="agentira-daemon",
+        auth_kind="deviceToken",
+        device={
+            "id": "x",
+            "publicKey": "y",
+            "signature": "z",
+            "signedAt": 1,
+            "nonce": "n",
+        },
+        display_name="agentira-daemon",
+    )
+    assert params["auth"] == {"deviceToken": "dev-tok"}
+    assert params["device"]["id"] == "x"
+    assert params["client"]["displayName"] == "agentira-daemon"
+    assert "operator.write" in params["scopes"]
+
+
 def test_protocol_range_brackets_server():
     """Offered range must include the server's protocol (negotiation, not a pin)."""
     assert MIN_PROTOCOL <= _SERVER_PROTOCOL <= MAX_PROTOCOL

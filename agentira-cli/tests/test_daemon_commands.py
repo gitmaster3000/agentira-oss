@@ -61,6 +61,35 @@ def temp_state(tmp_path, monkeypatch):
 # ── _start_impl ──────────────────────────────────────────────────────────
 
 
+def test_pair_command_calls_ensure_registered(temp_state, monkeypatch):
+    from agentira_cli.commands import daemon
+    from agentira_cli.runtimes.openclaw_device import generate_identity
+
+    called = {}
+
+    def fake_ensure(**kwargs):
+        called.update(kwargs)
+        ident = generate_identity(gateway_url="http://127.0.0.1:18789")
+        ident.device_token = "t"
+        ident.scopes = ["operator.read", "operator.write"]
+        return ident
+
+    monkeypatch.setattr(
+        "agentira_cli.runtimes.openclaw_device.ensure_registered",
+        fake_ensure,
+    )
+    monkeypatch.setattr(
+        "agentira_cli.runtimes.openclaw.OpenClawRuntime.introspect",
+        classmethod(lambda cls, binary_path="openclaw": {
+            "gateway_url": "http://127.0.0.1:18789",
+            "gateway_token": "gw",
+        }),
+    )
+    daemon.pair(force=True)
+    assert called.get("force") is True
+    assert called.get("gateway_token") == "gw"
+
+
 def test_start_background_returns_immediately(temp_state, monkeypatch):
     """Background start must return within 1s — historic hang was waiting
     forever on the subprocess. Failure mode: restart() never returns."""
