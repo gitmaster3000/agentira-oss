@@ -29,6 +29,29 @@ jobs:
       - name: Run pytest
         run: python -m pytest backend/tests/ -q
 
+  # ── CLI packaging smoke ─────────────────────────────────────────────────
+  # Fresh venv + `pip install -e ./agentira-cli` only. Catches missing
+  # pyproject deps (e.g. websocket-client for OpenClaw native WS) that unit
+  # tests miss because they stub the import. See test_runtime_deps.py.
+  cli-deps-smoke:
+    name: CLI deps smoke (fresh install)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CLI only in an isolated venv
+        run: |
+          python -m venv /tmp/agentira-cli-smoke
+          /tmp/agentira-cli-smoke/bin/pip install --upgrade pip
+          /tmp/agentira-cli-smoke/bin/pip install -e ./agentira-cli
+
+      - name: Runtime import smoke tests
+        run: /tmp/agentira-cli-smoke/bin/python agentira-cli/tests/test_runtime_deps.py
+
   # ── Docker compose lint ─────────────────────────────────────────────────
   # Validates whatever compose files are present on the branch. After
   # AP-31 (PR #14) merges, qa/prod compose files appear and this job

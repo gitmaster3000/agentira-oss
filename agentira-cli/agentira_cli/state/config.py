@@ -30,3 +30,6 @@ class DaemonConfig(BaseSettings):
     # ── Misc ─────────────────────────────────────────────────────────────
     dry_run: bool = False
     log_level: str = "INFO"
+    # Check GitHub for newer agentira-cli releases on daemon startup
+    # (throttled). Set AGENTIRA_SKIP_UPDATE_CHECK=1 to disable.
+    update_check_interval_hours: int = 24

@@ -18,7 +18,7 @@ import traceback
 
 from agentira_cli.runtimes.registry import detect_all, get_runtime_cls
 from agentira_cli.state.config import DaemonConfig
-from agentira_cli.state.paths import DAEMON_ID_FILE, ensure_home
+from agentira_cli.state.paths import DAEMON_ID_FILE, UPDATE_CHECK_CACHE_FILE, ensure_home
 from agentira_cli.transport.rest import AgentiraClient
 
 logger = logging.getLogger("agentira.daemon")
@@ -296,10 +296,20 @@ class AgentiraDaemon:
             )
             self._ws.start()
 
+        from agentira_cli._version import get_version
         logger.info(
-            "Daemon started — daemon_id=%s runtimes=%d dry_run=%s",
-            self._daemon_id[:8], len(self._registered), self.config.dry_run,
+            "Daemon started — agentira-cli %s daemon_id=%s runtimes=%d dry_run=%s",
+            get_version(), self._daemon_id[:8], len(self._registered), self.config.dry_run,
         )
+
+        try:
+            from agentira_cli.update_check import startup_update_notice
+            startup_update_notice(
+                UPDATE_CHECK_CACHE_FILE,
+                interval_hours=max(1, int(self.config.update_check_interval_hours)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("update check hook failed: %s", exc)
 
         # Heartbeat loop
         interval = max(5, int(self.config.heartbeat_interval))

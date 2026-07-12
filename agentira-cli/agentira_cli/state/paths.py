@@ -17,6 +17,8 @@ DAEMON_META_FILE = HOME / "daemon.meta.json"
 CONFIG_FILE = HOME / "config.json"
 # Admin token from `agentira daemon login` (browser-based). Mode 0600.
 CREDENTIALS_FILE = HOME / "credentials.json"
+# Throttle GitHub release checks (daemon startup + `daemon update --check`).
+UPDATE_CHECK_CACHE_FILE = HOME / "update_check.json"
 WORKSPACES_DIR = HOME / "workspaces"
 # AP-197: daemon-owned clones of git workspaces. The daemon clones a project's
 # remote here and branches per-task worktrees off it, so it never reaches into

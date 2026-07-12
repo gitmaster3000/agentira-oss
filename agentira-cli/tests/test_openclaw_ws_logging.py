@@ -38,8 +38,8 @@ class _FakeWS:
 
 def _run(tmp_path, script, **kwargs):
     fake = _FakeWS(script)
-    # `websocket` (websocket-client) isn't a test dep; inject a stub module so
-    # the `import websocket` inside _ws_main resolves to our fake.
+    # Stub websocket for scripted wire tests. Install health is in
+    # test_runtime_deps.py (CI cli-deps-smoke).
     stub = types.ModuleType("websocket")
     stub.create_connection = lambda *a, **k: fake
     with patch.dict(sys.modules, {"websocket": stub}):

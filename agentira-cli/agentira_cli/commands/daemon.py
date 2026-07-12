@@ -411,6 +411,20 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
         backend = meta.get("api_url") or DaemonConfig().api_url
         ws_connected = _probe_ws_connected(backend, daemon_id)
 
+    from agentira_cli._version import get_version
+    from agentira_cli.state.paths import UPDATE_CHECK_CACHE_FILE
+    cli_version = get_version()
+    update_hint = ""
+    try:
+        cache = json.loads(UPDATE_CHECK_CACHE_FILE.read_text())
+        latest = cache.get("latest")
+        if latest:
+            from agentira_cli.update_check import is_newer
+            if is_newer(str(latest), cli_version):
+                update_hint = str(latest)
+    except (OSError, ValueError, TypeError):
+        pass
+
     data = {
         "home": str(HOME),
         "home_overridden": bool(os.environ.get("AGENTIRA_HOME")),
@@ -422,6 +436,8 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
         "dry_run_env": dry_run_env,
         "ws_connected": ws_connected,
         "log": str(DAEMON_LOG_FILE),
+        "cli_version": cli_version,
+        "update_available": update_hint or None,
     }
 
     if output == "json":
@@ -446,7 +462,58 @@ def status(output: str = typer.Option("text", "--output", "-o", help="text | jso
                        "the daemon may well be connected — see `daemon logs`)")
         if dry_run_env:
             typer.echo("Mode:      DRY-RUN (env var set — triggers won't spawn subprocesses)")
+        typer.echo(f"CLI:       agentira-cli {cli_version}")
+        if update_hint:
+            typer.echo(f"Update:    {update_hint} available — run `agentira daemon update`")
         typer.echo(f"Log:       {DAEMON_LOG_FILE}")
+
+
+@app.command("version")
+def version_cmd() -> None:
+    """Show the installed agentira-cli version."""
+    from agentira_cli._version import get_version
+    typer.echo(f"agentira-cli {get_version()}")
+
+
+@app.command("update")
+def update_cmd(
+    check_only: bool = typer.Option(False, "--check", help="Only check for updates"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Install without prompting"),
+    restart: bool = typer.Option(False, "--restart", help="Restart daemon after a successful update"),
+) -> None:
+    """Upgrade agentira-cli from the latest GitHub release (pip install).
+
+    Uses the same Python as this command, so launchd/systemd services
+    pick up the upgrade after `daemon restart`. No manual pip needed.
+    """
+    from agentira_cli.update_check import run_update
+
+    if check_only:
+        result = run_update(check_only=True)
+        typer.echo(result["message"])
+        raise typer.Exit(0)
+
+    result = run_update(yes=False)
+    if result.get("message") == "confirmation_required":
+        latest = result["latest"]
+        current = result["current"]
+        typer.echo(f"Update available: {current} → {latest}")
+        if result.get("release_url"):
+            typer.echo(f"  Release: {result['release_url']}")
+        if not typer.confirm("Install now?", default=True):
+            typer.echo("Cancelled.")
+            raise typer.Exit(0)
+        result = run_update(yes=True)
+
+    typer.echo(result.get("message") or "Done.")
+    if not result.get("updated"):
+        raise typer.Exit(1 if result.get("latest") else 0)
+
+    if restart:
+        typer.echo("Restarting daemon…")
+        _restart_impl()
+    else:
+        typer.echo("Restart the daemon to load the new code: `agentira daemon restart`")
 
 
 @app.command("logs")

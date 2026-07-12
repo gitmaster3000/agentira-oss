@@ -1,0 +1,42 @@
+name: Release agentira-cli
+
+# Publish installable CLI builds to GitHub Releases.
+# Tag format: agentira-cli-v0.1.0
+#
+# Customers upgrade with:
+#   agentira daemon update
+# or:
+#   pip install --upgrade <wheel-url-from-release>
+on:
+  push:
+    tags:
+      - "agentira-cli-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build wheel + GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build agentira-cli/
+          ls -la agentira-cli/dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: agentira-cli/dist/*
+          generate_release_notes: true
+          name: agentira-cli ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
