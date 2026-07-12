@@ -12,6 +12,9 @@ vi.mock('../api', () => ({
             sendRuntimeChat: vi.fn(),
             stopChat: vi.fn(),
             scopeLive: vi.fn(),
+            listAgents: vi.fn(),
+            clearConversation: vi.fn(),
+            getDispatchPreview: vi.fn(),
         },
     },
 }));
@@ -38,6 +41,20 @@ describe('Chat page', () => {
         api.forge.sendRuntimeChat.mockResolvedValue({});
         api.forge.scopeLive.mockResolvedValue({ live: false });
         api.forge.stopChat.mockResolvedValue({});
+        api.forge.listAgents.mockResolvedValue([
+            { id: 'a1', name: 'Conductor' },
+            { id: 'a2', name: 'Implementer' },
+            { id: 'a3', name: 'Reviewer' },
+        ]);
+        api.forge.clearConversation.mockResolvedValue({});
+        api.forge.getDispatchPreview.mockResolvedValue({
+            agent: { name: 'Conductor', runtime_provider: 'claude', model: 'sonnet' },
+            project: {},
+            mcp_servers: [],
+            env_vars: { injected_by_daemon: [], user_provided_names: [] },
+            system_prompt_addenda: {},
+        });
+        window.confirm = vi.fn(() => true);
     });
 
     it('lists every agent conversation from GET /forge/chats', async () => {
@@ -70,7 +87,7 @@ describe('Chat page', () => {
     it('sends a message to the selected agent with its scope_key', async () => {
         render(<Chat />);
         await screen.findAllByText('Conductor');
-        const box = await screen.findByPlaceholderText(/Type a message/i);
+        const box = await screen.findByPlaceholderText(/message/i);
         fireEvent.change(box, { target: { value: 'hello' } });
         fireEvent.keyDown(box, { key: 'Enter' });
         await waitFor(() => {
@@ -195,5 +212,73 @@ describe('Chat page', () => {
         // Latched off immediately even though scopeLive still reports live.
         await waitFor(() => expect(screen.queryByTitle('Stop')).not.toBeInTheDocument());
         expect(screen.getByTitle('Send')).toBeInTheDocument();
+    });
+
+    // AP-436: global Chat page must support the same slash commands as AgentDetail.
+    it('/clear wipes the selected conversation without sending a message', async () => {
+        render(<Chat />);
+        await screen.findAllByText('Conductor');
+        const box = await screen.findByPlaceholderText(/message/i);
+        fireEvent.change(box, { target: { value: '/clear' } });
+        fireEvent.keyDown(box, { key: 'Enter' });
+        await waitFor(() => {
+            expect(api.forge.clearConversation).toHaveBeenCalledWith('a1', 'chat:project:p1');
+        });
+        expect(api.forge.sendRuntimeChat).not.toHaveBeenCalled();
+    });
+
+    it('/context shows a dispatch preview and does not send', async () => {
+        render(<Chat />);
+        await screen.findAllByText('Conductor');
+        const box = await screen.findByPlaceholderText(/message/i);
+        fireEvent.change(box, { target: { value: '/context' } });
+        fireEvent.keyDown(box, { key: 'Enter' });
+        await waitFor(() => {
+            expect(api.forge.getDispatchPreview).toHaveBeenCalledWith('a1', 'p1');
+        });
+        expect(api.forge.sendRuntimeChat).not.toHaveBeenCalled();
+        expect(await screen.findByText(/\/context/)).toBeInTheDocument();
+    });
+
+    it('sidebar New chat starts a fresh general thread for the picked agent', async () => {
+        render(<Chat />);
+        await screen.findAllByText('Conductor');
+        fireEvent.click(screen.getByTitle('New chat'));
+        expect(await screen.findByText(/New chat with/i)).toBeInTheDocument();
+        // Pick an agent that already has chat:default → new scope must be chat:user:*
+        // Flyout lists roster agents by name only (no last-message preview).
+        const flyoutAgents = screen.getAllByRole('button').filter(
+            (b) => b.textContent?.trim() === 'IMImplementer' || b.textContent?.includes('Implementer'),
+        );
+        // Prefer the flyout row (short label) over the rail row (has preview text).
+        const flyout = flyoutAgents.find((b) => !b.textContent?.includes('done')) || flyoutAgents[0];
+        fireEvent.click(flyout);
+        await waitFor(() => {
+            const call = api.forge.listMessages.mock.calls.find(
+                ([id, p]) => id === 'a2' && String(p.scope_key).startsWith('chat:user:'));
+            expect(call).toBeTruthy();
+        });
+    });
+
+    it('Send uses themed btn-primary classes', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'assistant', content: 'done', created_at: '2026-06-19T00:00:02.000Z' },
+        ]);
+        api.forge.scopeLive.mockResolvedValue({ live: false });
+        render(<Chat />);
+        const send = await screen.findByTitle('Send');
+        expect(send.className).toMatch(/btn/);
+        expect(send.className).toMatch(/btn-primary/);
+    });
+
+    it('Stop uses themed btn-ghost classes', async () => {
+        api.forge.listMessages.mockResolvedValue([
+            { id: 'm1', role: 'user', content: 'go', created_at: '2026-06-19T00:00:01.000Z' },
+        ]);
+        api.forge.scopeLive.mockResolvedValue({ live: true });
+        render(<Chat />);
+        const stop = await screen.findByTitle('Stop');
+        expect(stop.className).toMatch(/btn/);
+        expect(stop.className).toMatch(/btn-ghost/);
     });
 });

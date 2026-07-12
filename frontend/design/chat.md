@@ -33,5 +33,13 @@ selector — so the list still renders without N per-agent calls.
   scroll-up (shared `lib/chatPagination` helpers).
 - The newest agent's most-recent conversation is auto-selected on load; picking
   an agent opens its most-recent scope; the top selector switches scopes.
+- **New chat** (AP-436): `+` in the left-rail header opens an agent picker
+  (from `listAgents`); starts `chat:default` or a fresh `chat:user:<id>` if
+  general already exists. Scope dropdown also has "New chat" for the open agent.
+- **Slash commands** (parity with AgentDetail): `/clear` →
+  `clearConversation(agentId, scope_key)`; `/context` → `getDispatchPreview`
+  rendered as a local preview card (no dispatch).
+- Composer uses themed `.input` + `.btn-primary` / `.btn-ghost` (Stop), single-line
+  field — no nested scrollbar in the write area.
 
 Implementation: `src/pages/Chat.jsx`, route `/chat` (in-shell), sidebar "Chat".
