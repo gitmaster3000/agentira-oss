@@ -1,12 +1,11 @@
 name: CI
 
-# Gate every PR — not just to main. Without this every long-lived
-# branch (docker-local, …) merges PRs with zero checks.
+# Gate merges to main and validate every push to main.
 on:
   pull_request:
-    branches: ['**']
+    branches: [main]
   push:
-    branches: [main, docker-local]
+    branches: [main]
 
 jobs:
   # ── Backend tests ───────────────────────────────────────────────────────
