@@ -281,4 +281,24 @@ describe('Chat page', () => {
         expect(stop.className).toMatch(/btn/);
         expect(stop.className).toMatch(/btn-ghost/);
     });
+
+    it('composer is a textarea that auto-grows with multi-line text up to a max', async () => {
+        render(<Chat />);
+        const box = await screen.findByPlaceholderText(/message/i);
+        expect(box.tagName).toBe('TEXTAREA');
+        // jsdom doesn't layout scrollHeight; stub so the grow effect is observable.
+        Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 120 });
+        fireEvent.change(box, { target: { value: 'line1\nline2\nline3' } });
+        await waitFor(() => {
+            expect(box.style.height).toBe('120px');
+            expect(box.style.overflowY).toBe('hidden');
+        });
+        Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 300 });
+        fireEvent.change(box, { target: { value: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12' } });
+        await waitFor(() => {
+            // Cap is 176px; past that we allow internal scroll.
+            expect(box.style.height).toBe('176px');
+            expect(box.style.overflowY).toBe('auto');
+        });
+    });
 });

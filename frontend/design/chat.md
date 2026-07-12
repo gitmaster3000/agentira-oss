@@ -39,7 +39,8 @@ selector — so the list still renders without N per-agent calls.
 - **Slash commands** (parity with AgentDetail): `/clear` →
   `clearConversation(agentId, scope_key)`; `/context` → `getDispatchPreview`
   rendered as a local preview card (no dispatch).
-- Composer uses themed `.input` + `.btn-primary` / `.btn-ghost` (Stop), single-line
-  field — no nested scrollbar in the write area.
+- Composer uses themed `.input` + `.btn-primary` / `.btn-ghost` (Stop). Textarea
+  auto-grows with content up to ~11 lines (`COMPOSER_MAX_H` 176px), then scrolls
+  inside; scrollbar hidden until the cap (no idle scroll chrome).
 
 Implementation: `src/pages/Chat.jsx`, route `/chat` (in-shell), sidebar "Chat".

@@ -15,6 +15,8 @@ import { mergeWindow, serverLoadedCount } from '../lib/chatPagination';
 const POLL_MS = 3000;
 const PAGE_SIZE = 50;
 const PREFETCH_PX = 120;
+// Composer grows with typed lines, then stops and scrolls inside (px ≈ 11 lines).
+const COMPOSER_MAX_H = 176;
 
 const SLASH_COMMANDS = [
     { name: '/context', desc: 'Show what context (project, MCP, env, prompts) will be sent on the next message' },
@@ -193,6 +195,17 @@ export function Chat() {
     }, [_lastId]);
 
     useEffect(() => { inputRef.current?.focus(); }, [selKey]);
+
+    // Auto-grow the message field with content, up to COMPOSER_MAX_H, then
+    // enable internal scroll (hidden until the cap so no idle scrollbar chrome).
+    useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        const contentH = el.scrollHeight;
+        el.style.height = `${Math.min(contentH, COMPOSER_MAX_H)}px`;
+        el.style.overflowY = contentH > COMPOSER_MAX_H ? 'auto' : 'hidden';
+    }, [input, selKey]);
 
     const postMessage = async (content) => {
         const text = (content || '').trim();
@@ -588,7 +601,7 @@ export function Chat() {
                             <div ref={bottomRef} />
                         </div>
 
-                        {/* Composer — themed like AgentDetail: .input + .btn, no nested scroll chrome */}
+                        {/* Composer — themed .input + .btn; textarea auto-grows to a cap */}
                         <div className="px-4 py-3 border-t border-border-subtle bg-bg-panel relative">
                             {inputFocused && (
                                 <SlashCommandSuggest
@@ -599,15 +612,17 @@ export function Chat() {
                                     }}
                                 />
                             )}
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-end gap-2">
                                 <div
-                                    className="input flex-1 flex items-center cursor-text !py-2.5"
+                                    className="input flex-1 flex items-end cursor-text !py-2.5"
                                     onClick={() => inputRef.current?.focus()}
                                 >
-                                    <input
+                                    <textarea
                                         ref={inputRef}
-                                        className="flex-1 bg-transparent border-0 outline-none text-text-primary placeholder:text-text-tertiary min-w-0"
-                                        placeholder="Send a message — / for commands"
+                                        rows={1}
+                                        className="flex-1 w-full bg-transparent border-0 outline-none resize-none text-sm text-text-primary placeholder:text-text-tertiary min-w-0 leading-5"
+                                        style={{ maxHeight: COMPOSER_MAX_H, overflowY: 'hidden' }}
+                                        placeholder="Send a message — / for commands  (Shift+Enter for new line)"
                                         value={input}
                                         onChange={(e) => setInput(e.target.value)}
                                         onKeyDown={(e) => {
