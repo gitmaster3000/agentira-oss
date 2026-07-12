@@ -1,8 +1,8 @@
 import typer
 
-from agentira_cli.state.env_file import load_cli_env_files
+from agentira_cli.state.env_file import emit_config_warnings, load_cli_env_files
 
-load_cli_env_files()
+emit_config_warnings(load_cli_env_files())
 
 from .commands import daemon as daemon_cmd
 from .commands import runtime as runtime_cmd

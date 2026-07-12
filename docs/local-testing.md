@@ -62,9 +62,14 @@ EOF
 chmod 600 ~/.agentira/.env
 ```
 
-Edit anytime with `nano ~/.agentira/.env` (or your editor). **Only use the file**
-— do not export `AGENTIRA_*` in `~/.zshrc`. Set `AGENTIRA_DEV_MODE=0` for prod
-(`~/.agentira`) or `AGENTIRA_DEV_MODE=1` for local test (`~/.agentira-test`).
+Edit anytime with `nano ~/.agentira/.env` (or your editor). **Do not** put
+`AGENTIRA_*` in `~/.zshrc` — the CLI warns if shell env overrides your file.
+
+Config priority: CLI flags → environment variables → `~/.agentira/.env` →
+defaults. One-shot overrides are fine: `AGENTIRA_DEV_MODE=1 agentira daemon …`
+
+Set `AGENTIRA_DEV_MODE=0` for prod (`~/.agentira`) or `1` for local test
+(`~/.agentira-test`).
 
 > `AGENTIRA_DEV_MODE` only changes local CLI ergonomics — it is **not** a
 > security boundary. The real gate is server-side (`AGENTIRA_ENV=dev` +
