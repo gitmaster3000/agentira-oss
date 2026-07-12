@@ -324,8 +324,7 @@ agentira/
 │   ├── git_integration.md
 │   ├── rbac_guide.md
 │   └── ...
-├── tests/                         # legacy test root (will fold into backend/tests over time)
-├── backend/tests/                 # canonical test home
+├── backend/tests/                 # backend test suite (ephemeral Postgres)
 ├── data/                          # volume-mounted: agentira.db (dev), attachments/
 ├── docker-compose.yml             # base — required env override
 ├── docker-compose.override.yml    # dev (auto-loaded)

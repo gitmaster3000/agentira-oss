@@ -109,35 +109,42 @@ def sources_dir(tmp_path, monkeypatch):
     return d
 
 
+def _is_bare_check(cmd) -> bool:
+    return "rev-parse" in cmd and "--is-bare-repository" in cmd
+
+
 def test_fresh_dir_triggers_clone(sources_dir, monkeypatch):
+    # Fresh source: no dir yet, so `git clone --bare` runs, followed by the
+    # remote-tracking config + fetch that make origin/<base> resolvable for
+    # the per-task worktrees. Returns reason "cloned".
     calls = []
 
     def fake_run(cmd, *a, **k):
         calls.append(cmd)
-        # Simulate `git clone url dest` materializing the working copy.
-        dest = cmd[-1]
-        import os
-        os.makedirs(os.path.join(dest, ".git"), exist_ok=True)
-        return _FakeCompleted(returncode=0)
+        return _FakeCompleted(returncode=0, stdout="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     path, reason = ensure_source_clone("https://github.com/o/r.git")
     assert reason == "cloned"
     assert path.endswith(_slug("https://github.com/o/r.git"))
-    assert len(calls) == 1
-    assert calls[0][0:2] == ["git", "clone"]
+    # First git op is the bare clone; a fetch follows so origin/* is populated.
+    assert calls[0][:3] == ["git", "clone", "--bare"]
+    assert any("fetch" in c for c in calls)
 
 
 def test_existing_clone_triggers_fetch(sources_dir, monkeypatch):
-    # Pre-create a cached clone (dest/.git exists).
+    # Pre-create a cached bare clone dir; `_is_bare` must report bare so we
+    # take the refresh path (`git fetch --prune`) rather than re-cloning.
     dest = sources_dir / _slug("https://github.com/o/r")
-    (dest / ".git").mkdir(parents=True)
+    dest.mkdir(parents=True)
 
     calls = []
 
     def fake_run(cmd, *a, **k):
         calls.append(cmd)
+        if _is_bare_check(cmd):
+            return _FakeCompleted(returncode=0, stdout="true")
         return _FakeCompleted(returncode=0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -145,9 +152,9 @@ def test_existing_clone_triggers_fetch(sources_dir, monkeypatch):
     path, reason = ensure_source_clone("https://github.com/o/r")
     assert reason == "ok"
     assert path == str(dest)
-    assert len(calls) == 1
-    assert calls[0][0] == "git"
-    assert "fetch" in calls[0]
+    # No re-clone; the only network op is the fetch.
+    assert not any(c[:3] == ["git", "clone", "--bare"] for c in calls)
+    assert any("fetch" in c for c in calls)
 
 
 def test_clone_nonzero_raises_and_cleans_up(sources_dir, monkeypatch):
@@ -169,14 +176,18 @@ def test_clone_nonzero_raises_and_cleans_up(sources_dir, monkeypatch):
 
 
 def test_fetch_failure_is_nonfatal(sources_dir, monkeypatch):
-    """A failed `git fetch` on a cached clone is best-effort: still returns ok."""
+    """A failed `git fetch` on a cached bare clone is best-effort: still ok.
+    The is-bare probe must succeed so we stay on the refresh path; only the
+    fetch fails."""
     dest = sources_dir / _slug("https://github.com/o/r")
-    (dest / ".git").mkdir(parents=True)
+    dest.mkdir(parents=True)
 
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda *a, **k: _FakeCompleted(returncode=1, stderr="network down"),
-    )
+    def fake_run(cmd, *a, **k):
+        if _is_bare_check(cmd):
+            return _FakeCompleted(returncode=0, stdout="true")
+        return _FakeCompleted(returncode=1, stderr="network down")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
 
     path, reason = ensure_source_clone("https://github.com/o/r")
     assert reason == "ok"

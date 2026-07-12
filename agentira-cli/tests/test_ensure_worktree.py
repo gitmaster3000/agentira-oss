@@ -19,6 +19,12 @@ import pytest
 
 from agentira_cli.daemon.core import _ensure_worktree
 
+# Reasons that all mean "worktree created/repaired successfully". A local test
+# repo has no `origin/<base>`, so the create path cuts the new branch off HEAD
+# and reports `base_not_found_used_head` — still a success, just a note. (In
+# production the source is a bare clone WITH origin/*, so it'd be plain "ok".)
+_WT_OK = {"ok", "base_not_found_used_head"}
+
 
 def _init_repo(path: str, marker: str) -> None:
     os.makedirs(path, exist_ok=True)
@@ -30,6 +36,12 @@ def _init_repo(path: str, marker: str) -> None:
         f.write(marker)
     subprocess.run(["git", "-C", path, "add", "."], check=True)
     subprocess.run(["git", "-C", path, "commit", "-q", "-m", "init"], check=True)
+    # Model the daemon's real source (a bare clone with origin/*): default
+    # branch `main` + a self-`origin` so `origin/main` resolves. Without this
+    # the worktree code can't find the base ref and degrades to a HEAD cut.
+    subprocess.run(["git", "-C", path, "branch", "-m", "main"], check=True)
+    subprocess.run(["git", "-C", path, "remote", "add", "origin", path], check=True)
+    subprocess.run(["git", "-C", path, "fetch", "-q", "origin"], check=True)
 
 
 @pytest.fixture
@@ -48,16 +60,16 @@ def test_creates_fresh_worktree(two_repos):
         source=two_repos["frontend"], target=two_repos["target"],
         branch="agent/x/task/y",
     )
-    assert reason == "ok"
+    assert reason in _WT_OK
     assert os.path.exists(os.path.join(two_repos["target"], "FRONTEND_MARKER"))
 
 
 def test_reuses_matching_worktree(two_repos):
     args = dict(source=two_repos["frontend"], target=two_repos["target"],
                 branch="agent/x/task/y")
-    assert _ensure_worktree(**args) == "ok"
+    assert _ensure_worktree(**args) in _WT_OK
     # Second call with the same source → reused, not recreated.
-    assert _ensure_worktree(**args) == "ok"
+    assert _ensure_worktree(**args) in _WT_OK
     assert os.path.exists(os.path.join(two_repos["target"], "FRONTEND_MARKER"))
 
 
@@ -108,7 +120,7 @@ def test_clears_non_worktree_leftover_before_add(two_repos):
     reason = _ensure_worktree(
         source=two_repos["frontend"], target=target, branch="agent/x/task/y",
     )
-    assert reason == "ok"
+    assert reason in _WT_OK
     # Worktree-add succeeded → target is a real worktree off frontend.
     assert os.path.exists(os.path.join(target, ".git"))
     assert os.path.exists(os.path.join(target, "FRONTEND_MARKER"))

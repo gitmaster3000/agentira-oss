@@ -1,9 +1,7 @@
 name: Integration test (full suite)
 
-# The fast `CI` job (ci.yml) runs only `tests/` and never installs
-# agentira-cli, so the daemon / integration tests importorskip out and the
-# backend/tests/ unit suite isn't run at all. This workflow runs the FULL
-# suite end-to-end — with agentira-cli installed and real git — on demand.
+# On-demand full suite: backend/tests/ (ephemeral Postgres) plus
+# agentira-cli/tests/ (daemon/git unit tests with real git configured).
 #
 # Trigger: comment `/integration-test` on a pull request.
 #
@@ -17,7 +15,7 @@ on:
 
 jobs:
   full-suite:
-    name: Full suite (tests/ + backend/tests/)
+    name: Full suite (backend/tests/ + agentira-cli/tests/)
     # Only on PR comments that issue the command.
     if: >
       github.event.issue.pull_request &&
@@ -62,17 +60,11 @@ jobs:
           git config --global user.name "agentira ci"
           git config --global init.defaultBranch main
 
-      - name: Full integration suite (daemon + integration, no skips)
-        run: python -m pytest tests/ -v --tb=short
+      - name: Backend suite (ephemeral Postgres)
+        run: python -m pytest backend/tests/ -q
 
-      - name: Backend unit suite
-        # backend/tests/ relies on the org-stamping fixtures in
-        # tests/conftest.py; those tests aren't siblings of that conftest, so
-        # expose it as a repo-root conftest for this step only.
-        run: |
-          cp tests/conftest.py conftest.py
-          python -m pytest backend/tests/ -v --tb=short
-          rm -f conftest.py
+      - name: Daemon / CLI suite (real git, no network)
+        run: python -m pytest agentira-cli/tests/ -q
 
       - name: Report result
         if: always()

@@ -7,7 +7,7 @@
 
 ## Code Style
 - Minimal changes. No unnecessary refactors, comments, or abstractions.
-- Test after changes: `cd frontend && npx vite build` for UI, `pytest tests/` for backend.
+- Test after changes: `cd frontend && npx vite build` for UI, `pytest backend/tests/` for backend.
 - Follow existing patterns in the codebase.
 - **Think before writing code.** Read the surrounding module, name the contract you're targeting, list assumptions. Don't start typing until the shape is clear.
 - **Modular by default. Classes only when polymorphism or state make them earn their place.** Functions for everything else.
@@ -20,7 +20,7 @@
 - **Never** `create_engine("sqlite://…")`, build a private `sessionmaker`, use `StaticPool`, or `patch(...SessionLocal...)`. The real `SessionLocal` is a `RoutingSession` that reads the module-level `backend.db.engine` / `app_engine` at call time; conftest points those at the container, so the real session + its org-stamping/RLS event hooks route at the test DB automatically.
 - **Org context is already set**, so new rows get `org_id` stamped for you — insert profiles/projects without spelling it out. Use `privileged()` to bypass org scoping for cross-org setup/asserts.
 - **RBAC shape:** a Profile has a stored `account_type` (`human` / `agentira_agent` / `external_agent`) AND a `roles` M2M (`admin` / `member` / `viewer`). Build with `roles=[role_obj]`, never `role_id=`. There is no `bot` role.
-- Run: `cd backend && ../venv/bin/python -m pytest tests/ -q` (or a single file while iterating). Don't weaken an assertion to make a test pass — fix the code.
+- Run: `python -m pytest backend/tests/ -q` from the repo root (or a single file while iterating). Don't weaken an assertion to make a test pass — fix the code.
 
 ## Data Access
 - **No direct DB calls in services.** `services.py` / `forge/services.py` / `forge/conductor.py` / any orchestration module must NOT use `db.query(...)`, `db.add(...)`, `db.commit(...)` inline. Every read or write goes through a per-domain data-access function (e.g. `backend/forge/repos/runs.py`, `tasks_repo.py`). Services compose; repos own the SQL.
