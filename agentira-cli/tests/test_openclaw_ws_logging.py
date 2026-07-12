@@ -98,3 +98,59 @@ def test_error_line_carries_trace_id(tmp_path):
                   trace_id="deadbeef")
     assert res.success is False
     assert "deadbeef" in stderr.read_text()
+
+
+def test_chat_state_error_propagates_as_failure(tmp_path):
+    """OpenClaw model failures arrive as chat events with state=error.
+
+    If we ignore them, the UI hangs / gets a useless 'no content' error
+    while the real cause (e.g. Ollama down) is buried in gateway logs.
+    """
+    stderr = tmp_path / "run" / "stderr.log"
+    script = [
+        {"type": "event", "event": "connect.challenge",
+         "payload": {"nonce": "n1"}},
+        {"ok": True},  # connect
+        {"ok": False},  # subscribe may fail; ignore
+        {"type": "res", "id": "s1", "ok": True,
+         "payload": {"runId": "r1"}},
+        {"type": "event", "event": "chat", "payload": {
+            "runId": "r1",
+            "sessionKey": "agentira:x",
+            "state": "error",
+            "errorMessage": (
+                "All models failed (2): ollama/qwen: "
+                "fetch failed | connect ECONNREFUSED 127.0.0.1:11434"
+            ),
+        }},
+    ]
+    res, fake = _run(tmp_path, script, stderr_log_path=str(stderr),
+                     trace_id="abc123")
+    assert res.success is False
+    assert res.error
+    # Human-facing: mention the model/runtime failure, not a raw empty-text miss.
+    low = res.error.lower()
+    assert "model" in low or "ollama" in low or "connection" in low or "failed" in low
+    assert "no content produced" not in low
+    assert "11434" in res.error or "ollama" in low or "connection" in low
+    body = stderr.read_text()
+    assert "abc123" in body
+    # Subscribe must use `key` (OpenClaw schema), not `sessionKey`.
+    sent = [json.loads(s) for s in fake.sent]
+    sub = next(f for f in sent if f.get("method") == "sessions.messages.subscribe")
+    assert "key" in sub["params"]
+    assert "sessionKey" not in sub["params"]
+
+
+def test_chat_send_rpc_error_propagates(tmp_path):
+    script = [
+        {},
+        {"ok": True},
+        {"ok": True},
+        {"type": "res", "id": "s1", "ok": False,
+         "error": {"code": "INVALID_REQUEST",
+                   "message": "missing scope: operator.write"}},
+    ]
+    res, _ = _run(tmp_path, script)
+    assert res.success is False
+    assert "operator.write" in str(res.error)

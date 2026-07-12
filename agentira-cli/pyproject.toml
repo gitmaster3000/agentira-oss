@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentira-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "AgentIRA local CLI + daemon — runtime auto-detection and agent execution"
 readme = "README.md"
 license = { text = "Proprietary" }

@@ -542,6 +542,74 @@ def _tee_stderr(log_f, msg: str, *, trace_id: str = "") -> None:
         pass
 
 
+def _format_openclaw_error(raw) -> str:
+    """Turn OpenClaw RPC / chat error payloads into a plain-language failure.
+
+    OpenClaw model failures arrive as chat events:
+      {state: "error", errorMessage: "All models failed … ECONNREFUSED …"}
+    RPC failures are {code, message} dicts. Without this, the daemon only
+    reports "no content produced" and the real cause stays in gateway logs.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        msg = (
+            raw.get("errorMessage")
+            or raw.get("message")
+            or raw.get("error")
+            or raw.get("summary")
+            or ""
+        )
+        if isinstance(msg, dict):
+            msg = msg.get("message") or str(msg)
+        code = raw.get("code") or ""
+        text = str(msg or raw).strip()
+    else:
+        code = ""
+        text = str(raw).strip()
+    if not text:
+        return ""
+    low = text.lower()
+    # Plain-language rewrites for the common "no model backend" failure.
+    if "econnrefused" in low and ("11434" in text or "ollama" in low):
+        return (
+            "OpenClaw could not reach Ollama (nothing listening on port 11434). "
+            "Start Ollama and try again. "
+            f"Details: {text}"
+        )
+    if "all models failed" in low or "connection refused by the provider" in low:
+        return (
+            "OpenClaw's language model backend failed — the model provider "
+            f"is down or unreachable. Details: {text}"
+        )
+    if code and code not in text:
+        return f"{code}: {text}"
+    return text
+
+
+def _extract_chat_error(payload: dict) -> str:
+    """If a chat event payload is a terminal failure, return its message."""
+    if not isinstance(payload, dict):
+        return ""
+    state = str(payload.get("state") or "").lower()
+    err = (
+        payload.get("errorMessage")
+        or payload.get("error")
+        or (payload.get("message") if state == "error" else None)
+        or ""
+    )
+    if isinstance(err, dict):
+        err = err.get("message") or str(err)
+    err_s = str(err).strip() if err else ""
+    if state in ("error", "failed", "aborted") or (
+        err_s and state in ("final", "done", "complete") and payload.get("isError")
+    ):
+        return _format_openclaw_error(payload if err_s else {"message": state or "error"})
+    if payload.get("isError") and err_s:
+        return _format_openclaw_error(payload)
+    return ""
+
+
 async def run_openclaw_ws(
     gateway_url: str,
     gateway_token: str,
@@ -715,7 +783,8 @@ async def run_openclaw_ws(
                 ev_queue.put({"_fatal": err})
                 return
 
-            # 3. subscribe for transcript events on our session (best-effort)
+            # 3. subscribe for transcript events on our session (best-effort).
+            # OpenClaw schema uses `key`, not `sessionKey`.
             skey = session_key or resume_session_id
             if skey:
                 try:
@@ -725,7 +794,7 @@ async def run_openclaw_ws(
                                 "type": "req",
                                 "id": "sub1",
                                 "method": "sessions.messages.subscribe",
-                                "params": {"sessionKey": skey},
+                                "params": {"key": skey},
                             }
                         )
                     )
@@ -759,13 +828,26 @@ async def run_openclaw_ws(
                 )
             )
 
-            # 5. drain res + events until we see terminal signal or quiet
+            # 5. drain res + events until terminal success/error.
+            # OpenClaw model failures arrive as chat events:
+            #   {state: "error", errorMessage: "…"} — must set result.error.
+            run_error = ""
             for _ in range(4000):  # safety for very long runs
                 if stop.is_set():
                     break
                 try:
+                    # Bound wait so a silent gateway can't hang the daemon forever.
+                    if hasattr(ws, "settimeout"):
+                        try:
+                            ws.settimeout(90)
+                        except Exception:
+                            pass
                     raw = ws.recv()
-                except Exception:
+                except Exception as exc:
+                    if not collected_text and not run_error:
+                        run_error = _format_openclaw_error(
+                            f"OpenClaw stopped responding ({exc})"
+                        )
                     break
                 if not raw:
                     break
@@ -776,7 +858,8 @@ async def run_openclaw_ws(
 
                 if f.get("type") == "res" and f.get("id") == send_id:
                     if not f.get("ok"):
-                        ev_queue.put({"_fatal": f.get("error") or f})
+                        run_error = _format_openclaw_error(f.get("error") or f)
+                        ev_queue.put({"_fatal": run_error})
                         break
                     pl = f.get("payload") or {}
                     if isinstance(pl, dict):
@@ -789,19 +872,45 @@ async def run_openclaw_ws(
                 elif f.get("type") == "event":
                     ename = f.get("event", "")
                     p = f.get("payload") or {}
+                    if not isinstance(p, dict):
+                        p = {}
+
+                    # Terminal model/runtime failure from OpenClaw.
+                    chat_err = _extract_chat_error(p) if ename in (
+                        "chat", "chat.message", "session.message", "message",
+                        "agent", "agent.error", "run.error",
+                    ) else ""
+                    if not chat_err and ename in ("agent.error", "run.error", "error"):
+                        chat_err = _format_openclaw_error(p or f)
+                    if chat_err:
+                        run_error = chat_err
+                        # Stream a short error line so the chat UI unsticks.
+                        ev_queue.put({"type": "text", "text": chat_err, "model": p.get("model", "")})
+                        ev_queue.put({"_fatal": chat_err})
+                        break
 
                     # text / delta
                     if ename in ("chat", "chat.message", "session.message", "message", "chat.inject"):
+                        # Skip pure state frames (delta/final without text).
+                        state = str(p.get("state") or "").lower()
                         delta = (
                             p.get("deltaText")
                             or p.get("text")
                             or (p.get("message") or {}).get("content", "")
                             or (p.get("message") or {}).get("text", "")
-                            or p.get("content", "")
+                            or (p.get("content") if isinstance(p.get("content"), str) else "")
                         )
-                        if delta:
+                        if isinstance(delta, list):
+                            # content blocks
+                            delta = "".join(
+                                (b.get("text") or "") if isinstance(b, dict) else str(b)
+                                for b in delta
+                            )
+                        if delta and state not in ("error",):
                             ev_queue.put({"type": "text", "text": delta, "model": p.get("model", "")})
-                            collected_text.append(delta)
+                            collected_text.append(str(delta))
+                        if state in ("final", "done", "complete", "completed"):
+                            break
 
                     # tool lifecycle (structured because we advertised tool-events)
                     elif ename in ("session.tool", "tool", "tool_use", "agent.tool"):
@@ -821,10 +930,17 @@ async def run_openclaw_ws(
                         ev_queue.put({"type": "tool_result", "tool": tname, "output": tout})
 
                     if ename in ("chat.complete", "session.complete", "run.finished", "chat.done"):
+                        # Some gateways put the error only on the complete event.
+                        if not run_error:
+                            run_error = _extract_chat_error(p)
                         break
 
             result.text = "".join(collected_text).strip()
-            result.success = bool(result.text)
+            if run_error and not result.error:
+                result.error = run_error
+                result.success = False
+            else:
+                result.success = bool(result.text) and not run_error
             # The long-lived sessionKey is what the backend will store as
             # runtime_session_id and pass back as resume_session_id next time.
             result.session_id = (session_key or resume_session_id or "")
@@ -833,7 +949,7 @@ async def run_openclaw_ws(
                 result.output_tokens = int(usage.get("completion_tokens", usage.get("outputTokens", 0)) or 0)
 
         except Exception as exc:
-            result.error = str(exc)
+            result.error = _format_openclaw_error(exc) or str(exc)
             result.success = False
             logger.warning("openclaw native ws error trace=internal: %s", exc)
         finally:
@@ -875,8 +991,9 @@ async def run_openclaw_ws(
         if item is None:
             break
         if "_fatal" in item:
-            result.error = str(item["_fatal"])
+            result.error = _format_openclaw_error(item["_fatal"]) or str(item["_fatal"])
             result.success = False
+            # Still flush any text we already batched (incl. error line).
             break
 
         batch.append(item)
@@ -888,7 +1005,13 @@ async def run_openclaw_ws(
     t.join(timeout=3.0)
 
     if not result.success and not result.error:
-        result.error = "openclaw ws: no content produced"
+        result.error = (
+            "OpenClaw produced no reply. Check that OpenClaw is running and "
+            "its model provider (e.g. Ollama) is up."
+        )
+    if result.error:
+        result.error = _format_openclaw_error(result.error) or result.error
+        result.success = False
     if not result.success and result.error:
         _tee_stderr(stderr_log_f, result.error, trace_id=trace_id)
 
