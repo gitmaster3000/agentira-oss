@@ -33,6 +33,10 @@ The CLI asks `AGENTIRA_DAEMON_API_URL` (from `~/.agentira/.env`) for
 `GET /api/public/cli-release`, then `pip install`s the wheel URL returned.
 No GitHub token or private-repo access required.
 
+> **Maintainers:** to *publish* a new daemon version (bump → build → bake →
+> deploy) see [`daemon_release.md`](daemon_release.md). `daemon update` only
+> sees a change after the backend is redeployed with a bumped version.
+
 ## Common failure modes
 
 ### 1. Daemon process is running but WS disconnected
