@@ -42,5 +42,7 @@ selector — so the list still renders without N per-agent calls.
 - Composer uses themed `.input` + `.btn-primary` / `.btn-ghost` (Stop). Textarea
   auto-grows with content up to ~11 lines (`COMPOSER_MAX_H` 176px), then scrolls
   inside; scrollbar hidden until the cap (no idle scroll chrome).
+- Long chat/agent pickers (`DROPDOWN_MAX_H` = min(360px, 70vh)) scroll **inside**
+  the menu with `overscroll-contain` so the page body never grows.
 
 Implementation: `src/pages/Chat.jsx`, route `/chat` (in-shell), sidebar "Chat".

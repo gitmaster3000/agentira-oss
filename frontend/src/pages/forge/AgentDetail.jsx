@@ -987,10 +987,13 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                         return (
                             <>
                                 <div className="fixed inset-0 z-30" onClick={() => { setChatPickerOpen(false); setNewChatFlyoutOpen(false); setProjectFlyoutOpen(false); }} />
-                                <div className="absolute left-0 top-full mt-1 z-40 w-72 rounded-md border border-border-subtle shadow-xl"
-                                     style={{ backgroundColor: '#1a1a1a' }}>
+                                <div
+                                    className="absolute left-0 top-full mt-1 z-40 w-72 rounded-md border border-border-subtle shadow-xl flex flex-col overflow-hidden"
+                                    style={{ backgroundColor: '#1a1a1a', maxHeight: 'min(360px, 70vh)' }}
+                                    data-testid="agent-chat-picker"
+                                >
                                     {activeList.length > 0 && (
-                                        <div className="py-1.5">
+                                        <div className="py-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
                                             <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Active</div>
                                             {activeList.map((c) => {
                                                 const isActive = c.scope_key === activeScope;
@@ -1013,7 +1016,7 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                                     {/* New Chat — single hover/click menu item that
                                         flyouts to a submenu with General / Project / Task.
                                         Project nests one level deeper into a project list. */}
-                                    <div className="py-1 border-t border-border-subtle">
+                                    <div className="py-1 border-t border-border-subtle flex-shrink-0">
                                         <div
                                             className="relative"
                                             onMouseEnter={openNewChat}
@@ -1073,8 +1076,8 @@ function ChatTab({ agentId, agent, initialScope = null }) {
                                                             <div
                                                                 onMouseEnter={openProject}
                                                                 onMouseLeave={closeProject}
-                                                                className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1"
-                                                                style={{ backgroundColor: '#1a1a1a' }}
+                                                                className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1 overflow-y-auto overscroll-contain"
+                                                                style={{ backgroundColor: '#1a1a1a', maxHeight: 'min(360px, 70vh)' }}
                                                             >
                                                                 <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Pick a project</div>
                                                                 {startableProjects.map((p) => (

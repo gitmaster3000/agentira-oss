@@ -17,6 +17,8 @@ const PAGE_SIZE = 50;
 const PREFETCH_PX = 120;
 // Composer grows with typed lines, then stops and scrolls inside (px ≈ 11 lines).
 const COMPOSER_MAX_H = 176;
+// Dropdown menus scroll inside this cap so a long list never grows the page.
+const DROPDOWN_MAX_H = 'min(360px, 70vh)';
 
 const SLASH_COMMANDS = [
     { name: '/context', desc: 'Show what context (project, MCP, env, prompts) will be sent on the next message' },
@@ -377,9 +379,9 @@ export function Chat() {
         : agents.map((a) => ({ id: a.agent_id, name: a.agent_name }));
 
     return (
-        <div className="flex h-full min-h-0">
+        <div className="flex h-full min-h-0 overflow-hidden">
             {/* ── agent list (one row per agent) ────────────────────────── */}
-            <aside className={`w-full md:w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel md:flex flex-col ${mobilePane ? 'hidden' : 'flex'}`}>
+            <aside className={`w-full md:w-72 flex-shrink-0 border-r border-border-subtle bg-bg-panel md:flex flex-col min-h-0 ${mobilePane ? 'hidden' : 'flex'}`}>
                 <div className="px-4 h-[54px] flex-shrink-0 border-b border-border-subtle flex items-center gap-2">
                     <MessageSquare className="w-5 h-5 text-accent-primary" />
                     <span className="text-title-sm font-bold text-text-primary">Chat</span>
@@ -397,36 +399,42 @@ export function Chat() {
                         {newChatOpen && (
                             <>
                                 <div className="fixed inset-0 z-30" onClick={() => setNewChatOpen(false)} />
-                                <div className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-border-subtle bg-bg-app shadow-xl p-1">
-                                    <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+                                <div
+                                    className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-border-subtle bg-bg-app shadow-xl flex flex-col overflow-hidden"
+                                    style={{ maxHeight: DROPDOWN_MAX_H }}
+                                    data-testid="new-chat-dropdown"
+                                >
+                                    <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-text-tertiary flex-shrink-0">
                                         New chat with
                                     </div>
-                                    {newChatAgents.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-text-tertiary">
-                                            No agents available yet.
-                                        </div>
-                                    ) : (
-                                        newChatAgents.map((a) => {
-                                            const id = a.id || a.agent_id;
-                                            const name = a.name || a.agent_name || 'Agent';
-                                            return (
-                                                <button
-                                                    key={id}
-                                                    type="button"
-                                                    onClick={() => startNewChat(a)}
-                                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover text-left"
-                                                >
-                                                    <div
-                                                        className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
-                                                        style={{ background: agentColor(name) }}
+                                    <div className="overflow-y-auto min-h-0 overscroll-contain p-1 pt-0">
+                                        {newChatAgents.length === 0 ? (
+                                            <div className="px-2 py-3 text-xs text-text-tertiary">
+                                                No agents available yet.
+                                            </div>
+                                        ) : (
+                                            newChatAgents.map((a) => {
+                                                const id = a.id || a.agent_id;
+                                                const name = a.name || a.agent_name || 'Agent';
+                                                return (
+                                                    <button
+                                                        key={id}
+                                                        type="button"
+                                                        onClick={() => startNewChat(a)}
+                                                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover text-left"
                                                     >
-                                                        {name.slice(0, 2).toUpperCase()}
-                                                    </div>
-                                                    <span className="text-xs text-text-primary truncate">{name}</span>
-                                                </button>
-                                            );
-                                        })
-                                    )}
+                                                        <div
+                                                            className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                                                            style={{ background: agentColor(name) }}
+                                                        >
+                                                            {name.slice(0, 2).toUpperCase()}
+                                                        </div>
+                                                        <span className="text-xs text-text-primary truncate">{name}</span>
+                                                    </button>
+                                                );
+                                            })
+                                        )}
+                                    </div>
                                 </div>
                             </>
                         )}
@@ -485,7 +493,7 @@ export function Chat() {
             </aside>
 
             {/* ── conversation pane ─────────────────────────────────────── */}
-            <section className={`flex-1 min-w-0 md:flex flex-col bg-bg-panel ${mobilePane ? 'flex' : 'hidden'}`}>
+            <section className={`flex-1 min-w-0 min-h-0 md:flex flex-col bg-bg-panel overflow-hidden ${mobilePane ? 'flex' : 'hidden'}`}>
                 {!sel ? (
                     <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
                         Select a conversation, or start a new one with +
@@ -523,44 +531,50 @@ export function Chat() {
                                 {scopeOpen && (
                                     <>
                                         <div className="fixed inset-0 z-30" onClick={() => setScopeOpen(false)} />
-                                        <div className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-border-subtle bg-bg-app shadow-xl p-1">
-                                            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+                                        <div
+                                            className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-border-subtle bg-bg-app shadow-xl flex flex-col overflow-hidden"
+                                            style={{ maxHeight: DROPDOWN_MAX_H }}
+                                            data-testid="conversations-dropdown"
+                                        >
+                                            <div className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-text-tertiary flex-shrink-0">
                                                 Conversations
                                             </div>
-                                            {selScopes.map((c) => (
-                                                <button
-                                                    key={c.scope_key}
-                                                    onClick={() => pickScope(c)}
-                                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover text-left"
-                                                >
-                                                    <span className="flex-1 min-w-0">
-                                                        <span className="block text-xs text-text-primary truncate">{c.label}</span>
-                                                        {c.last_message && (
-                                                            <span className="block text-[10px] text-text-tertiary truncate">
-                                                                {c.last_message}
-                                                            </span>
-                                                        )}
-                                                    </span>
-                                                    {c.scope_key === sel.scope_key && (
-                                                        <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
-                                                    )}
-                                                </button>
-                                            ))}
-                                            {/* Optimistic: selected scope not yet in list (fresh New chat) */}
-                                            {sel && !selScopes.some((c) => c.scope_key === sel.scope_key) && (
-                                                <button
-                                                    type="button"
-                                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-bg-hover text-left"
-                                                >
-                                                    <span className="flex-1 min-w-0">
-                                                        <span className="block text-xs text-text-primary truncate">
-                                                            {sel.label || scopeLabel(sel.scope_key)}
+                                            <div className="overflow-y-auto min-h-0 overscroll-contain p-1 pt-0">
+                                                {selScopes.map((c) => (
+                                                    <button
+                                                        key={c.scope_key}
+                                                        onClick={() => pickScope(c)}
+                                                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover text-left"
+                                                    >
+                                                        <span className="flex-1 min-w-0">
+                                                            <span className="block text-xs text-text-primary truncate">{c.label}</span>
+                                                            {c.last_message && (
+                                                                <span className="block text-[10px] text-text-tertiary truncate">
+                                                                    {c.last_message}
+                                                                </span>
+                                                            )}
                                                         </span>
-                                                    </span>
-                                                    <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
-                                                </button>
-                                            )}
-                                            <div className="border-t border-border-subtle mt-1 pt-1">
+                                                        {c.scope_key === sel.scope_key && (
+                                                            <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
+                                                        )}
+                                                    </button>
+                                                ))}
+                                                {/* Optimistic: selected scope not yet in list (fresh New chat) */}
+                                                {sel && !selScopes.some((c) => c.scope_key === sel.scope_key) && (
+                                                    <button
+                                                        type="button"
+                                                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-bg-hover text-left"
+                                                    >
+                                                        <span className="flex-1 min-w-0">
+                                                            <span className="block text-xs text-text-primary truncate">
+                                                                {sel.label || scopeLabel(sel.scope_key)}
+                                                            </span>
+                                                        </span>
+                                                        <Check className="w-3.5 h-3.5 text-accent-primary flex-shrink-0" />
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="border-t border-border-subtle p-1 flex-shrink-0">
                                                 <button
                                                     type="button"
                                                     onClick={startNewChatForSelected}

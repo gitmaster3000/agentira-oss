@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { Chat } from './Chat';
 import { api } from '../api';
 
@@ -280,6 +280,45 @@ describe('Chat page', () => {
         const stop = await screen.findByTitle('Stop');
         expect(stop.className).toMatch(/btn/);
         expect(stop.className).toMatch(/btn-ghost/);
+    });
+
+    it('conversations dropdown scrolls inside a max height (does not grow the page)', async () => {
+        // Many scopes for one agent — the switcher must cap height + overflow-y.
+        api.forge.listChats.mockResolvedValue(
+            Array.from({ length: 40 }, (_, i) => ({
+                agent_id: 'a1',
+                agent_name: 'Conductor',
+                scope_key: `chat:user:scope${i}`,
+                label: `Chat ${i}`,
+                last_message: `msg ${i}`,
+                last_used_at: `2026-06-19T00:00:${String(i).padStart(2, '0')}.000Z`,
+            })),
+        );
+        render(<Chat />);
+        await waitFor(() => expect(api.forge.listChats).toHaveBeenCalled());
+        fireEvent.click(screen.getByTitle('Switch conversation'));
+        const menu = await screen.findByTestId('conversations-dropdown');
+        expect(menu.style.maxHeight).toMatch(/360px|70vh/);
+        expect(menu.className).toMatch(/overflow-hidden/);
+        // The list region (not the New chat footer) owns the scroll.
+        const scrollRegion = menu.querySelector('.overflow-y-auto');
+        expect(scrollRegion).toBeTruthy();
+        expect(scrollRegion.className).toMatch(/overscroll-contain/);
+        expect(within(menu).getByText('Chat 0')).toBeInTheDocument();
+        expect(within(menu).getByText('Chat 39')).toBeInTheDocument();
+    });
+
+    it('new-chat agent picker also scrolls inside a max height', async () => {
+        api.forge.listAgents.mockResolvedValue(
+            Array.from({ length: 30 }, (_, i) => ({ id: `ag${i}`, name: `Agent ${i}` })),
+        );
+        render(<Chat />);
+        await screen.findAllByText('Conductor');
+        fireEvent.click(screen.getByTitle('New chat'));
+        const menu = await screen.findByTestId('new-chat-dropdown');
+        expect(menu.style.maxHeight).toMatch(/360px|70vh/);
+        const scrollRegion = menu.querySelector('.overflow-y-auto');
+        expect(scrollRegion).toBeTruthy();
     });
 
     it('composer is a textarea that auto-grows with multi-line text up to a max', async () => {
