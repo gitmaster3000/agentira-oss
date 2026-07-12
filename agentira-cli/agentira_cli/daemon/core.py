@@ -964,6 +964,9 @@ class AgentiraDaemon:
                     model=model, system_prompt=system_prompt, on_event=on_event,
                     session_key=gw_session_key,
                     resume_session_id=resume_session_id,
+                    stdout_log_path=stdout_log_path or None,
+                    stderr_log_path=stderr_log_path or None,
+                    trace_id=trace_id,
                 )
             else:
                 result = await run_cli_stream(

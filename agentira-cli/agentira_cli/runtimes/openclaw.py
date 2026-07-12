@@ -102,6 +102,33 @@ class OpenClawRuntime(Runtime):
         }
 
 
+def _configure_runner(binary_path: str, agents: list) -> None:
+    """Apply the runner contract: empty systemPromptOverride + tools.profile=full."""
+    import subprocess
+
+    idx = next(
+        (i for i, a in enumerate(agents)
+         if isinstance(a, dict) and a.get("id") == _RUNNER_AGENT_ID),
+        -1,
+    )
+    if idx < 0:
+        return
+    for path, value in [
+        (f"agents.list[{idx}].systemPromptOverride", ""),
+        (f"agents.list[{idx}].tools", '{"profile":"full"}'),
+    ]:
+        try:
+            sub = subprocess.run(
+                [binary_path, "config", "set", path, value],
+                capture_output=True, text=True, timeout=10,
+            )
+            if sub.returncode != 0:
+                logger.debug("openclaw config set %s failed: %s",
+                             path, sub.stderr.strip())
+        except subprocess.TimeoutExpired:
+            logger.debug("openclaw config set %s timed out", path)
+
+
 def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") -> bool:
     """Idempotently add the `agentira-runner` agent to OpenClaw's config.
 
@@ -121,7 +148,9 @@ def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") 
     gateway picks up changes after a restart.
 
     Returns True if the entry was created, False if already present or if
-    OpenClaw isn't installed/usable.
+    OpenClaw isn't installed/usable. Always (re)applies the runner config
+    when the agent exists — older builds may have created the runner before
+    tools.profile=full was enforced.
     """
     import subprocess
 
@@ -144,7 +173,8 @@ def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") 
         return False
 
     if any(isinstance(a, dict) and a.get("id") == _RUNNER_AGENT_ID for a in agents):
-        logger.debug("runner-agent %s already present", _RUNNER_AGENT_ID)
+        logger.debug("runner-agent %s already present — reconfiguring", _RUNNER_AGENT_ID)
+        _configure_runner(binary_path, agents)
         return False
 
     # Pick a model: caller's hint, else the existing default agent's model.
@@ -178,33 +208,14 @@ def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") 
 
     logger.info("added %s runner-agent (model=%s)", _RUNNER_AGENT_ID, model or "<default>")
 
-    # Now configure the runner: empty systemPromptOverride (no identity
-    # injection) + tools.profile=full (all engine tools available).
-    # We need the runner's index in agents.list — reload to find it.
+    # Reload agents.list to find the runner index after add.
     try:
         list2 = subprocess.run(
             [binary_path, "agents", "list", "--json"],
             capture_output=True, text=True, timeout=10,
         )
         if list2.returncode == 0:
-            updated = json.loads(list2.stdout)
-            idx = next(
-                (i for i, a in enumerate(updated)
-                 if isinstance(a, dict) and a.get("id") == _RUNNER_AGENT_ID),
-                -1,
-            )
-            if idx >= 0:
-                for path, value in [
-                    (f"agents.list[{idx}].systemPromptOverride", ""),
-                    (f"agents.list[{idx}].tools", '{"profile":"full"}'),
-                ]:
-                    sub = subprocess.run(
-                        [binary_path, "config", "set", path, value],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    if sub.returncode != 0:
-                        logger.debug("openclaw config set %s failed: %s",
-                                     path, sub.stderr.strip())
+            _configure_runner(binary_path, json.loads(list2.stdout))
     except Exception as exc:
         logger.debug("post-add configuration of runner failed (non-fatal): %s", exc)
 

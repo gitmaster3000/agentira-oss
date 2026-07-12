@@ -519,6 +519,26 @@ def _build_env(extra: dict, strip: Optional[set] = None) -> dict:
     return env
 
 
+def _tee_json_line(log_f, obj: dict) -> None:
+    """Best-effort append of one JSON line to a per-run stdout log."""
+    if log_f is None:
+        return
+    try:
+        log_f.write((json.dumps(obj, ensure_ascii=False) + "\n").encode())
+    except OSError:
+        pass
+
+
+def _tee_stderr(log_f, msg: str, *, trace_id: str = "") -> None:
+    """Best-effort append of one error line to a per-run stderr log."""
+    if log_f is None:
+        return
+    try:
+        log_f.write((f"{msg} trace={trace_id}\n").encode())
+    except OSError:
+        pass
+
+
 async def run_openclaw_ws(
     gateway_url: str,
     gateway_token: str,
@@ -530,6 +550,9 @@ async def run_openclaw_ws(
     on_event=None,
     session_key: str = "",
     resume_session_id: str = "",
+    stdout_log_path: Optional[str] = None,
+    stderr_log_path: Optional[str] = None,
+    trace_id: str = "",
 ) -> StreamResult:
     """Native WS execution for OpenClaw using long-lived sessionKey for resume.
 
@@ -550,6 +573,21 @@ async def run_openclaw_ws(
         result.error = "missing gateway_url"
         result.success = False
         return result
+
+    stdout_log_f = None
+    stderr_log_f = None
+    if stdout_log_path:
+        try:
+            os.makedirs(os.path.dirname(stdout_log_path), exist_ok=True)
+            stdout_log_f = open(stdout_log_path, "ab", buffering=0)
+        except OSError as exc:
+            logger.warning("stdout log open failed (%s): %s", stdout_log_path, exc)
+    if stderr_log_path:
+        try:
+            os.makedirs(os.path.dirname(stderr_log_path), exist_ok=True)
+            stderr_log_f = open(stderr_log_path, "ab", buffering=0)
+        except OSError as exc:
+            logger.warning("stderr log open failed (%s): %s", stderr_log_path, exc)
 
     ws_base = gateway_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
     ws_url = f"{ws_base}/?auth.token={gateway_token}" if gateway_token else ws_base
@@ -803,6 +841,7 @@ async def run_openclaw_ws(
             break
 
         batch.append(item)
+        _tee_json_line(stdout_log_f, item)
         if time.monotonic() - last >= 0.5:
             await _flush()
 
@@ -811,4 +850,13 @@ async def run_openclaw_ws(
 
     if not result.success and not result.error:
         result.error = "openclaw ws: no content produced"
+    if not result.success and result.error:
+        _tee_stderr(stderr_log_f, result.error, trace_id=trace_id)
+
+    for f in (stdout_log_f, stderr_log_f):
+        if f is not None:
+            try:
+                f.close()
+            except OSError:
+                pass
     return result
