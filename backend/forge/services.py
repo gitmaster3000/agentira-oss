@@ -840,54 +840,22 @@ def _resolve_agent_status(a: Agent, runtime_online: bool, db) -> AgentStatus:
 
 
 def _refresh_status(db, agents: list[Agent]) -> dict[str, float]:
-    """Ping each unique gateway, update heartbeat, pull live costs.
+    """Resolve each agent's status. Daemon-bound agents mirror daemon health;
+    legacy runtime_url agents fall through to OFFLINE (the backend no longer
+    dials runtimes directly — the daemon owns all runtime access).
 
-    Returns: {agent_id: runtime_cost_usd} for agents with live cost data.
+    Returns: {} — kept for signature compatibility with callers.
     """
-    from backend.forge import runtime_client
-
-    now = datetime.now(timezone.utc)
-    live_costs: dict[str, float] = {}
-
-    # One health check per unique runtime_url
-    url_online: dict[str, bool] = {}
-    for a in agents:
-        url = a.runtime_url
-        if url and url not in url_online:
-            health = runtime_client.check_health(url, a.runtime_type or "openclaw")
-            url_online[url] = health.get("online", False)
-
     changed = False
     for a in agents:
-        url = a.runtime_url
-        is_online = bool(url and url_online.get(url, False))
-
-        # Resolve correct status
-        new_status = _resolve_agent_status(a, is_online, db)
+        new_status = _resolve_agent_status(a, False, db)
         if a.status != new_status:
             a.status = new_status
             changed = True
 
-        if not url:
-            continue
-
-        if is_online:
-            a.last_heartbeat = now
-            # Pull live costs
-            agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
-            rt = a.runtime_type or "openclaw"
-            gw_token = a.runtime_gateway_token or ""
-            costs = runtime_client.get_costs(url, gw_token, agent_name, rt)
-            if costs and costs.get("estimated_cost_usd"):
-                live_costs[a.id] = costs["estimated_cost_usd"]
-            # Sync model from runtime sessions if agent has no model set
-            if not a.model and costs and costs.get("model"):
-                a.model = costs["model"]
-                changed = True
-
     if changed:
         db.commit()
-    return live_costs
+    return {}
 
 
 # ── Agents ───────────────────────────────────────────────────────────────
@@ -1277,13 +1245,9 @@ def reset_agent_status(agent_id: str) -> dict | None:
             r.finished_at = now
             if r.started_at:
                 r.duration_ms = int((now - _utc(r.started_at)).total_seconds() * 1000)
-        # Reset agent status based on runtime health
-        from backend.forge import runtime_client
-        if a.runtime_url:
-            health = runtime_client.check_health(a.runtime_url, a.runtime_type or "openclaw")
-            a.status = AgentStatus.ONLINE if health.get("online") else AgentStatus.OFFLINE
-        else:
-            a.status = AgentStatus.OFFLINE
+        # Reset agent status. Daemon-bound agents mirror daemon health; the
+        # backend no longer dials runtimes directly.
+        a.status = _resolve_agent_status(a, False, db)
         a.last_heartbeat = now
         db.commit()
         db.refresh(a)
@@ -1611,26 +1575,7 @@ def get_stats() -> dict:
         total_input_tokens = db.query(func.sum(Run.input_tokens)).scalar() or 0
         total_output_tokens = db.query(func.sum(Run.output_tokens)).scalar() or 0
 
-        # Pull live runtime costs for all agents with a runtime_url
-        from backend.forge import runtime_client
-        runtime_total = 0.0
-        runtime_input = 0
-        runtime_output = 0
-        agents = db.query(Agent).filter(Agent.runtime_url.isnot(None), Agent.runtime_url != "").all()
-        for a in agents:
-            agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
-            costs = runtime_client.get_costs(
-                a.runtime_url, a.runtime_gateway_token or "",
-                agent_name, a.runtime_type or "openclaw",
-            )
-            if costs:
-                runtime_total += costs.get("estimated_cost_usd", 0) or 0
-                runtime_input += costs.get("total_input_tokens", 0) or 0
-                runtime_output += costs.get("total_output_tokens", 0) or 0
-
-        total_cost = forge_cost + runtime_total
-        total_input_tokens += runtime_input
-        total_output_tokens += runtime_output
+        total_cost = forge_cost
 
         return {
             "agents": {"total": total_agents, "online": online_agents, "busy": busy_agents},
@@ -2213,96 +2158,64 @@ def set_openclaw_agent_model(agent_name: str, model: str) -> dict:
 
 # ── Runtime (adapter-based, pull only) ─────────────────────────────────
 
-def _agent_runtime(a: Agent) -> tuple[str, str, str, str]:
-    """Extract runtime config from an agent → (url, gw_token, hooks_token, agent_name)."""
-    return (
-        a.runtime_url or "http://127.0.0.1:18789",
-        a.runtime_gateway_token or "",
-        a.runtime_hooks_token or "",
-        a.runtime_agent_name or (a.profile.name if a.profile else a.name),
-    )
-
-
 def get_runtime_status(agent_id: str) -> dict:
-    """Pull live status from the agent's runtime via adapter."""
-    from backend.forge import runtime_client
+    """Resolve agent status from daemon health (no direct runtime dialing)."""
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"online": False, "error": "Agent not found"}
 
-        url, gw_token, _, agent_name = _agent_runtime(a)
         rt = a.runtime_type or "openclaw"
-
-        health = runtime_client.check_health(url, rt)
-        sessions = runtime_client.get_sessions(url, gw_token, agent_name, rt)
-        is_online = health.get("online", False)
-
-        # Update status using shared resolver
-        new_status = _resolve_agent_status(a, is_online, db)
+        new_status = _resolve_agent_status(a, False, db)
         if a.status != new_status:
             a.status = new_status
-        if is_online:
-            a.last_heartbeat = datetime.now(timezone.utc)
-        db.commit()
+            db.commit()
+        is_online = new_status == AgentStatus.ONLINE
 
         return {
             "online": is_online,
-            "health": health,
-            "sessions": sessions,
+            "health": {"online": is_online},
+            "sessions": [],
             "model": a.model or "",
             "runtime_type": rt,
-            "latency_ms": health.get("latency_ms"),
+            "latency_ms": None,
         }
 
 
 def get_runtime_sessions(agent_id: str) -> dict:
-    """Pull live sessions + activity from the agent's runtime."""
-    from backend.forge import runtime_client
+    """Live sessions/activity are surfaced from stored runs, not by dialing
+    the runtime. The backend no longer connects to runtimes directly."""
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"error": "Agent not found"}
-        url, gw_token, _, agent_name = _agent_runtime(a)
-        rt = a.runtime_type or "openclaw"
-        return {
-            "sessions": runtime_client.get_sessions(url, gw_token, agent_name, rt),
-            "activity": runtime_client.get_activity(url, gw_token, agent_name, runtime_type=rt),
-        }
+        return {"sessions": [], "activity": []}
 
 
 def get_runtime_costs(agent_id: str) -> dict:
-    """Pull cost/usage data from the agent's runtime."""
-    from backend.forge import runtime_client
+    """Cost/usage from Forge's own tracked runs (no direct runtime pull)."""
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
             return {"error": "Agent not found"}
-        url, gw_token, _, agent_name = _agent_runtime(a)
-        rt = a.runtime_type or "openclaw"
-        runtime_costs = runtime_client.get_costs(url, gw_token, agent_name, rt)
-        # Merge with Forge's own tracked costs
-        forge_costs = get_agent_cost_breakdown(agent_id)
         return {
-            "runtime": runtime_costs,
-            "forge": forge_costs,
+            "runtime": {},
+            "forge": get_agent_cost_breakdown(agent_id),
         }
 
 
 def get_openclaw_overview() -> dict:
-    """Overview: health of all configured runtimes."""
-    from backend.forge import runtime_client
+    """Overview of configured runtimes (status from daemon health)."""
     with _session() as db:
         agents = db.query(Agent).filter(Agent.runtime_url != "").all()
         seen: dict[str, dict] = {}
         for a in agents:
             url = a.runtime_url
             if url not in seen:
-                rt = a.runtime_type or "openclaw"
                 seen[url] = {
                     "url": url,
-                    "runtime_type": rt,
-                    "health": runtime_client.check_health(url, rt),
+                    "runtime_type": a.runtime_type or "openclaw",
+                    "health": {"online": a.status == AgentStatus.ONLINE},
                     "agents": [],
                 }
             seen[url]["agents"].append({
@@ -2316,32 +2229,15 @@ def get_openclaw_overview() -> dict:
 
 
 def sync_openclaw_agents() -> list[dict]:
-    """Sync runtime data into forge agents via adapter pull."""
-    from backend.forge import runtime_client
+    """Resolve agent statuses from daemon health (no direct runtime pull)."""
     with _session() as db:
         _sync_bots(db)
-        forge_agents = db.query(Agent).all()
-        now = datetime.now(timezone.utc)
-
-        for a in forge_agents:
+        for a in db.query(Agent).all():
             if not a.runtime_url:
                 continue
-            url, gw_token, _, agent_name = _agent_runtime(a)
-            rt = a.runtime_type or "openclaw"
-
-            health = runtime_client.check_health(url, rt)
-            is_online = health.get("online", False)
-
-            new_status = _resolve_agent_status(a, is_online, db)
+            new_status = _resolve_agent_status(a, False, db)
             if a.status != new_status:
                 a.status = new_status
-            if is_online:
-                a.last_heartbeat = now
-                # Pull model from runtime sessions
-                costs = runtime_client.get_costs(url, gw_token, agent_name, rt)
-                if costs and costs.get("model") and not a.model:
-                    a.model = costs["model"]
-
         db.commit()
         return [_agent_to_dict(a) for a in forge_agents]
 
@@ -4472,7 +4368,6 @@ def send_runtime_message(
     so the daemon can render a synthetic system message ("you are helping
     the user who is currently viewing …").
     """
-    from backend.forge import runtime_client
     # ADR 008: sending a message into a task scope whose Run is PAUSED
     # auto-resumes the run. The user's message IS the continuation turn —
     # it's dispatched below carrying the scope's resume session, so the
@@ -4770,10 +4665,11 @@ def send_runtime_message(
                 result["resumed_run_id"] = resumed_run_id
             return result
 
-        url, gw_token, _, agent_name = _agent_runtime(a)
-        rt = a.runtime_type or "openclaw"
-
-        # Log the outgoing user message
+        # No bound daemon runtime → the backend has no way to run this agent.
+        # It no longer dials runtimes directly; all execution goes through the
+        # daemon (the `a.runtime_id` branch above). Log the user's message and
+        # return a clear error so the UI can prompt the user to connect a
+        # runtime rather than silently dropping the turn.
         user_msg = AgentMessage(
             agent_id=a.id, run_id=run_id,
             role=MessageRole.USER, content=content,
@@ -4781,90 +4677,10 @@ def send_runtime_message(
         )
         db.add(user_msg)
         db.commit()
-
-        # Build message history for context
-        recent = (db.query(AgentMessage)
-                  .filter(AgentMessage.agent_id == a.id)
-                  .order_by(AgentMessage.created_at.desc())
-                  .limit(20).all())
-        recent.reverse()
-
-        messages = []
-        _sys = "\n\n---\n\n".join(
-            p for p in (_platform_guardrails(), a.system_prompt or "") if p)
-        if _sys:
-            messages.append({"role": "system", "content": _sys})
-        for m in recent:
-            messages.append({"role": m.role.value, "content": m.content})
-
-        # Send via adapter
-        result = runtime_client.send_chat(url, gw_token, agent_name, messages, rt)
-
-        if "_error" in result:
-            # Log failed attempt
-            wh = WebhookLog(
-                agent_id=a.id, direction="outbound",
-                url=f"{url}/v1/chat/completions",
-                event="forge.chat",
-                payload=json.dumps({"content": content[:500]}),
-                status_code=500, success=False,
-                duration_ms=result.get("_latency_ms"),
-                response_body=result["_error"][:500],
-            )
-            db.add(wh)
-            db.commit()
-            return {"success": False, "error": result["_error"], "duration_ms": result.get("_latency_ms")}
-
-        # Calculate cost — use API value or estimate from tokens
-        cost_usd = result.get("cost_usd", 0.0)
-        in_tok = result.get("input_tokens", 0)
-        out_tok = result.get("output_tokens", 0)
-        # Use agent's configured model for pricing (API returns "openclaw:agent" which isn't in pricing table)
-        model_used = a.model or result.get("model", "")
-        if not cost_usd and (in_tok or out_tok):
-            est = estimate_cost(model_used, in_tok, out_tok)
-            cost_usd = est.get("total_cost", 0.0)
-
-        # Log the assistant response
-        assistant_msg = AgentMessage(
-            agent_id=a.id, run_id=run_id,
-            role=MessageRole.ASSISTANT,
-            content=result.get("content", ""),
-            model_used=model_used,
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cost_usd=cost_usd,
-        )
-        db.add(assistant_msg)
-
-        # Log webhook delivery
-        wh = WebhookLog(
-            agent_id=a.id, direction="outbound",
-            url=f"{url}/v1/chat/completions",
-            event="forge.chat",
-            payload=json.dumps({"content": content[:500]}),
-            status_code=200, success=True,
-            duration_ms=result.get("_latency_ms"),
-            response_body=json.dumps({
-                "content": result.get("content", "")[:500],
-                "model": result.get("model", ""),
-                "tokens": result.get("input_tokens", 0) + result.get("output_tokens", 0),
-            }),
-        )
-        db.add(wh)
-
-        # Update agent cost stats
-        a.total_cost_usd += cost_usd
-        db.commit()
-
         return {
-            "success": True,
-            "content": result.get("content", ""),
-            "model": model_used,
-            "input_tokens": in_tok,
-            "output_tokens": out_tok,
-            "cost_usd": cost_usd,
-            "duration_ms": result.get("_latency_ms"),
+            "success": False,
+            "error": "Agent has no connected runtime. Start the Agentira "
+                     "daemon on the agent's machine to run this agent.",
         }
 
 

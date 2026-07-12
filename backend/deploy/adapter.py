@@ -1,8 +1,6 @@
 """AP-316: `DeployAdapter` — the abstract contract every deploy target kind
-implements. Mirrors the `RuntimeAdapter` pattern in
-`backend/forge/runtime_client.py:59` (ADR-011 §2/§6): one ABC, one
-subclass per backend, capability-gated no-ops instead of exceptions for
-whatever a target can't do.
+implements (ADR-011 §2/§6): one ABC, one subclass per backend,
+capability-gated no-ops instead of exceptions for whatever a target can't do.
 """
 from __future__ import annotations
 

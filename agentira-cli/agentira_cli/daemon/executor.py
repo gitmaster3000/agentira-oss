@@ -26,6 +26,7 @@ from agentira_cli.runtimes.claude import (
     ToolResultEvent,
     ToolUseEvent,
 )
+from agentira_cli.runtimes.gateway_connect import build_connect_params
 
 logger = logging.getLogger("agentira.daemon.executor")
 
@@ -636,31 +637,16 @@ async def run_openclaw_ws(
             except Exception:
                 ch = {}
 
-            # 2. connect (protocol v4)
+            # 2. connect — canonical backend identity + negotiated protocol
             ws.send(
                 json.dumps(
                     {
                         "type": "req",
                         "id": "c1",
                         "method": "connect",
-                        "params": {
-                            "minProtocol": 4,
-                            "maxProtocol": 4,
-                            "client": {
-                                "id": "agentira-daemon",
-                                "version": "2026.7",
-                                "platform": "macos",
-                                "mode": "operator",
-                            },
-                            "role": "operator",
-                            "scopes": ["operator.read", "operator.write"],
-                            "caps": ["tool-events"],
-                            "commands": [],
-                            "permissions": {},
-                            "auth": {"token": gateway_token} if gateway_token else {},
-                            "locale": "en-US",
-                            "userAgent": "agentira-daemon/1.0",
-                        },
+                        "params": build_connect_params(
+                            gateway_token, user_agent="agentira-daemon"
+                        ),
                     }
                 )
             )
