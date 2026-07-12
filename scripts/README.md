@@ -24,7 +24,8 @@ iwr -useb https://YOUR-INSTANCE.up.railway.app/api/public/install.ps1 | iex
 The CLI wheel is baked into the backend Docker image on every Railway deploy.
 Customers never need GitHub access.
 
-To skip interactive prompts, set env vars before piping:
+To skip interactive prompts, put values in `~/.agentira/.env` before piping, or
+export them only for that one command:
 
 ```bash
 AGENTIRA_DAEMON_API_URL=https://your.url \

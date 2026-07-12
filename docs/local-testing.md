@@ -50,8 +50,7 @@ sets `AGENTIRA_ENV=dev` + an `AGENTIRA_DEV_API_KEY` (see
 the `preview` profile — no browser login:
 
 **First, turn on developer mode** — the test/prod split is dev-only. Customers
-act on their one configured daemon; developers set this once in `~/.agentira/.env`
-(or export in their shell profile):
+act on their one configured daemon; developers set this in `~/.agentira/.env` only:
 
 ```bash
 mkdir -p ~/.agentira
@@ -63,9 +62,9 @@ EOF
 chmod 600 ~/.agentira/.env
 ```
 
-Edit anytime with `nano ~/.agentira/.env` (or your editor). Shell exports win
-over the file if both are set. Remove `AGENTIRA_DEV_MODE` (or set it to `0`) to
-target your real daemon again.
+Edit anytime with `nano ~/.agentira/.env` (or your editor). **Only use the file**
+— do not export `AGENTIRA_*` in `~/.zshrc`. Set `AGENTIRA_DEV_MODE=0` for prod
+(`~/.agentira`) or `AGENTIRA_DEV_MODE=1` for local test (`~/.agentira-test`).
 
 > `AGENTIRA_DEV_MODE` only changes local CLI ergonomics — it is **not** a
 > security boundary. The real gate is server-side (`AGENTIRA_ENV=dev` +

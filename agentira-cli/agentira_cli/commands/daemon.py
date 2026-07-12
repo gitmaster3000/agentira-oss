@@ -66,12 +66,12 @@ def _daemon_main(
             typer.secho(
                 "TEST daemon needs your local backend in the environment, but "
                 "these are unset:\n  " + "\n  ".join(missing) + "\n\n"
-                "Set them in ~/.agentira/.env (or export in your shell), e.g.:\n"
+                "Set them in ~/.agentira/.env, e.g.:\n"
                 "  AGENTIRA_TEST_API_URL=http://localhost:8111\n"
                 "  AGENTIRA_TEST_API_KEY=<dev key>   "
                 "# matches AGENTIRA_DEV_API_KEY on the backend\n\n"
-                "Then re-run. (To act on your real daemon instead, unset "
-                "AGENTIRA_DEV_MODE in ~/.agentira/.env.)",
+                "Then re-run. (For prod, set AGENTIRA_DEV_MODE=0 in "
+                "~/.agentira/.env.)",
                 fg="yellow", err=True,
             )
             raise typer.Exit(1)

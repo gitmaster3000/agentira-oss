@@ -27,15 +27,19 @@ def test_parse_env_file_skips_comments_and_export(tmp_path: Path):
     }
 
 
-def test_load_env_file_does_not_override_shell(tmp_path: Path, monkeypatch):
+def test_load_env_file_overrides_shell(tmp_path: Path, monkeypatch):
     path = tmp_path / ".env"
-    path.write_text("AGENTIRA_DEV_MODE=1\nAGENTIRA_TEST_API_URL=file\n", encoding="utf-8")
+    path.write_text(
+        "AGENTIRA_DEV_MODE=0\nAGENTIRA_TEST_API_URL=file\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENTIRA_DEV_MODE", "1")
     monkeypatch.setenv("AGENTIRA_TEST_API_URL", "shell")
 
     env_file.load_env_file(path)
 
-    assert os.environ["AGENTIRA_DEV_MODE"] == "1"
-    assert os.environ["AGENTIRA_TEST_API_URL"] == "shell"
+    assert os.environ["AGENTIRA_DEV_MODE"] == "0"
+    assert os.environ["AGENTIRA_TEST_API_URL"] == "file"
 
 
 def test_load_cli_env_files_reads_default_and_active_home(tmp_path: Path, monkeypatch):
@@ -43,11 +47,13 @@ def test_load_cli_env_files_reads_default_and_active_home(tmp_path: Path, monkey
     test_home = tmp_path / "agentira-test"
     default_home.mkdir()
     test_home.mkdir()
-    (default_home / ".env").write_text("AGENTIRA_DEV_MODE=1\n", encoding="utf-8")
-    (test_home / ".env").write_text("AGENTIRA_TEST_API_KEY=test-key\n", encoding="utf-8")
+    (default_home / ".env").write_text("AGENTIRA_DEV_MODE=0\n", encoding="utf-8")
+    (test_home / ".env").write_text(
+        "AGENTIRA_DEV_MODE=1\nAGENTIRA_TEST_API_KEY=test-key\n",
+        encoding="utf-8",
+    )
 
-    monkeypatch.delenv("AGENTIRA_DEV_MODE", raising=False)
-    monkeypatch.delenv("AGENTIRA_TEST_API_KEY", raising=False)
+    monkeypatch.setenv("AGENTIRA_DEV_MODE", "1")
     monkeypatch.setenv("AGENTIRA_HOME", str(test_home))
     monkeypatch.setattr(env_file, "_cli_default_home", lambda: default_home)
 

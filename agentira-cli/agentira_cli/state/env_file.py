@@ -1,4 +1,9 @@
-"""Load CLI/daemon env vars from ~/.agentira/.env (shell vars win)."""
+"""Load CLI/daemon env vars from ~/.agentira/.env.
+
+The file is the source of truth — values in .env override anything already
+in the process environment. Configure prod vs local test there only; do not
+export AGENTIRA_* in shell profiles.
+"""
 
 from __future__ import annotations
 
@@ -27,11 +32,11 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 
 def load_env_file(path: Path) -> None:
-    """Merge KEY=VALUE pairs from *path* into os.environ (no shell override)."""
+    """Apply KEY=VALUE pairs from *path* into os.environ (file wins)."""
     if not path.is_file():
         return
     for key, val in _parse_env_file(path).items():
-        os.environ.setdefault(key, val)
+        os.environ[key] = val
 
 
 def _cli_default_home() -> Path:
