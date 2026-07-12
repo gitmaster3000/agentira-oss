@@ -1,17 +1,17 @@
 # Agentira daemon installer — Windows.
 #
-# Pipeable: iwr -useb https://.../install-daemon.ps1 | iex
+# Pipeable:
+#   iwr -useb https://YOUR-INSTANCE.up.railway.app/api/public/install.ps1 | iex
 #
 # What it does:
 #   1. Checks for python (>=3.11), claude CLI, git
-#   2. pip-installs agentira-cli from this GitHub repo
-#   3. Creates $env:USERPROFILE\.agentira\.env and prompts for backend URL + API key
-#   4. Prints the command to start the daemon
+#   2. Prompts for your Agentira backend URL
+#   3. pip-installs agentira-cli from that instance's published wheel
+#   4. Creates $env:USERPROFILE\.agentira\.env with backend URL + API key
 #
 # Env vars it respects (skip interactive prompts):
 #   AGENTIRA_DAEMON_API_URL  — backend URL (e.g. https://x.railway.app)
 #   AGENTIRA_DAEMON_API_KEY  — your workspace API key
-#   AGENTIRA_REPO            — defaults to gitmaster3000/agentira
 
 $ErrorActionPreference = 'Stop'
 
@@ -20,6 +20,17 @@ function Write-Ok($msg)    { Write-Host "  ✓ " -ForegroundColor Green -NoNewli
 function Write-Warn($msg)  { Write-Host "  ! " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
 function Write-Fail($msg)  { Write-Host "  ✗ " -ForegroundColor Red -NoNewline; Write-Host $msg; exit 1 }
 function Write-Hint($msg)  { Write-Host "    $msg" -ForegroundColor DarkGray }
+
+function Resolve-InstallUrl($BaseUrl) {
+    $base = $BaseUrl.TrimEnd('/')
+    try {
+        $resp = Invoke-RestMethod -Uri "$base/api/public/cli-release" -TimeoutSec 20
+        return $resp.install_url
+    } catch {
+        Write-Fail "Could not fetch CLI release from $base/api/public/cli-release.
+    Check the backend URL. The operator may need to redeploy the backend."
+    }
+}
 
 Write-Host ""
 Write-Host "Agentira daemon installer" -ForegroundColor White
@@ -74,45 +85,8 @@ if (-not $git) {
 }
 Write-Ok "git $((& git --version) -replace 'git version ', '')"
 
-# ── Step 2: pip install ─────────────────────────────────────────────────
-Write-Step "Installing agentira-cli"
-
-$repo = if ($env:AGENTIRA_REPO) { $env:AGENTIRA_REPO } else { "gitmaster3000/agentira" }
-$pipTarget = "git+https://github.com/$repo.git#subdirectory=agentira-cli"
-
-# Prefer --user when not in a venv.
-$pipArgs = @("install", "--upgrade", "--quiet", $pipTarget)
-if (-not $env:VIRTUAL_ENV) {
-    $pipArgs = @("install", "--upgrade", "--quiet", "--user", $pipTarget)
-}
-
-try {
-    & $python.Source -m pip @pipArgs
-    if ($LASTEXITCODE -ne 0) { throw "pip exit code $LASTEXITCODE" }
-    Write-Ok "agentira-cli installed from $repo"
-} catch {
-    Write-Fail "pip install failed: $_
-    Try manually: python -m pip install --user '$pipTarget'"
-}
-
-# Verify the entry point landed somewhere on PATH.
-$agentira = Get-Command agentira -ErrorAction SilentlyContinue
-if (-not $agentira) {
-    Write-Warn "'agentira' command not on PATH after install."
-    Write-Hint "If you used --user, add Python's user-scripts dir to PATH."
-    Write-Hint "Find it with: python -m site --user-base"
-    Write-Hint "Then add <that-path>\Scripts to your PATH env var."
-    Write-Hint "Open a new terminal and re-run."
-    exit 1
-}
-Write-Ok "agentira CLI on PATH: $($agentira.Source)"
-
-# ── Step 3: config ──────────────────────────────────────────────────────
-Write-Step "Configuring connection"
-
-$configDir = Join-Path $env:USERPROFILE ".agentira"
-$envFile = Join-Path $configDir ".env"
-New-Item -ItemType Directory -Force -Path $configDir | Out-Null
+# ── Step 2: backend URL ─────────────────────────────────────────────────
+Write-Step "Connecting to your Agentira instance"
 
 $apiUrl = $env:AGENTIRA_DAEMON_API_URL
 if (-not $apiUrl) {
@@ -126,6 +100,43 @@ if (-not $apiUrl) {
     }
 }
 $apiUrl = $apiUrl.TrimEnd('/')
+
+# ── Step 3: pip install ─────────────────────────────────────────────────
+Write-Step "Installing agentira-cli"
+
+$pipTarget = Resolve-InstallUrl $apiUrl
+
+$pipArgs = @("install", "--upgrade", "--quiet", $pipTarget)
+if (-not $env:VIRTUAL_ENV) {
+    $pipArgs = @("install", "--upgrade", "--quiet", "--user", $pipTarget)
+}
+
+try {
+    & $python.Source -m pip @pipArgs
+    if ($LASTEXITCODE -ne 0) { throw "pip exit code $LASTEXITCODE" }
+    Write-Ok "agentira-cli installed from $apiUrl"
+} catch {
+    Write-Fail "pip install failed: $_
+    Try manually: python -m pip install --user '$pipTarget'"
+}
+
+$agentira = Get-Command agentira -ErrorAction SilentlyContinue
+if (-not $agentira) {
+    Write-Warn "'agentira' command not on PATH after install."
+    Write-Hint "If you used --user, add Python's user-scripts dir to PATH."
+    Write-Hint "Find it with: python -m site --user-base"
+    Write-Hint "Then add <that-path>\Scripts to your PATH env var."
+    Write-Hint "Open a new terminal and re-run."
+    exit 1
+}
+Write-Ok "agentira CLI on PATH: $($agentira.Source)"
+
+# ── Step 4: config ──────────────────────────────────────────────────────
+Write-Step "Saving daemon credentials"
+
+$configDir = Join-Path $env:USERPROFILE ".agentira"
+$envFile = Join-Path $configDir ".env"
+New-Item -ItemType Directory -Force -Path $configDir | Out-Null
 
 $apiKey = $env:AGENTIRA_DAEMON_API_KEY
 if (-not $apiKey) {
@@ -141,7 +152,6 @@ if (-not $apiKey) {
     }
 }
 
-# Back up existing config if any.
 if (Test-Path $envFile) {
     $backup = "${envFile}.bak.$([int][double]::Parse((Get-Date -UFormat %s)))"
     Copy-Item $envFile $backup
@@ -158,7 +168,6 @@ AGENTIRA_DAEMON_API_URL=$apiUrl
 AGENTIRA_DAEMON_API_KEY=$apiKey
 "@ | Set-Content -Path $envFile -Encoding UTF8
 
-# Restrict ACL — current user only.
 $acl = Get-Acl $envFile
 $acl.SetAccessRuleProtection($true, $false)
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
@@ -168,11 +177,11 @@ Set-Acl -Path $envFile -AclObject $acl
 
 Write-Ok "Config written to $envFile (current-user ACL)"
 
-# ── Step 4: smoke ──────────────────────────────────────────────────────
+# ── Step 5: smoke ──────────────────────────────────────────────────────
 Write-Step "Smoke-checking the backend"
 
 try {
-    $r = Invoke-WebRequest -Uri "$apiUrl/api/statuses" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+    Invoke-WebRequest -Uri "$apiUrl/api/statuses" -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop | Out-Null
     Write-Ok "Backend reachable: $apiUrl"
 } catch {
     Write-Warn "Could not reach $apiUrl/api/statuses"
@@ -187,11 +196,10 @@ Write-Host ""
 Write-Host "Start the daemon:" -ForegroundColor White
 Write-Host "  agentira daemon" -ForegroundColor Cyan
 Write-Host ""
+Write-Host "Upgrade later:" -ForegroundColor White
+Write-Host "  agentira daemon update" -ForegroundColor Cyan
+Write-Host ""
 Write-Host "Keep it running across reboots:" -ForegroundColor White
 Write-Host "  agentira daemon install-service" -ForegroundColor Cyan
 Write-Host "  (creates a Windows scheduled task; auto-starts at login)" -ForegroundColor DarkGray
-Write-Host ""
-Write-Host "Need help?" -ForegroundColor White
-Write-Host "  • First-time guide: https://github.com/$repo/blob/main/docs/first-user.md" -ForegroundColor Cyan
-Write-Host "  • Troubleshooting: same doc, 'Troubleshooting' section" -ForegroundColor DarkGray
 Write-Host ""

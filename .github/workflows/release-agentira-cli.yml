@@ -1,23 +1,20 @@
 name: Release agentira-cli
 
-# Publish installable CLI builds to GitHub Releases.
-# Tag format: agentira-cli-v0.1.0
+# Verify the CLI wheel builds cleanly. The wheel ships inside the backend
+# Docker image on every Railway deploy (see Dockerfile + write_cli_manifest.py).
+# Customers install/upgrade from their instance URL — not GitHub.
 #
-# Customers upgrade with:
-#   agentira daemon update
-# or:
-#   pip install --upgrade <wheel-url-from-release>
+# Optional: push tag agentira-cli-v0.1.0 after bumping agentira-cli/pyproject.toml
+# to mark a release before deploying to Railway.
 on:
   push:
     tags:
       - "agentira-cli-v*"
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  release:
-    name: Build wheel + GitHub Release
+  verify-wheel:
+    name: Build wheel (ships on next Railway deploy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,17 +23,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build sdist + wheel
+      - name: Build wheel + manifest
         run: |
           python -m pip install --upgrade pip build
-          python -m build agentira-cli/
-          ls -la agentira-cli/dist/
+          python -m build agentira-cli/ -o /tmp/cli-dist
+          mkdir -p backend/static/cli/wheels
+          cp /tmp/cli-dist/*.whl backend/static/cli/wheels/
+          python scripts/write_cli_manifest.py
+          ls -la backend/static/cli/ backend/static/cli/wheels/
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload wheel artifact (operator reference)
+        uses: actions/upload-artifact@v4
         with:
-          files: agentira-cli/dist/*
-          generate_release_notes: true
-          name: agentira-cli ${{ github.ref_name }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: agentira-cli-wheel
+          path: backend/static/cli/

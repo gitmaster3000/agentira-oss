@@ -1,6 +1,6 @@
-"""GitHub release check + self-update for the agentira-cli / daemon.
+"""Backend-hosted CLI release check + self-update for the agentira-cli / daemon.
 
-Customers install via `pip install agentira-cli` (or a release wheel).
+Customers install from their Agentira instance URL (Railway-hosted wheel).
 `agentira daemon update` upgrades in-place using the same Python that
 runs the CLI. On daemon startup we log when a newer release exists.
 """
@@ -24,27 +24,27 @@ from agentira_cli.transport.tls import ssl_context
 
 logger = logging.getLogger("agentira.update")
 
-# Override for forks / staging: AGENTIRA_GITHUB_REPO=owner/repo
-_DEFAULT_REPO = "gitmaster3000/agentira"
-TAG_PREFIX = "agentira-cli-v"
 _USER_AGENT = "agentira-cli"
+_RELEASE_PATH = "/api/public/cli-release"
 
 
 @dataclass(frozen=True)
 class ReleaseInfo:
-    tag: str
     version: str
-    name: str
-    html_url: str
     install_spec: str
-    published_at: str = ""
+    install_sh_url: str = ""
+    min_python: str = "3.11"
+
+
+@dataclass(frozen=True)
+class ReleaseFetchResult:
+    release: Optional[ReleaseInfo]
+    status: str  # ok | unreachable | not_available
 
 
 def parse_version(version_str: str) -> tuple[int, ...]:
     """Parse semver-ish '0.1.2' / 'v0.1.2' into a comparable tuple."""
     raw = version_str.strip().removeprefix("v")
-    if raw.startswith(TAG_PREFIX):
-        raw = raw[len(TAG_PREFIX):]
     parts: list[int] = []
     for segment in raw.split("."):
         m = re.match(r"(\d+)", segment)
@@ -58,86 +58,79 @@ def is_newer(latest: str, current: str) -> bool:
     return parse_version(latest) > parse_version(current)
 
 
-def _github_repo() -> str:
-    return (os.environ.get("AGENTIRA_GITHUB_REPO") or _DEFAULT_REPO).strip()
+def _normalize_api_url(api_url: str) -> str:
+    return (api_url or "").strip().rstrip("/")
 
 
-def _api_get(path: str, timeout: float = 15.0) -> object:
-    url = f"https://api.github.com{path}"
+def _fetch_release_json(api_url: str, *, timeout: float = 15.0) -> dict:
+    base = _normalize_api_url(api_url)
+    if not base:
+        raise ValueError("api_url required")
+    url = f"{base}{_RELEASE_PATH}"
     req = urllib.request.Request(
         url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": _USER_AGENT,
-        },
+        headers={"Accept": "application/json", "User-Agent": _USER_AGENT},
     )
     with urllib.request.urlopen(req, timeout=timeout, context=ssl_context()) as resp:
-        return json.loads(resp.read().decode())
+        data = json.loads(resp.read().decode())
+    if not isinstance(data, dict) or not data.get("version") or not data.get("install_url"):
+        raise ValueError("invalid cli-release payload")
+    return data
 
 
-def _install_spec_for_release(repo: str, release: dict) -> str:
-    tag = release.get("tag_name") or ""
-    for asset in release.get("assets") or []:
-        name = (asset.get("name") or "")
-        if name.endswith(".whl") and "agentira" in name.lower():
-            url = asset.get("browser_download_url")
-            if url:
-                return url
-    if tag:
-        return (
-            f"git+https://github.com/{repo}.git@{tag}"
-            "#subdirectory=agentira-cli"
-        )
-    raise ValueError("release has no installable asset or tag")
-
-
-def fetch_latest_cli_release(*, repo: str | None = None) -> Optional[ReleaseInfo]:
-    """Return the newest GitHub release tagged agentira-cli-v*, or None."""
-    repo = repo or _github_repo()
+def fetch_latest_cli_release_result(*, api_url: str) -> ReleaseFetchResult:
+    """Return the instance's published CLI release plus fetch status."""
     try:
-        data = _api_get(f"/repos/{repo}/releases?per_page=30")
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        logger.debug("release fetch failed: %s", exc)
-        return None
-    if not isinstance(data, list):
-        return None
+        data = _fetch_release_json(api_url)
+    except urllib.error.HTTPError as exc:
+        logger.debug("cli-release HTTP %s: %s", exc.code, exc)
+        if exc.code == 404:
+            return ReleaseFetchResult(None, "not_available")
+        return ReleaseFetchResult(None, "unreachable")
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        logger.debug("cli-release fetch failed: %s", exc)
+        if isinstance(exc, ValueError) and "api_url required" in str(exc):
+            return ReleaseFetchResult(None, "not_available")
+        return ReleaseFetchResult(None, "unreachable")
 
-    candidates: list[ReleaseInfo] = []
-    for rel in data:
-        if rel.get("draft") or rel.get("prerelease"):
-            continue
-        tag = rel.get("tag_name") or ""
-        if not tag.startswith(TAG_PREFIX):
-            continue
-        ver = tag[len(TAG_PREFIX):]
-        try:
-            spec = _install_spec_for_release(repo, rel)
-        except ValueError:
-            continue
-        candidates.append(ReleaseInfo(
-            tag=tag,
-            version=ver,
-            name=rel.get("name") or tag,
-            html_url=rel.get("html_url") or "",
-            install_spec=spec,
-            published_at=rel.get("published_at") or "",
-        ))
-
-    if not candidates:
-        return None
-    candidates.sort(key=lambda r: parse_version(r.version), reverse=True)
-    return candidates[0]
+    release = ReleaseInfo(
+        version=str(data["version"]),
+        install_spec=str(data["install_url"]),
+        install_sh_url=str(data.get("install_sh_url") or ""),
+        min_python=str(data.get("min_python") or "3.11"),
+    )
+    return ReleaseFetchResult(release, "ok")
 
 
-def check_for_update(*, current: str | None = None) -> tuple[str, Optional[ReleaseInfo]]:
-    """Return (current_version, latest_release_or_none_if_up_to_date)."""
+def fetch_latest_cli_release(*, api_url: str) -> Optional[ReleaseInfo]:
+    return fetch_latest_cli_release_result(api_url=api_url).release
+
+
+def _fetch_failure_message(api_url: str, current: str, status: str) -> str:
+    base = _normalize_api_url(api_url) or "(no backend URL configured)"
+    if status == "not_available":
+        return (
+            f"No CLI release is published on {base} (current {current}). "
+            f"The operator may need to redeploy the backend."
+        )
+    return (
+        f"Could not reach {base}{_RELEASE_PATH} (current {current}). "
+        f"Check AGENTIRA_DAEMON_API_URL and try again."
+    )
+
+
+def check_for_update(
+    *, api_url: str, current: str | None = None,
+) -> tuple[str, Optional[ReleaseInfo], str]:
+    """Return (current_version, latest_release_or_none, fetch_status)."""
     cur = current or get_version()
-    latest = fetch_latest_cli_release()
+    result = fetch_latest_cli_release_result(api_url=api_url)
+    latest = result.release
     if latest is None:
-        return cur, None
+        return cur, None, result.status
     if is_newer(latest.version, cur):
-        return cur, latest
-    return cur, None
+        return cur, latest, result.status
+    return cur, None, result.status
 
 
 def pip_install_upgrade(install_spec: str, *, python: str | None = None) -> subprocess.CompletedProcess:
@@ -151,9 +144,11 @@ def pip_install_upgrade(install_spec: str, *, python: str | None = None) -> subp
     )
 
 
-def run_update(*, yes: bool = False, check_only: bool = False) -> dict:
-    """Check GitHub and optionally pip-install the latest CLI release."""
-    current, pending = check_for_update()
+def run_update(
+    *, api_url: str, yes: bool = False, check_only: bool = False,
+) -> dict:
+    """Check the backend and optionally pip-install the published CLI wheel."""
+    current, pending, status = check_for_update(api_url=api_url)
     out: dict = {
         "current": current,
         "latest": None,
@@ -161,18 +156,16 @@ def run_update(*, yes: bool = False, check_only: bool = False) -> dict:
         "message": "",
     }
     if pending is None:
-        if fetch_latest_cli_release() is None:
-            out["message"] = (
-                f"Could not reach GitHub releases for {_github_repo()} "
-                f"(current {current}). Try again later."
-            )
+        if status != "ok":
+            out["message"] = _fetch_failure_message(api_url, current, status)
         else:
             out["message"] = f"Already on the latest release ({current})."
         return out
 
     out["latest"] = pending.version
-    out["release_url"] = pending.html_url
     out["install_spec"] = pending.install_spec
+    if pending.install_sh_url:
+        out["install_sh_url"] = pending.install_sh_url
 
     if check_only:
         out["message"] = (
@@ -225,14 +218,16 @@ def write_check_cache(cache_path, *, current: str, latest: str | None) -> None:
         logger.debug("update cache write failed: %s", exc)
 
 
-def startup_update_notice(cache_path, *, interval_hours: float = 24.0) -> None:
+def startup_update_notice(
+    cache_path, *, api_url: str, interval_hours: float = 24.0,
+) -> None:
     """Best-effort background check; logs a hint when a release is newer."""
     if not should_check_now(cache_path, interval_hours=interval_hours):
         return
 
     def _work() -> None:
         try:
-            current, pending = check_for_update()
+            current, pending, _status = check_for_update(api_url=api_url)
             write_check_cache(
                 cache_path,
                 current=current,
@@ -241,8 +236,8 @@ def startup_update_notice(cache_path, *, interval_hours: float = 24.0) -> None:
             if pending:
                 logger.warning(
                     "agentira-cli %s is available (you have %s). "
-                    "Run `agentira daemon update` to upgrade. %s",
-                    pending.version, current, pending.html_url,
+                    "Run `agentira daemon update` to upgrade.",
+                    pending.version, current,
                 )
             else:
                 logger.info("agentira-cli %s — up to date", current)

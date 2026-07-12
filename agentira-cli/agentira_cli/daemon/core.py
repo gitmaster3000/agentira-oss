@@ -306,6 +306,7 @@ class AgentiraDaemon:
             from agentira_cli.update_check import startup_update_notice
             startup_update_notice(
                 UPDATE_CHECK_CACHE_FILE,
+                api_url=self.config.api_url,
                 interval_hours=max(1, int(self.config.update_check_interval_hours)),
             )
         except Exception as exc:  # noqa: BLE001

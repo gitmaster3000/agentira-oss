@@ -1442,6 +1442,10 @@ def api_create_member_invite(body: dict = None,
 for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router]:
     app.include_router(r)
 
+# Public CLI distribution (no auth — install/update from the instance URL)
+from backend.cli_release import router as cli_release_router
+app.include_router(cli_release_router)
+
 # Forge product router (self-contained)
 from backend.forge.router import router as forge_router, daemon_router as forge_daemon_router
 app.include_router(forge_router, dependencies=[Depends(get_current_user)])

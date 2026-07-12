@@ -7,6 +7,15 @@ COPY pyproject.toml .
 COPY backend/ backend/
 RUN pip install --no-cache-dir -e .
 
+# Bake agentira-cli wheel into the image for customer install/update.
+COPY agentira-cli/ agentira-cli/
+COPY scripts/write_cli_manifest.py scripts/write_cli_manifest.py
+RUN pip install --no-cache-dir build \
+    && python -m build agentira-cli/ -o /tmp/cli-dist \
+    && mkdir -p backend/static/cli/wheels \
+    && cp /tmp/cli-dist/*.whl backend/static/cli/wheels/ \
+    && python scripts/write_cli_manifest.py
+
 # Copy entry point
 COPY run.py .
 COPY scripts/ scripts/

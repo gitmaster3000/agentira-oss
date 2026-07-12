@@ -56,24 +56,26 @@ Don't create a project yet. Daemon first.
 
 #### Mac / Linux
 
+Replace `YOUR-INSTANCE` with the same URL you signed up at (e.g. `https://agentira.up.railway.app`):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gitmaster3000/agentira/main/scripts/install-daemon.sh | bash
+curl -fsSL https://YOUR-INSTANCE/api/public/install.sh | bash
 ```
 
 #### Windows (PowerShell as Administrator)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/gitmaster3000/agentira/main/scripts/install-daemon.ps1 | iex
+iwr -useb https://YOUR-INSTANCE/api/public/install.ps1 | iex
 ```
 
 The script will:
 
 1. Check Python + Claude are present (refuses to continue with a clear error if not).
-2. `pip install` the agentira-cli package from GitHub.
-3. Create `~/.agentira/.env` and prompt you for two values:
-   - **Backend URL** — the same URL you signed up at (e.g. `https://agentira.up.railway.app`).
-   - **API key** — the one from Step 2.
+2. Ask for your **backend URL**, then `pip install` the agentira-cli wheel from that instance.
+3. Ask for your **API key** (from Step 2) and write `~/.agentira/.env`.
 4. Print the command to start the daemon.
+
+Upgrade later: `agentira daemon update` (pulls the latest wheel from the same instance).
 
 ### Start the daemon
 

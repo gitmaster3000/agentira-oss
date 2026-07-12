@@ -24,12 +24,10 @@ app = typer.Typer(help="Manage the AgentIRA local daemon process.")
 _TEST_HOME = os.environ.get("AGENTIRA_TEST_HOME", "~/.agentira-test")
 
 
-_STATE_CHANGING = ("start", "stop", "restart")
-
-# Developer-only ergonomics (test daemon by default + confirm-before-prod) are
-# gated on this env var. Customers WON'T set it — there's no reason to — so for
-# them there is no test/prod concept: `agentira daemon <cmd>` simply acts on
-# their one configured daemon, and the --test/--prod flags are hidden.
+# Developer-only ergonomics (isolated test daemon home) are gated on this env
+# var. Customers WON'T set it — there's no reason to — so for them there is no
+# test/prod concept: `agentira daemon <cmd>` simply acts on their one configured
+# daemon. Unset AGENTIRA_DEV_MODE to target ~/.agentira instead of ~/.agentira-test.
 #
 # This flag is NOT a security boundary; it only changes LOCAL CLI ergonomics.
 # The real gate is server-side: the auth bypass lives on the backend
@@ -43,53 +41,12 @@ _DEV = os.getenv("AGENTIRA_DEV_MODE", "").strip().lower() in ("1", "true", "yes"
 @app.callback()
 def _daemon_main(
     ctx: typer.Context,
-    test: bool = typer.Option(
-        False, "--test", hidden=not _DEV,
-        help="(dev) Target the isolated TEST daemon (~/.agentira-test). Default "
-             "in dev mode — a bare `agentira daemon ...` runs in test mode.",
-    ),
-    prod: bool = typer.Option(
-        False, "--prod", hidden=not _DEV,
-        help="(dev) Target your real PROD daemon (~/.agentira). Explicit; "
-             "start/stop/restart ask for confirmation first.",
-    ),
 ) -> None:
     """Manage the AgentIRA local daemon (start, stop, restart, status, logs)."""
-    # ── Shipped / customer behavior: one daemon, no test/prod split ───────
-    # The dev flags don't apply; explain rather than do something surprising.
     if not _DEV:
-        if test or prod:
-            typer.secho(
-                "--test/--prod are developer-only (enable with "
-                "AGENTIRA_DEV_MODE=1). Just run `agentira daemon <command>`.",
-                fg="yellow", err=True)
-            raise typer.Exit(2)
         return
 
-    # ── Developer mode: test by default, prod explicit + confirmed ────────
-    if test and prod:
-        typer.secho("Pass either --test or --prod, not both.", fg="red", err=True)
-        raise typer.Exit(2)
-
-    # ── PROD: explicit opt-in, confirmed for state-changing commands ──────
-    if prod:
-        if ctx.invoked_subcommand in _STATE_CHANGING:
-            pid = _read_pid()
-            running = "running (PID %d)" % pid if pid and _is_running(pid) else "not running"
-            typer.secho(
-                "\n⚠  PROD daemon — about to run a state-changing command.\n"
-                f"  Command:  daemon {ctx.invoked_subcommand}\n"
-                f"  Home:     {HOME}\n"
-                f"  Backend:  {DaemonConfig().api_url}\n"
-                f"  Currently: {running}\n",
-                fg="yellow", err=True,
-            )
-            if not typer.confirm("Proceed against PROD?", default=False):
-                typer.secho("Aborted — prod untouched.", err=True)
-                raise typer.Exit(1)
-        return
-
-    # ── TEST (default): isolated home + DEV-SCOPED connection ─────────────
+    # ── Developer mode: isolated test home unless AGENTIRA_HOME already set ─
     # Read the test backend from AGENTIRA_TEST_API_URL / AGENTIRA_TEST_API_KEY,
     # NOT the generic AGENTIRA_DAEMON_* — those are what DaemonConfig reads, so
     # exporting them in your shell profile would also retarget the PROD daemon.
@@ -109,12 +66,12 @@ def _daemon_main(
             typer.secho(
                 "TEST daemon needs your local backend in the environment, but "
                 "these are unset:\n  " + "\n  ".join(missing) + "\n\n"
-                "Set them to point at your local stack (safe — these never "
-                "affect the prod daemon), e.g.:\n"
-                "  export AGENTIRA_TEST_API_URL=http://localhost:8111\n"
-                "  export AGENTIRA_TEST_API_KEY=<dev key>   "
+                "Set them in ~/.agentira/.env (or export in your shell), e.g.:\n"
+                "  AGENTIRA_TEST_API_URL=http://localhost:8111\n"
+                "  AGENTIRA_TEST_API_KEY=<dev key>   "
                 "# matches AGENTIRA_DEV_API_KEY on the backend\n\n"
-                "Then re-run. (To act on your real daemon instead, use --prod.)",
+                "Then re-run. (To act on your real daemon instead, unset "
+                "AGENTIRA_DEV_MODE in ~/.agentira/.env.)",
                 fg="yellow", err=True,
             )
             raise typer.Exit(1)
@@ -126,8 +83,7 @@ def _daemon_main(
         env["AGENTIRA_DAEMON_API_URL"] = test_url
     if test_key:
         env["AGENTIRA_DAEMON_API_KEY"] = test_key
-    argv = [a for a in sys.argv if a not in ("--test", "--prod")]
-    os.execvpe(argv[0], argv, env)
+    os.execvpe(sys.argv[0], sys.argv, env)
 
 
 # ── Browser-based admin login ────────────────────────────────────────────
@@ -340,11 +296,11 @@ def _restart_impl(*, dry_run: bool = False, api_key: str | None = None) -> None:
 @app.command("start")
 def start(
     dry_run: bool = typer.Option(False, "--dry-run", help="Log actions, skip executor"),
-    foreground: bool = typer.Option(False, "--foreground", "-f", help="Run in foreground (default: background)"),
+    background: bool = typer.Option(False, "--background", "-b", help="Run in background (default: foreground)"),
     api_key: str = typer.Option(None, "--api-key", help="Daemon auth token (optional)"),
 ) -> None:
-    """Start the daemon (background by default)."""
-    _start_impl(dry_run=dry_run, foreground=foreground, api_key=api_key)
+    """Start the daemon (foreground by default)."""
+    _start_impl(dry_run=dry_run, foreground=not background, api_key=api_key)
 
 
 @app.command("stop")
@@ -481,29 +437,28 @@ def update_cmd(
     yes: bool = typer.Option(False, "--yes", "-y", help="Install without prompting"),
     restart: bool = typer.Option(False, "--restart", help="Restart daemon after a successful update"),
 ) -> None:
-    """Upgrade agentira-cli from the latest GitHub release (pip install).
+    """Upgrade agentira-cli from your Agentira instance (pip install wheel).
 
     Uses the same Python as this command, so launchd/systemd services
     pick up the upgrade after `daemon restart`. No manual pip needed.
     """
     from agentira_cli.update_check import run_update
 
+    api_url = DaemonConfig().api_url
     if check_only:
-        result = run_update(check_only=True)
+        result = run_update(api_url=api_url, check_only=True)
         typer.echo(result["message"])
         raise typer.Exit(0)
 
-    result = run_update(yes=False)
+    result = run_update(api_url=api_url, yes=False)
     if result.get("message") == "confirmation_required":
         latest = result["latest"]
         current = result["current"]
         typer.echo(f"Update available: {current} → {latest}")
-        if result.get("release_url"):
-            typer.echo(f"  Release: {result['release_url']}")
         if not typer.confirm("Install now?", default=True):
             typer.echo("Cancelled.")
             raise typer.Exit(0)
-        result = run_update(yes=True)
+        result = run_update(api_url=api_url, yes=True)
 
     typer.echo(result.get("message") or "Done.")
     if not result.get("updated"):
@@ -562,7 +517,6 @@ def install_launchd() -> None:
         <string>{agentira_bin}</string>
         <string>daemon</string>
         <string>start</string>
-        <string>--foreground</string>
     </array>
     <key>KeepAlive</key>
     <true/>

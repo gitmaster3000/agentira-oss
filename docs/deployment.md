@@ -112,6 +112,35 @@ Without a Volume, attachments survive only until the next deploy. Fine for testi
 
 Migrations run automatically at startup (`scripts/bootstrap_db.py` → `services.bootstrap()` → `init_db()` → `run_migrations()`). They're idempotent on Postgres.
 
+## Daemon CLI distribution (customers)
+
+The backend Docker image bakes in the current `agentira-cli` wheel
+(`Dockerfile` → `write_cli_manifest.py`). Public endpoints (no auth):
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/public/cli-release` | JSON: version + `install_url` |
+| `GET /api/public/cli/wheels/{file}.whl` | Pip-installable wheel |
+| `GET /api/public/install.sh` | Mac/Linux installer script |
+| `GET /api/public/install.ps1` | Windows installer script |
+
+Customers install with:
+
+```bash
+curl -fsSL https://YOUR-FRONTEND-DOMAIN/api/public/install.sh | bash
+```
+
+They upgrade with `agentira daemon update` after you redeploy backend with a
+newer CLI (bump `agentira-cli/pyproject.toml` version before deploy).
+
+Optional backend env var if Railway's proxy headers are wrong:
+
+```
+AGENTIRA_PUBLIC_URL=https://your-frontend-domain.up.railway.app
+```
+
+Use your **frontend** domain (the public URL), not the internal backend name.
+
 ## Logs + diagnostics
 
 - Backend logs: Railway service → Logs tab.
@@ -138,4 +167,5 @@ Railway pricing as of 2026: Hobby plan ~$5/mo includes credits enough for a smal
 | Backend exits with "could not connect to server" | `AGENTIRA_DB_URL` not wired to Postgres add-on |
 | Sign-in works but agents missing | Backend hasn't bootstrapped — check logs for "agent templates seeded" |
 | Attachments disappear after redeploy | No Volume mounted on `/app/data` |
+| `daemon update` / installer says no CLI release | Backend not redeployed since CLI bump, or frontend not proxying `/api/public/*` |
 | MCP unreachable from agents | MCP service public-networking is off (correct); agents reach it via the backend, not directly |

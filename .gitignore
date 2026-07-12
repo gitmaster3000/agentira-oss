@@ -64,3 +64,10 @@ my personal website/
 .env.qa
 .env.prod
 .env.local
+
+# CLI wheels baked at Docker build time (not committed)
+backend/static/cli/wheels/*.whl
+backend/static/cli/manifest.json
+# Keep wheels/ from the generic rule below — only *.whl above are ignored
+!backend/static/cli/wheels/
+!backend/static/cli/wheels/.gitkeep

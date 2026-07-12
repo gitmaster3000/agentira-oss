@@ -36,15 +36,17 @@ The daemon is the bridge between the hosted backend and your local `claude` CLI.
 Why local? Because the agents touch real files in real git repos that live on your laptop. The cloud backend coordinates; the daemon executes.
 
 ```bash
-# Mac / Linux (one-liner installer — coming soon as part of the v1 release)
-curl -fsSL https://your-instance.railway.app/install.sh | sh
+# Mac / Linux — installs from your instance's published CLI wheel
+curl -fsSL https://your-instance.railway.app/api/public/install.sh | bash
 
-# For now, run from source:
+# Dev fallback (from source):
 git clone https://github.com/<you>/agentira ~/agentira
 cd ~/agentira/agentira-cli
 pip install -e .
 agentira daemon --backend-url https://your-instance.railway.app
 ```
+
+Customers upgrade with `agentira daemon update` (no GitHub access required).
 
 When you start the daemon, paste the **API key** from your profile page (top-right avatar → **Settings → API key**). The daemon authenticates over WebSocket and stays connected.
 

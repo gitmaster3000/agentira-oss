@@ -1,5 +1,9 @@
 import typer
 
+from agentira_cli.state.env_file import load_cli_env_files
+
+load_cli_env_files()
+
 from .commands import daemon as daemon_cmd
 from .commands import runtime as runtime_cmd
 from ._version import get_version

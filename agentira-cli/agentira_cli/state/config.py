@@ -6,11 +6,13 @@ import socket
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agentira_cli.state.paths import HOME
+
 
 class DaemonConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENTIRA_DAEMON_",
-        env_file=".env",
+        env_file=str(HOME / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -30,6 +32,6 @@ class DaemonConfig(BaseSettings):
     # ── Misc ─────────────────────────────────────────────────────────────
     dry_run: bool = False
     log_level: str = "INFO"
-    # Check GitHub for newer agentira-cli releases on daemon startup
+    # Check the backend for newer agentira-cli releases on daemon startup
     # (throttled). Set AGENTIRA_SKIP_UPDATE_CHECK=1 to disable.
     update_check_interval_hours: int = 24

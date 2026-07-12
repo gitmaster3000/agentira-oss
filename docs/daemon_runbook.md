@@ -7,11 +7,31 @@ How to diagnose, restart, and supervise the AgentIRA daemon.
 ```bash
 agentira daemon status          # Process + WS state + dry_run flag
 agentira daemon logs -f         # Tail the daemon log
-agentira daemon restart         # Stop + start (detaches immediately)
+agentira daemon update          # Upgrade CLI from your instance's published wheel
+agentira daemon restart         # Stop + start (backgrounds the new daemon)
 agentira daemon stop            # Graceful SIGTERM
-agentira daemon start           # Start in background
-agentira daemon start --foreground  # Debug mode (logs to stdout)
+agentira daemon start           # Start in foreground (logs to stdout)
+agentira daemon start --background  # Detach to background
 ```
+
+## Install + upgrade (customers)
+
+Install (first time):
+
+```bash
+curl -fsSL https://YOUR-INSTANCE/api/public/install.sh | bash
+```
+
+Upgrade (after operator redeploys backend with a newer CLI):
+
+```bash
+agentira daemon update
+agentira daemon restart
+```
+
+The CLI asks `AGENTIRA_DAEMON_API_URL` (from `~/.agentira/.env`) for
+`GET /api/public/cli-release`, then `pip install`s the wheel URL returned.
+No GitHub token or private-repo access required.
 
 ## Common failure modes
 
@@ -146,7 +166,6 @@ Create `~/Library/LaunchAgents/com.agentira.daemon.plist`:
         <string>/usr/local/bin/agentira</string>
         <string>daemon</string>
         <string>start</string>
-        <string>--foreground</string>
     </array>
     <key>KeepAlive</key>
     <true/>
@@ -174,7 +193,7 @@ Create `~/.config/systemd/user/agentira-daemon.service`:
 Description=AgentIRA Daemon
 
 [Service]
-ExecStart=/usr/local/bin/agentira daemon start --foreground
+ExecStart=/usr/local/bin/agentira daemon start
 Restart=always
 RestartSec=5
 

@@ -3998,7 +3998,7 @@ def mark_dispatch_dropped(*, agent_id: str, trace_id: str,
     """
     msg = (
         "⚠ No daemon online — your message couldn't be delivered. "
-        "Start the daemon (`agentira daemon start --foreground`) and try again."
+        "Start the daemon (`agentira daemon start`) and try again."
     )
     with _session() as db:
         # Mark the run failed if we have one
