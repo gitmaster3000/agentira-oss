@@ -14,7 +14,7 @@ import sys
 import types
 from unittest.mock import patch
 
-from agentira_cli.daemon.executor import run_openclaw_ws
+from agentira_cli.runtimes.openclaw_ws import run_openclaw_ws
 
 
 class _FakeWS:
@@ -142,6 +142,46 @@ def test_chat_state_error_propagates_as_failure(tmp_path):
     assert "sessionKey" not in sub["params"]
 
 
+def test_no_reply_silence_token_is_failure(tmp_path):
+    """OpenClaw WebChat silence must not count as a successful agent reply."""
+    script = [
+        {},
+        {"ok": True},
+        {"ok": True},
+        {"type": "res", "id": "s1", "ok": True, "payload": {"runId": "r1"}},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "final",
+            "message": {"role": "assistant", "content": "NO_REPLY"},
+        }},
+    ]
+    res, _ = _run(tmp_path, script)
+    assert res.success is False
+    assert "NO_REPLY" in (res.error or "") or "silence" in (res.error or "").lower()
+
+
+def test_user_role_chat_events_are_not_echoed_as_assistant(tmp_path):
+    """OpenClaw rebroadcasts the user message — must not land as agent reply."""
+    script = [
+        {},
+        {"ok": True},
+        {"ok": True},
+        {"type": "res", "id": "s1", "ok": True, "payload": {"runId": "r1"}},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "final",
+            "message": {"role": "user", "content": "are you there"},
+        }},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "final",
+            "message": {"role": "assistant",
+                        "content": [{"type": "text", "text": "yes I am"}]},
+        }},
+    ]
+    res, _ = _run(tmp_path, script)
+    assert res.success is True
+    assert res.text == "yes I am"
+    assert "are you there" not in res.text
+
+
 def test_chat_send_rpc_error_propagates(tmp_path):
     script = [
         {},
@@ -154,3 +194,46 @@ def test_chat_send_rpc_error_propagates(tmp_path):
     res, _ = _run(tmp_path, script)
     assert res.success is False
     assert "operator.write" in str(res.error)
+
+
+def test_cumulative_chat_snapshots_emit_true_deltas(tmp_path):
+    """OpenClaw rebroadcasts full text each event — we stream only suffixes.
+
+    Without snapshot→delta, the UI gets one full bubble per event
+    (Hel / Hello / Hello world) instead of one growing reply.
+    """
+    events: list[dict] = []
+
+    async def on_event(batch):
+        events.extend(batch)
+
+    script = [
+        {},
+        {"ok": True},
+        {"ok": True},
+        {"type": "res", "id": "s1", "ok": True, "payload": {"runId": "r1"}},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "delta",
+            "message": {"role": "assistant", "content": "Hel"},
+        }},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "delta",
+            "message": {"role": "assistant", "content": "Hello"},
+        }},
+        {"type": "event", "event": "chat", "payload": {
+            "state": "final",
+            "message": {"role": "assistant", "content": "Hello world"},
+        }},
+    ]
+    res, _ = _run(tmp_path, script, on_event=on_event)
+    assert res.success is True
+    assert res.text == "Hello world"
+    texts = [e["text"] for e in events if e.get("type") == "text"]
+    assert texts == ["Hel", "lo", " world"]
+
+
+def test_snapshot_to_delta_helper():
+    from agentira_cli.runtimes.openclaw_ws import _snapshot_to_delta
+    assert _snapshot_to_delta("", "Hi") == ("Hi", "Hi")
+    assert _snapshot_to_delta("Hi", "Hi there") == ("Hi there", " there")
+    assert _snapshot_to_delta("Hi there", "Hi") == ("Hi there", "")

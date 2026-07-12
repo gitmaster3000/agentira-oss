@@ -58,7 +58,7 @@ class OpenClawRuntime(Runtime):
 
         Device pairing / operator.write lives here — not in daemon core.
         """
-        from agentira_cli.daemon.executor import run_openclaw_ws
+        from agentira_cli.runtimes.openclaw_ws import run_openclaw_ws
         from agentira_cli.runtimes.openclaw_device import (
             RegistrationError,
             RegistrationPendingError,
@@ -326,42 +326,76 @@ def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") 
 # leave the user's own MCP servers alone.
 _AGENTIRA_MCP_NAMES = ("agentira", "memory", "agentira-project")
 
+# Last applied MCP fingerprint (process-local). Re-running `openclaw mcp set`
+# on every chat turn is ~2s×N and triggers a gateway config reload that
+# kills in-flight agent sessions (session file lock / bundle-mcp disposed).
+_last_mcp_fingerprint: str | None = None
 
-def register_agentira_mcps(mcp_config: dict, *, binary_path: str = "openclaw") -> dict:
+
+def _mcp_fingerprint(servers: dict) -> str:
+    return json.dumps(servers, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _read_openclaw_mcp_servers() -> dict:
+    """Current mcp.servers from openclaw.json (empty dict if missing)."""
+    state_dir = Path(os.environ.get("OPENCLAW_STATE_DIR", str(_DEFAULT_STATE_DIR)))
+    config_path = state_dir / "openclaw.json"
+    try:
+        cfg = json.loads(config_path.read_text())
+    except Exception:
+        return {}
+    mcp = cfg.get("mcp") or {}
+    servers = mcp.get("servers") or {}
+    return servers if isinstance(servers, dict) else {}
+
+
+def _entry_matches(desired: dict, existing: dict | None) -> bool:
+    """True if desired server config is already what OpenClaw has."""
+    if not isinstance(existing, dict):
+        return False
+    # Compare as canonical JSON so key order / whitespace don't force a rewrite.
+    return _mcp_fingerprint(desired) == _mcp_fingerprint(existing)
+
+
+def register_agentira_mcps(mcp_config: dict, *, binary_path: str = "openclaw",
+                           force: bool = False) -> dict:
     """Register Agentira's MCP servers into OpenClaw's config (AP-103).
 
-    We register into the runner agent's effective environment (via global
-    mcp set before dispatch) because neither the old HTTP completions nor
-    the native chat.send path take per-call MCP config. This keeps
-    Agentira MCPs (with per-agent token + memory) on top of the clean runner
-    without affecting the user's own OpenClaw agents.
-    `openclaw mcp set` is the supported way.
+    Skips `openclaw mcp set` when the desired servers already match what's
+    in openclaw.json (and the in-process cache). That avoids multi-second
+    CLI round-trips and gateway reloads on every chat turn — those reloads
+    were racing in-flight OpenClaw sessions (session lock timeouts).
 
-    `mcp_config` is the `{"mcpServers": {name: {...}}}` dict produced by
-    `backend.forge.mcp_registry.build_mcp_config` — it is built
-    PER-AGENT (the `agentira` server's Bearer token is that agent's own
-    api_key, `memory`'s MEMORY_FILE_PATH is that agent's per-project
-    path). Each entry is written verbatim — OpenClaw accepts both stdio
-    (`command`/`args`/`env`) and http (`type`/`url`/`headers`) shapes.
+    Still rewrites when the per-agent token / memory path / server set
+    changes (`force=True` always writes).
 
-    Per-agent identity is preserved because the daemon calls this
-    immediately before every OpenClaw dispatch (see
-    `core.py::_execute` gateway branch): the global MCP slot is
-    overwritten with THIS agent's config each time, so the runner picks
-    up the right token + memory path for the dispatch it's about to
-    serve. Agentira owns the agent layer; the single `agentira-runner`
-    is just the engine placeholder.
-
-    Returns {"registered": [...], "failed": [...]}.
+    Returns {"registered": [...], "failed": [...], "skipped": [...]} .
     """
     import subprocess
+    global _last_mcp_fingerprint
 
     servers = (mcp_config or {}).get("mcpServers") or {}
+    if not isinstance(servers, dict) or not servers:
+        return {"registered": [], "failed": [], "skipped": []}
+
+    fp = _mcp_fingerprint(servers)
+    if not force and fp == _last_mcp_fingerprint:
+        return {
+            "registered": [],
+            "failed": [],
+            "skipped": list(servers.keys()),
+        }
+
+    existing = {} if force else _read_openclaw_mcp_servers()
     registered: list[str] = []
     failed: list[dict] = []
+    skipped: list[str] = []
 
     for name, entry in servers.items():
         if not isinstance(entry, dict):
+            continue
+        if not force and _entry_matches(entry, existing.get(name)):
+            skipped.append(name)
             continue
         try:
             result = subprocess.run(
@@ -378,4 +412,15 @@ def register_agentira_mcps(mcp_config: dict, *, binary_path: str = "openclaw") -
             failed.append({"name": name, "error": result.stderr.strip()})
             logger.warning("openclaw mcp set %s failed: %s", name, result.stderr.strip())
 
-    return {"registered": registered, "failed": failed}
+    # Only mark fingerprint current if nothing failed (partial write may leave
+    # openclaw half-updated).
+    if not failed:
+        _last_mcp_fingerprint = fp
+    elif registered or skipped:
+        # Best-effort: next turn will re-diff against disk.
+        _last_mcp_fingerprint = None
+
+    if skipped and not registered:
+        logger.debug("openclaw MCP already up to date; skipped %s", skipped)
+
+    return {"registered": registered, "failed": failed, "skipped": skipped}

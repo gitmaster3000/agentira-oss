@@ -103,6 +103,18 @@ def test_daemon_core_has_no_openclaw_string_dispatch():
     assert "execute_turn" in src
 
 
+def test_executor_has_no_openclaw_ws_protocol():
+    """OpenClaw chat.send / event drain lives in runtimes/openclaw_ws — not
+    the shared CLI/gateway executor (polymorphism: adapter owns wire)."""
+    import inspect
+    from agentira_cli.daemon import executor as executor_mod
+    src = inspect.getsource(executor_mod)
+    assert "run_openclaw_ws" not in src
+    assert "_format_openclaw_error" not in src
+    assert "_snapshot_to_delta" not in src
+    assert "chat.send" not in src
+
+
 def test_openclaw_derives_a_real_session_key():
     """OpenClaw's native continuity is sessionKey — adapter must return one."""
     h = OpenClawRuntime.derive_session_handle(

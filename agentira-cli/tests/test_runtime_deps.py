@@ -19,7 +19,7 @@ _RUNTIME_IMPORTS: list[tuple[str, str, str]] = [
     (
         "websocket",
         "create_connection",
-        "OpenClaw native WS (run_openclaw_ws) and Forge OpenClawAdapter.chat",
+        "OpenClaw native WS (runtimes.openclaw_ws) and Forge OpenClawAdapter.chat",
     ),
     (
         "websockets.sync.client",

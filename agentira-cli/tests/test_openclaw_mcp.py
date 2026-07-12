@@ -76,8 +76,40 @@ def test_missing_openclaw_binary_is_non_fatal():
     assert result["failed"][0]["name"] == "agentira"
 
 
+def test_skips_when_fingerprint_matches_last_apply(monkeypatch):
+    """Second call with same config must not shell out (no gateway reload)."""
+    import agentira_cli.runtimes.openclaw as oc
+    monkeypatch.setattr(oc, "_last_mcp_fingerprint", None)
+    cfg = {"mcpServers": {"agentira": {"type": "http", "url": "u"}}}
+    with mock.patch("subprocess.run", side_effect=_ok) as run:
+        with mock.patch.object(oc, "_read_openclaw_mcp_servers", return_value={}):
+            r1 = register_agentira_mcps(cfg)
+            r2 = register_agentira_mcps(cfg)
+    assert r1["registered"] == ["agentira"]
+    assert r2["skipped"] == ["agentira"]
+    assert r2["registered"] == []
+    assert run.call_count == 1
+
+
+def test_skips_when_disk_already_matches(monkeypatch):
+    import agentira_cli.runtimes.openclaw as oc
+    monkeypatch.setattr(oc, "_last_mcp_fingerprint", None)
+    entry = {"type": "http", "url": "http://x/mcp"}
+    cfg = {"mcpServers": {"agentira": entry}}
+    with mock.patch("subprocess.run", side_effect=_ok) as run:
+        with mock.patch.object(
+            oc, "_read_openclaw_mcp_servers",
+            return_value={"agentira": entry},
+        ):
+            result = register_agentira_mcps(cfg)
+    assert result["skipped"] == ["agentira"]
+    assert result["registered"] == []
+    assert run.call_count == 0
+
+
 def test_empty_config_is_noop():
     with mock.patch("subprocess.run", side_effect=_ok) as run:
         result = register_agentira_mcps({"mcpServers": {}})
-    assert result == {"registered": [], "failed": []}
+    assert result["registered"] == []
+    assert result["failed"] == []
     run.assert_not_called()
