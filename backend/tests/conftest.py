@@ -1,25 +1,16 @@
 """Shared test harness — every test runs against its OWN ephemeral Postgres.
 
-Prod is Postgres, so tests are Postgres: a single throwaway container is spun
-for the session (no shared/long-lived/mutable DB), and each test gets a fresh
-schema + seeded defaults + a default org with the org-context pinned.
-
-Why this shape:
-  - The real `SessionLocal` is a RoutingSession whose `get_bind` reads the
-    module-level `backend.db.engine` / `app_engine` AT CALL TIME, and carries
-    the org-stamping / org-filter event hooks. Pointing those two module
-    globals at the container is therefore enough to route EVERY module's
-    `SessionLocal` (they all share the one object) at our test DB — no
-    per-module `SessionLocal` patching needed.
-  - With an org context set, `before_flush` stamps `org_id` on new rows, so
-    fixtures can insert profiles/projects without spelling out org_id.
+Prod is Postgres, so tests are Postgres: a throwaway container is spun per
+pytest-xdist worker (or one for serial runs), schema is created once per
+worker, and each test resets via TRUNCATE (much faster than drop_all/create_all).
 """
+
 from __future__ import annotations
 
 import types
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from testcontainers.postgres import PostgresContainer
 
@@ -29,28 +20,32 @@ from backend import services as core_services
 import backend.forge.models  # noqa: F401 — register FK targets on Base
 
 
+def _truncate_all(engine) -> None:
+    tables = inspect(engine).get_table_names()
+    if not tables:
+        return
+    quoted = ", ".join(f'"{t}"' for t in tables)
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+
+
 @pytest.fixture(scope="session")
-def _pg_engine():
-    """One throwaway Postgres for the whole test session; torn down at the end."""
+def _pg_engine(worker_id):
+    """One Postgres container per xdist worker (or one for serial runs)."""
     with PostgresContainer("postgres:16-alpine") as pg:
         engine = create_engine(pg.get_connection_url())
-        yield engine
-        engine.dispose()
+        Base.metadata.create_all(engine)
+        try:
+            yield engine
+        finally:
+            engine.dispose()
 
 
 @pytest.fixture
 def pg(_pg_engine):
-    """Fresh schema + seeded defaults + a default org, with the org context
-    pinned and the app's engines routed at the container.
-
-    Yields a namespace with `.engine`, `.org_id`, and `.SessionLocal` (the real
-    routing sessionmaker). Tests/fixtures build on top: seed an admin with
-    `org_id=pg.org_id`, mint tokens, drive the REST app, etc."""
+    """Fresh data on a shared schema, with org context pinned."""
     engine = _pg_engine
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    # Route the real SessionLocal at the container (both privileged + scoped
-    # binds), for the duration of the test.
+    _truncate_all(engine)
     orig_engine, orig_app = bdb.engine, bdb.app_engine
     bdb.engine, bdb.app_engine = engine, engine
     try:
