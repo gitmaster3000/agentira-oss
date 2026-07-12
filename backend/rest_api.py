@@ -1346,15 +1346,18 @@ app.add_middleware(
 # duration, and the request body for failing writes). uvicorn's own access
 # log doesn't capture the body, so a 500 like the default_project_id="" FK
 # violation needed a DB-log dig to diagnose. This puts the payload right
-# next to the traceback in the deploy logs. Its own stdout handler so it
+# next to the traceback in the deploy logs. Custom handler (to stdout) so it
 # shows regardless of uvicorn's logger config.
 import time as _time
 import json as _json
 import logging as _http_logging
+import sys as _sys
 
 _http_log = _http_logging.getLogger("agentira.http")
 if not _http_log.handlers:
-    _h = _http_logging.StreamHandler()
+    # Use stdout explicitly so INFO access logs don't get classified as
+    # errors by container log aggregators (stderr → error severity).
+    _h = _http_logging.StreamHandler(_sys.stdout)
     _h.setFormatter(_http_logging.Formatter("%(levelname)s: %(message)s"))
     _http_log.addHandler(_h)
     _http_log.setLevel(_http_logging.INFO)

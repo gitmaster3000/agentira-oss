@@ -50,7 +50,7 @@ def _path(scope_key: str) -> Path:
 
 
 def record(*, scope_key: str, trace_id: str, run_id: str,
-           pid: int, daemon_id: str, env_teardown: dict | None = None) -> None:
+           pid: int = 0, daemon_id: str, env_teardown: dict | None = None) -> None:
     """Write/overwrite the live-turn record for ``scope_key``.
 
     Overwriting enforces one live turn per scope. Best-effort.

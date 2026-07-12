@@ -4693,10 +4693,10 @@ def send_runtime_message(
 
             # Conversation continuity: scope-key tells us WHICH conversation
             # this chat belongs to (per-project, default, etc.). For runtimes
-            # that support resume (claude), pass the session handle on the
-            # frame. For gateway runtimes (openclaw/ollama, no resume), the
-            # daemon will see no session_id and the gateway path rebuilds
-            # history from forge_messages on its own.
+            # that support resume (claude, and now openclaw via native WS
+            # sessionKey), pass the long-lived session handle on the frame.
+            # assemble_context then skips full history rebuild. OpenClaw uses
+            # the stable sessionKey for native resume on the runner thread.
             # AP-105: scope_key from caller wins (user explicitly continuing
             # a specific conversation, e.g. a run-scoped chat after the run
             # completed). Otherwise derive from project_id.

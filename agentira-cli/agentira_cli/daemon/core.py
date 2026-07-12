@@ -252,8 +252,8 @@ class AgentiraDaemon:
         # subprocess. Keyed by trace_id (the dispatch primary key); we also
         # keep a parallel run_id → trace_id map so backend cancels by
         # run_id resolve correctly. CLI runs register their proc here;
-        # http_gateway runs register None (cancel is best-effort: nothing
-        # to kill mid-request, the run completes naturally).
+        # http_gateway (ollama) and openclaw native WS runs register pid=0
+        # (best-effort cancel; durable inflight + heartbeats keep "running").
         self._inflight: dict[str, dict] = {}
         self._run_to_trace: dict[str, str] = {}
         # ADR 009 / B6: scope_key → trace_id so a stop frame can target the
@@ -457,10 +457,11 @@ class AgentiraDaemon:
         """Execute a single trigger frame dispatched from the WS hub.
 
         One path for chat, run_step, and any future trigger kinds. The daemon
-        does not branch on `kind` — that's a server-side audit field. We only
-        route on runtime capability (http_gateway vs stream-json subprocess).
+        does not branch on `kind` — that's a server-side audit field. We route
+        on capability (http_gateway for ollama etc, native WS for openclaw,
+        else CLI stream-json).
         """
-        from agentira_cli.daemon.executor import run_cli_stream, run_gateway
+        from agentira_cli.daemon.executor import run_cli_stream, run_gateway, run_openclaw_ws
         from agentira_cli.daemon.materializer import (
             materialize, compose_system_prompt, ensure_memory_dirs,
         )
@@ -899,12 +900,21 @@ class AgentiraDaemon:
         session_lost = False  # AP-133: flipped when we retry after --resume miss
         try:
             if "http_gateway" in capabilities:
-                # AP-103: OpenClaw's chat-completions endpoint takes no
-                # per-call MCP config, so register this agent's MCP
-                # servers into OpenClaw's config immediately before the
-                # dispatch. The runner picks up THIS agent's token +
-                # memory path for the turn it's about to serve.
-                if provider == "openclaw" and mcp_config_json:
+                # ollama and other pure HTTP gateways stay on the non-streaming
+                # completions path for now.
+                result = await run_gateway(
+                    gateway_url, gateway_token, agent_name, prompt,
+                    model=model, system_prompt=system_prompt, on_event=on_event,
+                    provider=provider,
+                    session_key="",
+                )
+            elif provider == "openclaw":
+                # Native WS path for OpenClaw.
+                # Register MCPs (and the clean runner) right before we talk to it
+                # so THIS agent's token + memory + MCP servers are visible to the
+                # runner, while the user's own OpenClaw agent configs stay out of
+                # the picture.
+                if mcp_config_json:
                     try:
                         import json as _json
                         from agentira_cli.runtimes.openclaw import register_agentira_mcps
@@ -914,14 +924,15 @@ class AgentiraDaemon:
                     except Exception as exc:
                         logger.warning("MCP register (openclaw) failed trace=%s: %s",
                                        trace_id, exc)
-                # ADR 009 / Runtime Adapter contract: derive the per-(agent,
-                # scope) session handle so OpenClaw routes the turn to its
-                # own thread (x-openclaw-session-key). Falls back to "" for
-                # providers without server-side threading (ollama etc.) —
-                # then the gateway picks its default (no isolation, today's
-                # behavior).
-                gw_session_key = ""
-                if runtime_cls is not None:
+
+                # Use the long-lived session key for native resume if the backend
+                # provided one from a prior turn (stored in Conversation.runtime_session_id).
+                # Fall back to deriving the canonical key for this (agent, scope).
+                # This is the equivalent of passing --resume <id> for CLI agents:
+                # the key identifies the persistent thread under the agentira-runner
+                # in OpenClaw; we send only the new prompt on resume turns.
+                gw_session_key = resume_session_id
+                if not gw_session_key and runtime_cls is not None:
                     try:
                         gw_session_key = runtime_cls.derive_session_handle(
                             agent_id=agent_id, scope_key=scope_key,
@@ -929,11 +940,30 @@ class AgentiraDaemon:
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("derive_session_handle failed trace=%s: %s",
                                      trace_id, exc)
-                result = await run_gateway(
+
+                # pid=0 record so heartbeats keep the scope live (running glow,
+                # Stop button, last_heartbeat_at) for the duration of the WS turn.
+                try:
+                    from agentira_cli.daemon import inflight as _inflight_reg
+                    _inflight_reg.record(
+                        scope_key=scope_key, trace_id=trace_id,
+                        run_id=run_id, pid=0,
+                        daemon_id=self._daemon_id,
+                        env_teardown=env_teardown_ctx,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("inflight record (openclaw ws) skipped trace=%s: %s",
+                                 trace_id, exc)
+
+                # resume_session_id from backend (prior runtime_session_id stored
+                # on the Conversation for this scope). Passed so the WS path can
+                # do a true lightweight native resume (only new prompt, no re-send
+                # of system/history). The gw_session_key is the stable long-lived key.
+                result = await run_openclaw_ws(
                     gateway_url, gateway_token, agent_name, prompt,
                     model=model, system_prompt=system_prompt, on_event=on_event,
-                    provider=provider,
                     session_key=gw_session_key,
+                    resume_session_id=resume_session_id,
                 )
             else:
                 result = await run_cli_stream(
@@ -1303,7 +1333,7 @@ class AgentiraDaemon:
         Resume here is therefore a no-op — there is no stopped process
         to continue; a new dispatch arrives on the WS instead.
 
-        CLI runtimes only — http_gateway has no proc to signal.
+        CLI runtimes only — http_gateway / openclaw-WS have no local proc (use scope abort).
         """
         trace_id = frame.get("trace_id", "")
         run_id = frame.get("run_id", "")

@@ -15,7 +15,7 @@ class GrokRuntime(Runtime):
     provider = "grok"
     default_binary = "grok"
     env_path_override = "AGENTIRA_GROK_PATH"
-    capabilities = ("stream_json", "resume", "http_gateway")
+    capabilities = ("stream_json", "resume", "mcp_config")  # CLI only — do not declare http_gateway (grok is invoked via subprocess like claude, not /v1/chat/completions gateway)
     # Fallback models if `grok models` introspection is unavailable.
     # Real list is fetched at runtime detect time by invoking the
     # `grok models` subcommand (headless). See introspect().

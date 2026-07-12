@@ -114,16 +114,17 @@ def _oc_ws_call(base_url: str, token: str, method: str,
     try:
         ws = websocket.create_connection(ws_url, timeout=8)
         ws.recv()  # challenge
-        # Handshake
+        # Handshake — protocol v4 (current)
         ws.send(json.dumps({
             "type": "req", "id": "c1", "method": "connect",
             "params": {
-                "minProtocol": 3, "maxProtocol": 3,
-                "client": {"id": "cli", "version": "2026.3.7",
-                           "platform": "windows", "mode": "node"},
+                "minProtocol": 4, "maxProtocol": 4,
+                "client": {"id": "forge", "version": "2026.7",
+                           "platform": "macos", "mode": "operator"},
                 "role": "operator",
-                "scopes": ["operator.read", "operator.admin"],
-                "caps": [], "commands": [], "permissions": {},
+                "scopes": ["operator.read", "operator.write"],
+                "caps": ["tool-events"],
+                "commands": [], "permissions": {},
                 "auth": {"token": token},
                 "locale": "en-US", "userAgent": "forge/1.0",
             }
@@ -157,12 +158,12 @@ _oc_ws_cache: dict[str, tuple[float, dict]] = {}
 
 
 class OpenClawAdapter(RuntimeAdapter):
-    """OpenClaw runtime — HTTP gateway + hooks.
+    """OpenClaw runtime — native WS (primary) + HTTP health/hooks.
 
-    Available endpoints:
-      GET  /health
-      POST /v1/chat/completions  (needs gateway.http.endpoints.chatCompletions.enabled)
-      POST /hooks/agent          (needs hooks.enabled + token)
+    Execution and direct chat now use the WS RPC (chat.send + event stream)
+    targeting the agentira-runner placeholder. Agentira layers its prompt,
+    MCPs and history on top of the clean runner (OpenClaw engine only).
+    Status/costs still use the WS "status" method.
     """
 
     def health(self, url: str) -> dict:
@@ -178,57 +179,95 @@ class OpenClawAdapter(RuntimeAdapter):
 
     def chat(self, url: str, token: str, agent: str,
              messages: list[dict]) -> dict:
-        endpoint = url.rstrip("/") + "/v1/chat/completions"
-        # Route through the generic `agentira-runner` agent regardless of
-        # which Agentira agent is asking. Agentira owns the persona; OpenClaw
-        # contributes only its tools/workspace via this runner. The `agent`
-        # parameter is unused for routing — kept for signature compatibility
-        # with the legacy /hooks/agent path. See AP-70 + the runtime
-        # architecture plan.
-        body = {
-            "model": "openclaw:agentira-runner",
-            "messages": messages,
-            "stream": False,
-        }
-        result = _http(endpoint, token=token, method="POST",
-                       body=body, timeout=120)
-        if "_error" in result:
-            return result
+        """Native WS chat via the runner agent.
 
-        # Parse OpenAI-compatible response
+        We still target the clean "agentira-runner" placeholder so that
+        OpenClaw supplies the engine (tools/workspace) while Agentira
+        supplies the system prompt / history / MCPs on top. This keeps
+        user OpenClaw agent configs from polluting Agentira runs.
+        """
+        start = time.monotonic()
+        # Build a one-shot WS chat (no long-lived sessionKey for direct Forge chat;
+        # the caller in services.py already supplies full recent history in messages).
+        try:
+            import websocket  # type: ignore
+        except Exception as exc:
+            return {"_error": f"websocket unavailable: {exc}"}
+
+        ws_base = url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_base}/?auth.token={token}" if token else ws_base
+
         content = ""
-        model = result.get("model", "")
-        choices = result.get("choices", [])
-        if choices:
-            msg = choices[0].get("message", {})
-            content = msg.get("content", "")
-
-        usage = result.get("usage", {})
-        input_tokens = usage.get("prompt_tokens", 0)
-        output_tokens = usage.get("completion_tokens", 0)
-
-        # If runtime reports zero tokens, estimate from content (~4 chars/token)
-        if not input_tokens:
-            input_tokens = sum(len(m.get("content", "")) for m in messages) // 4
-        if not output_tokens:
-            output_tokens = len(content) // 4
-
-        # Cost from response extensions, or zero (caller estimates from pricing table)
+        model_used = "openclaw:agentira-runner"
+        input_tokens = sum(len(m.get("content", "")) for m in messages) // 4
+        output_tokens = 0
         cost_usd = 0.0
-        if "cost" in result:
-            cost_usd = result["cost"]
-        elif "x_openclaw" in result:
-            cost_usd = result["x_openclaw"].get("cost_usd", 0.0)
-        elif "cost" in usage:
-            cost_usd = usage["cost"].get("total", 0.0) if isinstance(usage["cost"], dict) else usage["cost"]
+
+        try:
+            ws = websocket.create_connection(ws_url, timeout=30)
+            ws.recv()  # challenge
+
+            ws.send(json.dumps({
+                "type": "req", "id": "c1", "method": "connect",
+                "params": {
+                    "minProtocol": 4, "maxProtocol": 4,
+                    "client": {"id": "forge", "version": "2026.7",
+                               "platform": "macos", "mode": "operator"},
+                    "role": "operator",
+                    "scopes": ["operator.read", "operator.write"],
+                    "caps": ["tool-events"],
+                    "commands": [], "permissions": {},
+                    "auth": {"token": token} if token else {},
+                    "locale": "en-US", "userAgent": "forge/1.0",
+                }
+            }))
+            hello = json.loads(ws.recv())
+            if not hello.get("ok"):
+                ws.close()
+                return {"_error": "connect failed", "_latency_ms": int((time.monotonic()-start)*1000)}
+
+            # Send via native chat (layered on runner)
+            send_params = {
+                "messages": messages,
+                "agentId": "agentira-runner",
+            }
+            ws.send(json.dumps({
+                "type": "req", "id": "chat1",
+                "method": "chat.send",
+                "params": send_params,
+            }))
+
+            # Collect until res or terminal event (blocking full response for this API)
+            for _ in range(500):
+                f = json.loads(ws.recv())
+                if f.get("type") == "res" and f.get("id") == "chat1":
+                    if f.get("ok"):
+                        pl = f.get("payload") or {}
+                        if isinstance(pl, dict) and pl.get("content"):
+                            content = pl["content"]
+                        if pl.get("model"):
+                            model_used = pl["model"]
+                    break
+                if f.get("type") == "event":
+                    p = f.get("payload") or {}
+                    delta = p.get("deltaText") or p.get("text") or (p.get("message") or {}).get("content", "")
+                    if delta:
+                        content += delta
+
+            ws.close()
+        except Exception as exc:
+            return {"_error": str(exc), "_latency_ms": int((time.monotonic()-start)*1000)}
+
+        output_tokens = len(content) // 4
+        lat = int((time.monotonic() - start) * 1000)
 
         return {
             "content": content,
-            "model": model,
+            "model": model_used,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": cost_usd,
-            "_latency_ms": result.get("_latency_ms", 0),
+            "_latency_ms": lat,
         }
 
     def trigger(self, url: str, token: str, agent: str,
@@ -367,7 +406,7 @@ _ADAPTERS: dict[str, RuntimeAdapter] = {
     "zeroclaw": OpenClawAdapter(),   # same protocol for now
     "ollama":   OllamaAdapter(),
     "openai":   GenericAdapter(),
-    "grok":     GenericAdapter(),    # xAI Grok API (OpenAI-compatible)
+    "grok":     GenericAdapter(),    # legacy direct xAI Grok HTTP API (not used by the 'grok' CLI runtime which is CLI-based)
     "generic":  GenericAdapter(),
 }
 

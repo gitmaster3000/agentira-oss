@@ -31,7 +31,7 @@ class Capability:
 
     # Legacy wire-shape labels in use today — semantic equivalents above.
     STREAM_JSON = "stream_json"      # CLI runtime streams stream-json over stdout
-    HTTP_GATEWAY = "http_gateway"    # gateway runtime (HTTP/WebSocket)
+    HTTP_GATEWAY = "http_gateway"    # gateway runtime using HTTP (ollama etc.). OpenClaw uses native WS + stream_events.
     MCP_CONFIG = "mcp_config"        # claude's --mcp-config
 
     @classmethod

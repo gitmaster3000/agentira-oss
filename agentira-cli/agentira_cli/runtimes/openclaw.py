@@ -26,18 +26,23 @@ class OpenClawRuntime(Runtime):
     default_binary = "openclaw"
     env_path_override = "AGENTIRA_OPENCLAW_PATH"
     version_args = ("--version",)
-    # ADR 009 / Runtime Adapter contract: OpenClaw's native continuity is
-    # `sessionKey` (server-side thread under the runner agent). The
-    # adapter derives the key in `derive_session_handle` below.
-    # TODO(ADR-009 wire): once the OpenAI-compat /v1/chat/completions body
-    # field name accepted by OpenClaw's gateway is confirmed (CLI flag is
-    # `--session-id`; hooks config uses `sessionKey`; the HTTP shim's body
-    # field is unconfirmed against `gateway` source), add `"resume"` to
-    # capabilities AND send the handle in `run_gateway`'s body. Without
-    # both, declaring `resume` would regress (backend would stop history-
-    # replay while the adapter doesn't actually send the key) — so the
-    # capability flip is the single load-bearing line gated on spec.
-    capabilities = ("http_gateway",)
+    # ADR 009 / Runtime Adapter contract: OpenClaw uses its native WS RPC
+    # protocol (chat.send / sessions.* + event stream) for execution.
+    # We target the clean "agentira-runner" placeholder agent (created by
+    # ensure_runner_agent) so that:
+    #   - OpenClaw supplies the full engine (tools, workspace, MCP servers
+    #     registered into its config, execution environment).
+    #   - Agentira layers its own system_prompt, conversation history (via
+    #     sessionKey continuity + prompt construction), per-agent MCPs
+    #     (registered fresh before each dispatch), and config on top.
+    # This prevents user's personal OpenClaw agent configs / personas /
+    # settings from polluting Agentira agents. The runner has empty
+    # systemPromptOverride and full tools profile.
+    #
+    # Native WS gives us incremental streaming events (text deltas, tool
+    # lifecycle) instead of a single non-streaming /v1/chat/completions
+    # response. Capabilities reflect the native contract.
+    capabilities = ("stream_events", "resume")
 
     @classmethod
     def derive_session_handle(cls, *, agent_id: str, scope_key: str) -> str:
@@ -91,6 +96,9 @@ class OpenClawRuntime(Runtime):
             "gateway_url": gateway_url,
             "gateway_token": gateway_token,
             "models": models,
+            # OpenClaw now prefers native WS RPC for streaming execution
+            # (chat.send + event stream) rather than the HTTP completions shim.
+            "native_ws": True,
         }
 
 
@@ -212,10 +220,12 @@ _AGENTIRA_MCP_NAMES = ("agentira", "memory", "agentira-project")
 def register_agentira_mcps(mcp_config: dict, *, binary_path: str = "openclaw") -> dict:
     """Register Agentira's MCP servers into OpenClaw's config (AP-103).
 
-    OpenClaw can't take per-call MCP config on the OpenAI-compatible
-    `/v1/chat/completions` endpoint, so MCP must be registered into
-    OpenClaw's own config. `openclaw mcp set <name> <json>` is the
-    supported mutation path (it rewrites openclaw.json with a backup).
+    We register into the runner agent's effective environment (via global
+    mcp set before dispatch) because neither the old HTTP completions nor
+    the native chat.send path take per-call MCP config. This keeps
+    Agentira MCPs (with per-agent token + memory) on top of the clean runner
+    without affecting the user's own OpenClaw agents.
+    `openclaw mcp set` is the supported way.
 
     `mcp_config` is the `{"mcpServers": {name: {...}}}` dict produced by
     `backend.forge.mcp_registry.build_mcp_config` — it is built

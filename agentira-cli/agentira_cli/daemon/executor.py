@@ -10,7 +10,9 @@ import asyncio
 import json
 import logging
 import os
+import queue
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -30,10 +32,8 @@ logger = logging.getLogger("agentira.daemon.executor")
 _BATCH_INTERVAL = 0.5  # seconds between event flushes
 _CRASH_TAIL_EVENTS = 8  # how many trailing stream events to keep for diagnostics
 
-# HTTP gateway (OpenClaw/Ollama) chat-completions timeout. Local models on a
-# laptop can take minutes to produce a full agentic turn, so the old hardcoded
-# 120s tripped legitimate qwen runs as "timed out". Env-overridable for slower
-# hardware / larger models.
+# HTTP gateway (ollama and similar) chat-completions timeout. Local models
+# can take minutes; env-overridable.
 _GATEWAY_TIMEOUT_S = int(os.environ.get("AGENTIRA_GATEWAY_TIMEOUT", "600"))
 
 
@@ -388,12 +388,8 @@ async def run_gateway(
 ) -> StreamResult:
     """POST prompt to an OpenAI-compatible HTTP gateway.
 
-    Supports two shapes:
-    - **openclaw**: routes through the generic `agentira-runner` agent so
-      OpenClaw's tools/workspace apply; persona comes from system_prompt.
-    - **ollama** (and other bare gateways): sends the model directly with
-      no agent-routing prefix, no auth header (Ollama has no auth by
-      default).
+    Used by ollama and other http-only gateways. OpenClaw now uses the
+    native WS path (run_openclaw_ws) so we get real streaming events.
     """
     result = StreamResult()
     url = gateway_url.rstrip("/") + "/v1/chat/completions"
@@ -521,3 +517,298 @@ def _build_env(extra: dict, strip: Optional[set] = None) -> dict:
     env = {k: v for k, v in os.environ.items() if k not in _BLOCKED}
     env.update(extra)
     return env
+
+
+async def run_openclaw_ws(
+    gateway_url: str,
+    gateway_token: str,
+    agent_name: str,
+    prompt: str,
+    *,
+    model: str = "",
+    system_prompt: str = "",
+    on_event=None,
+    session_key: str = "",
+    resume_session_id: str = "",
+) -> StreamResult:
+    """Native WS execution for OpenClaw using long-lived sessionKey for resume.
+
+    This gives true native resume like CLI agents (claude --resume):
+    - The stable sessionKey (derived from agent+scope) is the long-lived
+      handle on the OpenClaw side. Prior turns stay in the runner's thread
+      (warm KV cache, full prior context).
+    - On resume turns (resume_session_id present), we send *only* the new
+      user prompt under that sessionKey. No full history rebuild, no
+      re-sending the (potentially large) system prompt every turn.
+    - System prompt + Agentira layering is sent only on the first turn for
+      a given sessionKey (when no prior resume id).
+    - This is the point of advertising "resume" + using native WS: avoid the
+      cost of assemble_context full history + token bloat on every turn.
+    """
+    result = StreamResult()
+    if not gateway_url:
+        result.error = "missing gateway_url"
+        result.success = False
+        return result
+
+    ws_base = gateway_url.rstrip("/").replace("http://", "ws://").replace("https://", "wss://")
+    ws_url = f"{ws_base}/?auth.token={gateway_token}" if gateway_token else ws_base
+
+    # === Long-lived sessionKey for native resume (like claude --resume) ===
+    # The sessionKey (derived deterministically from agent+scope) is the
+    # persistent thread identifier on OpenClaw under the agentira-runner.
+    # When the backend passes a resume_session_id (from prior turn's
+    # runtime_session_id stored in the Conversation), we treat this as a
+    # continuation:
+    #   - Send *only* the new user prompt (as "text").
+    #   - Do NOT re-send system_prompt or any prior messages.
+    # This eliminates the expensive full-history rebuild on every turn and
+    # avoids bloating the wire + OpenClaw context with repeated system text.
+    # System prompt (Agentira persona + conventions + memory notes) is sent
+    # exactly once, on the first turn for that sessionKey.
+    is_resume = bool(resume_session_id)
+    messages: list[dict] = []
+    if system_prompt and not is_resume:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    # Runner target keeps the separation (engine from OpenClaw, persona/MCP/prompt from Agentira)
+    runner_target = "agentira-runner"
+
+    ev_queue: queue.Queue = queue.Queue()
+    stop = threading.Event()
+
+    collected_text: list[str] = []
+    usage: dict = {}
+
+    def _ws_main() -> None:
+        ws = None
+        try:
+            import websocket  # type: ignore
+        except Exception as exc:
+            ev_queue.put({"_fatal": f"websocket package unavailable: {exc}"})
+            return
+
+        try:
+            ws = websocket.create_connection(ws_url, timeout=45)
+
+            # 1. challenge
+            try:
+                ch = json.loads(ws.recv())
+            except Exception:
+                ch = {}
+
+            # 2. connect (protocol v4)
+            ws.send(
+                json.dumps(
+                    {
+                        "type": "req",
+                        "id": "c1",
+                        "method": "connect",
+                        "params": {
+                            "minProtocol": 4,
+                            "maxProtocol": 4,
+                            "client": {
+                                "id": "agentira-daemon",
+                                "version": "2026.7",
+                                "platform": "macos",
+                                "mode": "operator",
+                            },
+                            "role": "operator",
+                            "scopes": ["operator.read", "operator.write"],
+                            "caps": ["tool-events"],
+                            "commands": [],
+                            "permissions": {},
+                            "auth": {"token": gateway_token} if gateway_token else {},
+                            "locale": "en-US",
+                            "userAgent": "agentira-daemon/1.0",
+                        },
+                    }
+                )
+            )
+            hello = json.loads(ws.recv())
+            if not hello.get("ok"):
+                ev_queue.put({"_fatal": hello.get("error") or hello})
+                return
+
+            # 3. subscribe for transcript events on our session (best-effort)
+            skey = session_key or resume_session_id
+            if skey:
+                try:
+                    ws.send(
+                        json.dumps(
+                            {
+                                "type": "req",
+                                "id": "sub1",
+                                "method": "sessions.messages.subscribe",
+                                "params": {"sessionKey": skey},
+                            }
+                        )
+                    )
+                    _ = ws.recv()  # ack, ignore shape
+                except Exception:
+                    pass
+
+            # 4. send the turn — use long-lived sessionKey + minimal payload on resume
+            send_id = "s1"
+            if is_resume:
+                # Lightweight native resume using the long-lived sessionKey:
+                # send ONLY the new user message. The entire prior conversation
+                # (including the system prompt we sent on first turn) lives in
+                # the OpenClaw runner thread for that sessionKey. This is the
+                # equivalent of claude --resume <session> — no history rebuild.
+                send_params: dict = {
+                    "sessionKey": skey,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "agentId": runner_target,
+                }
+            else:
+                # First turn for this key: include system so Agentira layers
+                # its prompt/config on the clean runner.
+                send_params: dict = {
+                    "sessionKey": session_key,
+                    "messages": messages,
+                    "agentId": runner_target,
+                }
+
+            ws.send(
+                json.dumps(
+                    {
+                        "type": "req",
+                        "id": send_id,
+                        "method": "chat.send",
+                        "params": send_params,
+                    }
+                )
+            )
+
+            # 5. drain res + events until we see terminal signal or quiet
+            for _ in range(4000):  # safety for very long runs
+                if stop.is_set():
+                    break
+                try:
+                    raw = ws.recv()
+                except Exception:
+                    break
+                if not raw:
+                    break
+                try:
+                    f = json.loads(raw)
+                except Exception:
+                    continue
+
+                if f.get("type") == "res" and f.get("id") == send_id:
+                    if not f.get("ok"):
+                        ev_queue.put({"_fatal": f.get("error") or f})
+                        break
+                    pl = f.get("payload") or {}
+                    if isinstance(pl, dict):
+                        if pl.get("usage"):
+                            usage.update(pl["usage"])
+                        if pl.get("content"):
+                            collected_text.append(pl["content"])
+                    # continue draining events after the ack
+
+                elif f.get("type") == "event":
+                    ename = f.get("event", "")
+                    p = f.get("payload") or {}
+
+                    # text / delta
+                    if ename in ("chat", "chat.message", "session.message", "message", "chat.inject"):
+                        delta = (
+                            p.get("deltaText")
+                            or p.get("text")
+                            or (p.get("message") or {}).get("content", "")
+                            or (p.get("message") or {}).get("text", "")
+                            or p.get("content", "")
+                        )
+                        if delta:
+                            ev_queue.put({"type": "text", "text": delta, "model": p.get("model", "")})
+                            collected_text.append(delta)
+
+                    # tool lifecycle (structured because we advertised tool-events)
+                    elif ename in ("session.tool", "tool", "tool_use", "agent.tool"):
+                        tname = p.get("name") or p.get("tool") or p.get("toolName") or ""
+                        tin = p.get("input") or p.get("args") or p.get("parameters") or ""
+                        if tname:
+                            ev_queue.put({"type": "tool_use", "tool": tname, "input": tin})
+
+                    elif ename in (
+                        "session.tool.result",
+                        "tool_result",
+                        "tool.result",
+                        "agent.tool_result",
+                    ):
+                        tname = p.get("name") or p.get("tool") or ""
+                        tout = p.get("output") or p.get("result") or p.get("content") or str(p)[:2000]
+                        ev_queue.put({"type": "tool_result", "tool": tname, "output": tout})
+
+                    if ename in ("chat.complete", "session.complete", "run.finished", "chat.done"):
+                        break
+
+            result.text = "".join(collected_text).strip()
+            result.success = bool(result.text)
+            # The long-lived sessionKey is what the backend will store as
+            # runtime_session_id and pass back as resume_session_id next time.
+            result.session_id = (session_key or resume_session_id or "")
+            if usage:
+                result.input_tokens = int(usage.get("prompt_tokens", usage.get("inputTokens", 0)) or 0)
+                result.output_tokens = int(usage.get("completion_tokens", usage.get("outputTokens", 0)) or 0)
+
+        except Exception as exc:
+            result.error = str(exc)
+            result.success = False
+            logger.warning("openclaw native ws error trace=internal: %s", exc)
+        finally:
+            stop.set()
+            ev_queue.put(None)
+            if ws is not None:
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+
+    t = threading.Thread(target=_ws_main, daemon=True)
+    t.start()
+
+    # Async drain with batching (mirrors run_cli_stream behavior)
+    batch: list = []
+    last = time.monotonic()
+
+    async def _flush() -> None:
+        nonlocal batch, last
+        if batch and on_event:
+            try:
+                await on_event(list(batch))
+            except Exception as exc:
+                logger.warning("openclaw on_event error: %s", exc)
+        batch = []
+        last = time.monotonic()
+
+    while True:
+        try:
+            item = ev_queue.get(timeout=0.15)
+        except queue.Empty:
+            if not t.is_alive():
+                break
+            if time.monotonic() - last >= 0.5:
+                await _flush()
+            continue
+
+        if item is None:
+            break
+        if "_fatal" in item:
+            result.error = str(item["_fatal"])
+            result.success = False
+            break
+
+        batch.append(item)
+        if time.monotonic() - last >= 0.5:
+            await _flush()
+
+    await _flush()
+    t.join(timeout=3.0)
+
+    if not result.success and not result.error:
+        result.error = "openclaw ws: no content produced"
+    return result

@@ -1,11 +1,8 @@
-"""OpenClaw session_key wiring (ADR 009 / Runtime Adapter contract).
+"""OpenClaw session_key (legacy HTTP path).
 
-Asserts run_gateway sends `x-openclaw-session-key: <key>` on the OpenAI-
-compatible request when called with a session_key, and rounds it back as
-`result.session_id` so the backend persists it for the next dispatch.
-
-Per OpenClaw docs/gateway/openai-http-api.md:
-    `x-openclaw-session-key: <sessionKey>` fully controls session routing.
+Tests the header sent by the HTTP gateway helper (still used by ollama
+and for direct calls). OpenClaw daemon execution now goes through native
+WS (run_openclaw_ws) which passes sessionKey in the chat.send frame.
 """
 
 from __future__ import annotations
