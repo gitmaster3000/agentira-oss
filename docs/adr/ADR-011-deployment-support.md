@@ -50,8 +50,13 @@ it work" without a laptop full of `docker compose up` incantations).
 **Phase 2 (deferred, scope-gated behind phase 1 landing and a real customer
 round-trip):**
 - `railway` adapter (AP-318) — durable/public URLs, `test` and `prod`
-  environments via Railway environments, reuses `railway.toml` (already in
-  repo root) and the Railway CLI, token from env.
+  environments via Railway environments, token from env. Uses Railway's
+  **Public GraphQL API** (`backboard.railway.com/graphql/v2`), *not* the
+  `railway` CLI: the backend ships as a container image with no CLI binary
+  and no local working directory to `railway up`, and the API deploys a
+  commit of the service's connected repo — which is what deploying a task's
+  branch actually means. `railway.toml` (already in repo root) still drives
+  the build; the adapter only triggers and observes deployments.
 - MCP tools + autonomy-dial gating (AP-320) so an agent can trigger a deploy
   itself, gated `auto | ask | deny` through the Notifications + Autonomy Dial
   epic (`c10ea54a1209`).

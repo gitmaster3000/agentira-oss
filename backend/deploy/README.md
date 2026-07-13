@@ -17,6 +17,15 @@ this), no settings storage (AP-314), no `Task` columns (AP-315).
   instance per `TargetKind`.
 - `github_deployments.py` — records to the GitHub Deployments API when a
   repo is linked; skips cleanly (returns `None`/`False`) otherwise.
+- `railway.py` (AP-318) — `RailwayAdapter`, the first real adapter. Talks to
+  Railway's Public GraphQL API through the `RailwayApi` seam (the only place
+  that touches the network; tests replace it with a fake). *Not* the `railway`
+  CLI — the backend runs as a container image with no CLI binary and no local
+  working dir to `railway up`; the API deploys a commit of the service's
+  connected repo instead. Compose services map 1:1 to Railway services (names
+  resolved to ids via `project(id)`); `test`/`prod` select the Railway
+  environment; the token comes from `RAILWAY_TOKEN` in the process env.
+  Registered for `TargetKind.RAILWAY` on `import backend.deploy`.
 - `dry_run.py` — `DryRunAdapter`, an in-memory reference adapter used to
   validate the contract.
 - `conformance.py` — `run_conformance_suite(adapter, target)`: deploy ->

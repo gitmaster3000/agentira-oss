@@ -12,9 +12,14 @@ from backend.deploy.contract import (
     DeploymentStatus,
 )
 from backend.deploy.adapter import DeployAdapter
+from backend.deploy.contract import TargetKind
+from backend.deploy.railway import RailwayAdapter
 from backend.deploy.registry import get_adapter, register
 
+register(TargetKind.RAILWAY, RailwayAdapter())
+
 __all__ = [
+    "RailwayAdapter",
     "Capability",
     "DeployTargetConfig",
     "DeploymentResult",
