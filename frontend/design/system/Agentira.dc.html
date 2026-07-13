@@ -22,142 +22,169 @@
   @keyframes glapulse{0%,100%{box-shadow:0 0 5px 0 rgba(56,189,248,.30)}50%{box-shadow:0 0 16px 2px rgba(56,189,248,.55)}}
   @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
   @keyframes livedot{0%{transform:scale(.7);opacity:.75}70%{transform:scale(2);opacity:0}100%{opacity:0}}
-  @keyframes barwork{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+  @keyframes barwork{0%{left:-35%}100%{left:100%}}
   @keyframes fadein{from{transform:translateY(4px)}to{transform:none}}
   .glow{position:relative;animation:glapulse 2.8s ease-in-out infinite}
   .glow::before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.5px;background:conic-gradient(from var(--gla),transparent 0deg,rgba(56,189,248,0) 190deg,#38bdf8 280deg,#7dd3fc 320deg,#38bdf8 345deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:glaspin 2.5s linear infinite;pointer-events:none}
   .screen{opacity:1}
   .nav:hover{background:#272d36 !important}
   .ico{flex-shrink:0}
+  /* collapsible icon rail (button-toggled) */
+  .railwrap{width:248px;transition:width .22s cubic-bezier(.4,0,.2,1)}
+  .railwrap.rc{width:66px}
+  .rail.rc .rl{display:none !important}
+  .rail.rc .nav,.rail.rc .navrow{justify-content:center !important;padding-left:0 !important;padding-right:0 !important}
+  .rail.rc .plangroup{margin-left:2px !important;padding-left:0 !important;border-left:none !important}
+  .rail .hdricon{display:none}
+  .rail.rc .railhdr{display:flex !important;align-items:center !important;justify-content:center !important;gap:0 !important;font-size:0 !important;letter-spacing:0 !important;margin:10px 10px 3px !important;padding:9px 0 3px !important;background:none !important;border:none !important;border-top:1px solid rgba(255,255,255,.08) !important;border-radius:0 !important}
+  .rail.rc .hdricon{opacity:.45}
+  .rail.rc .usermenu{left:calc(100% + 6px) !important;right:auto !important;bottom:8px !important;width:194px !important;margin-bottom:0 !important}
+  .rail.rc .usermenu .nav{justify-content:flex-start !important;padding-left:10px !important;padding-right:10px !important}
+  .rail.rc .hdrlabel{display:none !important}
+  .rail.rc .hdricon{display:block}
+  .rail.rc .railtoggle-wrap{justify-content:center !important}
 </style>
 </helmet>
-<div style="display:flex;height:100vh;overflow:hidden;background:#0e1117">
+<div style="display:flex;flex-direction:column;gap:12px;height:100vh;overflow:hidden;padding:12px;background:radial-gradient(900px 480px at 14% -10%,rgba(201,184,255,.06),transparent),radial-gradient(1000px 520px at 86% -14%,rgba(56,189,248,.06),transparent),#090b10">
 
-  <!-- ================= SIDEBAR ================= -->
-  <aside style="width:248px;flex-shrink:0;border-right:1px solid #30363d;background:#161b22;display:flex;flex-direction:column">
-    <!-- workspace -->
-    <div style="padding:12px;border-bottom:1px solid #30363d">
-      <div onClick="{{ nav.home }}" style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;background:#1c2128;border:1px solid #30363d;cursor:pointer">
-        <span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">A</span>
-        <div style="flex:1;line-height:1.1"><div style="font-size:13px;font-weight:600">Acme Inc</div><div style="font-size:10px;color:#768390">Agentira workspace</div></div>
+  <!-- ================= TOP BAR (logo out of the bar, blended) ================= -->
+  <header style="flex-shrink:0;height:40px;display:flex;align-items:center;gap:12px;padding:0 6px 0 2px">
+    <!-- logo — separate, always visible -->
+    <div onClick="{{ nav.home }}" style="display:flex;align-items:center;gap:10px;cursor:pointer;flex-shrink:0">
+      <span style="width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(201,184,255,.35)">A</span>
+      <div style="line-height:1.05"><div style="font-size:13.5px;font-weight:700">Acme Inc</div><div style="font-size:10px;color:#768390">Agentira</div></div>
+    </div>
+    <span style="width:1px;height:20px;background:rgba(255,255,255,.09);flex-shrink:0"></span>
+    <!-- project switcher (moved out of sidebar) -->
+    <div style="display:flex;align-items:center;gap:9px;flex-shrink:0">
+      <span style="font-size:11px;font-weight:700;letter-spacing:.12em;color:#768390;flex-shrink:0">PROJECT</span>
+      <div style="position:relative;flex-shrink:0">
+      <div onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:10px;cursor:pointer;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)" style-hover="border-color:rgba(255,255,255,.16)">
+        <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:{{ active.color }}"></span>
+        <span style="font-size:13px;font-weight:600;color:{{ active.color }}">{{ active.name }}</span>
+        <sc-if value="{{ active.hasLive }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#38bdf8;font-weight:600">{{ active.live }}</span></span></sc-if>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2.2" style="margin-left:1px"><path d="M8 9l4-4 4 4"></path><path d="M16 15l-4 4-4-4"></path></svg>
       </div>
-    </div>
-    <!-- search -->
-    <div style="padding:10px 12px 4px">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:#0e1117;border:1px solid #30363d;color:#768390;cursor:text"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span style="font-size:12.5px;flex:1">Search or jump…</span><span style="font-size:10px;font-family:ui-monospace,monospace;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 5px;color:#b1bac4">⌘K</span></div>
-    </div>
-    <div style="flex:1;overflow-y:auto;padding:6px 8px">
-      <!-- global -->
-      <div class="nav" onClick="{{ nav.home }}" style="{{ cls.home }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg><span style="flex:1">Home</span></div>
-      <div class="nav" onClick="{{ nav.inbox }}" style="{{ cls.inbox }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="flex:1">Inbox</span><span style="font-size:10px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 6px">5</span></div>
-      <div class="nav" onClick="{{ nav.mywork }}" style="{{ cls.mywork }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span style="flex:1">My Work</span></div>
-      <div class="nav" onClick="{{ nav.chat }}" style="{{ cls.chat }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span style="flex:1">Chat</span><span style="font-size:10px;font-weight:700;background:#38bdf8;color:#0e1117;border-radius:999px;padding:1px 6px">2</span></div>
-
-      <!-- shared BUILD -->
-      <div style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0">BUILD</div>
-      <div class="nav" onClick="{{ nav.agents }}" style="{{ cls.agents }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg><span style="flex:1">Agents</span><span style="font-size:10px;color:#768390">6</span></div>
-      <div class="nav" onClick="{{ nav.runs }}" style="{{ cls.runs }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span style="flex:1">Runs</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#38bdf8;font-weight:600">4</span></span></div>
-      <div class="nav" onClick="{{ nav.conductor }}" style="{{ cls.conductor }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg><span style="flex:1">Conductor</span></div>
-      <div class="nav" onClick="{{ nav.runtimes }}" style="{{ cls.runtimes }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg><span style="flex:1">Runtimes</span><span style="font-size:10px;color:#768390">4</span></div>
-      <div class="nav" onClick="{{ nav.mcp }}" style="{{ cls.mcp }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg><span style="flex:1">MCP Servers</span></div>
-
-      <!-- PROJECTS dropdown -->
-      <div style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0">PROJECT</div>
-      <div style="position:relative">
-        <div onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer;background:#1c2128;border:1px solid #30363d">
-          <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:{{ active.color }}"></span>
-          <span style="font-size:13px;font-weight:600;flex:1;color:{{ active.color }}">{{ active.name }}</span>
-          <sc-if value="{{ active.hasLive }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:4px;margin-right:2px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#38bdf8;font-weight:600">{{ active.live }}</span></span></sc-if>
-          <svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+      <sc-if value="{{ projMenuOpen }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:100%;left:0;margin-top:6px;width:264px;background:#1c2128;border:1px solid rgba(255,255,255,.09);border-radius:14px;box-shadow:0 20px 44px rgba(0,0,0,.55);z-index:50;padding:5px;max-height:340px;overflow-y:auto">
+          <div style="font-size:9.5px;font-weight:700;letter-spacing:.1em;color:#768390;padding:6px 8px 4px">SWITCH PROJECT</div>
+          <sc-for list="{{ projects }}" as="p" hint-placeholder-count="6">
+            <div onClick="{{ p.select }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:10px;cursor:pointer">
+              <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:{{ p.color }}"></span>
+              <span style="font-size:13px;flex:1;color:#e8ebf0">{{ p.name }}</span>
+              <sc-if value="{{ p.hasLive }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="font-size:10px;color:#38bdf8;font-weight:600">{{ p.live }}</span></span></sc-if>
+              <sc-if value="{{ p.hasNeeds }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.14);border-radius:5px;padding:1px 5px">{{ p.needs }}</span></sc-if>
+              <sc-if value="{{ p.isActive }}" hint-placeholder-val="{{ false }}"><svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2.4"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+            </div>
+          </sc-for>
+          <div onClick="{{ nav.newProject }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:10px;cursor:pointer;color:#768390;border-top:1px solid rgba(255,255,255,.06);margin-top:4px"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg><span style="font-size:12.5px">New project</span></div>
         </div>
-        <sc-if value="{{ projMenuOpen }}" hint-placeholder-val="{{ false }}">
-          <div style="position:absolute;top:100%;left:0;right:0;margin-top:4px;background:#1c2128;border:1px solid #30363d;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.5);z-index:40;padding:5px;max-height:320px;overflow-y:auto">
-            <div style="font-size:9.5px;font-weight:700;letter-spacing:.1em;color:#768390;padding:6px 8px 4px">SWITCH PROJECT</div>
-            <sc-for list="{{ projects }}" as="p" hint-placeholder-count="6">
-              <div onClick="{{ p.select }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;cursor:pointer">
-                <span style="width:8px;height:8px;border-radius:2px;flex-shrink:0;background:{{ p.color }}"></span>
-                <span style="font-size:13px;flex:1;color:#e8ebf0">{{ p.name }}</span>
-                <sc-if value="{{ p.hasLive }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:3px"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="font-size:10px;color:#38bdf8;font-weight:600">{{ p.live }}</span></span></sc-if>
-                <sc-if value="{{ p.hasNeeds }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.14);border-radius:5px;padding:1px 5px">{{ p.needs }}</span></sc-if>
-                <sc-if value="{{ p.isActive }}" hint-placeholder-val="{{ false }}"><svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2.4"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
-              </div>
-            </sc-for>
-            <div onClick="{{ nav.newProject }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;cursor:pointer;color:#768390;border-top:1px solid #30363d;margin-top:4px"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg><span style="font-size:12.5px">New project</span></div>
+      </sc-if>
+    </div>
+    </div>
+    <!-- breadcrumb -->
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:0;flex:1">{{ crumb }}</div>
+    <!-- search (moved out of sidebar) -->
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#768390;cursor:text;width:210px;flex-shrink:0" style-hover="border-color:rgba(255,255,255,.16)"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span style="font-size:12.5px;flex:1">Search or jump…</span><span style="font-size:10px;font-family:ui-monospace,monospace;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:6px;padding:2px 5px;color:#b1bac4">⌘K</span></div>
+    <!-- right controls -->
+    <div style="display:flex;align-items:center;gap:9px">
+      <div onClick="{{ togglePulse }}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.3);cursor:pointer">
+        <span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span>
+        <span style="font-size:12px;font-weight:600;color:#38bdf8">4 running</span>
+      </div>
+      <div style="position:relative">
+        <div onClick="{{ toggleNewMenu }}" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600;cursor:pointer"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"></path></svg></div>
+        <sc-if value="{{ newMenuOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:100%;right:0;margin-top:8px;width:230px;background:#1c2128;border:1px solid rgba(255,255,255,.09);border-radius:14px;box-shadow:0 20px 44px rgba(0,0,0,.55);z-index:50;padding:6px">
+            <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:11px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:9px;background:rgba(128,203,196,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg></span><div><div style="font-size:12.5px;font-weight:600">New task</div><div style="font-size:10.5px;color:#768390">File work on the board</div></div></a>
+            <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:11px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:9px;background:rgba(197,138,249,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c58af9" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"></rect><rect x="3" y="14" width="18" height="6" rx="1"></rect></svg></span><div><div style="font-size:12.5px;font-weight:600">New epic</div><div style="font-size:10.5px;color:#768390">Group tasks on the roadmap</div></div></a>
+            <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:11px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:9px;background:rgba(201,184,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18"></path></svg></span><div><div style="font-size:12.5px;font-weight:600">New project</div><div style="font-size:10.5px;color:#768390">Guided 5-step wizard</div></div></a>
           </div>
         </sc-if>
       </div>
-      <!-- Plan nav (once) -->
-      <div style="padding:8px 4px 0">
-        <div class="nav" onClick="{{ nav.overview }}" style="{{ cls.overview }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"></path></svg><span style="flex:1">Overview</span></div>
-        <div class="nav" onClick="{{ nav.board }}" style="{{ cls.board }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg><span style="flex:1">Board</span><span style="font-size:10px;color:#768390">{{ active.board }}</span></div>
-        <div class="nav" onClick="{{ nav.backlog }}" style="{{ cls.backlog }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span style="flex:1">Backlog</span></div>
-        <div class="nav" onClick="{{ nav.roadmap }}" style="{{ cls.roadmap }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg><span style="flex:1">Roadmap</span></div>
-        <div class="nav" onClick="{{ nav.workflow }}" style="{{ cls.workflow }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="6" rx="1"></rect><rect x="15" y="3" width="6" height="6" rx="1"></rect><rect x="9" y="15" width="6" height="6" rx="1"></rect><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1"></path></svg><span style="flex:1">Workflow</span></div>
-        <div class="nav" onClick="{{ nav.projSettings }}" style="{{ cls.projSettings }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"></path></svg><span style="flex:1">Settings</span></div>
+      <div style="position:relative">
+        <div onClick="{{ toggleBell }}" style="position:relative;padding:7px;color:#b1bac4;cursor:pointer;border-radius:9px" style-hover="background:rgba(255,255,255,.06)"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg><span style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#ef4444;border:2px solid #090b10"></span></div>
+        <sc-if value="{{ bellOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:100%;right:0;margin-top:8px;width:312px;background:#1c2128;border:1px solid rgba(255,255,255,.09);border-radius:14px;box-shadow:0 20px 44px rgba(0,0,0,.55);z-index:50;overflow:hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.06)"><span style="font-size:12.5px;font-weight:700">Notifications</span><span style="font-size:11px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 7px">5</span></div>
+            <div style="padding:5px">
+              <sc-for list="{{ bellSummary }}" as="b" hint-placeholder-count="4">
+                <div onClick="{{ b.open }}" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px;border-radius:11px;cursor:pointer">
+                  <span style="width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:{{ b.tint }}">
+                    <sc-if value="{{ b.isWait }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></sc-if>
+                    <sc-if value="{{ b.isAt }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path></svg></sc-if>
+                    <sc-if value="{{ b.isDone }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2.2"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+                    <sc-if value="{{ b.isFail }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"></path></svg></sc-if>
+                  </span>
+                  <div style="flex:1;min-width:0"><div style="font-size:12.5px;color:#e8ebf0">{{ b.label }}</div><div style="font-size:11px;color:#768390;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.sub }}</div></div>
+                  <span style="font-size:11px;font-weight:700;color:{{ b.color }};background:{{ b.tint }};border-radius:999px;padding:1px 7px">{{ b.n }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div onClick="{{ openInboxAll }}" class="nav" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-top:1px solid rgba(255,255,255,.06);font-size:12px;font-weight:600;color:#c9b8ff;cursor:pointer">Open Inbox<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
+          </div>
+        </sc-if>
       </div>
     </div>
-    <!-- footer user -->
-    <div style="border-top:1px solid #30363d;padding:8px;position:relative">
-      <div onClick="{{ toggleUser }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;cursor:pointer">
-        <div style="width:28px;height:28px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div>
-        <div style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder · admin</div></div>
-        <svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M8 9l4-4 4 4"></path><path d="M16 15l-4 4-4-4"></path></svg>
+  </header>
+
+  <div style="flex:1;display:flex;gap:12px;min-height:0">
+
+  <!-- ================= SIDEBAR (collapsible icon rail) ================= -->
+  <aside class="railwrap {{ rcCls }}" style="flex-shrink:0;position:relative;z-index:30">
+    <div class="rail {{ rcCls }}" style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;background:#14171d;border:1px solid rgba(255,255,255,.07);border-radius:16px;box-shadow:0 12px 38px rgba(0,0,0,.45)" style-before="content:'';position:absolute;top:0;left:0;right:0;height:190px;border-radius:16px 16px 0 0;background:linear-gradient(180deg,rgba(201,184,255,.08),rgba(201,184,255,0) 72%);pointer-events:none;z-index:0">
+      <!-- collapse toggle (top of sidebar) -->
+      <div class="railtoggle-wrap" style="position:relative;z-index:1;display:flex;justify-content:flex-end;padding:10px 12px 2px">
+        <div onClick="{{ toggleRail }}" title="Toggle sidebar" style="width:30px;height:30px;flex-shrink:0;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#b1bac4;border:1px solid rgba(255,255,255,.08)" style-hover="background:rgba(255,255,255,.06)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line></svg></div>
       </div>
-      <sc-if value="{{ userOpen }}" hint-placeholder-val="{{ false }}">
-        <div style="position:absolute;bottom:100%;left:8px;right:8px;margin-bottom:4px;background:#1c2128;border:1px solid #30363d;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.5);z-index:40;padding:5px">
-          <div onClick="{{ nav.settings }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:7px;cursor:pointer;font-size:13px;color:#b1bac4"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v4M12 19v4M1 12h4M19 12h4"></path></svg>Settings</div>
-          <div onClick="{{ setSetTab.profile }}" class="nav" style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:7px;cursor:pointer;font-size:13px;color:#b1bac4"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>Profile</div>
-          <div class="nav" style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:7px;cursor:pointer;font-size:13px;color:#f87171"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path></svg>Sign out</div>
+      <div style="position:relative;z-index:1;flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 8px">
+        <!-- global -->
+        <div class="nav" data-tip="Home" title="Home" onClick="{{ nav.home }}" style="{{ cls.home }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg><span class="rl" style="flex:1">Home</span></div>
+        <div class="nav" data-tip="Inbox" title="Inbox" onClick="{{ nav.inbox }}" style="{{ cls.inbox }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span class="rl" style="flex:1">Inbox</span><span class="rl" style="font-size:10px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 6px">5</span></div>
+        <div class="nav" data-tip="My Work" title="My Work" onClick="{{ nav.mywork }}" style="{{ cls.mywork }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span class="rl" style="flex:1">My Work</span></div>
+        <div class="nav" data-tip="Chat" title="Chat" onClick="{{ nav.chat }}" style="{{ cls.chat }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="rl" style="flex:1">Chat</span><span class="rl" style="font-size:10px;font-weight:700;background:#38bdf8;color:#0e1117;border-radius:999px;padding:1px 6px">2</span></div>
+        <div class="nav" data-tip="Templates" title="Templates" onClick="{{ nav.templates }}" style="{{ cls.templates }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5z"></path><path d="m2 17 10 5 10-5M2 12l10 5 10-5"></path></svg><span class="rl" style="flex:1">Templates</span><span class="rl" style="font-size:10px;color:#768390">{{ tplCount }}</span></div>
+
+        <!-- shared BUILD -->
+        <div class="railhdr" style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0"><svg class="hdricon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 5.5 4 4L21 7a5 5 0 0 1-6.9 6.9l-6.6 6.6a2.1 2.1 0 0 1-3-3l6.6-6.6A5 5 0 0 1 18 4z"></path></svg><span class="hdrlabel">BUILD</span></div>
+        <div class="nav" data-tip="Agents" title="Agents" onClick="{{ nav.agents }}" style="{{ cls.agents }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg><span class="rl" style="flex:1">Agents</span><span class="rl" style="font-size:10px;color:#768390">6</span></div>
+        <div class="nav" data-tip="Runs" title="Runs" onClick="{{ nav.runs }}" style="{{ cls.runs }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span class="rl" style="flex:1">Runs</span><span class="rl" style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#38bdf8;font-weight:600">4</span></span></div>
+        <div class="nav" data-tip="Conductor" title="Conductor" onClick="{{ nav.conductor }}" style="{{ cls.conductor }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg><span class="rl" style="flex:1">Conductor</span></div>
+        <div class="nav" data-tip="Runtimes" title="Runtimes" onClick="{{ nav.runtimes }}" style="{{ cls.runtimes }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg><span class="rl" style="flex:1" data-om-label="Agent Runtimes">Agent Runtimes</span><span class="rl" style="font-size:10px;color:#768390">4</span></div>
+        <div class="nav" data-tip="MCP Servers" title="MCP Servers" onClick="{{ nav.mcp }}" style="{{ cls.mcp }}"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg><span class="rl" style="flex:1">MCP Servers</span></div>
+
+        <!-- PROJECT section (switcher moved to top bar) -->
+        <div class="railhdr" style="padding:16px 10px 7px;font-size:11.5px;font-weight:800;letter-spacing:.14em;color:#aeb6c0"><svg class="hdricon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span class="hdrlabel">PROJECT</span></div>
+        <!-- Plan nav (once) — scoped to the active project -->
+        <div class="plangroup" style="margin:8px 2px 0 9px;padding:7px 0 2px">
+          <div class="nav" data-tip="Overview" title="Overview" onClick="{{ nav.overview }}" style="{{ cls.overview }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"></path></svg><span class="rl" style="flex:1">Overview</span></div>
+          <div class="nav" data-tip="Board" title="Board" onClick="{{ nav.board }}" style="{{ cls.board }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg><span class="rl" style="flex:1">Board</span><span class="rl" style="font-size:10px;color:#768390">{{ active.board }}</span></div>
+          <div class="nav" data-tip="Backlog" title="Backlog" onClick="{{ nav.backlog }}" style="{{ cls.backlog }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span class="rl" style="flex:1">Backlog</span></div>
+          <div class="nav" data-tip="Roadmap" title="Roadmap" onClick="{{ nav.roadmap }}" style="{{ cls.roadmap }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg><span class="rl" style="flex:1">Roadmap</span></div>
+          <div class="nav" data-tip="Workflow" title="Workflow" onClick="{{ nav.workflow }}" style="{{ cls.workflow }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="6" height="6" rx="1"></rect><rect x="15" y="3" width="6" height="6" rx="1"></rect><rect x="9" y="15" width="6" height="6" rx="1"></rect><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1"></path></svg><span class="rl" style="flex:1">Workflow</span></div>
+          <div class="nav" data-tip="Settings" title="Settings" onClick="{{ nav.projSettings }}" style="{{ cls.projSettings }}"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8"></path></svg><span class="rl" style="flex:1">Settings</span></div>
         </div>
-      </sc-if>
+      </div>
+      <!-- footer user -->
+      <div style="position:relative;z-index:1;border-top:1px solid rgba(255,255,255,.06);padding:8px">
+        <div onClick="{{ toggleUser }}" class="nav" data-tip="Alex Rivera" title="Alex Rivera" style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:10px;cursor:pointer">
+          <div style="width:28px;height:28px;flex-shrink:0;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div>
+          <div class="rl" style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder · admin</div></div>
+          <svg class="ico rl" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M8 9l4-4 4 4"></path><path d="M16 15l-4 4-4-4"></path></svg>
+        </div>
+        <sc-if value="{{ userOpen }}" hint-placeholder-val="{{ false }}">
+          <div class="usermenu" style="position:absolute;bottom:100%;left:8px;right:8px;margin-bottom:6px;background:#1c2128;border:1px solid rgba(255,255,255,.09);border-radius:14px;box-shadow:0 20px 44px rgba(0,0,0,.55);z-index:60;padding:5px">
+            <div onClick="{{ nav.settings }}" class="nav" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer; font-size: 13px; color: #b1bac4; position: static; text-align: left"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>Settings</div>
+            <div onClick="{{ setSetTab.profile }}" class="nav" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:#b1bac4"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>Profile</div>
+            <div class="nav" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:#f87171"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path></svg>Sign out</div>
+          </div>
+        </sc-if>
+      </div>
     </div>
   </aside>
 
   <!-- ================= MAIN ================= -->
-  <main style="flex:1;display:flex;flex-direction:column;min-width:0">
-    <!-- top bar -->
-    <header style="height:54px;flex-shrink:0;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:#0e1117">
-      <div style="display:flex;align-items:center;gap:8px;font-size:13px;min-width:0">{{ crumb }}</div>
-      <div style="display:flex;align-items:center;gap:9px">
-        <div onClick="{{ togglePulse }}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.3);cursor:pointer">
-          <span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span>
-          <span style="font-size:12px;font-weight:600;color:#38bdf8">4 running</span>
-        </div>
-        <div style="position:relative">
-          <div onClick="{{ toggleNewMenu }}" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600;cursor:pointer"><svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"></path></svg></div>
-          <sc-if value="{{ newMenuOpen }}" hint-placeholder-val="{{ false }}">
-            <div style="position:absolute;top:100%;right:0;margin-top:8px;width:230px;background:#1c2128;border:1px solid #30363d;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.55);z-index:50;padding:6px">
-              <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:8px;background:rgba(128,203,196,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg></span><div><div style="font-size:12.5px;font-weight:600">New task</div><div style="font-size:10.5px;color:#768390">File work on the board</div></div></a>
-              <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:8px;background:rgba(197,138,249,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c58af9" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"></rect><rect x="3" y="14" width="18" height="6" rx="1"></rect></svg></span><div><div style="font-size:12.5px;font-weight:600">New epic</div><div style="font-size:10.5px;color:#768390">Group tasks on the roadmap</div></div></a>
-              <a href="Create Flows.dc.html" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:9px;text-decoration:none;color:inherit;cursor:pointer"><span style="width:30px;height:30px;border-radius:8px;background:rgba(201,184,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18"></path></svg></span><div><div style="font-size:12.5px;font-weight:600">New project</div><div style="font-size:10.5px;color:#768390">Guided 5-step wizard</div></div></a>
-            </div>
-          </sc-if>
-        </div>
-        <div style="position:relative">
-          <div onClick="{{ toggleBell }}" style="position:relative;padding:7px;color:#b1bac4;cursor:pointer"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg><span style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#ef4444;border:2px solid #0e1117"></span></div>
-          <sc-if value="{{ bellOpen }}" hint-placeholder-val="{{ false }}">
-            <div style="position:absolute;top:100%;right:0;margin-top:8px;width:312px;background:#1c2128;border:1px solid #30363d;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.55);z-index:50;overflow:hidden">
-              <div style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid #30363d"><span style="font-size:12.5px;font-weight:700">Notifications</span><span style="font-size:11px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 7px">5</span></div>
-              <div style="padding:5px">
-                <sc-for list="{{ bellSummary }}" as="b" hint-placeholder-count="4">
-                  <div onClick="{{ b.open }}" class="nav" style="display:flex;align-items:center;gap:11px;padding:9px;border-radius:9px;cursor:pointer">
-                    <span style="width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:{{ b.tint }}">
-                      <sc-if value="{{ b.isWait }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></sc-if>
-                      <sc-if value="{{ b.isAt }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path></svg></sc-if>
-                      <sc-if value="{{ b.isDone }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2.2"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
-                      <sc-if value="{{ b.isFail }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{ b.color }}" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"></path></svg></sc-if>
-                    </span>
-                    <div style="flex:1;min-width:0"><div style="font-size:12.5px;color:#e8ebf0">{{ b.label }}</div><div style="font-size:11px;color:#768390;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.sub }}</div></div>
-                    <span style="font-size:11px;font-weight:700;color:{{ b.color }};background:{{ b.tint }};border-radius:999px;padding:1px 7px">{{ b.n }}</span>
-                  </div>
-                </sc-for>
-              </div>
-              <div onClick="{{ openInboxAll }}" class="nav" style="display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-top:1px solid #30363d;font-size:12px;font-weight:600;color:#c9b8ff;cursor:pointer">Open Inbox<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg></div>
-            </div>
-          </sc-if>
-        </div>
-      </div>
-    </header>
+  <main style="flex:1;display:flex;flex-direction:column;min-width:0;background:#0e1117;border:1px solid rgba(255,255,255,.07);border-radius:16px;overflow:hidden;box-shadow:0 12px 38px rgba(0,0,0,.35)">
 
     <!-- screen body + pulse dock -->
     <div style="flex:1;display:flex;min-height:0">
@@ -201,13 +228,34 @@
                 </div>
               </sc-for>
             </div>
+
+            <!-- recent activity -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin:26px 0 12px"><span style="font-size:12px;font-weight:700;letter-spacing:.06em;color:#b1bac4">RECENT ACTIVITY</span><span style="font-size:12px;color:#768390">across workspace</span></div>
+            <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:15px">
+              <div style="display:flex;gap:10px;padding:11px 12px;border-radius:10px;background:rgba(128,203,196,.06);border:1px solid rgba(128,203,196,.18);margin-bottom:13px">
+                <span style="width:22px;height:22px;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(128,203,196,.14)"><svg width="13" height="13" viewBox="0 0 24 24" fill="#80cbc4" stroke="none"><path d="M12 2l1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9z"></path></svg></span>
+                <div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:#80cbc4;margin-bottom:4px">AI SUMMARY</div><p style="font-size:12.5px;color:#b1bac4;margin:0;line-height:1.55;text-wrap:pretty">Momentum is steady — agents opened 3 PRs and merged 2 runs while the team moved 4 tasks into review over the last 24 hours across all 6 projects. <b style="color:#e8ebf0;font-weight:600">ACM-138</b> is the only blocker, waiting on your auth-scheme decision.</p></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:1px">
+                <sc-for list="{{ activityFeed }}" as="a" hint-placeholder-count="6">
+                  <div onClick="{{ a.open }}" class="nav" style="display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:8px;cursor:pointer">
+                    <span style="width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;background:{{ a.tint }};color:{{ a.color }}">{{ a.init }}</span>
+                    <div style="flex:1;min-width:0;font-size:12.5px;color:#e8ebf0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b style="font-weight:600">{{ a.who }}</b> <span style="color:#768390">{{ a.text }}</span> <span style="font-family:ui-monospace,monospace;color:#7c8db5">{{ a.link }}</span></div>
+                    <span style="font-size:11px;color:#768390;flex-shrink:0">{{ a.ago }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
           </div>
         </sc-if>
 
         <!-- ===== BOARD ===== -->
         <sc-if value="{{ is.board }}" hint-placeholder-val="{{ false }}">
           <div class="screen" style="display:flex;flex-direction:column;height:100%">
-            <div style="padding:14px 22px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px;flex-wrap:wrap;flex-shrink:0">
+            <div style="padding:0 22px;height:53px;box-sizing:border-box;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px;flex-shrink:0">
+              
+              <span style="font-size:11px;color:#5a626c;white-space:nowrap">Board</span>
+              <div style="width:1px;height:22px;background:#30363d"></div>
               <div style="position:relative">
                 <div onClick="{{ toggleMembers }}" style="display:flex;align-items:center;gap:8px;border:1px solid #30363d;border-radius:9px;padding:6px 11px;cursor:pointer">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b1bac4" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -291,7 +339,7 @@
               <div style="display:flex;align-items:center;gap:2px">
                 <div onClick="{{ setTaskTab.plan }}" style="{{ ttabS.plan }}">Plan</div>
                 <div onClick="{{ setTaskTab.agent }}" style="{{ ttabS.agent }}">Agent<sc-if value="{{ task.isLive }}" hint-placeholder-val="{{ false }}"><span style="position:relative;display:inline-flex;margin-left:7px;vertical-align:middle"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8;display:inline-block"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span></sc-if></div>
-                <div onClick="{{ setTaskTab.activity }}" style="{{ ttabS.activity }}">Activity</div>
+                <div onClick="{{ setTaskTab.activity }}" style="{{ ttabS.activity }}">Chat</div>
                 <div onClick="{{ setTaskTab.files }}" style="{{ ttabS.files }}">Files</div>
               </div>
             </div>
@@ -343,6 +391,21 @@
                     <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:13px"><span style="width:17px;height:17px;border-radius:5px;background:#2ecc71;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="color:#768390;text-decoration:line-through">Exponential backoff on 5xx with jitter</span></div>
                     <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:13px"><span style="width:17px;height:17px;border-radius:5px;background:#2ecc71;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="color:#768390;text-decoration:line-through">Unit tests for retry + give-up paths</span></div>
                     <div style="display:flex;align-items:center;gap:10px;font-size:13px"><span style="width:17px;height:17px;border-radius:5px;border:1.5px solid #484f58;flex-shrink:0"></span><span style="color:#e8ebf0">Dead-letter log entry + audit alert</span></div>
+
+                    <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin:28px 0 13px">ACTIVITY</div>
+                    <div style="display:flex;flex-direction:column;gap:0">
+                      <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#00bcd4;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:15px"><div style="font-size:13px;color:#e8ebf0;line-height:1.45"><b style="font-weight:600">Backend Implementer</b> opened draft PR <span style="font-family:ui-monospace,monospace;color:#80cbc4">acme-web#318</span></div><div style="font-size:11px;color:#768390;margin-top:2px">8m ago</div></div></div>
+                      <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#c9b8ff;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:15px"><div style="font-size:13px;color:#e8ebf0;line-height:1.45"><b style="font-weight:600">Dana Kim</b> commented on this task</div><div style="font-size:11px;color:#768390;margin-top:2px">12m ago</div></div></div>
+                      <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#f1c40f;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:15px"><div style="font-size:13px;color:#e8ebf0;line-height:1.45">Moved <span style="color:#768390">To Do</span> → <span style="color:#f1c40f">In Progress</span></div><div style="font-size:11px;color:#768390;margin-top:2px">2h ago</div></div></div>
+                      <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#2ecc71;margin-top:3px"></span></div><div><div style="font-size:13px;color:#e8ebf0;line-height:1.45"><b style="font-weight:600">Planner</b> wrote the Definition of Done</div><div style="font-size:11px;color:#768390;margin-top:2px">3h ago</div></div></div>
+                    </div>
+
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin:28px 0 13px"><span style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390">DISCUSSION</span><span onClick="{{ setTaskTab.activity }}" style="display:flex;align-items:center;gap:4px;font-size:11px;color:#80cbc4;cursor:pointer">View all in Chat<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg></span></div>
+                    <div style="display:flex;flex-direction:column;gap:13px;margin-bottom:14px">
+                      <div style="display:flex;gap:10px"><span style="width:28px;height:28px;border-radius:50%;flex-shrink:0;background:rgba(201,184,255,.16);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">DA</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:12.5px;font-weight:600">Dana Kim</span><span style="font-size:10.5px;color:#768390">12m</span></div><div style="font-size:13px;line-height:1.55;color:#c8cdd4;background:#1c2128;border-radius:11px;border-top-left-radius:3px;padding:9px 12px">@Backend Implementer can you confirm the retry cap is 5, not 3? The runbook says 5.</div></div></div>
+                      <div style="display:flex;gap:10px"><span style="width:28px;height:28px;border-radius:50%;flex-shrink:0;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">AI</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:12.5px;font-weight:600">Backend Implementer</span><span style="font-size:9px;font-weight:700;color:#00bcd4;background:rgba(0,188,212,.14);border-radius:4px;padding:1px 5px">AGENT</span><span style="font-size:10.5px;color:#768390">10m</span></div><div style="font-size:13px;line-height:1.55;color:#c8cdd4;background:#1c2128;border-radius:11px;border-top-left-radius:3px;padding:9px 12px">Confirmed — cap is 5 with full jitter. Updated <span style="font-family:ui-monospace,monospace;color:#80cbc4">retry.py</span> accordingly.</div></div></div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px"><span style="width:28px;height:28px;border-radius:50%;flex-shrink:0;background:#1c2128;color:#b1bac4;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">AX</span><div style="flex:1;display:flex;align-items:center;gap:8px;background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:9px 12px"><span style="font-size:12.5px;color:#768390;flex:1">Comment… use @ to mention. A comment can wake the assigned agent.</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2" style="flex-shrink:0"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"></path></svg></div></div>
                   </div>
                 </sc-if>
 
@@ -650,6 +713,13 @@
         <!-- ===== BACKLOG ===== -->
         <sc-if value="{{ is.backlog }}" hint-placeholder-val="{{ false }}">
           <div class="screen" style="padding:24px 28px">
+            <div style="display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:12px;background:{{ active.color }}12;border:1px solid {{ active.color }}33;margin-bottom:18px">
+              <span style="width:11px;height:11px;border-radius:3px;background:{{ active.color }};flex-shrink:0"></span>
+              <div style="line-height:1.25"><div style="font-size:13.5px;font-weight:700;color:{{ active.color }}">{{ active.name }}</div><div style="font-size:11px;color:#768390">This backlog belongs to the selected project</div></div>
+              <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">{{ active.key }}</span>
+              <div style="flex:1"></div>
+              <div onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#b1bac4;padding:5px 10px;border-radius:8px;border:1px solid #30363d;cursor:pointer" style-hover="background:#1c2128;color:#e8ebf0">Switch project<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></div>
+            </div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
               <h1 style="font-size:22px;font-weight:700;margin:0">Backlog</h1>
               <div style="display:flex;align-items:center;gap:4px;background:#14161b;border:1px solid #30363d;border-radius:10px;padding:3px">
@@ -706,6 +776,13 @@
         <!-- ===== ROADMAP (GANTT) ===== -->
         <sc-if value="{{ is.roadmap }}" hint-placeholder-val="{{ false }}">
           <div class="screen" style="padding:24px 28px">
+            <div style="display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:12px;background:{{ active.color }}12;border:1px solid {{ active.color }}33;margin-bottom:18px">
+              <span style="width:11px;height:11px;border-radius:3px;background:{{ active.color }};flex-shrink:0"></span>
+              <div style="line-height:1.25"><div style="font-size:13.5px;font-weight:700;color:{{ active.color }}">{{ active.name }}</div><div style="font-size:11px;color:#768390">This roadmap belongs to the selected project</div></div>
+              <span style="font-size:9.5px;font-family:ui-monospace,monospace;color:#768390;background:#0e1117;border:1px solid #30363d;border-radius:5px;padding:2px 7px">{{ active.key }}</span>
+              <div style="flex:1"></div>
+              <div onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#b1bac4;padding:5px 10px;border-radius:8px;border:1px solid #30363d;cursor:pointer" style-hover="background:#1c2128;color:#e8ebf0">Switch project<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></div>
+            </div>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
               <h1 style="font-size:22px;font-weight:700;margin:0">Roadmap</h1>
               <div style="display:flex;align-items:center;gap:9px">
@@ -846,6 +923,104 @@
               <div class="nav" style="display:flex;align-items:center;gap:11px;padding:12px 14px;border-bottom:1px solid #1c2128;cursor:pointer"><span style="font-size:11px;font-family:ui-monospace,monospace;color:#7c8db5">ACM-148</span><span style="flex:1;font-size:12.5px">Pagination for the audit log</span><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#b1bac4"><span style="width:7px;height:7px;border-radius:50%;background:#8ab4f8"></span>To Do</span></div>
               <div class="nav" style="display:flex;align-items:center;gap:11px;padding:12px 14px;cursor:pointer"><span style="font-size:11px;font-family:ui-monospace,monospace;color:#7c8db5">ACM-147</span><span style="flex:1;font-size:12.5px">Dark-mode polish pass</span><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#b1bac4"><span style="width:7px;height:7px;border-radius:50%;background:#8ab4f8"></span>To Do</span></div>
             </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== TEMPLATES ===== -->
+        <sc-if value="{{ is.templates }}" hint-placeholder-val="{{ false }}">
+          <div class="screen" style="padding:24px 28px;max-width:980px">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+              <div>
+                <h1 style="font-size:22px;font-weight:700;margin:0 0 5px">Templates</h1>
+                <p style="font-size:13px;color:#768390;margin:0;max-width:64ch">Reusable blueprints for tasks, epics and projects. Pick one in any <b style="color:#b1bac4;font-weight:600">New…</b> flow to skip the blank page — it pre-fills the Definition of Done, default agent, workflow and more.</p>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New template</div>
+            </div>
+
+            <!-- tabs -->
+            <div style="display:flex;align-items:center;gap:6px;margin:22px 0 18px">
+              <div onClick="{{ setTplTab.task }}" style="{{ tplTabS.task }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg>Tasks<span style="font-size:10px;color:#768390;background:#0e1117;border-radius:999px;padding:1px 7px">{{ tplCounts.task }}</span></div>
+              <div onClick="{{ setTplTab.epic }}" style="{{ tplTabS.epic }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"></rect><rect x="3" y="14" width="18" height="6" rx="1"></rect></svg>Epics<span style="font-size:10px;color:#768390;background:#0e1117;border-radius:999px;padding:1px 7px">{{ tplCounts.epic }}</span></div>
+              <div onClick="{{ setTplTab.project }}" style="{{ tplTabS.project }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18"></path></svg>Projects<span style="font-size:10px;color:#768390;background:#0e1117;border-radius:999px;padding:1px 7px">{{ tplCounts.project }}</span></div>
+            </div>
+
+            <!-- TASK TEMPLATES -->
+            <sc-if value="{{ tpl.task }}" hint-placeholder-val="{{ true }}">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px">
+                <sc-for list="{{ taskTpls }}" as="t" hint-placeholder-count="4">
+                  <div class="nav" style="background:#14161b;border:1px solid #30363d;border-radius:13px;padding:15px;display:flex;flex-direction:column;border-left:3px solid {{ t.color }}">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+                      <span style="width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:{{ t.color }}1f"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ t.color }}" stroke-width="2"><path d="M12 2 2 7l10 5 10-5-10-5z"></path><path d="m2 17 10 5 10-5M2 12l10 5 10-5"></path></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#f0f3f6">{{ t.name }}</div><div style="font-size:10.5px;color:#768390">Task template · {{ t.uses }} uses</div></div>
+                      <span style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer;flex-shrink:0" style-hover="background:#1c2128;color:#e8ebf0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg></span>
+                    </div>
+                    <div style="font-size:12px;color:#b1bac4;line-height:1.5;margin-bottom:11px">{{ t.desc }}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px">
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><span style="width:6px;height:6px;border-radius:50%;background:{{ t.prioColor }}"></span>{{ t.priority }}</span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg>{{ t.agent }}</span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" stroke-width="2.2"><path d="M20 6 9 17l-5-5"></path></svg>{{ t.dodCount }}-point DoD</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:auto;border-top:1px solid #1c2128;padding-top:12px">
+                      <a href="Create Flows.dc.html" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:#1c2128;border:1px solid #30363d;color:#e8ebf0;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer" style-hover="border-color:#484f58"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>New task from this</a>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Edit</span>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Duplicate</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <!-- EPIC TEMPLATES -->
+            <sc-if value="{{ tpl.epic }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px">
+                <sc-for list="{{ epicTpls }}" as="t" hint-placeholder-count="3">
+                  <div class="nav" style="background:#14161b;border:1px solid #30363d;border-radius:13px;padding:15px;display:flex;flex-direction:column;border-left:3px solid {{ t.color }}">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+                      <span style="width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:{{ t.color }}1f"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ t.color }}" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1"></rect><rect x="3" y="14" width="18" height="6" rx="1"></rect></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#f0f3f6">{{ t.name }}</div><div style="font-size:10.5px;color:#768390">Epic template · {{ t.uses }} uses</div></div>
+                      <span style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer;flex-shrink:0" style-hover="background:#1c2128;color:#e8ebf0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg></span>
+                    </div>
+                    <div style="font-size:12px;color:#b1bac4;line-height:1.5;margin-bottom:11px">{{ t.desc }}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px">
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18M8 2v4M16 2v4"></path></svg>{{ t.span }}</span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>{{ t.tasks }} starter tasks</span>
+                    </div>
+                    <div style="font-size:11px;color:#768390;margin-bottom:13px;display:flex;align-items:center;gap:6px"><span style="font-size:9px;font-weight:700;letter-spacing:.06em;color:#5a626c">PHASES</span><span style="color:#b1bac4;font-family:ui-monospace,monospace;font-size:10.5px">{{ t.phasesText }}</span></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:auto;border-top:1px solid #1c2128;padding-top:12px">
+                      <a href="Create Flows.dc.html" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:#1c2128;border:1px solid #30363d;color:#e8ebf0;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer" style-hover="border-color:#484f58"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>New epic from this</a>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Edit</span>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Duplicate</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <!-- PROJECT TEMPLATES -->
+            <sc-if value="{{ tpl.project }}" hint-placeholder-val="{{ false }}">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px">
+                <sc-for list="{{ projTpls }}" as="t" hint-placeholder-count="4">
+                  <div class="nav" style="background:#14161b;border:1px solid #30363d;border-radius:13px;padding:15px;display:flex;flex-direction:column;border-left:3px solid {{ t.color }}">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+                      <span style="width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:{{ t.color }}1f"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{ t.color }}" stroke-width="2"><path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18"></path></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#f0f3f6">{{ t.name }}</div><div style="font-size:10.5px;color:#768390">Project template · {{ t.uses }} uses</div></div>
+                      <span style="width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer;flex-shrink:0" style-hover="background:#1c2128;color:#e8ebf0"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg></span>
+                    </div>
+                    <div style="font-size:12px;color:#b1bac4;line-height:1.5;margin-bottom:11px">{{ t.desc }}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px">
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="3" width="6" height="6" rx="1"></rect><rect x="15" y="3" width="6" height="6" rx="1"></rect><rect x="9" y="15" width="6" height="6" rx="1"></rect></svg>{{ t.workflow }}</span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg>{{ t.agents }} agents</span>
+                      <span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:3px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg>{{ t.cols }} columns</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:auto;border-top:1px solid #1c2128;padding-top:12px">
+                      <a href="Create Flows.dc.html" style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:8px;background:#1c2128;border:1px solid #30363d;color:#e8ebf0;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer" style-hover="border-color:#484f58"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>New project from this</a>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Edit</span>
+                      <span style="font-size:12px;color:#768390;cursor:pointer;padding:7px 8px" style-hover="color:#e8ebf0">Duplicate</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
           </div>
         </sc-if>
 
@@ -1019,27 +1194,83 @@
 
         <!-- ===== CONDUCTOR ===== -->
         <sc-if value="{{ is.conductor }}" hint-placeholder-val="{{ false }}">
-          <div class="screen" style="padding:24px 28px;max-width:860px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="screen" style="padding:24px 28px;max-width:1180px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
               <div style="display:flex;align-items:center;gap:11px"><span style="width:38px;height:38px;border-radius:10px;background:rgba(201,184,255,.12);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg></span><div><h1 style="font-size:21px;font-weight:700;margin:0">Conductor</h1><div style="font-size:12px;color:#768390">The orchestrator — plans, dispatches, reconciles.</div></div></div>
               <div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:#81c995">Active</span><div style="width:38px;height:21px;border-radius:999px;background:#81c995;position:relative"><span style="position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;background:#0e1117"></span></div></div>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0">
-              <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">TICK CADENCE</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">30s</div><div style="font-size:11px;color:#768390;margin-top:3px">token-free dispatch</div></div>
-              <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">PLAN INTERVAL</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">10m</div><div style="font-size:11px;color:#768390;margin-top:3px">LLM assignment</div></div>
-              <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">DAILY REPORT</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">09:00</div><div style="font-size:11px;color:#768390;margin-top:3px">local time</div></div>
-            </div>
-            <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:16px;margin-bottom:14px">
-              <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#768390;margin-bottom:12px">LATEST CYCLE</div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:8px;height:8px;border-radius:50%;background:#2ecc71"></span><span style="font-size:12.5px;flex:1">Tick · dispatched 2 tasks to free agents</span><span style="font-size:11px;color:#768390">12s ago</span></div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:8px;height:8px;border-radius:50%;background:#c9b8ff"></span><span style="font-size:12.5px;flex:1">Planning turn · assigned 3 unassigned tasks by specialty</span><span style="font-size:11px;color:#768390">4m ago</span></div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><span style="width:8px;height:8px;border-radius:50%;background:#ff9800"></span><span style="font-size:12.5px;flex:1">Progress check · 1 stalled task flagged for re-dispatch</span><span style="font-size:11px;color:#768390">9m ago</span></div>
-            </div>
-            <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:16px">
-              <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#768390;margin-bottom:12px">AGENT SURVEY · who's eligible next</div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12.5px;flex:1">Backend Implementer</span><span style="font-size:11px;color:#768390">1/2 in flight · ACM-149 next</span></div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:7px;height:7px;border-radius:50%;background:#81c995"></span><span style="font-size:12.5px;flex:1">Frontend Implementer</span><span style="font-size:11px;color:#768390">0/2 · idle</span></div>
-              <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12.5px;flex:1">Reviewer</span><span style="font-size:11px;color:#768390">1/1 · busy</span></div>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:18px;align-items:start">
+              <!-- LEFT: telemetry + queue -->
+              <div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px">
+                  <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">TICK CADENCE</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">30s</div><div style="font-size:11px;color:#768390;margin-top:3px">token-free dispatch</div></div>
+                  <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">PLAN INTERVAL</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">10m</div><div style="font-size:11px;color:#768390;margin-top:3px">LLM assignment</div></div>
+                  <div style="background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:14px"><div style="font-size:11px;color:#768390;margin-bottom:4px">DAILY REPORT</div><div style="font-size:18px;font-weight:700;font-family:ui-monospace,monospace">09:00</div><div style="font-size:11px;color:#768390;margin-top:3px">local time</div></div>
+                </div>
+                <!-- DISPATCH QUEUE · manageable -->
+                <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:16px;margin-bottom:14px">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#768390">NEXT IN QUEUE · {{ condQueueCount }} to dispatch</div><span onClick="{{ condPauseQueue }}" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:{{ condQueuePausedColor }};cursor:pointer">{{ condQueuePausedLabel }}</span></div>
+                  <div style="display:flex;align-items:flex-start;gap:7px;margin-bottom:12px;padding:7px 9px;border-radius:8px;background:#0e1117;border:1px solid #1c2128"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4M12 8h.01"></path></svg><div style="font-size:10.5px;color:#768390;line-height:1.5">Each task shows its phase transition — where it sits, where the next run moves it, and what that run will do. Pulled live from your <span onClick="{{ nav.workflow }}" style="color:#80cbc4;cursor:pointer">Workflow</span>.</div></div>
+                  <sc-for list="{{ condQueue }}" as="q" hint-placeholder-count="3">
+                    <div style="padding:11px 0;border-bottom:1px solid #1c2128">
+                      <div style="display:flex;align-items:center;gap:11px">
+                        <span style="width:22px;height:22px;border-radius:6px;background:#0e1117;border:1px solid #30363d;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#768390;flex-shrink:0">{{ q.pos }}</span>
+                        <div style="flex:1;min-width:0"><div style="font-size:12.5px;color:#e8ebf0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ q.title }}</div><div style="display:flex;align-items:center;gap:6px;margin-top:2px"><span style="font-size:10px;font-family:ui-monospace,monospace;color:#768390">{{ q.key }}</span><span style="font-size:10px;color:{{ q.color }}">→ {{ q.agent }}</span></div></div>
+                        <div style="display:flex;align-items:center;gap:2px;flex-shrink:0">
+                          <div onClick="{{ q.bump }}" title="Move up" style="width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer" style-hover="background:#1c2128;color:#e8ebf0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"></path></svg></div>
+                          <div onClick="{{ q.dispatchNow }}" title="Dispatch now" style="width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#80cbc4;cursor:pointer" style-hover="background:rgba(128,203,196,.12)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-14 9V3z"></path></svg></div>
+                          <div onClick="{{ q.remove }}" title="Hold" style="width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer" style-hover="background:rgba(248,81,73,.12);color:#f85149"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
+                        </div>
+                      </div>
+                      <div style="display:flex;align-items:flex-start;gap:8px;margin:8px 0 0 33px;padding:8px 10px;border-radius:8px;background:#0e1117;border:1px solid #1c2128">
+                        <span style="display:inline-flex;align-items:center;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;flex-shrink:0;background:{{ q.phaseColor }}1f;color:{{ q.phaseColor }}">{{ q.phase }}</span>
+                        <div style="flex:1;min-width:0">
+                          <div style="display:flex;align-items:center;gap:8px;font-size:10.5px;margin-bottom:3px"><span style="font-family:ui-monospace,monospace;color:#768390">{{ q.from }}</span><span style="display:inline-flex;flex-direction:column;align-items:center;flex-shrink:0"><svg width="40" height="10" viewBox="0 0 40 10" fill="none"><line x1="0" y1="5" x2="32" y2="5" stroke="{{ q.phaseColor }}" stroke-width="1.5"></line><path d="M32 1.5l5 3.5-5 3.5" stroke="{{ q.phaseColor }}" stroke-width="1.5" fill="none"></path></svg></span><span style="font-family:ui-monospace,monospace;font-weight:600;color:{{ q.phaseColor }}">{{ q.to }}</span></div>
+                          <div style="font-size:11px;line-height:1.5;color:#8b95a1">{{ q.plan }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </sc-for>
+                  <sc-if value="{{ condQueueEmpty }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:#768390;padding:10px 0 4px;text-align:center">Queue clear — Conductor is caught up.</div></sc-if>
+                </div>
+                <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:16px;margin-bottom:14px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#768390;margin-bottom:12px">LATEST CYCLE</div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:8px;height:8px;border-radius:50%;background:#2ecc71"></span><span style="font-size:12.5px;flex:1">Tick · dispatched 2 tasks to free agents</span><span style="font-size:11px;color:#768390">12s ago</span></div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:8px;height:8px;border-radius:50%;background:#c9b8ff"></span><span style="font-size:12.5px;flex:1">Planning turn · assigned 3 unassigned tasks by specialty</span><span style="font-size:11px;color:#768390">4m ago</span></div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><span style="width:8px;height:8px;border-radius:50%;background:#ff9800"></span><span style="font-size:12.5px;flex:1">Progress check · 1 stalled task flagged for re-dispatch</span><span style="font-size:11px;color:#768390">9m ago</span></div>
+                </div>
+                <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:16px">
+                  <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#768390;margin-bottom:12px">AGENT SURVEY · who's eligible next</div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12.5px;flex:1">Backend Implementer</span><span style="font-size:11px;color:#768390">1/2 in flight · ACM-149 next</span></div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1c2128"><span style="width:7px;height:7px;border-radius:50%;background:#81c995"></span><span style="font-size:12.5px;flex:1">Frontend Implementer</span><span style="font-size:11px;color:#768390">0/2 · idle</span></div>
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12.5px;flex:1">Reviewer</span><span style="font-size:11px;color:#768390">1/1 · busy</span></div>
+                </div>
+              </div>
+              <!-- RIGHT: live chat with Conductor -->
+              <div style="position:sticky;top:24px;background:#14161b;border:1px solid #30363d;border-radius:14px;display:flex;flex-direction:column;height:calc(100vh - 132px);min-height:480px;overflow:hidden">
+                <div style="display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid #30363d">
+                  <span style="position:relative;width:30px;height:30px;border-radius:9px;background:rgba(201,184,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg><span style="position:absolute;bottom:-1px;right:-1px;width:9px;height:9px;border-radius:50%;background:#81c995;border:2px solid #14161b"></span></span>
+                  <div style="flex:1"><div style="font-size:13px;font-weight:600">Talk to Conductor</div><div style="font-size:10.5px;color:#81c995">online · steering live</div></div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle></svg>
+                </div>
+                <div id="condChatScroll" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px">
+                  <sc-for list="{{ condMsgs }}" as="m" hint-placeholder-count="2">
+                    <div style="{{ m.rowStyle }}">
+                      <sc-if value="{{ m.isCond }}" hint-placeholder-val="{{ true }}"><span style="width:24px;height:24px;border-radius:7px;background:rgba(201,184,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg></span></sc-if>
+                      <div style="{{ m.bubbleStyle }}">{{ m.text }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="padding:10px 14px 4px"><div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;color:#5a626c;margin-bottom:7px">SUGGESTED</div><div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <sc-for list="{{ condSuggest }}" as="s" hint-placeholder-count="3">
+                    <div onClick="{{ s.send }}" style="font-size:11px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:5px 11px;cursor:pointer;white-space:nowrap" style-hover="border-color:#c9b8ff66;color:#e8ebf0">{{ s.label }}</div>
+                  </sc-for>
+                </div></div>
+                <div style="padding:12px 14px;display:flex;align-items:center;gap:8px">
+                  <input value="{{ condInput }}" onInput="{{ onCondInput }}" onKeyDown="{{ onCondKey }}" placeholder="Message the Conductor…" style="flex:1;background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:10px 12px;font-size:12.5px;color:#e8ebf0;outline:none;font-family:inherit">
+                  <div onClick="{{ sendCondMsg }}" style="width:38px;height:38px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"></path></svg></div>
+                </div>
+              </div>
             </div>
           </div>
         </sc-if>
@@ -1236,21 +1467,25 @@
 
       </div>
 
-      <!-- ===== PULSE DOCK ===== -->
-      <sc-if value="{{ pulseOpen }}" hint-placeholder-val="{{ true }}">
-        <aside style="width:296px;flex-shrink:0;border-left:1px solid #30363d;background:#14161b;display:flex;flex-direction:column">
-          <div style="height:44px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid #30363d">
-            <span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span>
-            <span style="font-size:12px;font-weight:700;letter-spacing:.04em;flex:1">PULSE</span>
-            <div onClick="{{ togglePulse }}" style="padding:4px;color:#768390;cursor:pointer"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
-          </div>
-          <div style="flex:1;overflow-y:auto;padding:12px">
+    </div>
+  </main>
+  </div>
+
+  <!-- ===== PULSE DOCK (full height) ===== -->
+  <sc-if value="{{ pulseOpen }}" hint-placeholder-val="{{ true }}">
+    <aside style="position:fixed;top:64px;right:12px;bottom:12px;width:300px;z-index:45;border:1px solid rgba(255,255,255,.07);border-radius:16px;background:#14161b;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.5);overflow:hidden">
+      <div style="height:54px;flex-shrink:0;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:0 16px">
+        <span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span>
+        <span style="font-size:12.5px;font-weight:700;letter-spacing:.06em;flex:1">PULSE</span>
+        <div onClick="{{ togglePulse }}" style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#768390;cursor:pointer" style-hover="background:#1c2128;color:#e8ebf0"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:4px 12px 12px">
             <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:9px">RUNNING · 4</div>
             <sc-for list="{{ liveRuns }}" as="r" hint-placeholder-count="2">
               <div onClick="{{ r.open }}" class="nav" style="border-radius:9px;background:#1c2128;border:1px solid #30363d;padding:10px;margin-bottom:8px;cursor:pointer">
                 <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:7px;height:7px;border-radius:50%;background:#38bdf8"></span><span style="font-size:12px;font-weight:600;flex:1">{{ r.agent }}</span><span style="font-size:10px;color:#80cbc4">{{ r.cost }}</span></div>
                 <div style="font-size:11px;color:#b1bac4;margin-bottom:7px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">{{ r.key }}</span> {{ r.taskTitle }}</div>
-                <div style="height:3px;border-radius:999px;background:#0e1117;overflow:hidden;position:relative"><span style="position:absolute;top:0;left:0;height:100%;width:50%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,#7dd3fc);animation:barwork 1.6s ease-in-out infinite"></span></div>
+                <div style="height:3px;border-radius:999px;background:rgba(56,189,248,.1);overflow:hidden;position:relative"><span style="position:absolute;top:0;height:100%;width:35%;border-radius:999px;background:linear-gradient(90deg,rgba(56,189,248,0),#38bdf8,#7dd3fc);animation:barwork 1.5s ease-in-out infinite"></span></div>
               </div>
             </sc-for>
             <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin:16px 0 9px">WAITING ON YOU · 1</div>
@@ -1260,9 +1495,7 @@
             <div style="border-radius:9px;padding:9px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="width:18px;height:18px;border-radius:50%;background:rgba(0,188,212,.14);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">RV</span><span style="font-size:11.5px;font-weight:600">Reviewer</span><span style="font-size:10px;color:#768390;margin-left:auto">20m</span></div><div style="font-size:11px;color:#b1bac4;padding-left:25px">Approved BIL-31, merging.</div></div>
           </div>
         </aside>
-      </sc-if>
-    </div>
-  </main>
+  </sc-if>
 
   <!-- ===== BOARD SETTINGS ===== -->
   <sc-if value="{{ boardSettings }}" hint-placeholder-val="{{ false }}">
@@ -1301,8 +1534,8 @@
 
   <!-- ===== TASK SIDEVIEW DRAWER ===== -->
   <sc-if value="{{ drawerOpen }}" hint-placeholder-val="{{ false }}">
-    <aside style="position:fixed;top:55px;right:0;bottom:0;width:384px;background:#161b22;border-left:1px solid #30363d;z-index:56;display:flex;flex-direction:column;box-shadow:-10px 0 28px rgba(0,0,0,.35)">
-      <div style="padding:14px 18px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px">
+    <aside style="position:fixed;top:107px;right:0;bottom:0;width:384px;background:#161b22;border-left:1px solid #30363d;z-index:56;display:flex;flex-direction:column;box-shadow:-10px 0 28px rgba(0,0,0,.35)">
+      <div style="padding:11px 18px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px;min-height:50px;box-sizing:border-box">
         <span style="font-size:12px;font-family:ui-monospace,monospace;font-weight:600;color:#7c8db5;white-space:nowrap">{{ drawer.key }}</span>
         <sc-if value="{{ drawer.hasEpic }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;background:{{ drawer.epicColor }}22;color:{{ drawer.epicColor }}">{{ drawer.epic }}</span></sc-if>
         <div style="flex:1"></div>
@@ -1314,532 +1547,20 @@
       <div style="padding:15px 18px 13px"><h2 style="font-size:17.5px;font-weight:600;margin:0;line-height:1.3">{{ drawer.title }}</h2></div>
       <div style="flex:1;display:flex;min-height:0;border-top:1px solid #30363d">
         <nav style="width:50px;flex-shrink:0;border-right:1px solid #30363d;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 0">
-          <div onClick="{{ setDrawerTab.details }}" title="Details" style="{{ dtabS.details }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4M12 8h.01"></path></svg></div>
-          <div onClick="{{ setDrawerTab.chat }}" title="Comments" style="{{ dtabS.chat }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
-          <div onClick="{{ setDrawerTab.activity }}" title="Activity" style="{{ dtabS.activity }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div>
-          <div onClick="{{ setDrawerTab.files }}" title="Files" style="{{ dtabS.files }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M13 2v7h7"></path></svg></div>
-          <div onClick="{{ setDrawerTab.git }}" title="Branch &amp; PR" style="{{ dtabS.git }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
+          <div onClick="{{ navTo.info }}" title="Details" style="{{ dtabS.info }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4M12 8h.01"></path></svg></div>
+          <div onClick="{{ navTo.files }}" title="Files" style="{{ dtabS.files }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M13 2v7h7"></path></svg></div>
+          <div onClick="{{ navTo.git }}" title="Branch &amp; PR" style="{{ dtabS.git }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
+          <div onClick="{{ navTo.chat }}" title="Comments" style="{{ dtabS.chat }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
+          <div onClick="{{ navTo.activity }}" title="Activity" style="{{ dtabS.activity }}"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg></div>
         </nav>
-        <div style="flex:1;min-width:0;overflow-y:auto;padding:16px 18px">
-          <sc-if value="{{ dtab.details }}" hint-placeholder-val="{{ true }}">
+        <div id="drawerScroll" onScroll="{{ onDrawerScroll }}" style="flex:1;min-width:0;overflow-y:auto;padding:16px 18px">
+          <div id="dsec-info">
             <sc-if value="{{ drawer.isLive }}" hint-placeholder-val="{{ false }}">
-              <div onClick="{{ drawer.openFull }}" class="glow nav" style="display:flex;align-items:center;gap:9px;padding:11px;border-radius:10px;background:#1c2128;border:1px solid #30363d;margin-bottom:16px;cursor:pointer">
-                <span style="width:26px;height:26px;border-radius:7px;background:rgba(0,188,212,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg></span>
-                <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600">Agent working now</div><div style="font-size:11px;color:#768390">Open to watch the live run</div></div>
+              <div onClick="{{ drawer.openFull }}" class="glow nav" style="display:flex;align-items:center;gap:9px;padding:10px;border-radius:10px;background:#1c2128;border:1px solid #30363d;margin-bottom:16px;cursor:pointer">
+                <span style="width:24px;height:24px;border-radius:7px;background:rgba(0,188,212,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg></span>
+                <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600">Agent working now</div><div style="font-size:10.5px;color:#768390">Open to watch the live run</div></div>
                 <span style="display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:#38bdf8"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span>LIVE</span>
               </div>
             </sc-if>
-            <div style="display:grid;grid-template-columns:84px 1fr;gap:11px 10px;font-size:12.5px;margin-bottom:18px">
-              <span style="color:#768390">Status</span><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:{{ drawer.statusColor }}"></span>{{ drawer.statusLabel }}</span>
-              <span style="color:#768390">Priority</span><span style="display:inline-flex"><span style="font-size:10px;font-weight:700;text-transform:capitalize;padding:2px 8px;border-radius:4px;{{ drawer.prioCls }}">{{ drawer.priority }}</span></span>
-              <span style="color:#768390">Assignee</span><span style="display:inline-flex;align-items:center;gap:7px"><span style="width:20px;height:20px;border-radius:50%;background:#1c2128;color:#b1bac4;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">{{ drawer.assignee }}</span>{{ drawer.assignee }}</span>
-            </div>
-            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:9px">DEFINITION OF DONE</div>
-            <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:7px"><span style="width:16px;height:16px;border-radius:5px;background:#2ecc71;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="color:#768390;text-decoration:line-through">Implementation drafted</span></div>
-            <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:7px"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58;flex-shrink:0"></span><span style="color:#e8ebf0">Tests cover the new path</span></div>
-            <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;margin-bottom:18px"><span style="width:16px;height:16px;border-radius:5px;border:1.5px solid #484f58;flex-shrink:0"></span><span style="color:#e8ebf0">Reviewer approves &amp; merges</span></div>
             <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:8px">DESCRIPTION</div>
-            <p style="font-size:12.5px;line-height:1.6;color:#b1bac4;margin:0">A quick peek at the work item. Open the full task for the agent run, activity thread, files, and git links.</p>
-          </sc-if>
-          <sc-if value="{{ dtab.chat }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;flex-direction:column;gap:13px">
-              <div style="display:flex;gap:9px"><span style="width:26px;height:26px;border-radius:50%;flex-shrink:0;background:rgba(201,184,255,.16);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700">DA</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:12px;font-weight:600">Dana Kim</span><span style="font-size:10px;color:#768390">12m</span></div><div style="font-size:12.5px;line-height:1.55;color:#c8cdd4;background:#1c2128;border-radius:10px;border-top-left-radius:3px;padding:9px 11px">Confirmed the retry cap is 5 with full jitter. Make sure the dead-letter path is covered too.</div></div></div>
-              <div style="display:flex;gap:9px"><span style="width:26px;height:26px;border-radius:50%;flex-shrink:0;background:rgba(0,188,212,.16);color:#00bcd4;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700">AI</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:12px;font-weight:600">Backend Implementer</span><span style="font-size:9px;font-weight:700;color:#00bcd4;background:rgba(0,188,212,.12);border-radius:4px;padding:1px 5px">AGENT</span><span style="font-size:10px;color:#768390">4m</span></div><div style="font-size:12.5px;line-height:1.55;color:#c8cdd4;background:#1c2128;border-radius:10px;border-top-left-radius:3px;padding:9px 11px">Wiring the retry wrapper into the dispatcher now, then I'll add the dead-letter queue and tests.</div></div></div>
-              <div style="display:flex;gap:9px"><span style="width:26px;height:26px;border-radius:50%;flex-shrink:0;background:rgba(128,203,196,.16);color:#80cbc4;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700">AX</span><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:12px;font-weight:600">Alex Rivera</span><span style="font-size:10px;color:#768390">just now</span></div><div style="font-size:12.5px;line-height:1.55;color:#c8cdd4;background:#1c2128;border-radius:10px;border-top-left-radius:3px;padding:9px 11px">Looks good — ping me when the PR is ready for review.</div></div></div>
-            </div>
-          </sc-if>
-          <sc-if value="{{ dtab.activity }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;flex-direction:column;gap:0">
-              <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#00bcd4;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:16px"><div style="font-size:12.5px;color:#e8ebf0;line-height:1.45"><b>Backend Implementer</b> opened draft PR <span style="font-family:ui-monospace,monospace;color:#80cbc4">acme-web#318</span></div><div style="font-size:10.5px;color:#768390;margin-top:2px">8m ago</div></div></div>
-              <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#c9b8ff;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:16px"><div style="font-size:12.5px;color:#e8ebf0;line-height:1.45"><b>Dana Kim</b> commented on this task</div><div style="font-size:10.5px;color:#768390;margin-top:2px">12m ago</div></div></div>
-              <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#f1c40f;margin-top:3px"></span><span style="flex:1;width:1.5px;background:#30363d"></span></div><div style="padding-bottom:16px"><div style="font-size:12.5px;color:#e8ebf0;line-height:1.45">Moved <span style="color:#768390">To Do</span> → <span style="color:#f1c40f">In Progress</span></div><div style="font-size:10.5px;color:#768390;margin-top:2px">1h ago</div></div></div>
-              <div style="display:flex;gap:11px"><div style="display:flex;flex-direction:column;align-items:center"><span style="width:9px;height:9px;border-radius:50%;background:#2ecc71;margin-top:3px"></span></div><div><div style="font-size:12.5px;color:#e8ebf0;line-height:1.45">Checked <span style="color:#768390">"Implementation drafted"</span></div><div style="font-size:10.5px;color:#768390;margin-top:2px">2h ago</div></div></div>
-            </div>
-          </sc-if>
-          <sc-if value="{{ dtab.files }}" hint-placeholder-val="{{ false }}">
-            <div style="display:flex;flex-direction:column;gap:8px">
-              <div class="nav" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;background:#1c2128;border:1px solid #30363d;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M13 2v7h7"></path></svg><div style="flex:1;min-width:0"><div style="font-size:12.5px;color:#e8ebf0">retry-design.md</div><div style="font-size:10.5px;color:#768390">Dana Kim · 3.2 KB</div></div></div>
-              <div class="nav" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;background:#1c2128;border:1px solid #30363d;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M13 2v7h7"></path></svg><div style="flex:1;min-width:0"><div style="font-size:12.5px;color:#e8ebf0">dispatcher.diff</div><div style="font-size:10.5px;color:#768390">Backend Implementer · 11 KB</div></div></div>
-              <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:4px;padding:10px;border-radius:9px;border:1px dashed #30363d;color:#768390;font-size:11.5px;cursor:pointer" style-hover="color:#b1bac4;border-color:#484f58"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>Attach a file</div>
-            </div>
-          </sc-if>
-          <sc-if value="{{ dtab.git }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:8px">BRANCH</div>
-            <div style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;background:#1c2128;border:1px solid #30363d;margin-bottom:16px;font-size:12px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span style="flex:1;font-family:ui-monospace,monospace;color:#b1bac4;min-width:0;overflow:hidden;text-overflow:ellipsis">feat/acm-142-webhook-retry</span></div>
-            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:8px">PULL REQUEST</div>
-            <div class="nav" style="padding:11px 12px;border-radius:10px;background:#1c2128;border:1px solid #30363d;cursor:pointer"><div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M6 9v6a6 6 0 0 0 6 6h3"></path></svg><span style="font-size:12.5px;font-family:ui-monospace,monospace;color:#80cbc4">acme-web#318</span><span style="font-size:9px;font-weight:700;color:#a78bfa;background:rgba(167,139,250,.14);border-radius:4px;padding:1px 6px">DRAFT</span></div><div style="font-size:12px;color:#c8cdd4">Add Stripe webhook retry with backoff</div><div style="font-size:10.5px;color:#768390;margin-top:5px">base <span style="font-family:ui-monospace,monospace">main</span> · +214 −38</div></div>
-          </sc-if>
-        </div>
-      </div>
-      <div style="padding:13px 18px;border-top:1px solid #30363d;display:flex;align-items:center;gap:8px">
-        <div style="flex:1;display:flex;align-items:center;gap:8px;background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:9px 12px"><span style="font-size:12px;color:#768390;flex:1">Comment or @mention…</span></div>
-        <div onClick="{{ drawer.openFull }}" style="display:flex;align-items:center;gap:6px;padding:9px 13px;border-radius:9px;background:#80cbc4;color:#0e1117;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg>Hand to agent</div>
-      </div>
-    </aside>
-  </sc-if>
-
-  <!-- ===== CHAT FAB / POPUP ===== -->
-  <sc-if value="{{ chatClosed }}" hint-placeholder-val="{{ true }}">
-    <div onClick="{{ toggleChat }}" style="position:fixed;left:268px;bottom:22px;width:50px;height:50px;border-radius:50%;background:#80cbc4;color:#0e1117;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.4);cursor:pointer;z-index:60"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg></div>
-  </sc-if>
-  <sc-if value="{{ chatOpen }}" hint-placeholder-val="{{ false }}">
-    <div style="position:fixed;left:268px;bottom:22px;width:384px;height:540px;background:#0e1117;border:1px solid #30363d;border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:flex;flex-direction:column;z-index:60;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:9px;padding:11px 13px;border-bottom:1px solid #30363d">
-        <span style="width:28px;height:28px;border-radius:8px;background:rgba(128,203,196,.14);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg></span>
-        <div style="flex:1"><div style="font-size:13px;font-weight:600">Agentira Guide</div><div style="font-size:10px;color:#768390">Ask about anything on screen</div></div>
-        <div onClick="{{ toggleChat }}" style="padding:5px;color:#768390;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"></path></svg></div>
-      </div>
-      <div style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
-        <div style="align-self:flex-start;max-width:85%;background:#1c2128;border-radius:12px;border-top-left-radius:3px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:#e8ebf0">Hi! I'm the Guide. I can explain what's on this screen, find a task, or help you start an agent run.</div>
-        <div style="align-self:flex-end;max-width:85%;background:#80cbc4;color:#0e2a27;border-radius:12px;border-top-right-radius:3px;padding:10px 12px;font-size:12.5px;line-height:1.5">What's blocking ACM-138?</div>
-        <div style="align-self:flex-start;max-width:85%;background:#1c2128;border-radius:12px;border-top-left-radius:3px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:#e8ebf0">The Researcher agent paused — it asked which auth scheme the export should use. Answer it from the task's Agent tab and it resumes.</div>
-      </div>
-      <div style="padding:11px;border-top:1px solid #30363d">
-        <div style="display:flex;align-items:center;gap:8px;background:#1c2128;border:1px solid #30363d;border-radius:11px;padding:9px 12px">
-          <span style="font-size:12.5px;color:#768390;flex:1">Message the Guide…</span>
-          <div style="width:30px;height:30px;border-radius:8px;background:#80cbc4;color:#0e1117;display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg></div>
-        </div>
-      </div>
-    </div>
-  </sc-if>
-
-</div>
-</x-dc>
-<script type="text/x-dc" data-dc-script>
-class Component extends DCLogic {
-  state = {
-    route:'home', activeProject:'acme',
-    projMenuOpen:false, userOpen:false, chatOpen:false, pulseOpen:true,
-    selTaskData:null, selAgentData:null, selRunData:null,
-    taskTab:'agent', agentTab:'toolset', projTab:'basics', setTab:'profile', inboxTab:'all',
-    memberMenuOpen:false, wfNode:null, bellOpen:false, chatPeer:'be',
-    backlogView:'list', boardSettings:false, chatScope:'general', collapsedEpics:{}, drawerTask:null, chatScopeOpen:false,
-    drawerTab:'details', removedMembers:[], newMenuOpen:false,
-  };
-
-  EPICS = [
-    { id:'pay',  name:'Payments',  color:'#c58af9', desc:'Billing reliability & Stripe hardening', start:0,  span:2.1, done:6, total:9 },
-    { id:'plat', name:'Platform',  color:'#80cbc4', desc:'Auth, rate limits & core services',      start:1.1, span:1.9, done:4, total:8 },
-    { id:'grow', name:'Growth',    color:'#fdd663', desc:'Onboarding & marketing funnel',          start:2.2, span:1.4, done:1, total:5 },
-    { id:'data', name:'Data',      color:'#81c995', desc:'Warehouse syncs & dbt models',           start:0.6, span:2.6, done:3, total:7 },
-  ];
-
-  CHATS = [
-    { id:'be',   name:'Backend Implementer',  color:'#00bcd4', tint:'rgba(0,188,212,.14)',  init:'AI', status:'running', last:'Wiring the retry wrapper into the dispatcher now…', ago:'now', unread:0, kind:'agent',
-      msgs:[
-        { me:false, t:'On ACM-142 — confirmed the retry cap is 5 with full jitter. Tests green.' },
-        { me:true,  t:'Great. Once the PR is up, tag Alex as reviewer.' },
-        { me:false, t:'Will do. Wiring the retry wrapper into the dispatcher now, then I\'ll open the draft PR.' },
-      ] },
-    { id:'rev',  name:'Reviewer',             color:'#a78bfa', tint:'rgba(124,77,255,.14)', init:'RV', status:'running', last:'Two comments on BIL-31 — minor, then I\'ll approve.', ago:'2m', unread:2, kind:'agent',
-      msgs:[
-        { me:true,  t:'How\'s BIL-31 looking?' },
-        { me:false, t:'Two comments — minor naming + a missing null check. Once addressed I\'ll approve and merge.' },
-      ] },
-    { id:'plan', name:'Planner',              color:'#f1c40f', tint:'rgba(241,196,64,.14)', init:'PL', status:'online',  last:'Sprint scoped — 6 tasks assigned by specialty.', ago:'1h', unread:0, kind:'agent',
-      msgs:[ { me:false, t:'Sprint planning done. I scoped 6 tasks and assigned them by specialty. Want a summary?' } ] },
-    { id:'ops',  name:'DevOps',               color:'#ff9800', tint:'rgba(255,152,0,.14)',  init:'DO', status:'offline', last:'Deploy pipeline is green.', ago:'1d', unread:0, kind:'agent',
-      msgs:[ { me:false, t:'Deploy pipeline is green. Staging is up to date with main.' } ] },
-    { id:'all',  name:'All agents',           color:'#c9b8ff', tint:'rgba(201,184,255,.14)', init:'∗', status:'online',  last:'Broadcast a question to every agent at once.', ago:'', unread:0, kind:'broadcast',
-      msgs:[ { me:true, t:'Standup: drop your current blocker, if any.' }, { me:false, who:'Backend Implementer', t:'No blockers — PR up for review.' }, { me:false, who:'Reviewer', t:'Waiting on BIL-31 fixes.' } ] },
-  ];
-
-  MEMBERS = [
-    { name:'Dana Kim',           handle:'dana', role:'admin',  init:'DA', color:'#c9b8ff', kind:'human' },
-    { name:'Alex Rivera',        handle:'alex', role:'admin',  init:'AX', color:'#80cbc4', kind:'human' },
-    { name:'Backend Implementer',handle:'be',   role:'service account', init:'AI', color:'#00bcd4', kind:'agent' },
-    { name:'Reviewer',           handle:'rev',  role:'service account', init:'RV', color:'#a78bfa', kind:'agent' },
-  ];
-
-  PROJECTS = [
-    { id:'acme',     name:'Acme Web',       color:'#c9b8ff', key:'ACM', board:24, live:2, repo:'acme/web',            desc:'Stripe-powered billing & customer dashboard.', counts:[2,3,2,1,2] },
-    { id:'billing',  name:'Billing API',    color:'#80cbc4', key:'BIL', board:11, live:1, repo:'acme/billing-api',    desc:'Metering, invoicing & reconciliation service.', counts:[3,2,2,1,3] },
-    { id:'mobile',   name:'Mobile',         color:'#fdd663', key:'MOB', board:8,  needs:1, repo:'acme/mobile',        desc:'React Native app for iOS & Android.', counts:[2,2,1,1,2] },
-    { id:'growth',   name:'Growth Site',    color:'#c58af9', key:'GRW', board:5,           repo:'acme/growth',        desc:'Marketing site & onboarding funnel.', counts:[1,1,1,1,1] },
-    { id:'internal', name:'Internal Tools', color:'#8ab4f8', key:'INT', board:14, live:1, repo:'acme/internal',       desc:'Ops dashboards & admin tooling.', counts:[4,3,2,2,3] },
-    { id:'data',     name:'Data Pipeline',  color:'#81c995', key:'DAT', board:9,           repo:'acme/data-pipeline', desc:'ETL jobs, warehouse syncs & dbt models.', counts:[2,2,2,1,2] },
-  ];
-
-  LIVE = [
-    { id:'r3',   agent:'Backend Implementer', color:'#00bcd4', tint:'rgba(0,188,212,.14)',  key:'ACM-142', taskTitle:'Add Stripe webhook retry', project:'Acme Web',   dur:'4m 12s', tok:'18.2k tok', cost:'$0.42' },
-    { id:'rrev', agent:'Reviewer',            color:'#a78bfa', tint:'rgba(124,77,255,.14)', key:'BIL-31',  taskTitle:'Reconcile invoice totals', project:'Billing API', dur:'1m 02s', tok:'6.1k tok',  cost:'$0.13' },
-  ];
-
-  NEEDS = [
-    { id:'n1', tint:'rgba(255,152,0,.15)',  color:'#ff9800', text:'Researcher needs your answer to continue', key:'ACM-138', ago:'3m ago' },
-    { id:'n2', tint:'rgba(124,77,255,.15)', color:'#a78bfa', text:'@you mentioned by Dana on a PR review',     key:'ACM-142', ago:'12m ago' },
-    { id:'n3', tint:'rgba(46,204,113,.15)', color:'#2ecc71', text:'Run finished — ready to review & merge',     key:'MOB-09',  ago:'20m ago' },
-  ];
-
-  BOARD = {
-    backlog: [
-      { key:'ACM-150', title:'Rotate API keys on a schedule', priority:'medium', assignee:'AI' },
-      { key:'ACM-151', title:'Empty state for dashboards', priority:'low', assignee:'DA' },
-    ],
-    todo: [
-      { key:'ACM-149', title:'Webhook signing secret rotation', priority:'high', epic:'Payments', epicColor:'#c58af9', assignee:'AI' },
-      { key:'ACM-148', title:'Pagination for the audit log', priority:'medium', assignee:'DA' },
-      { key:'ACM-147', title:'Dark-mode polish pass', priority:'low', assignee:'AX' },
-    ],
-    in_progress: [
-      { key:'ACM-142', title:'Add Stripe webhook retry with backoff', priority:'high', epic:'Payments', epicColor:'#c58af9', assignee:'DA', live:true, dod:'2/3' },
-      { key:'ACM-138', title:'Audit log export', priority:'medium', assignee:'AI', needs:true },
-    ],
-    review: [
-      { key:'ACM-140', title:'Refactor auth middleware', priority:'high', epic:'Platform', epicColor:'#80cbc4', assignee:'AX', live:true },
-    ],
-    done: [
-      { key:'ACM-135', title:'Invoice PDF generation', priority:'medium', assignee:'AI' },
-      { key:'ACM-130', title:'Per-tenant rate limiting', priority:'high', assignee:'DA' },
-    ],
-  };
-
-  AGENTS = [
-    { id:'be',   name:'Backend Implementer',  role:'Implementer', runtime:'claude',  model:'claude-opus-4-8',   status:'running', inflight:1, max:2, project:'Acme Web',       color:'#00bcd4' },
-    { id:'fe',   name:'Frontend Implementer', role:'Implementer', runtime:'claude',  model:'claude-sonnet-4-6', status:'online',  inflight:0, max:2, project:'Acme Web',       color:'#00bcd4' },
-    { id:'rev',  name:'Reviewer',             role:'Reviewer',    runtime:'claude',  model:'claude-opus-4-8',   status:'running', inflight:1, max:1, project:'Billing API',    color:'#a78bfa' },
-    { id:'plan', name:'Planner',              role:'Planner',     runtime:'claude',  model:'claude-sonnet-4-6', status:'online',  inflight:0, max:1, project:'—',              color:'#f1c40f' },
-    { id:'ops',  name:'DevOps',               role:'DevOps',      runtime:'openclaw',model:'qwen-3.6',          status:'offline', inflight:0, max:1, project:'Internal Tools', color:'#ff9800' },
-    { id:'cond', name:'Conductor',            role:'Orchestrator',runtime:'claude',  model:'claude-opus-4-8',   status:'online',  inflight:0, max:1, project:'all projects',   color:'#c9b8ff' },
-  ];
-
-  RUNS = [
-    { id:'r3',   key:'run_9f3a2', agent:'Backend Implementer', color:'#00bcd4', task:'ACM-142 · Add Stripe webhook retry', project:'Acme Web',    status:'running',   outcome:'', tin:'14.2k', tout:'4.0k', cost:'$0.42', dur:'4m 12s', pr:'acme-web#318' },
-    { id:'rrev', key:'run_7b2c1', agent:'Reviewer',            color:'#a78bfa', task:'BIL-31 · Reconcile invoice totals',  project:'Billing API', status:'running',   outcome:'', tin:'6.1k',  tout:'1.2k', cost:'$0.13', dur:'1m 02s', pr:'—' },
-    { id:'r2',   key:'run_5a1d0', agent:'Frontend Implementer',color:'#00bcd4', task:'MOB-09 · Settings redesign',         project:'Mobile',      status:'completed', outcome:'succeeded', tin:'22.4k', tout:'7.8k', cost:'$0.71', dur:'8m 40s', pr:'mobile#77' },
-    { id:'r1',   key:'run_3c9f4', agent:'Backend Implementer', color:'#00bcd4', task:'ACM-142 · Add Stripe webhook retry', project:'Acme Web',    status:'failed',    outcome:'failed',    tin:'9.0k',  tout:'2.1k', cost:'$0.28', dur:'3m 11s', pr:'—' },
-    { id:'r0',   key:'run_1f7b8', agent:'Planner',             color:'#f1c40f', task:'Sprint planning · Acme Web',         project:'Acme Web',    status:'completed', outcome:'succeeded', tin:'12.0k', tout:'3.3k', cost:'$0.39', dur:'2m 05s', pr:'—' },
-  ];
-
-  RUNTIMES = [
-    { name:'claude-code', provider:'claude',  version:'2.4.1', status:'online',  models:'opus-4-8, sonnet-4-6', caps:'RESUME · STREAM · STOP · PAUSE · MCP' },
-    { name:'openclaw',    provider:'openclaw',version:'0.9.3', status:'online',  models:'qwen-3.6, llama-4',    caps:'RESUME · STREAM · STOP · MCP' },
-    { name:'ollama',      provider:'ollama',  version:'0.5.0', status:'offline', models:'qwen-3.6, mistral',    caps:'STREAM · TOOLS' },
-    { name:'codex',       provider:'codex',   version:'1.1.0', status:'online',  models:'o4-mini',              caps:'RESUME · STREAM · MCP' },
-  ];
-
-  NOTIF = [
-    { cat:'agent',    icon:'wait',  color:'#fdd663', title:'Researcher is waiting on your answer', sub:'Which auth scheme for the export?', key:'ACM-138', ago:'3m ago', to:'task' },
-    { cat:'mention',  icon:'at',    color:'#a78bfa', title:'Dana mentioned you on a PR review', sub:'“can you confirm the retry cap is 5?”', key:'ACM-142', ago:'12m ago', to:'task' },
-    { cat:'agent',    icon:'done',  color:'#2ecc71', title:'Run completed — ready to review & merge', sub:'Frontend Implementer · MOB-09', key:'MOB-09', ago:'20m ago', to:'runDetail' },
-    { cat:'agent',    icon:'fail',  color:'#e74c3c', title:'Run failed — attempt 2', sub:'Backend Implementer · ACM-142', key:'ACM-142', ago:'1h ago', to:'runDetail' },
-    { cat:'assigned', icon:'check', color:'#00bcd4', title:'You were assigned a task', sub:'Pagination for the audit log', key:'ACM-148', ago:'3h ago', to:'task' },
-    { cat:'mention',  icon:'at',    color:'#a78bfa', title:'Reviewer mentioned you', sub:'“left two comments on the diff”', key:'BIL-31', ago:'3h ago', to:'task' },
-    { cat:'workflow', icon:'gate',  color:'#ff9800', title:'Gate failed — DoD not all checked', sub:'Blocked review → done on ACM-140', key:'ACM-140', ago:'4h ago', to:'task' },
-    { cat:'workflow', icon:'alert', color:'#e91e63', title:'Needs attention — bounce exhausted', sub:'2 corrective runs failed · INT-22', key:'INT-22', ago:'5h ago', to:'task' },
-  ];
-
-  go(route, extra) { this.setState(Object.assign({ route, projMenuOpen:false, userOpen:false, memberMenuOpen:false, bellOpen:false }, extra || {})); }
-
-  renderVals() {
-    const st = this.state, r = st.route, self = this;
-    const navStyle = (a) => 'display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:13px;transition:background .12s;' +
-      (a ? 'background:rgba(201,184,255,.10);color:#c9b8ff;font-weight:600' : 'color:#b1bac4');
-
-    const is = {
-      home:r==='home', inbox:r==='inbox', mywork:r==='mywork',
-      agents:r==='agents', agentDetail:r==='agentDetail', runs:r==='runs', runDetail:r==='runDetail',
-      runtimes:r==='runtimes', conductor:r==='conductor', mcp:r==='mcp', forgeSettings:r==='forgeSettings',
-      board:r==='board', backlog:r==='backlog', roadmap:r==='roadmap', overview:r==='overview',
-      projSettings:r==='projSettings', task:r==='task', settings:r==='settings', workflow:r==='workflow', chat:r==='chat',
-    };
-    const cls = {
-      home:navStyle(is.home), inbox:navStyle(is.inbox), mywork:navStyle(is.mywork),
-      agents:navStyle(is.agents||is.agentDetail), runs:navStyle(is.runs||is.runDetail),
-      conductor:navStyle(is.conductor), runtimes:navStyle(is.runtimes), mcp:navStyle(is.mcp), forge:navStyle(is.forgeSettings),
-      overview:navStyle(is.overview), board:navStyle(is.board||is.task), backlog:navStyle(is.backlog),
-      roadmap:navStyle(is.roadmap), projSettings:navStyle(is.projSettings), workflow:navStyle(is.workflow), chat:navStyle(is.chat),
-    };
-    const nav = {
-      home:()=>this.go('home'), inbox:()=>this.go('inbox'), mywork:()=>this.go('mywork'),
-      agents:()=>this.go('agents'), runs:()=>this.go('runs'), conductor:()=>this.go('conductor'),
-      runtimes:()=>this.go('runtimes'), mcp:()=>this.go('mcp'), forgeSettings:()=>this.go('settings',{setTab:'build'}),
-      overview:()=>this.go('overview'), board:()=>this.go('board'), backlog:()=>this.go('backlog'),
-      roadmap:()=>this.go('roadmap'), workflow:()=>this.go('workflow'), projSettings:()=>this.go('projSettings'),
-      chat:()=>this.go('chat'),
-      settings:()=>this.go('settings',{setTab:'profile'}), newProject:()=>this.go('projSettings'), newTask:()=>this.go('board'),
-    };
-
-    const active = this.PROJECTS.find(p=>p.id===st.activeProject) || this.PROJECTS[0];
-    const decorate = (p)=>({ ...p, hasLive:!!p.live, hasNeeds:!!p.needs, live:p.live||0, needs:p.needs||0, isActive:p.id===st.activeProject,
-      select:()=>this.go(is.task?'board':r, { activeProject:p.id, projMenuOpen:false }),
-      openBoard:()=>this.go('board', { activeProject:p.id }) });
-    const projects = this.PROJECTS.map(decorate);
-    const activeDec = decorate(active);
-    const SBCOLS = [{label:'Backlog',color:'#938f99'},{label:'To do',color:'#8ab4f8'},{label:'In progress',color:'#fdd663'},{label:'Review',color:'#c58af9'},{label:'Done',color:'#81c995'}];
-    const sbCounts = active.counts || [0,0,0,0,0];
-    const sbTotal = sbCounts.reduce((a,b)=>a+b,0) || 1;
-    const statusBar = SBCOLS.map((c,i)=>({ ...c, count:sbCounts[i], pct:(sbCounts[i]/sbTotal*100)+'%' }));
-
-    const liveRuns = this.LIVE.map(x=>({ ...x, open:()=>this.go('runDetail', { selRunData:x }) }));
-    const needsYou = this.NEEDS.map(n=>({ ...n, open:()=>this.go('task', { selTaskData:{ key:n.key, title:n.text }, taskTab:'agent' }) }));
-
-    // breadcrumb element
-    const crumbSeg = (txt, dim) => React.createElement('span', { style:{ color: dim?'#768390':'#f0f3f6', fontWeight: dim?400:600 } }, txt);
-    const chev = () => React.createElement('svg',{width:11,height:11,viewBox:'0 0 24 24',fill:'none',stroke:'#768390','strokeWidth':2,key:Math.random()},React.createElement('path',{d:'M9 18l6-6-6-6'}));
-    const buildCrumb = () => {
-      const projName = active.name;
-      const map = {
-        home:[crumbSeg('Home')], inbox:[crumbSeg('Inbox')], mywork:[crumbSeg('My Work')],
-        agents:[crumbSeg('Build',true),chev(),crumbSeg('Agents')],
-        agentDetail:[crumbSeg('Build',true),chev(),crumbSeg('Agents',true),chev(),crumbSeg((st.selAgentData&&st.selAgentData.name)||'Agent')],
-        runs:[crumbSeg('Build',true),chev(),crumbSeg('Runs')],
-        runDetail:[crumbSeg('Build',true),chev(),crumbSeg('Runs',true),chev(),crumbSeg((st.selRunData&&st.selRunData.key)||'Run')],
-        conductor:[crumbSeg('Build',true),chev(),crumbSeg('Conductor')],
-        runtimes:[crumbSeg('Build',true),chev(),crumbSeg('Runtimes')],
-        mcp:[crumbSeg('Build',true),chev(),crumbSeg('MCP Servers')],
-        forgeSettings:[crumbSeg('Build',true),chev(),crumbSeg('Build Settings')],
-        settings:[crumbSeg('Settings')],
-        chat:[crumbSeg('Chat')],
-        overview:[crumbSeg(projName,true),chev(),crumbSeg('Overview')],
-        board:[crumbSeg(projName,true),chev(),crumbSeg('Board')],
-        backlog:[crumbSeg(projName,true),chev(),crumbSeg('Backlog')],
-        roadmap:[crumbSeg(projName,true),chev(),crumbSeg('Roadmap')],
-        workflow:[crumbSeg(projName,true),chev(),crumbSeg('Workflow')],
-        projSettings:[crumbSeg(projName,true),chev(),crumbSeg('Settings')],
-        task:[crumbSeg(projName,true),chev(),crumbSeg('Board',true),chev(),crumbSeg((st.selTaskData&&st.selTaskData.key)||'Task')],
-      };
-      return React.createElement('div',{style:{display:'flex',alignItems:'center',gap:'8px'}}, (map[r]||map.home));
-    };
-
-    const COLS = [
-      { id:'backlog', label:'Backlog', color:'#938f99' },
-      { id:'todo', label:'To Do', color:'#8ab4f8' },
-      { id:'in_progress', label:'In Progress', color:'#fdd663' },
-      { id:'review', label:'Review', color:'#c58af9' },
-      { id:'done', label:'Done', color:'#81c995' },
-    ];
-    const prioStyle = (p) => p==='critical'||p==='high' ? 'color:#f87171;background:rgba(248,113,113,.12)' : p==='medium' ? 'color:#b1bac4;background:#161b22' : 'color:#768390;background:#161b22';
-    const boardColumns = COLS.map(c => ({
-      ...c,
-      count:(this.BOARD[c.id]||[]).length,
-      tasks:(this.BOARD[c.id]||[]).map(t => ({
-        ...t, hasEpic:!!t.epic, hasLive:!!t.live, hasNeeds:!!t.needs, hasDod:!!t.dod,
-        glow: t.live ? 'glow' : '', leftBorder: t.live ? '#38bdf8' : '#30363d',
-        prioCls: prioStyle(t.priority),
-        open:()=>this.setState({ drawerTab:'details', drawerTask:Object.assign({ statusLabel:c.label, statusColor:c.color }, t) }),
-      })),
-    }));
-
-    const dt = st.drawerTask;
-    const dtb = st.drawerTab || 'details';
-    const dtabStyle = (on)=>`width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:${on?'#80cbc4':'#768390'};background:${on?'rgba(128,203,196,.13)':'transparent'}`;
-    const drawer = dt ? Object.assign({}, dt, { hasEpic:!!dt.epic, isLive:!!dt.live, prioCls:prioStyle(dt.priority),
-      openFull:()=>this.go('task', { selTaskData:dt, taskTab:dt.live?'agent':'plan' }),
-      edit:()=>this.go('task', { selTaskData:dt, taskTab:'plan' }),
-      delete:()=>this.setState({ drawerTask:null }) }) : { hasEpic:false, isLive:false, prioCls:'' };
-
-    const backlogRows = boardColumns.flatMap(c => c.tasks.map(t => ({ ...t, statusLabel:c.label, statusColor:c.color })));
-
-    const task = Object.assign({ key:'ACM-142', title:'Add Stripe webhook retry with backoff', priority:'medium', assignee:'—' }, st.selTaskData || {});
-    task.hasEpic = !!task.epic; task.isLive = !!task.live; task.notLive = !task.live;
-    const ttab = { agent:st.taskTab==='agent', plan:st.taskTab==='plan', activity:st.taskTab==='activity', files:st.taskTab==='files' };
-    const tabStyle = (a, col) => 'padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:2px solid ' + (a?col:'transparent') + ';' + (a?'font-weight:600;color:'+col:'color:#b1bac4');
-    const setTaskTab = { agent:()=>this.setState({taskTab:'agent'}), plan:()=>this.setState({taskTab:'plan'}), activity:()=>this.setState({taskTab:'activity'}), files:()=>this.setState({taskTab:'files'}) };
-
-    const agents = this.AGENTS.map(a => ({ ...a,
-      statusColor: a.status==='running'?'#38bdf8':a.status==='online'?'#81c995':'#768390',
-      isRunning:a.status==='running', isOffline:a.status==='offline',
-      tint:'rgba('+(a.color==='#00bcd4'?'0,188,212':a.color==='#a78bfa'?'124,77,255':a.color==='#f1c40f'?'241,196,64':a.color==='#ff9800'?'255,152,0':'201,184,255')+',.14)',
-      open:()=>this.go('agentDetail', { selAgentData:a, agentTab:'toolset' }) }));
-    const acctHosts = { be:'mac-studio-01', fe:'mac-studio-01', rev:'ci-runner-02', ops:'ci-runner-02', plan:'mac-studio-01', qa:'ci-runner-02' };
-    const acctAgents = this.AGENTS.slice(0,4).map(a => {
-      const sc = a.status==='running'?'#38bdf8':a.status==='online'?'#81c995':'#768390';
-      return { ...a,
-        init: (a.name||'A').trim().charAt(0).toUpperCase(),
-        host: acctHosts[a.id] || 'daemon',
-        avTint: a.color+'29',
-        statLabel: a.status,
-        statColor: sc,
-        dotStyle: 'width:6px;height:6px;border-radius:50%;background:'+sc+(a.status==='running'?';box-shadow:0 0 7px '+sc:''),
-        openSettings: ()=>this.go('agentDetail', { selAgentData:a, agentTab:'settings' }) };
-    });
-    const agent = Object.assign({ name:'Backend Implementer', role:'Implementer', runtime:'claude', model:'claude-opus-4-8', project:'Acme Web', max:2, color:'#00bcd4' }, st.selAgentData || {});
-    const atab = { toolset:st.agentTab==='toolset', prompt:st.agentTab==='prompt', runtime:st.agentTab==='runtime', settings:st.agentTab==='settings', activity:st.agentTab==='activity' };
-    const setAgentTab = { toolset:()=>this.setState({agentTab:'toolset'}), prompt:()=>this.setState({agentTab:'prompt'}), runtime:()=>this.setState({agentTab:'runtime'}), settings:()=>this.setState({agentTab:'settings'}), activity:()=>this.setState({agentTab:'activity'}) };
-
-    const runs = this.RUNS.map(rn => ({ ...rn,
-      isRunning:rn.status==='running', isDone:rn.status==='completed', isFailed:rn.status==='failed',
-      statusColor: rn.status==='running'?'#38bdf8':rn.status==='completed'?'#2ecc71':rn.status==='failed'?'#e74c3c':'#768390',
-      statusLabel: rn.status.charAt(0).toUpperCase()+rn.status.slice(1),
-      open:()=>this.go('runDetail', { selRunData:rn }) }));
-    const run = Object.assign({ key:'run_9f3a2', agent:'Backend Implementer', task:'ACM-142 · Add Stripe webhook retry', project:'Acme Web', status:'running', tin:'14.2k', tout:'4.0k', cost:'$0.42', dur:'4m 12s', pr:'acme-web#318' }, st.selRunData || {});
-    run.isRunning = run.status==='running';
-    const runtimes = this.RUNTIMES.map(rt => ({ ...rt, isOnline:rt.status==='online' }));
-
-    // ── Global settings: personal Account + Organization (admin, per-org) ──
-    const setKeys = ['profile','apikey','notif','org','members','accounts','build'];
-    const stabStyle = (a)=>'padding:7px 12px;border-radius:8px;font-size:12.5px;cursor:pointer;'+(a?'background:rgba(201,184,255,.1);color:#c9b8ff;font-weight:600':'color:#b1bac4');
-    const setSetTab = {}; setKeys.forEach(k=>setSetTab[k]=()=>this.setState({setTab:k}));
-    const stab = {}; setKeys.forEach(k=>stab[k]=st.setTab===k);
-    const stabS = {}; setKeys.forEach(k=>stabS[k]=stabStyle(stab[k]));
-    // ── Project-scoped settings (contextual to the active project) ──
-    const projTabs = ['basics','workspace','repos','members','automation','webhooks'];
-    const setProjTab = {}; projTabs.forEach(k=>setProjTab[k]=()=>this.setState({projTab:k}));
-    const ptab = {}; projTabs.forEach(k=>ptab[k]=st.projTab===k);
-    const ptabS = {}; projTabs.forEach(k=>ptabS[k]=stabStyle(ptab[k]));
-
-    const inboxTabs = ['all','mentions','agents','assigned','workflow'];
-    const setInboxTab = {}; inboxTabs.forEach(k=>setInboxTab[k]=()=>this.setState({inboxTab:k}));
-    const itab = {}; inboxTabs.forEach(k=>itab[k]=st.inboxTab===k);
-    const itabStyle = (a)=>'padding:7px 13px;border-radius:9px;font-size:12.5px;cursor:pointer;white-space:nowrap;'+(a?'background:#1c2128;color:#f0f3f6;font-weight:600;border:1px solid #30363d':'color:#768390;border:1px solid transparent');
-
-
-    const ttabS = { plan:tabStyle(ttab.plan,'#c9b8ff'), agent:tabStyle(ttab.agent,'#80cbc4'), activity:tabStyle(ttab.activity,'#c9b8ff'), files:tabStyle(ttab.files,'#c9b8ff') };
-    const atabS = { toolset:tabStyle(atab.toolset,'#c9b8ff'), prompt:tabStyle(atab.prompt,'#c9b8ff'), runtime:tabStyle(atab.runtime,'#c9b8ff'), settings:tabStyle(atab.settings,'#c9b8ff'), activity:tabStyle(atab.activity,'#c9b8ff') };
-    const itabS = {}; inboxTabs.forEach(k=>itabS[k]=itabStyle(itab[k]));
-    const transportPill = (on)=>'padding:4px 10px;border-radius:7px;font-size:11px;cursor:pointer;'+(on?'background:rgba(201,184,255,.12);border:1px solid #c9b8ff;color:#c9b8ff;font-weight:600':'border:1px solid #30363d;color:#768390');
-    const notifRow = (label, sub, inapp, email, webhook)=>({ label, sub, inappS:transportPill(inapp), emailS:transportPill(email), webhookS:transportPill(webhook) });
-    const userNotifGroups = [
-      { entity:'Tasks', rows:[
-        notifRow('Mentions','Someone @mentions you on a task', true, true, false),
-        notifRow('Assigned to you','A task is assigned to you', true, false, false),
-      ]},
-      { entity:'Runs', rows:[
-        notifRow('Run failed / blocked','An agent run errored or hit a blocked gate', true, true, false),
-        notifRow('Run completed','A run you own finished successfully', true, false, false),
-      ]},
-      { entity:'Projects', rows:[
-        notifRow('Daily digest','Morning summary across your projects', false, true, false),
-      ]},
-    ];
-    const disabledPill = 'padding:4px 10px;border-radius:7px;font-size:11px;color:#3a414b;border:1px solid #20262e';
-    const agentNotifGroups = [
-      { entity:'Tasks', rows:[
-        notifRow('Comment on owned task','Wakes the agent to read & respond', true, false, true),
-        notifRow('Assigned a new task','Conductor dispatched work to it', true, false, true),
-        notifRow('Review requested','A task entered its review column', true, false, true),
-      ]},
-      { entity:'Runs', rows:[
-        notifRow('Run failed — self-heal','Auto-retry within the bounce budget', true, false, true),
-      ]},
-      { entity:'Epics', rows:[
-        notifRow('Epic scope changed','A task was added to or removed from its epic', true, false, true),
-      ]},
-    ].map(g=>({ ...g, rows:g.rows.map(r=>({ ...r, emailS:disabledPill })) }));
-    const WF = {
-      backlog:{ label:'backlog', role:'—', count:2, dispatch:false, integrate:false, gates:[], desc:'Ideas land here. No agent is assigned until the task is promoted to To do.' },
-      todo:{ label:'todo', role:'planner', count:3, dispatch:false, integrate:false, gates:['has_assignee'], desc:'Planner scopes the task and writes a Definition of Done before work starts.' },
-      in_progress:{ label:'in_progress', role:'implementer', count:2, dispatch:true, integrate:false, gates:['has_dod'], desc:'Implementer writes code on a task branch and opens a pull request.' },
-      review:{ label:'review', role:'reviewer', count:1, dispatch:true, integrate:true, gates:['dod_all_checked','pr_url_set'], desc:'Reviewer checks the diff. On approval the branch merges to main automatically.' },
-      done:{ label:'done', role:'documentation', count:2, dispatch:true, integrate:false, gates:[], desc:'Documentation agent writes up what shipped.' },
-    };
-    const selWf = {}; Object.keys(WF).forEach(k=>selWf[k]=()=>this.setState({wfNode:k}));
-    const wfNode = (key) => ({ key, ...WF[key], isActive:st.wfNode===key, hasDispatch:WF[key].dispatch, hasIntegrate:WF[key].integrate, hasRole:WF[key].role!=='—', hasGates:WF[key].gates.length>0,
-      cardStyle:'background:#1c2128;border:1px solid '+(st.wfNode===key?'#c9b8ff':'#30363d')+';border-radius:12px;padding:13px;cursor:pointer;min-width:150px;'+(st.wfNode===key?'box-shadow:0 0 0 1px #c9b8ff':''), select:()=>this.setState({wfNode:key}) });
-    const wfNodes = Object.keys(WF).map(wfNode);
-    const wfN = {}; Object.keys(WF).forEach(k=>wfN[k]=wfNode(k));
-    const wfSel = st.wfNode ? { key:st.wfNode, ...WF[st.wfNode], hasGates:WF[st.wfNode].gates.length>0, gatesText:(WF[st.wfNode].gates.join(' · ')||'none'), hasRole:WF[st.wfNode].role!=='—' } : { key:'', label:'—', role:'—', count:0, desc:'', hasGates:false, gatesText:'none', integrate:false, hasRole:false };
-    return {
-      wfNodes, wfN, selWf, wfSel, wfOpen:!!st.wfNode, closeWf:()=>this.setState({wfNode:null}),
-      openTaskRun:()=>this.go('runDetail',{ selRunData:this.RUNS[0] }),
-      bellOpen:st.bellOpen, toggleBell:()=>this.setState(s=>({bellOpen:!s.bellOpen, userOpen:false, projMenuOpen:false})),
-      newMenuOpen:st.newMenuOpen,
-      chatList: this.CHATS.map(c=>({ ...c, isActive:c.id===st.chatPeer, hasUnread:c.unread>0, isBroadcast:c.kind==='broadcast',
-        statusColor: c.status==='running'?'#38bdf8':c.status==='online'?'#81c995':'#768390',
-        rowStyle:'display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;'+(c.id===st.chatPeer?'background:rgba(201,184,255,.10)':''),
-        pick:()=>this.setState({chatPeer:c.id}) })),
-      chatPeer: (()=>{ const c=this.CHATS.find(x=>x.id===st.chatPeer)||this.CHATS[0];
-        return { ...c, isBroadcast:c.kind==='broadcast', statusColor:c.status==='running'?'#38bdf8':c.status==='online'?'#81c995':'#768390',
-          msgs:c.msgs.map(m=>({ ...m, hasWho:!!m.who, rowStyle:'display:flex;flex-direction:column;max-width:74%;'+(m.me?'align-self:flex-end;align-items:flex-end':'align-self:flex-start;align-items:flex-start'),
-            bubbleStyle:'padding:9px 13px;font-size:13px;line-height:1.5;border-radius:13px;'+(m.me?'background:#c9b8ff;color:#23184a;border-bottom-right-radius:4px':'background:#1c2128;color:#e8ebf0;border-bottom-left-radius:4px') })) };
-      })(),
-      openChatWithAgent:()=>this.go('chat',{ chatPeer:(st.selAgentData&&this.CHATS.find(c=>c.name===st.selAgentData.name)?this.CHATS.find(c=>c.name===st.selAgentData.name).id:'be') }),
-      openAgentFromChat:()=>{ const c=this.CHATS.find(x=>x.id===st.chatPeer); const a=this.AGENTS.find(x=>x.name===(c&&c.name)); if(a) this.go('agentDetail',{ selAgentData:a, agentTab:'toolset' }); },
-      chatScopeOpen:st.chatScopeOpen,
-      toggleChatScope:()=>this.setState(s=>({chatScopeOpen:!s.chatScopeOpen})),
-      chatScopeCurrent:({ general:'General', project:active.name, task:'ACM-142 · Webhook retry' })[st.chatScope],
-      chatScopeKind:({ general:'Standing conversation', project:'Project thread', task:'Task thread' })[st.chatScope],
-      chatScopes:[
-        { id:'general', label:'General', sub:'Not tied to a project or task' },
-        { id:'project', label:active.name, sub:'Project thread · '+active.key },
-        { id:'task',    label:'ACM-142 · Webhook retry', sub:'Task thread · syncs with Activity' },
-      ].map(s=>({ ...s, isActive:s.id===st.chatScope, pick:()=>this.setState({chatScope:s.id, chatScopeOpen:false}) })),
-      backlogView:st.backlogView, isListView:st.backlogView==='list', isEpicView:st.backlogView==='epics',
-      setListView:()=>this.setState({backlogView:'list'}), setEpicView:()=>this.setState({backlogView:'epics'}),
-      listTabStyle:'padding:6px 13px;border-radius:8px;font-size:12.5px;cursor:pointer;'+(st.backlogView==='list'?'background:#1c2128;color:#f0f3f6;font-weight:600;border:1px solid #30363d':'color:#768390;border:1px solid transparent'),
-      epicTabStyle:'padding:6px 13px;border-radius:8px;font-size:12.5px;cursor:pointer;'+(st.backlogView==='epics'?'background:#1c2128;color:#f0f3f6;font-weight:600;border:1px solid #30363d':'color:#768390;border:1px solid transparent'),
-      epicGroups: this.EPICS.map(e=>({ ...e, pct:Math.round(e.done/e.total*100)+'%', pctNum:Math.round(e.done/e.total*100),
-        collapsed:!!st.collapsedEpics[e.id], expanded:!st.collapsedEpics[e.id], chevron:(st.collapsedEpics[e.id]?'0deg':'90deg'),
-        toggle:()=>this.setState(s=>({ collapsedEpics:Object.assign({}, s.collapsedEpics, { [e.id]:!s.collapsedEpics[e.id] }) })),
-        rows: boardColumns.flatMap(c=>c.tasks.filter(t=>t.epic===e.name).map(t=>({ ...t, statusLabel:c.label, statusColor:c.color }))),
-        open:()=>this.go('board') })),
-      noEpicRows: boardColumns.flatMap(c=>c.tasks.filter(t=>!t.epic).map(t=>({ ...t, statusLabel:c.label, statusColor:c.color }))),
-      noEpicCount: boardColumns.flatMap(c=>c.tasks.filter(t=>!t.epic)).length,
-      epicBars: this.EPICS.map((e,i)=>({ ...e, top:i*52, leftPct:(e.start/4*100)+'%', widthPct:(e.span/4*100)+'%', pct:Math.round(e.done/e.total*100)+'%',
-        labelStyle:'position:absolute;left:'+(e.start/4*100)+'%;width:'+(e.span/4*100)+'%;top:'+(i*52+10)+'px;height:30px',
-        rowStyle:'position:absolute;left:0;right:0;top:'+(i*52)+'px;height:52px;border-bottom:1px solid #1c2128' })),
-      roadmapMonths:[{n:'Jun',cur:true},{n:'Jul',cur:false},{n:'Aug',cur:false},{n:'Sep',cur:false}],
-      roadmapDeps:[
-        // platform(1) depends on payments(0): from payments end → platform start
-        { x1:'52.5%', y1:36, x2:'27.5%', y2:62 },
-        // growth(2) depends on platform(1)
-        { x1:'75%',   y1:88, x2:'55%',   y2:114 },
-      ],
-      todayPct:(1.4/4*100)+'%',
-      boardSettings:st.boardSettings, openBoardSettings:()=>this.setState({boardSettings:true}), closeBoardSettings:()=>this.setState({boardSettings:false}),
-      drawer, drawerOpen:!!st.drawerTask, closeDrawer:()=>this.setState({drawerTask:null}),
-      boardPadRight: st.drawerTask ? '398px' : '14px',
-      dtab:{ details:dtb==='details', chat:dtb==='chat', activity:dtb==='activity', files:dtb==='files', git:dtb==='git' },
-      dtabS:{ details:dtabStyle(dtb==='details'), chat:dtabStyle(dtb==='chat'), activity:dtabStyle(dtb==='activity'), files:dtabStyle(dtb==='files'), git:dtabStyle(dtb==='git') },
-      setDrawerTab:{ details:()=>this.setState({drawerTab:'details'}), chat:()=>this.setState({drawerTab:'chat'}), activity:()=>this.setState({drawerTab:'activity'}), files:()=>this.setState({drawerTab:'files'}), git:()=>this.setState({drawerTab:'git'}) },
-      userNotifGroups, agentNotifGroups,
-      openWorkflowFromBoard:()=>this.go('workflow',{ boardSettings:false }),
-      bellSummary:[
-        { icon:'wait',  color:'#fdd663', tint:'rgba(253,214,99,.14)',  label:'Waiting on you',  n:1, sub:'Researcher paused on ACM-138' },
-        { icon:'at',    color:'#a78bfa', tint:'rgba(124,77,255,.14)',   label:'Mentions',        n:2, sub:'Dana, Reviewer mentioned you' },
-        { icon:'done',  color:'#2ecc71', tint:'rgba(46,204,113,.14)',   label:'Ready to review', n:1, sub:'MOB-09 run finished' },
-        { icon:'fail',  color:'#e74c3c', tint:'rgba(231,76,60,.14)',    label:'Failed / blocked',n:1, sub:'ACM-142 attempt 2 failed' },
-      ].map(b=>({ ...b, isWait:b.icon==='wait', isAt:b.icon==='at', isDone:b.icon==='done', isFail:b.icon==='fail', open:()=>this.go('inbox',{ inboxTab:'all' }) })),
-      openInboxAll:()=>this.go('inbox',{ inboxTab:'all' }),
-      boardColumns, backlogRows, task, ttab, ttabS, setTaskTab,
-      agents, agent, atab, atabS, setAgentTab, runs, run, runtimes, acctAgents,
-      ptab, setProjTab, ptabS, itab, setInboxTab, itabS, stab, setSetTab, stabS,
-      statusBar, totalTasks:sbTotal,
-      is, cls, nav, projects, active:activeDec, liveRuns, needsYou,
-      crumb: buildCrumb(),
-      projMenuOpen:st.projMenuOpen, userOpen:st.userOpen, pulseOpen:st.pulseOpen,
-      chatOpen:st.chatOpen, chatClosed:!st.chatOpen,
-      toggleProjMenu:()=>this.setState(s=>({projMenuOpen:!s.projMenuOpen})),
-      toggleUser:()=>this.setState(s=>({userOpen:!s.userOpen})),
-      togglePulse:()=>this.setState(s=>({pulseOpen:!s.pulseOpen})),
-      toggleNewMenu:()=>this.setState(s=>({newMenuOpen:!s.newMenuOpen})),
-      toggleChat:()=>this.setState(s=>({chatOpen:!s.chatOpen})),
-      boardMembers: this.MEMBERS.filter(m=>!(st.removedMembers||[]).includes(m.handle)).map(m=>({ ...m,
-        remove:(e)=>{ if(e&&e.stopPropagation)e.stopPropagation(); this.setState(s=>({removedMembers:[...(s.removedMembers||[]), m.handle]})); },
-        open: m.kind==='agent'
-        ? ()=>this.go('agentDetail',{ selAgentData:(this.AGENTS.find(x=>x.name===m.name)||{ name:m.name, role:m.role, runtime:'claude', model:'claude-opus-4-8', project:'Acme Web', max:1, color:m.color }), agentTab:'toolset' })
-        : ()=>this.go('settings',{ setTab:'profile' }) })),
-      teamCount: this.MEMBERS.filter(m=>!(st.removedMembers||[]).includes(m.handle)).length,
-      hasRemovedMembers: (st.removedMembers||[]).length>0,
-      removedCount: (st.removedMembers||[]).length,
-      addMember: ()=>{ if((st.removedMembers||[]).length) this.setState(s=>({removedMembers:s.removedMembers.slice(0,-1)})); else this.go('projSettings',{ projTab:'members' }); },
-      restoreMembers: ()=>this.setState({removedMembers:[]}),
-      activityFeed: [
-        { init:'AI', tint:'rgba(0,188,212,.14)',  color:'#00bcd4', who:'Backend Implementer', text:'opened draft PR', link:'acme-web#318', ago:'8m',  open:()=>this.go('runDetail',{ selRunData:this.RUNS[0] }) },
-        { init:'DA', tint:'rgba(201,184,255,.14)', color:'#c9b8ff', who:'Dana',                text:'commented on',    link:'ACM-142',      ago:'12m', open:()=>this.go('task',{ selTaskData:{ key:'ACM-142', title:'Add Stripe webhook retry with backoff', priority:'high', epic:'Payments', epicColor:'#c58af9', assignee:'DA', live:true }, taskTab:'activity' }) },
-        { init:'RV', tint:'rgba(46,204,113,.14)',  color:'#2ecc71', who:'Reviewer',            text:'approved',        link:'ACM-140',      ago:'1h',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-140', title:'Refactor auth middleware', priority:'high', epic:'Platform', epicColor:'#80cbc4', assignee:'AX' }, taskTab:'plan' }) },
-        { init:'AI', tint:'rgba(0,188,212,.14)',  color:'#00bcd4', who:'Frontend Implementer', text:'finished run on', link:'MOB-09',     ago:'2h',  open:()=>this.go('runDetail',{ selRunData:this.RUNS[2] }) },
-        { init:'DA', tint:'rgba(201,184,255,.14)', color:'#c9b8ff', who:'Dana',                text:'moved to review', link:'ACM-140',      ago:'3h',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-140', title:'Refactor auth middleware', priority:'high' }, taskTab:'plan' }) },
-        { init:'RV', tint:'rgba(46,204,113,.14)',  color:'#2ecc71', who:'Reviewer',            text:'approved',        link:'ACM-140',      ago:'3h',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-140', title:'Refactor auth middleware', priority:'high' }, taskTab:'plan' }) },
-        { init:'CO', tint:'rgba(201,184,255,.14)', color:'#c9b8ff', who:'Conductor',           text:'dispatched',      link:'ACM-149',      ago:'4h',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-149', title:'Webhook signing secret rotation', priority:'high' }, taskTab:'plan' }) },
-        { init:'PL', tint:'rgba(241,196,64,.14)',  color:'#f1c40f', who:'Planner',             text:'created',         link:'ACM-150',      ago:'5h',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-150', title:'Rotate API keys on a schedule', priority:'medium' }, taskTab:'plan' }) },
-        { init:'AI', tint:'rgba(0,188,212,.14)',   color:'#00bcd4', who:'Backend Implementer', text:'merged',          link:'ACM-130',      ago:'1d',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-130', title:'Per-tenant rate limiting', priority:'high' }, taskTab:'plan' }) },
-        { init:'DA', tint:'rgba(201,184,255,.14)', color:'#c9b8ff', who:'Dana',                text:'commented on',    link:'ACM-138',      ago:'1d',  open:()=>this.go('task',{ selTaskData:{ key:'ACM-138', title:'Audit log export', priority:'medium' }, taskTab:'activity' }) },
-      ],
-      memberMenuOpen:st.memberMenuOpen,
-      toggleMembers:()=>this.setState(s=>({memberMenuOpen:!s.memberMenuOpen})),
-      inboxItems: this.NOTIF.filter(n=> st.inboxTab==='all' || n.cat===({mentions:'mention',agents:'agent'}[st.inboxTab]||st.inboxTab)).map(n=>({
-        ...n,
-        isAt:n.icon==='at', isDone:n.icon==='done', isFail:n.icon==='fail', isCheck:n.icon==='check',
-        isGate:n.icon==='gate', isAlert:n.icon==='alert', isWait:n.icon==='wait',
-        tint:n.color+'22',
-        open:()=>this.go(n.to, n.to==='task' ? { selTaskData:{ key:n.key, title:n.title }, taskTab:'activity' } : { selRunData:{ key:'run_'+n.key, agent:'Agent', task:n.key+' · '+n.title, status:'completed' } }),
-      })),
-      inboxCounts: { all:this.NOTIF.length, mentions:this.NOTIF.filter(n=>n.cat==='mention').length, agents:this.NOTIF.filter(n=>n.cat==='agent').length, assigned:this.NOTIF.filter(n=>n.cat==='assigned').length, workflow:this.NOTIF.filter(n=>n.cat==='workflow').length },
-    };
-  }
-}
-</script>
-</body>
-</html>
+            <p style="font-size:12.5px;line-height:1.6;color:#b1bac4;margin:0 0 18px">A quick peek at the work item. Open the full task for the agent run, activity thread, files, and git lin

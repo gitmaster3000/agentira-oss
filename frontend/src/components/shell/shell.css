@@ -4,26 +4,92 @@
 .nav:hover { background: #272d36 !important; }
 .ico { flex-shrink: 0; }
 
-/* ── Mobile chrome: off-canvas sidebar + hamburger ──────────────────────
-   Desktop keeps the static 248px rail. On narrow viewports the rail becomes
-   a fixed drawer that slides in over the content, toggled by the topbar
-   hamburger; a backdrop dismisses it. Route changes close it (Layout). */
+/* ── Collapsible icon rail (button-toggled) ────────────────────────────
+   Verbatim from the Agentira.dc.html helmet. `.railwrap` owns the width
+   animation; `.rail` is the floating panel inside it. Adding `.rc` to both
+   collapses the rail to icons only. */
+.railwrap { width: 248px; transition: width .22s cubic-bezier(.4, 0, .2, 1); }
+.railwrap.rc { width: 66px; }
+.rail.rc .rl { display: none !important; }
+.rail.rc .nav,
+.rail.rc .navrow { justify-content: center !important; padding-left: 0 !important; padding-right: 0 !important; }
+.rail.rc .plangroup { margin-left: 2px !important; padding-left: 0 !important; border-left: none !important; }
+.rail .hdricon { display: none; }
+.rail.rc .railhdr {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    font-size: 0 !important;
+    letter-spacing: 0 !important;
+    margin: 10px 10px 3px !important;
+    padding: 9px 0 3px !important;
+    background: none !important;
+    border: none !important;
+    border-top: 1px solid rgba(255, 255, 255, .08) !important;
+    border-radius: 0 !important;
+}
+.rail.rc .hdricon { display: block; opacity: .45; }
+.rail.rc .usermenu {
+    left: calc(100% + 6px) !important;
+    right: auto !important;
+    bottom: 8px !important;
+    width: 194px !important;
+    margin-bottom: 0 !important;
+}
+.rail.rc .usermenu .nav { justify-content: flex-start !important; padding-left: 10px !important; padding-right: 10px !important; }
+.rail.rc .hdrlabel { display: none !important; }
+.rail.rc .railtoggle-wrap { justify-content: center !important; }
+
+/* The rail panel's top sheen — `style-before` in the design file. */
+.rail::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 190px;
+    border-radius: 16px 16px 0 0;
+    background: linear-gradient(180deg, rgba(201, 184, 255, .08), rgba(201, 184, 255, 0) 72%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Hover affordances the design file expresses as `style-hover`. */
+.hoverline { transition: border-color .12s; }
+.hoverline:hover { border-color: rgba(255, 255, 255, .16) !important; }
+.hovertint { transition: background .12s; }
+.hovertint:hover { background: rgba(255, 255, 255, .06) !important; }
+
+/* ── Mobile chrome: off-canvas rail + hamburger ────────────────────────
+   Desktop keeps the floating rail. On narrow viewports the rail becomes a
+   fixed drawer that slides in over the content, toggled by the topbar
+   hamburger; a backdrop dismisses it. Route changes close it (Layout).
+   The drawer always shows labels, so the collapsed width is overridden. */
 .shell-hamburger { display: none; }
 .shell-backdrop { display: none; }
 
 @media (max-width: 768px) {
     .shell-hamburger { display: inline-flex; }
-    .shell-sidebar {
+    .shell-sidebar,
+    .shell-sidebar.rc {
         position: fixed;
-        top: var(--app-top-offset, 0);
-        left: 0;
-        height: calc(100% - var(--app-top-offset, 0));
+        /* The preview banner (PreviewBanner) sets --app-top-offset; fixed
+           overlays must clear it. */
+        top: calc(12px + var(--app-top-offset, 0px));
+        left: 12px;
+        bottom: 12px;
+        width: 248px;
         z-index: 60;
-        transform: translateX(-100%);
+        transform: translateX(calc(-100% - 12px));
         transition: transform .2s ease;
-        box-shadow: 0 0 32px rgba(0, 0, 0, .55);
     }
     .shell-sidebar.shell-sidebar--open { transform: translateX(0); }
+    /* Labels stay visible in the drawer even if the rail is collapsed. */
+    .shell-sidebar.rc .rail.rc .rl { display: revert !important; }
+    .shell-sidebar.rc .rail.rc .nav { justify-content: flex-start !important; padding-left: 10px !important; padding-right: 10px !important; }
+    .shell-sidebar.rc .rail.rc .hdrlabel { display: revert !important; }
+    .shell-sidebar.rc .rail.rc .hdricon { display: none !important; }
     .shell-backdrop {
         display: block;
         position: fixed;

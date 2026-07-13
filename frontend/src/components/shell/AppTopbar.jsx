@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { api } from '../../api';
-import { useCurrentProjectId } from '../../currentProject';
-import { useShellData } from './shellData';
+import { useCurrentProjectId, setCurrentProjectId } from '../../currentProject';
+import { useShellData, projectColor } from './shellData';
 
-// Exact port of Agentira.dc.html top bar (design hash RjjZ09618cpj5TzJmourRQ).
+// Exact port of the Agentira.dc.html top bar: blended into the canvas (no card
+// chrome), holding the logo lockup, the project switcher (moved out of the
+// sidebar), the breadcrumb, the search pill, and the right-hand controls.
 // Breadcrumb, "N running" pulse pill, New menu and bell are all wired to real
 // data / real actions — no prototype mock rows.
 
@@ -48,22 +50,35 @@ function useBreadcrumb(activeProjectName) {
     return [crumbSeg('Home')];
 }
 
+const liveDot = (n) => (
+    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#38bdf8' }} />
+            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#38bdf8', animation: 'livedot 1.8s ease-out infinite' }} />
+        </span>
+        <span style={{ fontSize: '10px', color: '#38bdf8', fontWeight: 600 }}>{n}</span>
+    </span>
+);
+
 export function AppTopbar({ onNewProject, onMenu }) {
     const navigate = useNavigate();
     const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
-    const { projects, runningTotal, pulseOpen, togglePulse } = useShellData();
+    const { projects, runningByProject, runningTotal, pulseOpen, togglePulse } = useShellData();
     const activeProjectId = urlProjectId || storedProjectId;
-    const activeProject = projects.find((p) => p.id === activeProjectId);
+    const activeProject = projects.find((p) => p.id === activeProjectId) || projects[0] || null;
     const crumb = useBreadcrumb(activeProject?.name);
 
+    const [projMenuOpen, setProjMenuOpen] = useState(false);
     const [newOpen, setNewOpen] = useState(false);
     const [bellOpen, setBellOpen] = useState(false);
     const [notifs, setNotifs] = useState([]);
+    const projRef = useRef(null);
     const newRef = useRef(null);
     const bellRef = useRef(null);
 
     const unread = notifs.filter((n) => !n.read).length;
+    const activeLive = activeProject ? runningByProject[activeProject.id] || 0 : 0;
 
     useEffect(() => {
         let cancelled = false;
@@ -76,12 +91,19 @@ export function AppTopbar({ onNewProject, onMenu }) {
         load();
         const id = setInterval(load, 30_000);
         const onDown = (e) => {
+            if (projRef.current && !projRef.current.contains(e.target)) setProjMenuOpen(false);
             if (newRef.current && !newRef.current.contains(e.target)) setNewOpen(false);
             if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false);
         };
         document.addEventListener('mousedown', onDown);
         return () => { cancelled = true; clearInterval(id); document.removeEventListener('mousedown', onDown); };
     }, []);
+
+    const selectProject = (p) => {
+        setCurrentProjectId(p.id);
+        setProjMenuOpen(false);
+        navigate(`/studio/project/${p.id}/board`);
+    };
 
     const onNotifClick = async (n) => {
         try {
@@ -96,8 +118,8 @@ export function AppTopbar({ onNewProject, onMenu }) {
     };
 
     const createItem = (tint, stroke, icon, title, sub, onClick) => (
-        <div className="nav" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px 10px', borderRadius: '9px', cursor: 'pointer', color: 'inherit' }}>
-            <span style={{ width: '30px', height: '30px', borderRadius: '8px', background: tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div className="nav" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px 10px', borderRadius: '11px', cursor: 'pointer', color: 'inherit' }}>
+            <span style={{ width: '30px', height: '30px', borderRadius: '9px', background: tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2">{icon}</svg>
             </span>
             <div>
@@ -108,15 +130,68 @@ export function AppTopbar({ onNewProject, onMenu }) {
     );
 
     return (
-        <header style={{ height: '54px', flexShrink: 0, borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 18px', background: '#161b22', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0 }}>
-                {/* Hamburger — opens the off-canvas sidebar. CSS hides it on desktop. */}
-                <button onClick={onMenu} className="shell-hamburger" title="Menu" aria-label="Open navigation"
-                    style={{ background: 'none', border: 'none', padding: '6px', marginRight: '2px', color: '#b1bac4', cursor: 'pointer', alignItems: 'center' }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
-                </button>
-                {crumb}
+        <header style={{ flexShrink: 0, height: '40px', display: 'flex', alignItems: 'center', gap: '12px', padding: '0 6px 0 2px', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
+            {/* Hamburger — opens the off-canvas rail. CSS hides it on desktop. */}
+            <button onClick={onMenu} className="shell-hamburger" title="Menu" aria-label="Open navigation"
+                style={{ background: 'none', border: 'none', padding: '6px', color: '#b1bac4', cursor: 'pointer', alignItems: 'center', flexShrink: 0 }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+            </button>
+
+            {/* Logo lockup — separate from any card, always visible. */}
+            <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flexShrink: 0 }}>
+                <span style={{ width: '30px', height: '30px', borderRadius: '9px', background: 'linear-gradient(135deg,#c9b8ff,#80cbc4)', color: '#0e1117', fontSize: '15px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 10px rgba(201,184,255,.35)' }}>A</span>
+                <div style={{ lineHeight: 1.05 }}>
+                    <div style={{ fontSize: '13.5px', fontWeight: 700 }}>Acme Inc</div>
+                    <div style={{ fontSize: '10px', color: '#768390' }}>Agentira</div>
+                </div>
             </div>
+
+            <span style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,.09)', flexShrink: 0 }} />
+
+            {/* Project switcher — moved out of the sidebar. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexShrink: 0 }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.12em', color: '#768390', flexShrink: 0 }}>PROJECT</span>
+                <div style={{ position: 'relative', flexShrink: 0 }} ref={projRef}>
+                    <div className="hoverline" onClick={() => setProjMenuOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '10px', cursor: 'pointer', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: activeProject ? projectColor(activeProject) : '#768390' }} />
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: activeProject ? projectColor(activeProject) : '#768390' }}>{activeProject ? activeProject.name : 'No project'}</span>
+                        {activeLive > 0 ? liveDot(activeLive) : null}
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" strokeWidth="2.2" style={{ marginLeft: '1px' }}><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
+                    </div>
+                    {projMenuOpen && (
+                        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '6px', width: '264px', background: '#1c2128', border: '1px solid rgba(255,255,255,.09)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, padding: '5px', maxHeight: '340px', overflowY: 'auto' }}>
+                            <div style={{ fontSize: '9.5px', fontWeight: 700, letterSpacing: '.1em', color: '#768390', padding: '6px 8px 4px' }}>SWITCH PROJECT</div>
+                            {projects.map((p) => {
+                                const live = runningByProject[p.id] || 0;
+                                return (
+                                    <div key={p.id} className="nav" onClick={() => selectProject(p)} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 8px', borderRadius: '10px', cursor: 'pointer' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: projectColor(p) }} />
+                                        <span style={{ fontSize: '13px', flex: 1, color: '#e8ebf0' }}>{p.name}</span>
+                                        {live > 0 ? <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#38bdf8' }} /><span style={{ fontSize: '10px', color: '#38bdf8', fontWeight: 600 }}>{live}</span></span> : null}
+                                        {activeProject && p.id === activeProject.id ? <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg> : null}
+                                    </div>
+                                );
+                            })}
+                            <div className="nav" onClick={() => { setProjMenuOpen(false); onNewProject && onNewProject(); }} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 8px', borderRadius: '10px', cursor: 'pointer', color: '#768390', borderTop: '1px solid rgba(255,255,255,.06)', marginTop: '4px' }}>
+                                <svg className="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+                                <span style={{ fontSize: '12.5px' }}>New project</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Breadcrumb */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0, flex: 1 }}>{crumb}</div>
+
+            {/* Search — moved out of the sidebar. */}
+            <div className="hoverline" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 11px', borderRadius: '10px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', color: '#768390', cursor: 'text', width: '210px', flexShrink: 0 }}>
+                <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+                <span style={{ fontSize: '12.5px', flex: 1 }}>Search or jump…</span>
+                <span style={{ fontSize: '10px', fontFamily: 'ui-monospace,monospace', background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.09)', borderRadius: '6px', padding: '2px 5px', color: '#b1bac4' }}>⌘K</span>
+            </div>
+
+            {/* Right controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {/* Pulse pill — toggles the full-height Pulse drawer (PulseDock).
                     Pulse blue when something is running; muted "All quiet" otherwise.
@@ -124,7 +199,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                 <div
                     onClick={togglePulse}
                     title={pulseOpen ? 'Hide Pulse' : 'Show Pulse'}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: runningTotal > 0 ? 'rgba(56,189,248,.08)' : (pulseOpen ? '#1c2128' : 'transparent'), border: `1px solid ${runningTotal > 0 ? 'rgba(56,189,248,.3)' : '#30363d'}`, cursor: 'pointer' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: runningTotal > 0 ? 'rgba(56,189,248,.08)' : (pulseOpen ? 'rgba(255,255,255,.06)' : 'transparent'), border: `1px solid ${runningTotal > 0 ? 'rgba(56,189,248,.3)' : 'rgba(255,255,255,.08)'}`, cursor: 'pointer' }}
                 >
                     {runningTotal > 0 ? (
                         <>
@@ -149,7 +224,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M6 9l6 6 6-6" /></svg>
                     </div>
                     {newOpen && (
-                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '230px', background: '#1c2128', border: '1px solid #30363d', borderRadius: '12px', boxShadow: '0 16px 40px rgba(0,0,0,.55)', zIndex: 50, padding: '6px' }}>
+                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '230px', background: '#1c2128', border: '1px solid rgba(255,255,255,.09)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, padding: '6px' }}>
                             {createItem('rgba(128,203,196,.14)', '#80cbc4', (<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>), 'New task', 'File work on the board', () => { setNewOpen(false); window.dispatchEvent(new CustomEvent('open-create-task')); })}
                             {createItem('rgba(197,138,249,.14)', '#c58af9', (<><rect x="3" y="4" width="18" height="6" rx="1" /><rect x="3" y="14" width="18" height="6" rx="1" /></>), 'New epic', 'Group tasks on the roadmap', () => { setNewOpen(false); window.dispatchEvent(new CustomEvent('open-create-epic')); })}
                             {createItem('rgba(201,184,255,.14)', '#c9b8ff', (<path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18" />), 'New project', 'Guided 5-step wizard', () => { setNewOpen(false); onNewProject && onNewProject(); })}
@@ -159,13 +234,13 @@ export function AppTopbar({ onNewProject, onMenu }) {
 
                 {/* Bell */}
                 <div style={{ position: 'relative' }} ref={bellRef}>
-                    <div onClick={() => setBellOpen((o) => !o)} style={{ position: 'relative', padding: '7px', color: '#b1bac4', cursor: 'pointer' }}>
+                    <div className="hovertint" onClick={() => setBellOpen((o) => !o)} style={{ position: 'relative', padding: '7px', color: '#b1bac4', cursor: 'pointer', borderRadius: '9px' }}>
                         <svg className="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
-                        {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid #0e1117' }} />}
+                        {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid #090b10' }} />}
                     </div>
                     {bellOpen && (
-                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '312px', background: '#1c2128', border: '1px solid #30363d', borderRadius: '12px', boxShadow: '0 16px 40px rgba(0,0,0,.55)', zIndex: 50, overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid #30363d' }}>
+                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '312px', background: '#1c2128', border: '1px solid rgba(255,255,255,.09)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,.06)' }}>
                                 <span style={{ fontSize: '12.5px', fontWeight: 700 }}>Notifications</span>
                                 {unread > 0 && <span style={{ fontSize: '11px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 7px' }}>{unread}</span>}
                             </div>
@@ -173,7 +248,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                                 {notifs.length === 0 ? (
                                     <div style={{ padding: '24px 8px', textAlign: 'center', fontSize: '12px', color: '#768390' }}>You're all caught up.</div>
                                 ) : notifs.slice(0, 8).map((n) => (
-                                    <div key={n.id} className="nav" onClick={() => onNotifClick(n)} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px', borderRadius: '9px', cursor: 'pointer', opacity: n.read ? 0.6 : 1 }}>
+                                    <div key={n.id} className="nav" onClick={() => onNotifClick(n)} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px', borderRadius: '11px', cursor: 'pointer', opacity: n.read ? 0.6 : 1 }}>
                                         <span style={{ marginTop: '1px', width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, background: n.read ? 'transparent' : '#ef4444' }} />
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                             <div style={{ fontSize: '12.5px', color: '#e8ebf0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>
@@ -182,7 +257,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                                     </div>
                                 ))}
                             </div>
-                            <div className="nav" onClick={() => { setBellOpen(false); navigate('/studio'); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', borderTop: '1px solid #30363d', fontSize: '12px', fontWeight: 600, color: '#c9b8ff', cursor: 'pointer' }}>
+                            <div className="nav" onClick={() => { setBellOpen(false); navigate('/studio'); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', borderTop: '1px solid rgba(255,255,255,.06)', fontSize: '12px', fontWeight: 600, color: '#c9b8ff', cursor: 'pointer' }}>
                                 Open Inbox<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
                             </div>
                         </div>

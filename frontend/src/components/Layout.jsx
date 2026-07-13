@@ -8,10 +8,17 @@ import { FloatingChat } from './FloatingChat';
 import { PulseDock } from './PulseDock';
 import './shell/shell.css';
 
+// Shell root, ported from Agentira.dc.html: a dark gradient canvas holding a
+// blended header row, then a row of two floating panels (rail + main).
+const CANVAS = 'radial-gradient(900px 480px at 14% -10%,rgba(201,184,255,.06),transparent),'
+    + 'radial-gradient(1000px 520px at 86% -14%,rgba(56,189,248,.06),transparent),#090b10';
+
 export function Layout() {
     const [showCreate, setShowCreate] = useState(false);
     // Mobile off-canvas nav: closed by default, toggled by the topbar hamburger.
     const [navOpen, setNavOpen] = useState(false);
+    // Desktop rail: expanded (248px) or collapsed to icons (66px).
+    const [railOpen, setRailOpen] = useState(true);
     const location = useLocation();
 
     // Any route change (incl. project switch) closes the mobile drawer.
@@ -25,15 +32,18 @@ export function Layout() {
 
     return (
         <ShellDataProvider>
-            <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: '#0e1117' }}>
-                {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
-                <AppSidebar open={navOpen} />
-                <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <AppTopbar onNewProject={() => setShowCreate(true)} onMenu={() => setNavOpen((o) => !o)} />
-                    <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                        <Outlet />
-                    </div>
-                </main>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden', padding: '12px', background: CANVAS }}>
+                <AppTopbar onNewProject={() => setShowCreate(true)} onMenu={() => setNavOpen((o) => !o)} />
+
+                <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
+                    {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
+                    <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
+                    <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#0e1117', border: '1px solid rgba(255,255,255,.07)', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 12px 38px rgba(0,0,0,.35)' }}>
+                        <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                            <Outlet />
+                        </div>
+                    </main>
+                </div>
 
                 {showCreate && <CreateProjectWizard onClose={() => setShowCreate(false)} onSuccess={handleProjectSuccess} />}
 
