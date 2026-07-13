@@ -1,0 +1,44 @@
+meta {
+  name: 07 Prepare task run
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/forge/tasks/{{oc_task_id}}/prepare-run
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+body:json {
+  {
+    "agent_id": "{{oc_agent_id}}"
+  }
+}
+
+script:pre-request {
+  if (!bru.getVar("oc_agent_id") || !bru.getVar("oc_task_id")) {
+    bru.runner.skipRequest();
+  }
+}
+
+script:post-response {
+  const st = res.getStatus();
+  if (st === 200 || st === 201) {
+    const b = res.getBody();
+    bru.setVar("oc_run_id", b.id || b.run_id || "");
+  }
+}
+
+assert {
+  res.status: in [200, 201, 400, 404, 422]
+}
+
+docs {
+  Creates a prepared run via public forge API (same entry as UI prepare-run).
+  Full dispatch needs an online daemon; prepare should still create a run row when allowed.
+}

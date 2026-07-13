@@ -20,7 +20,7 @@ What the binary ships with. Not configurable by Agentira.
 | claude-code | `Read`, `Edit`, `Write`, `Bash`, `Grep`, `Glob`, `WebFetch`, `Task`, `TodoWrite`, in-process Skill loader, hooks, permission system |
 | codex | its own native tool set |
 | gemini-cli | its own native tool set |
-| openclaw | tools exposed by the routed runner-agent's `tools.profile` |
+| openclaw | tools on the **per-Agentira engine agent** (`ar-<agent8>`, `tools.profile=full`) |
 | ollama (bare gateway) | none — pure token generation |
 
 These appear on every dispatch automatically because the runtime is the
@@ -36,7 +36,7 @@ none of this and writes none of this.
 | claude-code | `~/.claude.json` (personal MCP servers), `~/.claude/CLAUDE.md`, `~/.claude/plugins/`, `~/.claude/skills/`, `~/.claude/settings.json` |
 | codex | `~/.codex/` |
 | gemini-cli | `~/.gemini/` |
-| openclaw | `~/.openclaw/openclaw.json` (we auto-bootstrap a single `agentira-runner` entry with `bootstrap=null`, `contextInjection=never`; nothing else) |
+| openclaw | `~/.openclaw/openclaw.json` — we create **engine agents** `ar-<id>` (empty system override, full tools, workspace = Agentira desk). We do **not** run product turns as personal `main`. See [openclaw-engine-agents.md](./openclaw-engine-agents.md). |
 
 **We deliberately do not pass `--strict-mcp-config` by default** for
 claude-code. Without that flag, claude-code merges the user's host MCP
@@ -128,9 +128,8 @@ the registry, so the agent will get exactly those two and nothing else.
   appended after.
 - **Agent toggled to use `filesystem` in Toolset** → gets that one server
   PLUS all the user's host servers PLUS `agentira` + `memory`.
-- **OpenClaw user's per-workspace tool profile** → the runner-agent
-  inherits all of it. Agentira just steers persona via the prepended
-  system message, never via `openclaw.json`.
+- **OpenClaw host plugins / tools** → available when the engine agent's
+  tools profile allows them. Persona still comes only from Agentira.
 
 ## Fragile spots
 
@@ -140,11 +139,11 @@ the registry, so the agent will get exactly those two and nothing else.
 2. **Name collisions** — if a user names a host MCP server `agentira` or
    `memory`, ours wins by virtue of being last in the merge. Renaming
    would silently shadow theirs.
-3. **OpenClaw bootstrap content drift** — if a user edits the
-   `agentira-runner` entry and adds bootstrap content that introduces a
-   persona, Agentira's prepended system message will fight it.
-   `ensure_runner_agent()` is idempotent on existence only; it doesn't
-   reset content.
+3. **OpenClaw bootstrap content drift** — if someone edits an engine agent
+   (`ar-*`) and adds SOUL/bootstrap persona content, it can fight Agentira's
+   system message. We set empty `systemPromptOverride` + `skipBootstrap` on
+   ensure; re-apply is idempotent. Do not point product runs at personal
+   `main`.
 4. **Per-runtime adapter coverage** — only `claude.py` is fully wired for
    `--strict-mcp-config`. codex/gemini adapters will need the same flag
    when added.

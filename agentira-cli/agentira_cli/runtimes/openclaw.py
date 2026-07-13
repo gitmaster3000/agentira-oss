@@ -5,19 +5,22 @@ import logging
 import os
 from pathlib import Path
 
-from .base import Runtime, TurnRequest, derive_session_handle as _derive_session_handle
+from .base import Runtime, TurnRequest
+from .openclaw_engine import (
+    clear_engine_session,
+    derive_engine_session_key,
+    ensure_engine_agent,
+    normalize_session_key,
+)
 
 logger = logging.getLogger("agentira.runtime.openclaw")
 
 _DEFAULT_STATE_DIR = Path.home() / ".openclaw"
 _DEFAULT_PORT = 18789
 
-# Generic runner-agent that Agentira routes ALL its OpenClaw chats through.
-# Per the runtime architecture: Agentira owns the agent (persona,
-# system_prompt, conversation history) and OpenClaw owns the engine
-# (MCP tools, workspace, code execution). The runner has bootstrap=null
-# and contextInjection=never so it doesn't inject identity-shaping
-# content that would fight Agentira's system_prompt.
+# Legacy shared placeholder — kept only so older docs/tests/daemon boot
+# that still call ensure_runner_agent do not crash. Execution no longer
+# routes through this id; each Agentira agent gets ar-<agent8>.
 _RUNNER_AGENT_ID = "agentira-runner"
 
 
@@ -26,38 +29,29 @@ class OpenClawRuntime(Runtime):
     default_binary = "openclaw"
     env_path_override = "AGENTIRA_OPENCLAW_PATH"
     version_args = ("--version",)
-    # ADR 009 / Runtime Adapter contract: OpenClaw uses its native WS RPC
-    # protocol (chat.send / sessions.* + event stream) for execution.
-    # We target the clean "agentira-runner" placeholder agent (created by
-    # ensure_runner_agent) so that:
-    #   - OpenClaw supplies the full engine (tools, workspace, MCP servers
-    #     registered into its config, execution environment).
-    #   - Agentira layers its own system_prompt, conversation history (via
-    #     sessionKey continuity + prompt construction), per-agent MCPs
-    #     (registered fresh before each dispatch), and config on top.
-    # This prevents user's personal OpenClaw agent configs / personas /
-    # settings from polluting Agentira agents. The runner has empty
-    # systemPromptOverride and full tools profile.
-    #
-    # Native WS gives us incremental streaming events (text deltas, tool
-    # lifecycle) instead of a single non-streaming /v1/chat/completions
-    # response. Capabilities reflect the native contract.
+    # ADR 009: native WS (chat.send + event stream).
+    # Ownership split:
+    #   Agentira — persona, memory MCP, prompts, board tools, workdir provision
+    #   OpenClaw — tool engine only (read/edit/exec + host plugins)
+    # One OpenClaw engine agent per Agentira agent (ar-<agent8>), workspace
+    # bound to the Agentira-provisioned desk, sessionKey routes to that
+    # engine so we never land on the user's personal main agent.
     capabilities = ("stream_events", "resume")
 
     @classmethod
     def derive_session_handle(cls, *, agent_id: str, scope_key: str) -> str:
-        """OpenClaw `sessionKey` for (agent, scope_key) — one server-side
-        thread per Agentira conversation scope under the runner agent.
-        Stable: same scope -> same key -> same thread (with KV cache
-        warm)."""
-        return _derive_session_handle(agent_id=agent_id, scope_key=scope_key)
+        """OpenClaw sessionKey: agent:ar-<id>:<scope> (routes to engine agent)."""
+        return derive_engine_session_key(agent_id=agent_id, scope_key=scope_key)
+
+    @classmethod
+    def clear_handle(cls, *, agent_id: str, scope_key: str) -> None:
+        """Drop OpenClaw-side thread; backend also clears runtime_session_id."""
+        key = derive_engine_session_key(agent_id=agent_id, scope_key=scope_key)
+        clear_engine_session(key)
 
     @classmethod
     async def execute_turn(cls, req: TurnRequest):
-        """Native OpenClaw WS path: device registration + chat.send stream.
-
-        Device pairing / operator.write lives here — not in daemon core.
-        """
+        """Native OpenClaw WS path: engine agent + workdir bind + chat.send."""
         from agentira_cli.runtimes.openclaw_ws import run_openclaw_ws
         from agentira_cli.runtimes.openclaw_device import (
             RegistrationError,
@@ -65,8 +59,20 @@ class OpenClawRuntime(Runtime):
             ensure_registered,
         )
 
-        # Register MCPs (and the clean runner) right before we talk to it
-        # so THIS agent's token + memory + MCP servers are visible.
+        # Ensure 1:1 engine agent + bind workspace to Agentira desk (once
+        # when desk changes — cached). Persona stays empty on OC side.
+        try:
+            ensure_engine_agent(
+                req.agent_id,
+                workdir=req.workdir or "",
+                default_model=req.model or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ensure_engine_agent failed trace=%s: %s", req.trace_id, exc,
+            )
+
+        # Register Agentira MCPs so THIS agent's token + memory are visible.
         if req.mcp_config_json:
             try:
                 reg = register_agentira_mcps(json.loads(req.mcp_config_json))
@@ -78,7 +84,12 @@ class OpenClawRuntime(Runtime):
                     req.trace_id, exc,
                 )
 
-        session_key = req.resume_session_id
+        # Resume id may be legacy agentira:… — normalize to agent:ar-… form.
+        session_key = normalize_session_key(
+            req.resume_session_id or "",
+            agent_id=req.agent_id,
+            scope_key=req.scope_key,
+        )
         if not session_key:
             try:
                 session_key = cls.derive_session_handle(
@@ -144,7 +155,8 @@ class OpenClawRuntime(Runtime):
             system_prompt=req.system_prompt,
             on_event=req.on_event,
             session_key=session_key,
-            resume_session_id=req.resume_session_id,
+            resume_session_id=session_key if req.resume_session_id else "",
+            workdir=req.workdir or "",
             stdout_log_path=req.stdout_log_path or None,
             stderr_log_path=req.stderr_log_path or None,
             trace_id=req.trace_id,
@@ -229,28 +241,33 @@ def _configure_runner(binary_path: str, agents: list) -> None:
 
 
 def ensure_runner_agent(default_model: str = "", binary_path: str = "openclaw") -> bool:
-    """Idempotently add the `agentira-runner` agent to OpenClaw's config.
+    """Legacy boot hook (daemon start). Prefer ensure_engine_agent per turn.
 
-    Why: Agentira owns the agent layer (persona, system_prompt, conversation
-    history). OpenClaw owns the engine layer (MCP tools, workspace, code
-    execution). To get the latter without the former, we route every Agentira
-    chat through ONE generic OpenClaw agent whose `systemPromptOverride` is
-    empty (so OpenClaw doesn't inject identity-shaping content) and whose
-    `tools.profile` is "full" (so all OpenClaw-side tools are available).
-
-    Persona is supplied by Agentira via the system message in the chat body.
-
-    Implementation note: we MUST use the `openclaw` CLI rather than mutating
-    `~/.openclaw/openclaw.json` directly. The OpenClaw gateway holds the
-    config in memory and rewrites the file on its own schedule, so direct
-    edits get clobbered. The CLI is the supported mutation path and the
-    gateway picks up changes after a restart.
-
-    Returns True if the entry was created, False if already present or if
-    OpenClaw isn't installed/usable. Always (re)applies the runner config
-    when the agent exists — older builds may have created the runner before
-    tools.profile=full was enforced.
+    Kept so older call sites do not break. Execution uses 1:1 ``ar-<id>``
+    engine agents (see openclaw_engine.py); this only ensures skipBootstrap
+    defaults and the legacy placeholder if present.
     """
+    # Prefer global skipBootstrap so desks are not polluted with SOUL.md.
+    try:
+        _config_set_skip_bootstrap(binary_path)
+    except Exception:  # noqa: BLE001
+        pass
+    return _ensure_legacy_runner(default_model=default_model, binary_path=binary_path)
+
+
+def _config_set_skip_bootstrap(binary_path: str = "openclaw") -> None:
+    import subprocess
+    try:
+        subprocess.run(
+            [binary_path, "config", "set", "agents.defaults.skipBootstrap", "true"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def _ensure_legacy_runner(default_model: str = "", binary_path: str = "openclaw") -> bool:
+    """Idempotently ensure legacy agentira-runner exists (non-execution path)."""
     import subprocess
 
     # Probe whether the runner agent already exists.

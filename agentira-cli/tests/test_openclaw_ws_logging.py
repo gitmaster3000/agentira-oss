@@ -45,7 +45,7 @@ def _run(tmp_path, script, **kwargs):
     with patch.dict(sys.modules, {"websocket": stub}):
         res = asyncio.run(run_openclaw_ws(
             "http://127.0.0.1:18789", "tok", "agentira-runner", "hi",
-            session_key="agentira:abcd1234:task:t1",
+            session_key="agent:ar-abcd1234:task:t1",
             **kwargs,
         ))
     return res, fake

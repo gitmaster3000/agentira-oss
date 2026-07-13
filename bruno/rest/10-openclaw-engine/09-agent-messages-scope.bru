@@ -1,0 +1,30 @@
+meta {
+  name: 09 Agent messages for task scope
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/api/forge/agents/{{oc_agent_id}}/messages?scope_key=task%3A{{oc_task_id}}&limit=20
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+script:pre-request {
+  if (!bru.getVar("oc_agent_id") || !bru.getVar("oc_task_id")) {
+    bru.runner.skipRequest();
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Chat transcript for scope task:<id>. Empty array is fine before first dispatch;
+  endpoint must not 500. Engine session keys are daemon-side (agent:ar-…:task:…).
+}

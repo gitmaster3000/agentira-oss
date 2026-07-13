@@ -1,0 +1,19 @@
+meta {
+  name: 00 Health /docs reachable
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/docs
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: in [200, 307, 308]
+}
+
+docs {
+  Smoke that local docker backend is up before seeding data.
+}

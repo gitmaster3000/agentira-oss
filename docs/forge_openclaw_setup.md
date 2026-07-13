@@ -1,170 +1,64 @@
-# Forge ↔ OpenClaw Integration Setup
+# Forge ↔ OpenClaw setup (operators)
 
-## Overview
-
-Forge is the management plane for OpenClaw agents. Communication uses:
-- **HTTP** for chat (`/v1/chat/completions`) and triggers (`/hooks/agent`)
-- **WebSocket RPC** for live status data (sessions, costs)
+> **Product model:** OpenClaw is a **tool engine**. Agentira owns persona, memory, MCP board tools, and the task desk.  
+> Full design: [openclaw-engine-agents.md](./openclaw-engine-agents.md) · User guide: [openclaw-agents-user.md](./openclaw-agents-user.md)
 
 ## Prerequisites
 
-1. OpenClaw running locally (default: `http://127.0.0.1:18789`)
-2. Gateway token from `~/.openclaw/openclaw.json` → `gateway.auth.token` (the daemon reads this only for one-time device pairing — you do not paste it into Agentira for WS execution)
-3. Hooks token from `~/.openclaw/openclaw.json` → `hooks.token` (HTTP triggers only)
-
-### Daemon ↔ OpenClaw registration (automatic)
-
-The local Agentira daemon registers itself as an OpenClaw **device** with
-`operator.write` on start (and on demand via `agentira daemon pair`). Identity
-and the issued device token live in `~/.agentira/openclaw-device.json` (mode
-0600). Agent execution uses that device token — not the shared gateway token.
+1. OpenClaw gateway local (default `http://127.0.0.1:18789`)
+2. Agentira daemon on the same machine
+3. Device pairing for execution auth:
 
 ```bash
-agentira daemon pair          # force re-register / show pending status
-openclaw devices list --json  # confirm displayName agentira-daemon has operator.write
-```
-
-If pairing needs a manual approve (rare on loopback):
-
-```bash
-openclaw devices approve <requestId>
 agentira daemon pair
+openclaw devices list --json   # displayName agentira-daemon → operator.write
 agentira daemon restart
 ```
 
-Never hand-edit scopes in `openclaw.json`.
+Identity file: `~/.agentira/openclaw-device.json` (mode 0600).  
+Do **not** paste the shared gateway token into Agentira for WS turns.
 
-## Step 1: Enable Chat Completions in OpenClaw
+## What the daemon does
 
-Add to `~/.openclaw/openclaw.json` inside the `gateway` section:
+On each OpenClaw turn:
 
-```json
-"http": {
-  "endpoints": {
-    "chatCompletions": {
-      "enabled": true
-    }
-  }
-}
-```
+1. Ensures engine agent **`ar-<first8 of agent id>`** exists (`tools.profile=full`, empty system override).
+2. Binds engine **workspace** to the Agentira workdir when the desk path changes.
+3. Registers Agentira MCP servers (fingerprint-skip if unchanged).
+4. `chat.send` with `sessionKey = agent:ar-<id>:<scope>`.
+5. Streams text + tool events to the backend.
 
-Full gateway section example:
-```json
-"gateway": {
-  "port": 18789,
-  "mode": "local",
-  "bind": "loopback",
-  "auth": {
-    "mode": "token",
-    "token": "YOUR_GATEWAY_TOKEN"
-  },
-  "http": {
-    "endpoints": {
-      "chatCompletions": { "enabled": true }
-    }
-  }
-}
-```
+## Forge agent fields
 
-**Restart OpenClaw** after editing: `openclaw restart`
+| Field | Value |
+|-------|--------|
+| Runtime type | `openclaw` |
+| Gateway URL | usually auto from daemon introspect |
+| Model | OpenClaw-reachable model id |
+| System prompt | Agentira persona (not OpenClaw SOUL.md) |
 
-## Step 2: Configure Agents in Forge
+There is **no** “must match agents.list id in openclaw.json for persona” step.  
+Engine agents are created automatically; do not point product agents at personal `main`.
 
-Each Forge agent needs these fields set (Config tab → Runtime Connection):
+## Legacy (removed from execution)
 
-| Field | Value | Purpose |
-|---|---|---|
-| **Runtime Type** | `openclaw` | Selects OpenClaw integration |
-| **Gateway URL** | `http://127.0.0.1:18789` | OpenClaw gateway address |
-| **Agent Name** | e.g. `architect`, `frontend` | Must match agent `id` in `openclaw.json → agents.list` |
-| **Gateway Token** | Your gateway auth token | Used for `/v1/chat/completions` and WebSocket RPC |
-| **Hooks Token** | Your hooks auth token | Used for `/hooks/agent` fire-and-forget triggers |
+| Old idea | Status |
+|----------|--------|
+| Shared `agentira-runner` for all chats | Not used for execution |
+| HTTP `/v1/chat/completions` for OpenClaw product turns | Native WS only |
+| `sessionKey` like `agentira:…` without `agent:` prefix | Normalized to `agent:ar-…` |
+| “Agent Name” = OpenClaw personal agent id | Dropped; Agentira display name is independent |
 
-### Finding Your Tokens
+## Ops checks
 
-**Gateway Token** — in `~/.openclaw/openclaw.json`:
-```json
-"gateway": { "auth": { "token": "YOUR_GATEWAY_TOKEN" } }
-```
-
-**Hooks Token** — in `~/.openclaw/openclaw.json`:
-```json
-"hooks": { "token": "YOUR_HOOKS_TOKEN" }
-```
-
-Click the eye icon next to each token field to show/hide the value.
-
-## Step 3: Verify
-
-### Health Check
 ```bash
-curl http://127.0.0.1:18789/health
-# Expected: {"ok":true,"status":"live"}
+openclaw agents list --json | jq '.[] | {id, workspace}'
+# Expect ar-<id> entries with workspace under ~/.agentira/agents/.../task-* when active
+
+agentira daemon status
 ```
 
-### Chat Completions
-```bash
-curl -X POST http://127.0.0.1:18789/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_GATEWAY_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openclaw:architect",
-    "messages": [{"role": "user", "content": "Hello, who are you?"}]
-  }'
-```
-Expected: OpenAI-compatible response with `choices[0].message.content`.
+## Related
 
-### Hook Trigger
-```bash
-curl -X POST http://127.0.0.1:18789/hooks/agent \
-  -H "Authorization: Bearer YOUR_HOOKS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agentId": "architect",
-    "message": "Test message from Forge"
-  }'
-```
-
-### In the UI
-1. Go to **Forge → Agents** — configured agents should show **Online** (green)
-2. Open an agent → **Chat tab** → send a message → see real AI response
-3. Open an agent → **Overview tab** → see live OpenClaw status + sessions
-4. Open an agent → **Config tab** → verify both tokens are set (click eye to reveal)
-
-## How Online/Offline Works
-
-- Every time the agent list or detail page loads, Forge pings the gateway (`GET /health`)
-- If the gateway responds, all agents on that URL get their heartbeat refreshed → **Online**
-- If no heartbeat within 2 minutes → **Offline**
-- Agents with no `runtime_url` set are always **Offline**
-- Agents in **Busy** state (active run) are not overridden
-
-## Architecture
-
-```
-Frontend (React)
-    │
-    ▼
-Forge API (FastAPI)
-    │
-    ├── GET  /health                  → heartbeat / online status
-    ├── POST /v1/chat/completions     → synchronous chat (Gateway Token)
-    ├── POST /hooks/agent             → fire-and-forget trigger (Hooks Token)
-    └── ws://host:port/?auth.token=X  → JSON-RPC for sessions/costs
-    │
-    ▼
-OpenClaw Gateway (:18789)
-    │
-    ▼
-AI Provider (Gemini, Claude, etc.)
-```
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| All agents offline | Check OpenClaw is running: `curl http://127.0.0.1:18789/health` |
-| Chat returns error | Verify `chatCompletions.enabled: true` in openclaw.json, restart OpenClaw |
-| 401 on chat | Check Gateway Token matches `gateway.auth.token` in openclaw.json |
-| 401 on hooks | Check Hooks Token matches `hooks.token` in openclaw.json |
-| Agent not found on chat | Verify Agent Name matches an `id` in `agents.list` in openclaw.json |
+- [MCP layering](./mcp_layering.md)
+- [Daemon runbook](./daemon_runbook.md)

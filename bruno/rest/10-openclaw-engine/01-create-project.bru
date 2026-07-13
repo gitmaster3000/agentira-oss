@@ -1,0 +1,39 @@
+meta {
+  name: 01 Create OpenClaw IT project
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/projects
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+body:json {
+  {
+    "name": "OpenClaw Engine IT {{$timestamp}}",
+    "description": "Bruno integration — engine-per-agent contracts (local docker)"
+  }
+}
+
+script:post-response {
+  if (res.getStatus() === 200 || res.getStatus() === 201) {
+    const b = res.getBody();
+    bru.setVar("oc_project_id", b.id);
+    bru.setVar("oc_project_key", b.key_prefix || "");
+  }
+}
+
+assert {
+  res.status: in [200, 201]
+  res.body.id: isDefined
+}
+
+docs {
+  Seed a throwaway project via Agentira API. Project id is reused for tasks/agents.
+}

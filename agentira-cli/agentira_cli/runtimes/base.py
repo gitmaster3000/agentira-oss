@@ -177,8 +177,8 @@ class Runtime:
 
         claude returns "" — it keys `--resume` by *cwd* (the per-(agent,
         task) worktree from ADR 009 / A2), not by an Agentira-derived
-        string. OpenClaw and similar gateway runtimes override to return
-        a sanitized `agentira:<agent>:<scope>` handle.
+        string. OpenClaw overrides to ``agent:ar-<agent8>:<scope>`` so the
+        gateway routes to the per-Agentira engine agent (not personal main).
         """
         return ""
 
@@ -188,8 +188,7 @@ class Runtime:
 
         - claude: opaque session files in `~/.claude` — no provider call
           needed; the backend dropping `runtime_session_id` is enough.
-        - openclaw: TBD — call delete-thread by sessionKey when the API
-          exposes one, else rotate a generation suffix on the handle.
+        - openclaw: drops/resets the engine sessionKey (see OpenClawRuntime).
         - ollama / bare LLM: no thread to clear.
         """
         return None

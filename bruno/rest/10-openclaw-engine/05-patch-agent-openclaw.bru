@@ -1,0 +1,39 @@
+meta {
+  name: 05 Patch agent openclaw fields
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/forge/agents/{{oc_agent_id}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+body:json {
+  {
+    "runtime_type": "openclaw",
+    "runtime_url": "http://127.0.0.1:18789",
+    "system_prompt": "You are an Agentira integration-test agent. Prefer tools on the task desk.",
+    "default_project_id": "{{oc_project_id}}"
+  }
+}
+
+script:pre-request {
+  if (!bru.getVar("oc_agent_id")) {
+    bru.runner.skipRequest();
+  }
+}
+
+assert {
+  res.status: in [200, 400, 404, 422]
+}
+
+docs {
+  Asserts PATCH surface for openclaw runtime_type + system_prompt (Agentira persona).
+  Engine agent creation on the host is daemon-side (ar-<id>), not this payload.
+}

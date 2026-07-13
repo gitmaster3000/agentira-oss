@@ -1,0 +1,36 @@
+meta {
+  name: 02 List forge runtimes (find openclaw)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/forge/runtimes
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+script:post-response {
+  const body = res.getBody();
+  const list = Array.isArray(body) ? body : (body.items || body.runtimes || []);
+  const oc = list.find(r =>
+    (r.provider || r.type || r.name || "").toString().toLowerCase().includes("openclaw")
+    || (r.id || "").toString().toLowerCase().includes("openclaw")
+  );
+  if (oc) {
+    bru.setVar("oc_runtime_id", oc.id);
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Discover an OpenClaw forge runtime id if one is registered (daemon online).
+  When no daemon is present, later agent create may use a mock runtime_id from env.
+}

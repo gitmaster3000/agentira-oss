@@ -471,6 +471,7 @@ async def run_openclaw_ws(
     on_event=None,
     session_key: str = "",
     resume_session_id: str = "",
+    workdir: str = "",
     stdout_log_path: Optional[str] = None,
     stderr_log_path: Optional[str] = None,
     trace_id: str = "",
@@ -527,8 +528,13 @@ async def run_openclaw_ws(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    # Runner target keeps the separation (engine from OpenClaw, persona/MCP/prompt from Agentira)
-    runner_target = "agentira-runner"
+    # session_key must already be agent:ar-<id>:<scope> (OpenClawRuntime).
+    # workdir is bound onto that engine agent before this call; recorded for logs.
+    if workdir:
+        logger.debug(
+            "openclaw ws turn workdir=%s sessionKey=%s trace=%s",
+            workdir, session_key or resume_session_id, trace_id,
+        )
 
     ev_queue: queue.Queue = queue.Queue()
     stop = threading.Event()
@@ -679,8 +685,15 @@ async def run_openclaw_ws(
                 # Resume turns still need the anti-silence nudge — OpenClaw
                 # keeps channel silence training on the thread.
                 body = f"{_anti_silence}\n\n{prompt}"
+            if not turn_key:
+                run_error = (
+                    "OpenClaw sessionKey missing — engine agent routing "
+                    "requires agent:ar-<id>:<scope>"
+                )
+                ev_queue.put({"_fatal": run_error})
+                return
             send_params: dict = {
-                "sessionKey": turn_key or f"agentira:{runner_target}",
+                "sessionKey": turn_key,
                 "message": body,
                 "idempotencyKey": str(_uuid.uuid4()),
             }

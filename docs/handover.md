@@ -46,7 +46,7 @@ agentira daemon status          # confirm: running + WebSocket connected
 ```
 
 This registers Claude + OpenClaw runtimes and idempotently adds the
-`agentira-runner` agent to OpenClaw.
+per-Agentira engine agents (`ar-<id>`) in OpenClaw (see openclaw-engine-agents.md).
 
 ### 2. Seed OpenClaw MCP servers
 

@@ -1,0 +1,44 @@
+meta {
+  name: 04 Create OpenClaw forge agent
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/forge/agents
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+body:json {
+  {
+    "name": "oc-engine-it-{{$timestamp}}",
+    "runtime_id": "{{oc_runtime_id}}",
+    "executor_type": "http",
+    "model": "ollama/qwen3.6:latest"
+  }
+}
+
+script:post-response {
+  const st = res.getStatus();
+  if (st === 200 || st === 201) {
+    const b = res.getBody();
+    bru.setVar("oc_agent_id", b.id);
+  } else {
+    // Runtime may be missing offline — leave agent_id empty; later steps skip.
+    bru.setVar("oc_agent_id", "");
+  }
+}
+
+assert {
+  res.status: in [200, 201, 400, 404, 422]
+}
+
+docs {
+  Creates a forge agent bound to OpenClaw runtime when available.
+  4xx is acceptable when no runtime is registered (offline local docker without daemon).
+}

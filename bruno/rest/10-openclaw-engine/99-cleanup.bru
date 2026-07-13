@@ -1,0 +1,29 @@
+meta {
+  name: 99 Cleanup project
+  type: http
+  seq: 99
+}
+
+delete {
+  url: {{baseUrl}}/api/projects/{{oc_project_id}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+script:pre-request {
+  if (!bru.getVar("oc_project_id")) {
+    bru.runner.skipRequest();
+  }
+}
+
+assert {
+  res.status: in [200, 204, 404]
+}
+
+docs {
+  Best-effort cleanup of the IT project (and cascade). Safe to re-run.
+}

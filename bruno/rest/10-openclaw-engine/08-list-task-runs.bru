@@ -1,0 +1,29 @@
+meta {
+  name: 08 List task runs
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/api/forge/tasks/{{oc_task_id}}/runs
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{apiKey}}
+}
+
+script:pre-request {
+  if (!bru.getVar("oc_task_id")) {
+    bru.runner.skipRequest();
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  Lists runs for the seeded task — contract used by task detail / run tabs.
+}
