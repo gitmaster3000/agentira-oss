@@ -96,3 +96,36 @@ def test_tool_use_breaks_text_coalesce(test_db):
                    .count())
     assert [t.content for t in texts] == ["I'll look that up.", "Here it is."]
     assert tools == 2
+
+
+def test_replace_flag_overwrites_open_bubble_not_appends(test_db):
+    """Runtime rewrites (full snapshot, not a delta) must SET content.
+
+    Without replace, coalescing appends full restarts and the UI shows the
+    monologue looping ('Got it…' repeated).
+    """
+    agent_id = _mk_agent(test_db)
+    trace_id = uuid.uuid4().hex[:12]
+    forge_services._TRACE_SCOPE[trace_id] = "chat:default"
+
+    forge_services.append_trigger_events(
+        agent_id, trace_id=trace_id, run_id=None,
+        events=[
+            {"type": "text", "text": "Got it — let's fix this."},
+            {"type": "text", "text": " Got it — let's fix this. Scanning…"},  # delta-style append
+            # Full restart snapshot (no shared prefix growth) — must replace.
+            {"type": "text",
+             "text": "Got it — let's fix this.\n\nI'll scan the frontend.",
+             "replace": True},
+        ],
+    )
+
+    with forge_services._session() as db:
+        rows = (db.query(AgentMessage)
+                  .filter(AgentMessage.trace_id == trace_id,
+                          AgentMessage.role == MessageRole.ASSISTANT)
+                  .all())
+    assert len(rows) == 1
+    assert rows[0].content == "Got it — let's fix this.\n\nI'll scan the frontend."
+    # Must NOT contain the middle fragment twice / looped restarts.
+    assert rows[0].content.count("Got it") == 1

@@ -3879,10 +3879,17 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                 content = evt.get("text", "")
                 if not content:
                     continue
+                # `replace=True` = runtime rewrote the full assistant snapshot
+                # (not a token delta). SET the open bubble; don't append, or
+                # monologues loop ("Got it…" × N) in the chat UI.
+                replace = bool(evt.get("replace"))
                 if open_text is None:
                     open_text = _latest_open_text()
                 if open_text is not None:
-                    open_text.content = (open_text.content or "") + content
+                    if replace:
+                        open_text.content = content
+                    else:
+                        open_text.content = (open_text.content or "") + content
                     if evt.get("model"):
                         open_text.model_used = evt.get("model") or open_text.model_used
                 else:

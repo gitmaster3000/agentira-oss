@@ -20,6 +20,110 @@ from agentira_cli.runtimes.gateway_connect import build_connect_params
 
 logger = logging.getLogger("agentira.runtime.openclaw_ws")
 
+# ── OpenClaw gateway protocol (wire names) ──────────────────────────────────
+# Single place to update if OpenClaw renames events / fields / RPCs.
+# Verified against openclaw dist (2026.4.x): GATEWAY_EVENTS + agent stream=tool.
+
+# WS frame.event values
+OC_EVENT_AGENT = "agent"
+OC_EVENT_CHAT = "chat"
+OC_EVENT_SESSION_TOOL = "session.tool"
+OC_EVENT_SESSION_MESSAGE = "session.message"
+OC_EVENT_CONNECT_CHALLENGE = "connect.challenge"
+
+# Chat-family events that carry assistant text / terminal state
+OC_CHAT_EVENTS: frozenset[str] = frozenset({
+    OC_EVENT_CHAT,
+    "chat.message",
+    OC_EVENT_SESSION_MESSAGE,
+    "message",
+    "chat.inject",
+})
+
+# Events that may signal terminal model/runtime failure
+OC_ERROR_EVENTS: frozenset[str] = frozenset({
+    OC_EVENT_CHAT,
+    "chat.message",
+    OC_EVENT_SESSION_MESSAGE,
+    "message",
+    OC_EVENT_AGENT,
+    "agent.error",
+    "run.error",
+})
+
+# Turn-complete event names (stop draining)
+OC_COMPLETE_EVENTS: frozenset[str] = frozenset({
+    "chat.complete",
+    "session.complete",
+    "run.finished",
+    "chat.done",
+})
+
+# Tool lifecycle: primary wire names (real OpenClaw 2026.4+)
+#   event: agent|session.tool, payload.stream == "tool", data.phase = start|update|result
+OC_TOOL_EVENT_NAMES: frozenset[str] = frozenset({
+    OC_EVENT_SESSION_TOOL,
+    "session.tools",  # defensive alias
+    "tool",
+    "tool_use",
+    "agent.tool",
+})
+# Older / invented result-only names we still accept
+OC_TOOL_RESULT_EVENT_NAMES: frozenset[str] = frozenset({
+    "session.tool.result",
+    "tool_result",
+    "tool.result",
+    "agent.tool_result",
+})
+
+OC_STREAM_TOOL = "tool"
+
+# data.phase values on stream=tool frames
+OC_TOOL_PHASE_START: frozenset[str] = frozenset({"start", "begin", ""})
+OC_TOOL_PHASE_UPDATE: frozenset[str] = frozenset({"update", "delta", "progress"})
+OC_TOOL_PHASE_RESULT: frozenset[str] = frozenset({"result", "end", "error", "failed"})
+OC_TOOL_PHASE_ERROR: frozenset[str] = frozenset({"error", "failed"})
+
+# Payload field keys (nested under payload / payload.data)
+OC_KEY_DATA = "data"
+OC_KEY_STREAM = "stream"
+OC_KEY_PHASE = "phase"
+OC_KEY_NAME = "name"
+OC_KEY_TOOL = "tool"
+OC_KEY_TOOL_NAME = "toolName"
+OC_KEY_TOOL_CALL_ID = "toolCallId"
+OC_KEY_TOOL_CALL_ID_SNAKE = "tool_call_id"
+OC_KEY_ARGS = "args"
+OC_KEY_INPUT = "input"
+OC_KEY_PARAMETERS = "parameters"
+OC_KEY_RESULT = "result"
+OC_KEY_OUTPUT = "output"
+OC_KEY_PARTIAL_RESULT = "partialResult"
+OC_KEY_CONTENT = "content"
+OC_KEY_IS_ERROR = "isError"
+OC_KEY_STATE = "state"
+OC_KEY_MESSAGE = "message"
+OC_KEY_MODEL = "model"
+OC_KEY_TEXT = "text"
+
+# Chat state / role values
+OC_STATE_FINAL: frozenset[str] = frozenset({"final", "done", "complete", "completed"})
+OC_STATE_ERROR: frozenset[str] = frozenset({"error", "aborted"})
+OC_ROLE_USER_SYSTEM: frozenset[str] = frozenset({"user", "system"})
+OC_ROLE_ASSISTANT = "assistant"
+
+# Gateway RPC methods
+OC_RPC_SESSIONS_SUBSCRIBE = "sessions.subscribe"
+OC_RPC_SESSIONS_MESSAGES_SUBSCRIBE = "sessions.messages.subscribe"
+OC_RPC_CHAT_SEND = "chat.send"
+OC_RPC_CONNECT = "connect"
+
+# Internal daemon→backend event types (Agentira contract, not OpenClaw wire)
+EVT_TEXT = "text"
+EVT_TOOL_USE = "tool_use"
+EVT_TOOL_RESULT = "tool_result"
+EVT_TOOL_CALL_ID = "tool_call_id"  # optional field on internal tool events
+
 
 def _tee_json_line(log_f, obj: dict) -> None:
     if log_f is None:
@@ -100,21 +204,21 @@ def _extract_chat_error(payload: dict) -> str:
     """If a chat event payload is a terminal failure, return its message."""
     if not isinstance(payload, dict):
         return ""
-    state = str(payload.get("state") or "").lower()
+    state = str(payload.get(OC_KEY_STATE) or "").lower()
     err = (
         payload.get("errorMessage")
         or payload.get("error")
-        or (payload.get("message") if state == "error" else None)
+        or (payload.get(OC_KEY_MESSAGE) if state == "error" else None)
         or ""
     )
     if isinstance(err, dict):
         err = err.get("message") or str(err)
     err_s = str(err).strip() if err else ""
     if state in ("error", "failed", "aborted") or (
-        err_s and state in ("final", "done", "complete") and payload.get("isError")
+        err_s and state in OC_STATE_FINAL and payload.get(OC_KEY_IS_ERROR)
     ):
         return _format_openclaw_error(payload if err_s else {"message": state or "error"})
-    if payload.get("isError") and err_s:
+    if payload.get(OC_KEY_IS_ERROR) and err_s:
         return _format_openclaw_error(payload)
     return ""
 
@@ -133,27 +237,32 @@ def _is_failed_assistant_stub(text: str) -> bool:
     )
 
 
-def _snapshot_to_delta(prev: str, incoming: str) -> tuple[str, str]:
-    """Convert a cumulative text snapshot into (new_prev, delta_to_emit).
+def _snapshot_to_delta(prev: str, incoming: str) -> tuple[str, str, bool]:
+    """Convert a cumulative text snapshot into (new_prev, text_to_emit, replace).
 
     OpenClaw often rebroadcasts the *full* assistant message so far on every
-    chat event (not a true token delta). If we forward each snapshot as a
-    new text event, the backend creates one AgentMessage per snapshot and
-    the UI shows the reply growing as dozens of full bubbles.
+    chat event (not a true token delta). If we forward each snapshot as an
+    appendable text event, the backend concatenates full copies and the UI
+    shows the monologue looping ("Got it…" repeated N times).
 
-    Returns updated cumulative text and only the new suffix to stream.
+    Returns:
+      new_prev  — cumulative text after this event
+      text      — payload for a type=text event (delta or full rewrite)
+      replace   — if True, backend must SET the open bubble to `text`
+                  (not append). Used when the runtime restarts / rewrites
+                  the assistant message without a shared prefix.
     """
     if not incoming:
-        return prev, ""
+        return prev, "", False
     if not prev:
-        return incoming, incoming
+        return incoming, incoming, False
     if incoming.startswith(prev):
-        return incoming, incoming[len(prev):]
-    # Non-prefix update (rewrite / correction): emit whole new string once.
+        return incoming, incoming[len(prev):], False
     if prev.startswith(incoming):
         # Shorter rewrite of what we already sent — skip (avoid duplicates).
-        return prev, ""
-    return incoming, incoming
+        return prev, "", False
+    # Non-prefix rewrite (model restarted reasoning mid-stream, etc.).
+    return incoming, incoming, True
 
 
 def _is_silent_reply_token(text: str) -> bool:
@@ -175,6 +284,125 @@ def _is_silent_reply_token(text: str) -> bool:
     return False
 
 
+def _first_key(d: dict, *keys: str):
+    """Return the first present non-None value for keys in d."""
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k]
+    return None
+
+
+def _tool_wire_events(ename: str, payload: dict) -> list[dict]:
+    """Translate OpenClaw tool lifecycle WS frames into internal events.
+
+    Real OpenClaw (2026.4+) does **not** emit freestanding tool_use /
+    session.tool.result event names. Tools arrive as:
+
+      event: OC_EVENT_AGENT | OC_EVENT_SESSION_TOOL
+      payload: {
+        stream: OC_STREAM_TOOL,
+        data: { phase: start|update|result, name, toolCallId, args?, result? }
+      }
+
+    Delivery:
+      - agent + stream=tool → caps tool-events (toolEventRecipient on chat.send)
+      - session.tool → sessions.subscribe
+
+    We used to match invented event names and read name/args at the top level
+    of the payload, so every real tool frame was silently dropped.
+    """
+    if not isinstance(payload, dict):
+        return []
+
+    data = payload.get(OC_KEY_DATA) if isinstance(payload.get(OC_KEY_DATA), dict) else {}
+    stream = str(
+        payload.get(OC_KEY_STREAM) or data.get(OC_KEY_STREAM) or ""
+    ).lower()
+    is_tool_frame = (
+        ename in OC_TOOL_EVENT_NAMES
+        or (ename == OC_EVENT_AGENT and stream == OC_STREAM_TOOL)
+        or stream == OC_STREAM_TOOL
+    )
+    is_result_frame = ename in OC_TOOL_RESULT_EVENT_NAMES
+    if not is_tool_frame and not is_result_frame:
+        return []
+
+    phase = str(
+        data.get(OC_KEY_PHASE) or payload.get(OC_KEY_PHASE) or ""
+    ).lower()
+    tname = _first_key(
+        data, OC_KEY_NAME, OC_KEY_TOOL, OC_KEY_TOOL_NAME,
+    )
+    if tname is None:
+        tname = _first_key(payload, OC_KEY_NAME, OC_KEY_TOOL, OC_KEY_TOOL_NAME)
+    tname = str(tname or "").strip()
+    if not tname and not is_result_frame:
+        return []
+
+    tool_call_id = _first_key(
+        data, OC_KEY_TOOL_CALL_ID, OC_KEY_TOOL_CALL_ID_SNAKE,
+    )
+    if tool_call_id is None:
+        tool_call_id = _first_key(
+            payload, OC_KEY_TOOL_CALL_ID, OC_KEY_TOOL_CALL_ID_SNAKE,
+        )
+    tool_call_id = str(tool_call_id or "")
+
+    def _as_input(raw) -> object:
+        return raw if raw is not None else ""
+
+    def _as_output(raw) -> str:
+        if raw is None:
+            return ""
+        if isinstance(raw, str):
+            return raw
+        try:
+            return json.dumps(raw, ensure_ascii=False)[:8000]
+        except Exception:
+            return str(raw)[:8000]
+
+    out: list[dict] = []
+    # phase start → tool_use; phase result → tool_result.
+    # update is partial progress — ignore for chat rows (noisy).
+    if is_result_frame or phase in OC_TOOL_PHASE_RESULT:
+        tout = data.get(OC_KEY_RESULT) if OC_KEY_RESULT in data else None
+        if tout is None:
+            tout = _first_key(data, OC_KEY_OUTPUT, OC_KEY_PARTIAL_RESULT)
+        if tout is None:
+            tout = _first_key(payload, OC_KEY_OUTPUT, OC_KEY_RESULT, OC_KEY_CONTENT)
+        if tout is None and is_result_frame:
+            tout = str(payload)[:2000]
+        ev: dict = {
+            "type": EVT_TOOL_RESULT,
+            "tool": tname,
+            "output": _as_output(tout),
+        }
+        if tool_call_id:
+            ev[EVT_TOOL_CALL_ID] = tool_call_id
+        if data.get(OC_KEY_IS_ERROR) or phase in OC_TOOL_PHASE_ERROR:
+            ev["is_error"] = True
+        out.append(ev)
+    elif phase in OC_TOOL_PHASE_UPDATE:
+        return []
+    elif phase in OC_TOOL_PHASE_START or is_tool_frame:
+        tin = (
+            data.get(OC_KEY_ARGS)
+            if OC_KEY_ARGS in data
+            else _first_key(data, OC_KEY_INPUT, OC_KEY_PARAMETERS)
+        )
+        if tin is None:
+            tin = _first_key(payload, OC_KEY_INPUT, OC_KEY_ARGS, OC_KEY_PARAMETERS) or ""
+        ev = {
+            "type": EVT_TOOL_USE,
+            "tool": tname,
+            "input": _as_input(tin),
+        }
+        if tool_call_id:
+            ev[EVT_TOOL_CALL_ID] = tool_call_id
+        out.append(ev)
+    return out
+
+
 def _assistant_text_from_chat_payload(payload: dict) -> str:
     """Extract assistant-visible text from an OpenClaw chat event.
 
@@ -186,15 +414,15 @@ def _assistant_text_from_chat_payload(payload: dict) -> str:
     """
     if not isinstance(payload, dict):
         return ""
-    state = str(payload.get("state") or "").lower()
-    if state in ("error", "aborted"):
+    state = str(payload.get(OC_KEY_STATE) or "").lower()
+    if state in OC_STATE_ERROR:
         return ""
 
-    msg = payload.get("message")
+    msg = payload.get(OC_KEY_MESSAGE)
     role = ""
     if isinstance(msg, dict):
         role = str(msg.get("role") or "").lower()
-    if role in ("user", "system"):
+    if role in OC_ROLE_USER_SYSTEM:
         return ""
 
     def _clean(s: str) -> str:
@@ -204,31 +432,31 @@ def _assistant_text_from_chat_payload(payload: dict) -> str:
         return s
 
     # Prefer streaming delta fields when present.
-    for key in ("deltaText", "text"):
+    for key in ("deltaText", OC_KEY_TEXT):
         val = payload.get(key)
         if isinstance(val, str) and val:
             return _clean(val)
 
     if not isinstance(msg, dict):
-        content = payload.get("content")
-        if isinstance(content, str) and content and state in ("final", "done", "complete"):
+        content = payload.get(OC_KEY_CONTENT)
+        if isinstance(content, str) and content and state in OC_STATE_FINAL:
             return _clean(content)
         return ""
 
-    content = msg.get("content")
+    content = msg.get(OC_KEY_CONTENT)
     if isinstance(content, str) and content:
-        return _clean(content) if role in ("assistant", "") else ""
+        return _clean(content) if role in (OC_ROLE_ASSISTANT, "") else ""
     if isinstance(content, list):
         parts: list[str] = []
         for block in content:
             if isinstance(block, dict):
-                t = block.get("text") or block.get("content") or ""
+                t = block.get(OC_KEY_TEXT) or block.get(OC_KEY_CONTENT) or ""
                 if t:
                     parts.append(str(t))
             elif block:
                 parts.append(str(block))
         return _clean("".join(parts))
-    text = msg.get("text")
+    text = msg.get(OC_KEY_TEXT)
     return _clean(str(text)) if text else ""
 
 
@@ -310,6 +538,9 @@ async def run_openclaw_ws(
     # Cumulative assistant text already streamed — used to convert OpenClaw
     # full-message rebroadcasts into true deltas (one growing bubble).
     streamed_so_far = ""
+    # Dedup tool frames: tool-events cap delivers event:"agent", and
+    # sessions.subscribe also delivers event:"session.tool" for the same call.
+    seen_tool_keys: set[str] = set()
 
     def _ws_main() -> None:
         nonlocal streamed_so_far
@@ -333,7 +564,7 @@ async def run_openclaw_ws(
             except Exception:
                 ch = {}
             nonce = ""
-            if isinstance(ch, dict) and ch.get("event") == "connect.challenge":
+            if isinstance(ch, dict) and ch.get("event") == OC_EVENT_CONNECT_CHALLENGE:
                 nonce = (ch.get("payload") or {}).get("nonce") or ""
 
             # 2. connect — device-token auth when registered; signed device keeps scopes
@@ -373,7 +604,7 @@ async def run_openclaw_ws(
                     {
                         "type": "req",
                         "id": "c1",
-                        "method": "connect",
+                        "method": OC_RPC_CONNECT,
                         "params": build_connect_params(auth_token, **connect_kwargs),
                     }
                 )
@@ -394,18 +625,32 @@ async def run_openclaw_ws(
                 ev_queue.put({"_fatal": err})
                 return
 
-            # 3. subscribe for transcript events on our session (best-effort).
-            # OpenClaw schema uses `key`, not `sessionKey`.
+            # 3. subscribe for tool + transcript events (best-effort).
+            # OpenClaw has two registries:
+            #   sessions.subscribe        → sessionEventSubscribers → session.tool
+            #   sessions.messages.subscribe → sessionMessageSubscribers → chat msgs
+            # Tool frames also arrive as agent + stream=tool when we connect with
+            # caps tool-events (registered on chat.send).
+            # OpenClaw schema uses `key`, not `sessionKey`, for messages.subscribe.
             skey = session_key or resume_session_id
-            if skey:
+            for sub_id, method, params in (
+                ("sub0", OC_RPC_SESSIONS_SUBSCRIBE, {}),
+                (
+                    "sub1",
+                    OC_RPC_SESSIONS_MESSAGES_SUBSCRIBE,
+                    {"key": skey} if skey else None,
+                ),
+            ):
+                if params is None:
+                    continue
                 try:
                     ws.send(
                         json.dumps(
                             {
                                 "type": "req",
-                                "id": "sub1",
-                                "method": "sessions.messages.subscribe",
-                                "params": {"key": skey},
+                                "id": sub_id,
+                                "method": method,
+                                "params": params,
                             }
                         )
                     )
@@ -445,7 +690,7 @@ async def run_openclaw_ws(
                     {
                         "type": "req",
                         "id": send_id,
-                        "method": "chat.send",
+                        "method": OC_RPC_CHAT_SEND,
                         "params": send_params,
                     }
                 )
@@ -487,7 +732,9 @@ async def run_openclaw_ws(
                             usage.update(pl["usage"])
                         if pl.get("content"):
                             content = str(pl["content"])
-                            streamed_so_far, delta = _snapshot_to_delta(streamed_so_far, content)
+                            streamed_so_far, delta, _repl = _snapshot_to_delta(
+                                streamed_so_far, content,
+                            )
                             if delta:
                                 collected_text.append(delta)
                     # continue draining events after the ack
@@ -499,57 +746,72 @@ async def run_openclaw_ws(
                         p = {}
 
                     # Terminal model/runtime failure from OpenClaw.
-                    chat_err = _extract_chat_error(p) if ename in (
-                        "chat", "chat.message", "session.message", "message",
-                        "agent", "agent.error", "run.error",
-                    ) else ""
+                    chat_err = (
+                        _extract_chat_error(p) if ename in OC_ERROR_EVENTS else ""
+                    )
                     if not chat_err and ename in ("agent.error", "run.error", "error"):
                         chat_err = _format_openclaw_error(p or f)
                     # Failure stubs sometimes land as "assistant" content.
-                    if not chat_err and ename in ("chat", "chat.message", "message"):
-                        msg0 = p.get("message") if isinstance(p.get("message"), dict) else {}
+                    if not chat_err and ename in (
+                        OC_EVENT_CHAT, "chat.message", "message",
+                    ):
+                        msg0 = (
+                            p.get(OC_KEY_MESSAGE)
+                            if isinstance(p.get(OC_KEY_MESSAGE), dict)
+                            else {}
+                        )
                         stub = ""
                         if isinstance(msg0, dict):
-                            c = msg0.get("content")
+                            c = msg0.get(OC_KEY_CONTENT)
                             if isinstance(c, str):
                                 stub = c
                             elif isinstance(c, list):
                                 stub = " ".join(
-                                    str(b.get("text") or "") if isinstance(b, dict) else str(b)
+                                    str(b.get(OC_KEY_TEXT) or "")
+                                    if isinstance(b, dict) else str(b)
                                     for b in c
                                 )
                         if _is_failed_assistant_stub(stub) or _is_failed_assistant_stub(
-                            str(p.get("text") or "")
+                            str(p.get(OC_KEY_TEXT) or "")
                         ):
                             chat_err = _format_openclaw_error(stub or p)
                     if chat_err:
                         run_error = chat_err
                         # Stream a short error line so the chat UI unsticks.
-                        ev_queue.put({"type": "text", "text": chat_err, "model": p.get("model", "")})
+                        ev_queue.put({
+                            "type": EVT_TEXT,
+                            "text": chat_err,
+                            "model": p.get(OC_KEY_MODEL, ""),
+                        })
                         ev_queue.put({"_fatal": chat_err})
                         break
 
                     # text / delta (assistant only — never echo user role)
-                    if ename in ("chat", "chat.message", "session.message", "message", "chat.inject"):
-                        state = str(p.get("state") or "").lower()
-                        msg = p.get("message") if isinstance(p.get("message"), dict) else {}
+                    if ename in OC_CHAT_EVENTS:
+                        state = str(p.get(OC_KEY_STATE) or "").lower()
+                        msg = (
+                            p.get(OC_KEY_MESSAGE)
+                            if isinstance(p.get(OC_KEY_MESSAGE), dict)
+                            else {}
+                        )
                         role = str((msg or {}).get("role") or "").lower()
                         # Detect silence tokens *before* stripping them out.
                         raw_assist = ""
                         if isinstance(msg, dict):
-                            c = msg.get("content")
+                            c = msg.get(OC_KEY_CONTENT)
                             if isinstance(c, str):
                                 raw_assist = c
                             elif isinstance(c, list):
                                 raw_assist = "".join(
-                                    str(b.get("text") or "") if isinstance(b, dict) else str(b)
+                                    str(b.get(OC_KEY_TEXT) or "")
+                                    if isinstance(b, dict) else str(b)
                                     for b in c
                                 )
-                            elif msg.get("text"):
-                                raw_assist = str(msg.get("text"))
-                        if not raw_assist and isinstance(p.get("text"), str):
-                            raw_assist = p["text"]
-                        if role == "assistant" and _is_silent_reply_token(raw_assist):
+                            elif msg.get(OC_KEY_TEXT):
+                                raw_assist = str(msg.get(OC_KEY_TEXT))
+                        if not raw_assist and isinstance(p.get(OC_KEY_TEXT), str):
+                            raw_assist = p[OC_KEY_TEXT]
+                        if role == OC_ROLE_ASSISTANT and _is_silent_reply_token(raw_assist):
                             run_error = (
                                 "OpenClaw returned NO_REPLY (silence). The model "
                                 "chose not to answer. Ask a clearer question."
@@ -558,44 +820,50 @@ async def run_openclaw_ws(
                             break
                         snapshot = _assistant_text_from_chat_payload(p)
                         delta = ""
+                        replace = False
                         if snapshot:
-                            streamed_so_far, delta = _snapshot_to_delta(
+                            streamed_so_far, delta, replace = _snapshot_to_delta(
                                 streamed_so_far, snapshot,
                             )
                         if delta:
-                            ev_queue.put({
-                                "type": "text",
+                            ev: dict = {
+                                "type": EVT_TEXT,
                                 "text": delta,
-                                "model": p.get("model", ""),
-                            })
+                                "model": p.get(OC_KEY_MODEL, ""),
+                            }
+                            if replace:
+                                # Full rewrite — backend must replace, not append.
+                                ev["replace"] = True
+                                collected_text.clear()
+                            ev_queue.put(ev)
                             collected_text.append(delta)
                         # Only end on final *assistant* frames. OpenClaw also
                         # emits final user echoes — breaking there dropped the
                         # real reply.
-                        if state in ("final", "done", "complete", "completed"):
-                            if role in ("user", "system"):
+                        if state in OC_STATE_FINAL:
+                            if role in OC_ROLE_USER_SYSTEM:
                                 continue
-                            if role == "assistant" or delta or streamed_so_far:
+                            if role == OC_ROLE_ASSISTANT or delta or streamed_so_far:
                                 break
 
-                    # tool lifecycle
-                    elif ename in ("session.tool", "tool", "tool_use", "agent.tool"):
-                        tname = p.get("name") or p.get("tool") or p.get("toolName") or ""
-                        tin = p.get("input") or p.get("args") or p.get("parameters") or ""
-                        if tname:
-                            ev_queue.put({"type": "tool_use", "tool": tname, "input": tin})
+                    # tool lifecycle — agent/session.tool + nested data.phase.
+                    # Reset cumulative text so post-tool narration is a fresh
+                    # segment (not a "rewrite" of pre-tool prose).
+                    else:
+                        for tev in _tool_wire_events(ename, p):
+                            dedupe = (
+                                f"{tev.get('type')}: "
+                                f"{tev.get(EVT_TOOL_CALL_ID) or ''}:"
+                                f"{tev.get('tool') or ''}"
+                            )
+                            if dedupe in seen_tool_keys:
+                                continue
+                            seen_tool_keys.add(dedupe)
+                            streamed_so_far = ""
+                            collected_text.clear()
+                            ev_queue.put(tev)
 
-                    elif ename in (
-                        "session.tool.result",
-                        "tool_result",
-                        "tool.result",
-                        "agent.tool_result",
-                    ):
-                        tname = p.get("name") or p.get("tool") or ""
-                        tout = p.get("output") or p.get("result") or p.get("content") or str(p)[:2000]
-                        ev_queue.put({"type": "tool_result", "tool": tname, "output": tout})
-
-                    if ename in ("chat.complete", "session.complete", "run.finished", "chat.done"):
+                    if ename in OC_COMPLETE_EVENTS:
                         if not run_error:
                             run_error = _extract_chat_error(p)
                         break
