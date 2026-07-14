@@ -50,6 +50,9 @@ class FakeApi:
     def _me(self, _):
         return {"me": {"id": "u1", "email": "ops@agentira.dev"}}
 
+    def _projects(self, _):
+        return {"projects": _edges(("agentira",), "proj")}
+
     def _project(self, _):
         return {"project": {
             "services": _edges(self.services, "svc"),
@@ -87,6 +90,7 @@ def _operation(query: str) -> str:
     "deployment" is a substring of deploymentLogs/deploymentRemove."""
     markers = [
         ("serviceInstanceDeployV2(", "serviceInstanceDeployV2"),
+        ("projects(", "projects"),
         ("buildLogs(", "logs"),
         ("deploymentRemove(", "deploymentRemove"),
         ("deployment(", "deployment"),
@@ -270,8 +274,22 @@ def test_verify_credential_ok():
     assert detail == "authenticated as ops@agentira.dev"
 
 
+def test_verify_credential_accepts_team_token():
+    """A workspace/team token authenticates fine but has no user behind it, so
+    Railway rejects `me` with "Not Authorized". That is not an invalid token."""
+    api = FakeApi(raise_on={"me": ApiError("railway API error: Not Authorized")})
+
+    valid, detail = RailwayAdapter(api=api).verify_credential("rw_team_token")
+
+    assert valid is True
+    assert "team token" in detail
+    assert [c["op"] for c in api.calls] == ["me", "projects"]
+
+
 def test_verify_credential_rejects_bad_token():
-    api = FakeApi(raise_on={"me": ApiError("railway API HTTP 401: Unauthorized")})
+    """A token that is actually bad fails every probe, not just `me`."""
+    unauthorized = ApiError("railway API HTTP 401: Unauthorized")
+    api = FakeApi(raise_on={"me": unauthorized, "projects": unauthorized})
 
     valid, detail = RailwayAdapter(api=api).verify_credential("bad")
 

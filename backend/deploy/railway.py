@@ -9,7 +9,8 @@ a deploy of a task's branch means here. Stdlib urllib only, same shape as
 
 Operations used (Railway Public API):
 
-    me                                   verify a token
+    me                                   verify a personal token
+    projects                             verify a team token (`me` is personal-only)
     serviceInstanceDeployV2              deploy a commit/branch to an env
     deployment(id)                       status, url/staticUrl
     buildLogs / deploymentLogs           logs
@@ -69,6 +70,9 @@ _STATUS_MAP = {
 }
 
 _Q_ME = "query { me { id email name } }"
+
+#: Works for every token type; `me` does not (see `verify_credential`).
+_Q_PROJECTS = "query { projects(first: 1) { edges { node { id } } } }"
 
 _Q_PROJECT = """
 query($id: String!) {
@@ -168,7 +172,14 @@ class RailwayAdapter(DeployAdapter):
         try:
             data = self.api.call(_Q_ME, {}, token=token)
         except ApiError as exc:
-            return False, str(exc)
+            # A workspace/team token authenticates but has no user behind it, so
+            # Railway rejects `me` — a valid token, not a bad one. Re-probe with
+            # a query every token type can run before calling it invalid.
+            try:
+                self.api.call(_Q_PROJECTS, {}, token=token)
+            except ApiError:
+                return False, str(exc)
+            return True, "authenticated (team token)"
         me = data.get("me") or {}
         who = me.get("email") or me.get("name") or me.get("id")
         return True, f"authenticated as {who}" if who else "token accepted"
