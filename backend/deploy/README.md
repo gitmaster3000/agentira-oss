@@ -32,6 +32,29 @@ this), no settings storage (AP-314), no `Task` columns (AP-315).
   status transitions -> teardown. AP-317/AP-318 run their real adapters
   through this too.
 
+## Verifying a Railway key (AP-446)
+
+Three things about Railway's API bite, and all three showed up as the same
+useless symptom — *"your key is invalid"* for a key that was perfectly good:
+
+1. **Cloudflare fronts the API and 403s the stdlib's default User-Agent**
+   (`Python-urllib/3.x`) with `error code: 1010`. The request never reaches
+   Railway. `RailwayApi` therefore sends its own `User-Agent` on every call —
+   do not remove it. `curl` works fine, which is exactly why this survived
+   manual testing.
+2. **`me` is a personal-token-only query.** A workspace/team key authenticates
+   fine but has no user behind it, so Railway answers `Not Authorized`.
+   Verification probes `me` first and falls back to `projects`, which every
+   token type can run.
+3. **"We couldn't check" is not "your key is bad."** `verify_credential`
+   returns `None` (not `False`) when Railway was unreachable or an edge blocked
+   us, and the UI must say so rather than blaming the user's key. That is what
+   `AuthError` vs `TransportError`/`BlockedError` exist to separate.
+
+A mocked test cannot catch (1) — the transport is the thing that's broken. The
+regression gate is `bruno/rest/11-deploy`, which probes a **real** key against
+the **real** API. Run it against pre-prod before touching this code.
+
 ## Secrets-from-env (ADR-011 §3)
 
 Deploy credentials (Railway token, GCP service account key, kubeconfig,

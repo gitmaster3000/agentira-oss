@@ -69,6 +69,29 @@ class DeploymentManager:
         credential["detail"] = detail
         return credential
 
+    def verify_key(self, db, project_id: str, *, kind: str, token: str) -> dict:
+        """Probe a key the user is still typing into the connect wizard. Stores
+        nothing. An unusable key comes back as `{"valid": false, "error": …}` —
+        a result the wizard renders, not an exception."""
+        self._require_project(db, project_id)
+        kind = self._valid_kind(kind)
+        token = (token or "").strip()
+        if not token:
+            raise ValueError("api_key is required")
+
+        try:
+            adapter = registry.get_adapter(TargetKind(kind))
+        except LookupError:
+            raise ValueError(f"{kind} cannot be connected yet")
+        probe = getattr(adapter, "probe_key", None)
+        if probe is None:
+            raise ValueError(f"{kind} does not support key verification")
+
+        result = probe(token)
+        _log.info("deploy key probed: project=%s kind=%s valid=%s",
+                  project_id, kind, result.get("valid"))
+        return result
+
     # ── internals ────────────────────────────────────────────────────────
 
     def _require_project(self, db, project_id: str) -> Project:

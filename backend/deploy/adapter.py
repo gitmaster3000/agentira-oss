@@ -29,12 +29,16 @@ class DeployAdapter(ABC):
     def supports(self, capability: Capability) -> bool:
         return capability in self.capabilities
 
-    def verify_credential(self, token: str) -> tuple[bool, str]:
+    def verify_credential(self, token: str) -> tuple[bool | None, str]:
         """Probe the provider's API to confirm `token` authenticates. Returns
         (valid, human_readable_detail). Provider-specific — each adapter
-        overrides with a single cheap API call (never raises: a flaky probe
-        reads as "invalid, retry"). Default: verification unsupported, so a
-        target kind with no adapter can't falsely report a token as valid."""
+        overrides with a single cheap API call (never raises).
+
+        `valid` is `None` for "couldn't check" — the provider was unreachable,
+        or something upstream of it refused us. That is not the same as a bad
+        token and must never be surfaced as one. Default: verification
+        unsupported, so a target kind with no adapter can't falsely report a
+        token as valid."""
         return False, "credential verification not supported for this target"
 
     @abstractmethod

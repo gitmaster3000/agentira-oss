@@ -1,0 +1,58 @@
+meta {
+  name: Deploy - Verify a real Railway key
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider/verify
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "provider": "railway",
+    "api_key": "{{process.env.RAILWAY_API_KEY}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.valid: eq true
+  res.body.account: isDefined
+  res.body.services: isDefined
+}
+
+script:post-response {
+  // AP-446: this is the regression gate. A real workspace key was reported
+  // invalid in production for two separate reasons, both of which this asserts
+  // are gone:
+  //   1. Cloudflare 403'd our default urllib User-Agent (error code 1010), so
+  //      the token was never even looked at.
+  //   2. `me` is a personal-token-only query — a team key gets "Not Authorized".
+  const body = res.getBody();
+  if (body.valid !== true) {
+    throw new Error(
+      `a real Railway key came back invalid: ${JSON.stringify(body.error)}`);
+  }
+  // the key is write-only: it must never be echoed back
+  const raw = JSON.stringify(body);
+  if (raw.includes(bru.getProcessEnv("RAILWAY_API_KEY"))) {
+    throw new Error("the API key was echoed back in the response");
+  }
+  // at least one deployable service, and add-ons flagged as not deployable
+  const deployable = body.services.filter(s => s.deployable);
+  if (deployable.length === 0) {
+    throw new Error("no deployable service returned — the wizard would be stuck");
+  }
+}
+
+docs {
+  Needs RAILWAY_API_KEY in bruno/.env — a Railway workspace token.
+  Probe-only: nothing is stored, so this is safe to run against pre-prod.
+}

@@ -1,0 +1,27 @@
+meta {
+  name: Deploy - Providers we cannot connect yet are rejected
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider/verify
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "provider": "gcp_cloud_run",
+    "api_key": "irrelevant"
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.detail: contains cannot be connected yet
+}

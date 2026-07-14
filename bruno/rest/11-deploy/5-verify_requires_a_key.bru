@@ -1,0 +1,27 @@
+meta {
+  name: Deploy - Verify requires an api_key
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider/verify
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "provider": "railway",
+    "api_key": "  "
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.detail: contains api_key is required
+}

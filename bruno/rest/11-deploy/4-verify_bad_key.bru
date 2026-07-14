@@ -1,0 +1,39 @@
+meta {
+  name: Deploy - A bad key is a 200 with an inline error
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider/verify
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "provider": "railway",
+    "api_key": "00000000-dead-beef-0000-000000000000"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.valid: eq false
+  res.body.error.headline: isDefined
+  res.body.error.detail: isDefined
+}
+
+script:post-response {
+  // Contract: an unusable key is a *result* the wizard renders inline, not a
+  // 4xx. And it must say the key was rejected — not that we failed to check it.
+  // Those are different problems and only one of them is the user's to fix.
+  const err = res.getBody().error;
+  if (!/reject/i.test(err.headline)) {
+    throw new Error(`expected a "rejected" headline, got: ${err.headline}`);
+  }
+}

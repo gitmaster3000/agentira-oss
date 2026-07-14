@@ -1,0 +1,32 @@
+meta {
+  name: Deploy - Login as admin
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/api/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "username": "{{admin_user}}",
+    "password": "{{process.env.AGENTIRA_ADMIN_PASSWORD}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.token: isDefined
+}
+
+vars:post-response {
+  _deploy_token: res.body.token
+}
+
+docs {
+  Every request in this folder authenticates with the bearer this returns.
+  The password is read from the environment (bruno/.env) — never committed.
+}

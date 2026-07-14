@@ -79,6 +79,10 @@ class DeployCredentialUpdate(BaseModel):
     kind: str
     token: str
 
+class DeployKeyVerify(BaseModel):
+    provider: str
+    api_key: str
+
 class InitialTaskSpec(BaseModel):
     title: str
     description: str = ""
@@ -746,6 +750,21 @@ def api_set_deploy_credential(project_id: str, body: DeployCredentialUpdate):
     try:
         return services.set_deploy_credential(
             project_id, kind=body.kind, token=body.token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.post("/{project_id}/deploy/provider/verify")
+def api_verify_deploy_key(project_id: str, body: DeployKeyVerify):
+    """Probe a provider key the connect wizard is holding, without storing it:
+    is it good, whose account is it, what can we deploy to.
+
+    An unusable key is a 200 with `valid: false` and an inline error the wizard
+    renders — see frontend/docs/deploy-backend-requirements.md §2. A 4xx here
+    means *our* API is unhappy (unknown provider, no such project), not the key.
+    """
+    try:
+        return services.verify_deploy_key(
+            project_id, provider=body.provider, api_key=body.api_key)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

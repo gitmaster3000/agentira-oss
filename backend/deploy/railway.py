@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -53,6 +54,18 @@ _log = logging.getLogger("deploy.railway")
 
 API_URL = "https://backboard.railway.com/graphql/v2"
 TOKEN_ENV_VARS = ("RAILWAY_TOKEN", "RAILWAY_API_TOKEN")
+
+#: Cloudflare fronts Railway's API and 403s the stdlib default
+#: `Python-urllib/3.x` UA. Send a real one or nothing gets through.
+USER_AGENT = "agentira-deploy/1.0 (+https://agentira.dev)"
+_CLOUDFLARE_BLOCK = "error code: 1010"
+
+#: Railway phrasing for "your token doesn't grant this". Anything else is ours.
+_AUTH_MESSAGES = ("not authorized", "unauthorized", "invalid token",
+                  "authentication", "forbidden")
+
+#: Railway services that host no app of ours — the wizard shows them disabled.
+_ADDON_HINTS = ("postgres", "mysql", "redis", "mongo", "clickhouse", "minio")
 
 #: Railway's DeploymentStatus enum -> our contract's states.
 _STATUS_MAP = {
@@ -73,6 +86,20 @@ _Q_ME = "query { me { id email name } }"
 
 #: Works for every token type; `me` does not (see `verify_credential`).
 _Q_PROJECTS = "query { projects(first: 1) { edges { node { id } } } }"
+
+#: What the connect wizard lists: every project the key can see, and its
+#: services. Same query for a personal or a team key.
+_Q_WORKSPACE = """
+query {
+  projects(first: 20) {
+    edges { node {
+      id
+      name
+      services { edges { node { id name } } }
+    } }
+  }
+}
+"""
 
 _Q_PROJECT = """
 query($id: String!) {
@@ -110,6 +137,20 @@ class ApiError(RuntimeError):
     """Railway's API rejected the call, or was unreachable."""
 
 
+class AuthError(ApiError):
+    """Railway looked at the token and refused it. The only error that means
+    "this token is bad" — everything else is our problem, not the user's."""
+
+
+class TransportError(ApiError):
+    """We never got a usable answer: unreachable, timed out, or non-JSON."""
+
+
+class BlockedError(TransportError):
+    """An edge/WAF (Cloudflare) refused the request before Railway saw it.
+    Says nothing about the token — hence a TransportError, not an AuthError."""
+
+
 class RailwayApi:
     """Thin GraphQL transport. The single seam tests replace with a fake —
     nothing else in this module touches the network."""
@@ -120,7 +161,9 @@ class RailwayApi:
 
     def call(self, query: str, variables: dict, *, token: str) -> dict:
         """POST one GraphQL operation. Returns the `data` object. Raises
-        `ApiError` on transport failure or a GraphQL `errors` payload."""
+        `AuthError` if Railway refused the token, `TransportError`/`BlockedError`
+        if we never got an answer, `ApiError` for anything else."""
+        operation = _operation_name(query)
         body = json.dumps({"query": query, "variables": variables}).encode()
         req = urllib.request.Request(
             self.url,
@@ -129,22 +172,49 @@ class RailwayApi:
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
+                # Railway is behind Cloudflare, which 403s the stdlib default
+                # `Python-urllib/3.x` UA with "error code: 1010". Identify
+                # ourselves or every request dies before reaching the API.
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
             },
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 payload = json.loads(resp.read())
         except urllib.error.HTTPError as exc:
-            raise ApiError(f"railway API HTTP {exc.code}: {_body(exc)}") from exc
+            raise self._http_error(operation, exc) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise ApiError(f"railway API unreachable: {exc}") from exc
+            _log.warning("railway %s unreachable: %s", operation, exc)
+            raise TransportError(f"railway API unreachable: {exc}") from exc
         except ValueError as exc:
-            raise ApiError("railway API returned invalid JSON") from exc
+            _log.warning("railway %s returned non-JSON", operation)
+            raise TransportError("railway API returned invalid JSON") from exc
+
         if payload.get("errors"):
             messages = "; ".join(
                 str(e.get("message", e)) for e in payload["errors"])
+            _log.warning("railway %s error: %s", operation, messages)
+            if _is_auth_message(messages):
+                raise AuthError(f"railway API error: {messages}")
             raise ApiError(f"railway API error: {messages}")
+
+        _log.debug("railway %s ok", operation)
         return payload.get("data") or {}
+
+    def _http_error(self, operation: str, exc: urllib.error.HTTPError) -> ApiError:
+        """Classify an HTTP failure. Never logs the token or the auth header."""
+        body = _body(exc)
+        _log.warning("railway %s HTTP %s: %s", operation, exc.code, body.strip()[:200])
+        if _CLOUDFLARE_BLOCK in body:
+            return BlockedError(
+                f"railway API HTTP {exc.code}: blocked by Railway's edge "
+                f"({_CLOUDFLARE_BLOCK}) — the request never reached the API")
+        if exc.code in (401, 403):
+            return AuthError(f"railway API HTTP {exc.code}: {body.strip()}")
+        if exc.code >= 500:
+            return TransportError(f"railway API HTTP {exc.code}: {body.strip()}")
+        return ApiError(f"railway API HTTP {exc.code}: {body.strip()}")
 
 
 class RailwayAdapter(DeployAdapter):
@@ -165,24 +235,76 @@ class RailwayAdapter(DeployAdapter):
 
     # ── credential ───────────────────────────────────────────────────────
 
-    def verify_credential(self, token: str) -> tuple[bool, str]:
+    def verify_credential(self, token: str) -> tuple[bool | None, str]:
+        """(valid, detail). `None` means *we* couldn't check — Railway was
+        unreachable or an edge blocked us — which is not the user's token being
+        bad, and must never be shown as "invalid"."""
         token = (token or "").strip()
         if not token:
             return False, "no token provided"
         try:
             data = self.api.call(_Q_ME, {}, token=token)
+        except TransportError as exc:
+            _log.warning("railway credential unverifiable: %s", exc)
+            return None, f"could not reach Railway to check this key: {exc}"
+        except AuthError as exc:
+            # A workspace/team token authenticates fine but has no user behind
+            # it, so Railway refuses `me`. Re-probe with a query every token
+            # type can run before calling the token bad.
+            return self._verify_team_token(token, personal_error=exc)
         except ApiError as exc:
-            # A workspace/team token authenticates but has no user behind it, so
-            # Railway rejects `me` — a valid token, not a bad one. Re-probe with
-            # a query every token type can run before calling it invalid.
-            try:
-                self.api.call(_Q_PROJECTS, {}, token=token)
-            except ApiError:
-                return False, str(exc)
-            return True, "authenticated (team token)"
+            _log.warning("railway credential unverifiable: %s", exc)
+            return None, f"could not check this key with Railway: {exc}"
+
         me = data.get("me") or {}
         who = me.get("email") or me.get("name") or me.get("id")
+        _log.info("railway credential verified (personal token)")
         return True, f"authenticated as {who}" if who else "token accepted"
+
+    def _verify_team_token(self, token: str, *,
+                           personal_error: AuthError) -> tuple[bool | None, str]:
+        try:
+            self.api.call(_Q_PROJECTS, {}, token=token)
+        except TransportError as exc:
+            _log.warning("railway credential unverifiable: %s", exc)
+            return None, f"could not reach Railway to check this key: {exc}"
+        except ApiError:
+            _log.info("railway rejected the credential")
+            return False, str(personal_error)
+        _log.info("railway credential verified (team token)")
+        return True, "authenticated (team token)"
+
+    def probe_key(self, token: str) -> dict:
+        """What the connect wizard needs from one key: is it good, whose
+        workspace is it, and which services can we deploy to. Shape is the
+        `deploy/provider/verify` contract (frontend/docs/deploy-backend-
+        requirements.md §2) — an unusable key is a result, not an exception."""
+        valid, detail = self.verify_credential(token)
+        if valid is not True:
+            return {"valid": False, "error": _verify_error(valid, detail)}
+        try:
+            data = self.api.call(_Q_WORKSPACE, {}, token=token.strip())
+        except ApiError as exc:
+            return {"valid": False, "error": _verify_error(None, str(exc))}
+
+        projects = _nodes(data.get("projects"))
+        services = [
+            {
+                "id": service["id"],
+                "name": service["name"],
+                "project": project.get("name") or "",
+                "type": "database" if _is_addon(service["name"]) else "web service",
+                "region": None,
+                "deployable": not _is_addon(service["name"]),
+            }
+            for project in projects
+            for service in _nodes(project.get("services"))
+            if service.get("id") and service.get("name")
+        ]
+        _log.info("railway key probe ok: %s project(s), %s service(s)",
+                  len(projects), len(services))
+        return {"valid": True, "account": _account_of(projects, detail),
+                "services": services}
 
     # ── contract ─────────────────────────────────────────────────────────
 
@@ -318,6 +440,54 @@ def service_names(config: dict) -> list[str]:
     services = config.get("services") or (
         [config["service"]] if config.get("service") else [])
     return [str(s) for s in services] or ["app"]
+
+
+def _operation_name(query: str) -> str:
+    """Best-effort label for a log line — the first field in the selection set
+    (`me`, `projects`, `deployment`, …). Diagnostics only; never parsed."""
+    match = re.search(r"\{\s*(\w+)", query)
+    return match.group(1) if match else "query"
+
+
+def _is_auth_message(messages: str) -> bool:
+    lowered = messages.lower()
+    return any(hint in lowered for hint in _AUTH_MESSAGES)
+
+
+def _is_addon(service_name: str) -> bool:
+    lowered = service_name.lower()
+    return any(hint in lowered for hint in _ADDON_HINTS)
+
+
+def _nodes(connection) -> list[dict]:
+    """The `node` objects of a Railway `{edges: [{node: …}]}` connection."""
+    return [edge.get("node") or {} for edge in (connection or {}).get("edges") or []]
+
+
+def _account_of(projects: list[dict], detail: str) -> str:
+    """A human label for whose Railway this key opens. A personal key gives us
+    the email; a team key gives us only what it can see."""
+    if detail.startswith("authenticated as "):
+        return detail[len("authenticated as "):]
+    return projects[0].get("name") or "Railway workspace" if projects else "Railway workspace"
+
+
+def _verify_error(valid: bool | None, detail: str) -> dict:
+    """The wizard renders `headline` + `detail` inline. Say plainly whether the
+    key is bad or we simply couldn't check it — those are different problems and
+    only one of them is the user's to fix."""
+    if valid is None:
+        return {
+            "headline": "Couldn't reach Railway to check this key",
+            "detail": (f"{detail} This is not a problem with your key — "
+                       "try again in a moment."),
+        }
+    return {
+        "headline": "Railway rejected this key",
+        "detail": (f"{detail} It may be expired or revoked. Generate a fresh "
+                   "token in Railway → Account → Tokens (or your workspace's "
+                   "Tokens tab) and paste it here."),
+    }
 
 
 def _by_name(connection) -> dict:

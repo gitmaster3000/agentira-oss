@@ -31,11 +31,15 @@ def _make_project(client):
 
 class _StubAdapter:
     """Stands in for a real DeployAdapter; returns a canned verify result."""
-    def __init__(self, result):
+    def __init__(self, result, probe=None):
         self._result = result
+        self._probe = probe
 
     def verify_credential(self, token):
         return self._result
+
+    def probe_key(self, token):
+        return self._probe
 
 
 # ── target ────────────────────────────────────────────────────────────────
@@ -103,6 +107,67 @@ def test_no_adapter_leaves_validity_unknown(client):
     assert body["has_token"] is True
     assert body["valid"] is None
     assert body["detail"] == "no adapter for this provider yet"
+
+
+# ── key verify (the endpoint the connect wizard calls) ──────────────────────
+
+VERIFIED = {
+    "valid": True,
+    "account": "ops@agentira.dev",
+    "services": [{"id": "svc_1", "name": "flowty-api", "type": "web service",
+                  "region": None, "deployable": True}],
+}
+
+
+def test_wizard_can_verify_a_key(client):
+    """AP-446: the Deploy wizard posts here. The route did not exist, so the
+    frontend's Verify step failed for every key, valid or not."""
+    pid = _make_project(client)
+    with patch("backend.deploy.manager.registry.get_adapter",
+               return_value=_StubAdapter(None, probe=VERIFIED)):
+        res = client.post(f"/api/projects/{pid}/deploy/provider/verify",
+                          json={"provider": "railway", "api_key": "rw_key"})
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["valid"] is True
+    assert body["account"] == "ops@agentira.dev"
+    assert body["services"][0]["deployable"] is True
+    assert "rw_key" not in res.text  # write-only, never echoed back
+
+
+def test_bad_key_is_a_200_with_an_inline_error(client):
+    """Contract: an invalid key is a result the wizard renders, not a 4xx."""
+    pid = _make_project(client)
+    rejected = {"valid": False, "error": {"headline": "Railway rejected this key",
+                                          "detail": "It may be expired."}}
+    with patch("backend.deploy.manager.registry.get_adapter",
+               return_value=_StubAdapter(None, probe=rejected)):
+        res = client.post(f"/api/projects/{pid}/deploy/provider/verify",
+                          json={"provider": "railway", "api_key": "bad"})
+
+    assert res.status_code == 200, res.text
+    assert res.json()["valid"] is False
+    assert res.json()["error"]["headline"]
+
+
+def test_verify_rejects_a_provider_we_cannot_connect(client):
+    pid = _make_project(client)
+    with patch("backend.deploy.manager.registry.get_adapter",
+               side_effect=LookupError):
+        res = client.post(f"/api/projects/{pid}/deploy/provider/verify",
+                          json={"provider": "gcp_cloud_run", "api_key": "k"})
+
+    assert res.status_code == 400
+    assert "cannot be connected yet" in res.json()["detail"]
+
+
+def test_verify_requires_a_key(client):
+    pid = _make_project(client)
+    res = client.post(f"/api/projects/{pid}/deploy/provider/verify",
+                      json={"provider": "railway", "api_key": "  "})
+    assert res.status_code == 400
+    assert "api_key is required" in res.json()["detail"]
 
 
 def test_empty_token_clears_credential(client):

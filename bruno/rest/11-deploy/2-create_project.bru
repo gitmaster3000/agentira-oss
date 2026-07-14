@@ -1,0 +1,32 @@
+meta {
+  name: Deploy - Create project
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/projects
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "name": "Deploy Key Verify (bruno)",
+    "description": "Throwaway project for the deploy key-verify suite",
+    "actor": "admin"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+}
+
+vars:post-response {
+  _deploy_pid: res.body.id
+}

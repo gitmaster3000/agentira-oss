@@ -71,3 +71,7 @@ backend/static/cli/manifest.json
 # Keep wheels/ from the generic rule below — only *.whl above are ignored
 !backend/static/cli/wheels/
 !backend/static/cli/wheels/.gitkeep
+
+# Bruno local secrets (never commit)
+bruno/.env
+.env

@@ -13,6 +13,8 @@ from backend.deploy.contract import (
 )
 from backend.deploy.railway import (
     ApiError,
+    AuthError,
+    TransportError,
     RailwayAdapter,
     railway_environment,
     service_names,
@@ -51,7 +53,10 @@ class FakeApi:
         return {"me": {"id": "u1", "email": "ops@agentira.dev"}}
 
     def _projects(self, _):
-        return {"projects": _edges(("agentira",), "proj")}
+        return {"projects": {"edges": [{"node": {
+            "id": "proj_flowty", "name": "flowty",
+            "services": _edges(("flowty-api", "Postgres"), "svc"),
+        }}]}}
 
     def _project(self, _):
         return {"project": {
@@ -277,7 +282,7 @@ def test_verify_credential_ok():
 def test_verify_credential_accepts_team_token():
     """A workspace/team token authenticates fine but has no user behind it, so
     Railway rejects `me` with "Not Authorized". That is not an invalid token."""
-    api = FakeApi(raise_on={"me": ApiError("railway API error: Not Authorized")})
+    api = FakeApi(raise_on={"me": AuthError("railway API error: Not Authorized")})
 
     valid, detail = RailwayAdapter(api=api).verify_credential("rw_team_token")
 
@@ -288,13 +293,73 @@ def test_verify_credential_accepts_team_token():
 
 def test_verify_credential_rejects_bad_token():
     """A token that is actually bad fails every probe, not just `me`."""
-    unauthorized = ApiError("railway API HTTP 401: Unauthorized")
+    unauthorized = AuthError("railway API HTTP 401: Unauthorized")
     api = FakeApi(raise_on={"me": unauthorized, "projects": unauthorized})
 
     valid, detail = RailwayAdapter(api=api).verify_credential("bad")
 
     assert valid is False
     assert "Unauthorized" in detail
+
+
+def test_verify_credential_is_unknown_when_railway_is_unreachable():
+    """A network failure is our problem, not the user's key. `None` = couldn't
+    check; only Railway actually refusing the token means invalid."""
+    api = FakeApi(raise_on={"me": TransportError("railway API unreachable: timed out")})
+
+    valid, detail = RailwayAdapter(api=api).verify_credential("good_token")
+
+    assert valid is None
+    assert "could not reach Railway" in detail
+
+
+def test_verify_credential_does_not_fall_back_when_it_cannot_reach_railway():
+    """The team-token fallback answers an AuthError. A transport failure must
+    short-circuit — re-probing a dead endpoint just fails twice."""
+    api = FakeApi(raise_on={"me": TransportError("railway API unreachable: timed out")})
+
+    RailwayAdapter(api=api).verify_credential("good_token")
+
+    assert [c["op"] for c in api.calls] == ["me"]
+
+
+# ── key probe (connect wizard) ───────────────────────────────────────────
+
+def test_probe_key_lists_deployable_services():
+    result = RailwayAdapter(api=FakeApi()).probe_key("rw_secret")
+
+    assert result["valid"] is True
+    assert result["account"] == "ops@agentira.dev"
+    by_name = {s["name"]: s for s in result["services"]}
+    assert by_name["flowty-api"]["deployable"] is True
+    assert by_name["flowty-api"]["type"] == "web service"
+    # a Postgres add-on hosts no code of ours — the wizard renders it disabled
+    assert by_name["Postgres"]["deployable"] is False
+    assert by_name["Postgres"]["type"] == "database"
+
+
+def test_probe_key_reports_a_bad_key_as_a_result_not_an_error():
+    """`valid: false` + an inline error is the contract; the wizard renders it."""
+    unauthorized = AuthError("railway API HTTP 401: Unauthorized")
+    api = FakeApi(raise_on={"me": unauthorized, "projects": unauthorized})
+
+    result = RailwayAdapter(api=api).probe_key("bad")
+
+    assert result["valid"] is False
+    assert "rejected" in result["error"]["headline"]
+    assert "services" not in result
+
+
+def test_probe_key_distinguishes_unreachable_from_rejected():
+    """The 1010 bug wore a "your key is invalid" mask for weeks. Never again:
+    when we can't check, the wizard must say so."""
+    api = FakeApi(raise_on={"me": TransportError("blocked by Railway's edge")})
+
+    result = RailwayAdapter(api=api).probe_key("good_token")
+
+    assert result["valid"] is False
+    assert result["error"]["headline"] == "Couldn't reach Railway to check this key"
+    assert "not a problem with your key" in result["error"]["detail"]
 
 
 def test_verify_credential_rejects_empty_token():

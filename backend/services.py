@@ -809,6 +809,14 @@ def set_deploy_credential(project_id: str, *, kind: str, token: str) -> dict:
         return result
 
 
+def verify_deploy_key(project_id: str, *, provider: str, api_key: str) -> dict:
+    """Probe-only: the wizard is still holding the key, so nothing is stored and
+    there is nothing to commit."""
+    with _session() as db:
+        return _deploy_manager.verify_key(
+            db, project_id, kind=provider, token=api_key)
+
+
 def delete_project(project_id: str) -> bool:
     """Cascade-delete a project and everything it owns: tasks, epics, members,
     activities, attachments (rows + on-disk files), forge runs, and chats.
