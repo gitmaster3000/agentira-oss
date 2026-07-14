@@ -1,9 +1,19 @@
 # Deploy tab — backend requirements
 
 The Deploy frontend (`src/pages/Deploy.jsx`, `src/components/deploy/*`) is built and
-merged against the contract below. Nothing here is implemented server-side yet —
-this document is the spec the backend should match. Every endpoint the UI calls
-already exists as a stub in `src/api.js` under the `// Deploy` comment.
+merged against the contract below. This document is the spec the backend matches.
+Every endpoint the UI calls already exists as a stub in `src/api.js` under the
+`// Deploy` comment.
+
+**Implementation status** (backend repo):
+
+| endpoint | status |
+|---|---|
+| `POST /deploy/provider/verify` | **live** — AP-446, `backend/deploy/railway.py` |
+| everything else below | not implemented yet |
+
+Until the rest lands, the wizard clears step 1 (key verification) and then has
+nowhere to go. The remaining endpoints are a separate piece of work.
 
 All routes are relative to the existing API base (`/api`) and authenticate with
 the same bearer JWT as the rest of the app. `project_id` is the Agentira project.
