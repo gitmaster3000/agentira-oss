@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bruno Integration Test Plan — Runtimes &amp; Agents (AP-440)</title>
+<style>
+  :root {
+    --ink: #1a1d23; --muted: #5c6470; --line: #e3e6ea; --bg: #ffffff;
+    --accent: #4653d8; --accent-soft: #eef0fc; --warn-bg: #fdf3e4; --warn-ink: #8a5a12;
+    --ok-bg: #e8f5ec; --ok-ink: #1e6b3a; --code-bg: #f4f5f7;
+  }
+  body { font: 16px/1.6 "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: var(--bg);
+         max-width: 960px; margin: 0 auto; padding: 3rem 2rem 6rem; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 .3rem; }
+  h2 { font-size: 1.35rem; margin: 2.8rem 0 .8rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+  .sub { color: var(--muted); margin-bottom: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .92rem; }
+  th { text-align: left; font-weight: 600; border-bottom: 2px solid var(--ink); padding: .45rem .6rem; }
+  td { border-bottom: 1px solid var(--line); padding: .45rem .6rem; vertical-align: top; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: .86em; }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); padding: 1rem 1.2rem; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .pill { display: inline-block; font-size: .75rem; font-weight: 600; padding: .1rem .55rem;
+          border-radius: 999px; vertical-align: middle; }
+  .pill.p1 { background: var(--accent-soft); color: var(--accent); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn-ink); }
+  .pill.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft);
+             padding: .8rem 1.1rem; border-radius: 0 8px 8px 0; margin: 1.2rem 0; }
+  .callout.warn { border-color: var(--warn-ink); background: var(--warn-bg); }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  .toc { background: var(--code-bg); border-radius: 8px; padding: 1rem 1.4rem; }
+  .toc ol { margin: .3rem 0; }
+  a { color: var(--accent); }
+  .meta { font-size: .85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Bruno Integration Test Plan — Runtimes &amp; Agents</h1>
+<p class="sub">Task <strong>AP-440</strong> · real-endpoint QA suite for the Agentira platform · authored 2026-07-14 by master&nbsp;planner<br>
+Grounded in a full survey of <code>backend/rest_api.py</code>, <code>backend/forge/*</code>, the existing <code>bruno/</code> collection, and the docker QA stack.</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ol>
+  <li><a href="#goals">Goals &amp; scope</a></li>
+  <li><a href="#current">Current state &amp; gaps</a></li>
+  <li><a href="#env">Environment design (the variability layer)</a></li>
+  <li><a href="#layout">Collection organization</a></li>
+  <li><a href="#daemon">Test-daemon strategy: simulated vs real</a></li>
+  <li><a href="#phases">Delivery phases (8)</a></li>
+  <li><a href="#conventions">Authoring conventions</a></li>
+  <li><a href="#ci">CI wiring</a></li>
+  <li><a href="#risks">Risks &amp; open questions</a></li>
+</ol>
+</div>
+
+<h2 id="goals">1. Goals &amp; scope</h2>
+<ul>
+  <li><strong>Real endpoints, no mocks.</strong> Every request hits a live backend (<code>/api/…</code>) or MCP server, selected purely by environment variables.</li>
+  <li><strong>Full CRUD for all entities:</strong> profiles, service accounts, projects, tasks, epics, attachments, notifications, repos, deploy-settings, workflow/RBAC, and the Forge trio — <strong>runtimes, agents, runs</strong>.</li>
+  <li><strong>Full agent lifecycle:</strong> register a runtime → create an agent bound to it → talk to the agent (messages/chat) → assign a task → dispatch a run → simulate daemon progress → complete → verify events, costs, cleanup.</li>
+  <li><strong>Advanced operations:</strong> run pause/resume/retry/cancel, conductor tick, gate-checked task moves, scheduler refresh, cost estimation, model catalog, auth-failure matrix.</li>
+  <li><strong>Runnable three ways:</strong> Bruno GUI (exploratory QA), <code>bru run</code> CLI (local), CI against the <code>docker-compose.qa.yml</code> stack.</li>
+</ul>
+<p>Out of scope: browser/frontend E2E, load testing, the OpenClaw engine suite (already covered in <code>rest/10-openclaw-engine/</code>), and GitHub-webhook HMAC simulation (separate task AP-? candidate).</p>
+
+<h2 id="current">2. Current state &amp; gaps</h2>
+<p>The repo already has a two-tree collection: <code>bruno/mcp/</code> (JSON-RPC over <code>POST /mcp</code>, 10 numbered folders, good cleanup discipline) and <code>bruno/rest/</code> (thin: projects, tasks, roadmap, openclaw-engine). Survey findings that shape this plan:</p>
+<table>
+<tr><th>Finding</th><th>Impact on plan</th></tr>
+<tr><td><span class="pill warn">bug</span> Legacy <code>rest/</code> files reference <code>{{base_url}}</code> (snake_case) which is <em>undefined</em> in <code>environments/ci.bru</code>; <code>mcp/</code> uses <code>{{baseUrl}}</code>.</td><td>Phase 0 normalizes everything to <code>{{baseUrl}}</code> before new work lands.</td></tr>
+<tr><td><span class="pill warn">gap</span> Environment defines only <code>baseUrl</code> + <code>apiKey</code>.</td><td>Full env schema in §3 — service URLs, credentials, mode flags.</td></tr>
+<tr><td><span class="pill warn">gap</span> Zero coverage: repos, deploy-settings, profiles, service accounts, invites, forge runtimes/agents/runs (outside openclaw-engine), notifications (REST), RBAC (REST).</td><td>Phases 1–6 fill these.</td></tr>
+<tr><td><span class="pill warn">flag</span> Workflow/RBAC mutation routes (<code>POST /api/roles</code>, <code>/api/permissions</code>, grant/revoke) are <em>not</em> admin-gated in code.</td><td>Phase 7 encodes a deliberate authz test that will <em>fail</em> until the backend is fixed — the suite doubles as a security regression net.</td></tr>
+<tr><td><span class="pill ok">reuse</span> Existing conventions work well: numbered folders for run order, <code>vars:post-response</code> ID capture, <code>bru.runner.skipRequest()</code> guards, <code>99-cleanup</code> accepting <code>[200,204,404]</code>.</td><td>Adopted verbatim (§7).</td></tr>
+<tr><td><span class="pill warn">note</span> Auth-failure specs exist but disabled (<code>11-*.bru.disabled</code>, <code>12-*.bru.disabled</code>).</td><td>Phase 7 revives them under the new env schema.</td></tr>
+</table>
+
+<h2 id="env">3. Environment design</h2>
+<p>One <code>.bru</code> file per target under <code>bruno/environments/</code>: <code>local.bru</code>, <code>qa.bru</code>, <code>ci.bru</code>, plus a documented <code>example.bru</code> template. Secrets never committed — supplied via Bruno's <code>--env-var</code> CLI overrides or a git-ignored <code>.env</code> (Bruno reads <code>{{process.env.X}}</code>).</p>
+
+<table>
+<tr><th>Variable</th><th>Purpose</th><th>local</th><th>qa</th></tr>
+<tr><td><code>baseUrl</code></td><td>Backend REST root</td><td><code>http://localhost:8111</code></td><td><code>http://localhost:8112</code></td></tr>
+<tr><td><code>mcpUrl</code></td><td>MCP server root</td><td><code>http://localhost:8000</code></td><td><code>http://localhost:8001</code></td></tr>
+<tr><td><code>adminEmail</code> / <code>adminPassword</code></td><td>Seed admin login → mints <code>{{jwt}}</code> in setup folder</td><td colspan="2">from <code>process.env</code>, never committed</td></tr>
+<tr><td><code>apiKey</code></td><td>Service-account bearer key (agent-style auth path)</td><td colspan="2">minted <em>by the suite itself</em> in Phase 1 and captured — proves the whole key lifecycle</td></tr>
+<tr><td><code>daemonKey</code></td><td>Admin-role key used for daemon-facing endpoints (<code>/runtimes/register</code>, <code>/trigger-complete</code>…)</td><td colspan="2">captured from admin service-account creation</td></tr>
+<tr><td><code>runPrefix</code></td><td>Namespacing string (e.g. <code>brunoqa</code>) prefixed to every created entity name — parallel runs never collide, cleanup can sweep by prefix</td><td colspan="2"><code>brunoqa</code> (override per pipeline run id in CI)</td></tr>
+<tr><td><code>daemonMode</code></td><td><code>simulated</code> | <code>real</code> — selects Phase 5 behavior (§5)</td><td><code>simulated</code></td><td><code>simulated</code> (nightly job: <code>real</code>)</td></tr>
+<tr><td><code>runDestructive</code></td><td><code>true</code>/<code>false</code> — gates deletes of shared fixtures (profiles, roles); always <code>true</code> in CI, defaults <code>false</code> for GUI exploration against shared envs</td><td><code>true</code></td><td><code>true</code></td></tr>
+<tr><td><code>pollRetries</code> / <code>pollDelayMs</code></td><td>Tunable waits for async run-state transitions</td><td><code>10</code> / <code>1000</code></td><td><code>20</code> / <code>1500</code></td></tr>
+</table>
+
+<div class="callout">
+<strong>Design rule:</strong> requests reference <em>only</em> variables — no literal host, credential, or entity name anywhere in a <code>.bru</code> file. Switching target = switching environment file. That is the whole "maximum variability" requirement.
+</div>
+
+<p>Runtime-captured variables (set via <code>vars:post-response</code>, prefixed by domain for explainability): <code>auth_jwt</code>, <code>sa_apiKey</code>, <code>proj_id</code>, <code>task_id</code>, <code>epic_id</code>, <code>rt_daemonId</code>, <code>rt_runtimeId</code>, <code>ag_agentId</code>, <code>run_id</code>, <code>run_traceId</code>, <code>att_id</code>, <code>notif_id</code>.</p>
+
+<h2 id="layout">4. Collection organization</h2>
+<p>New third tree <code>bruno/api/</code> for the full REST suite (leaves the legacy <code>rest/</code> tree untouched until Phase 0 migrates it in). Numbered folders define execution order; each folder is self-contained (own setup guards) so QA can run any folder alone in the GUI.</p>
+<pre><code>bruno/
+  environments/           local.bru · qa.bru · ci.bru · example.bru
+  api/
+    00-health/            liveness, /api/auth/config, /api/statuses
+    01-auth/              login → jwt · invite flow · password reset · negative logins
+    02-identity/          profiles CRUD · service accounts CRUD + key rotate · git-token store/probe
+    03-projects/          CRUD · members · board · workflow · webhook-config · deploy-settings + credential
+    04-repos/             add/update/remove repo · repo token store + check
+    05-tasks/             CRUD · move (gates) · comments · activity · changes · commits/PR links · suggest-branch
+    06-epics/             CRUD · tasks-in-epic · plan-template · plan (prepare epic-planning run)
+    07-attachments/       task/project/epic upload · folder upload · zip · download · delete
+    08-notifications/     list · mark read (driven by events generated in 05)
+    09-rbac/              roles · permissions · grant/revoke · authz matrix
+    10-forge-runtimes/    register (as fake daemon) · list · get · heartbeat · offline transition
+    11-forge-agents/      create (admin) · CRUD · heartbeat · reset-status · dispatch-preview · concierge
+    12-forge-chat/        post message · conversations · queued · scope-live · chat stop · clear
+    13-forge-runs/        prepare-run · dispatch · events · ready-checks · trigger-events/complete (simulated daemon) · pause/resume/retry/cancel
+    14-forge-advanced/    conductor tick/report · stats · scheduler refresh · cost-estimate · pricing · model catalog
+    15-authz-negative/    401 no-token · 403 non-admin on admin routes · cross-org denial · RBAC-gap regression specs
+    99-cleanup/           prefix-sweep deletes, reverse dependency order
+</code></pre>
+<p><code>bruno/mcp/</code> stays as-is (it already covers the MCP tool surface); one Phase 6 addition mirrors the agent-lifecycle happy path through MCP tools to prove parity.</p>
+
+<h2 id="daemon">5. Test-daemon strategy</h2>
+<p>The daemon (<code>agentira-cli/agentira_cli/daemon/core.py</code>) registers runtimes, holds the <code>WS /api/forge/daemon/ws</code> channel, executes runs, and reports completion. Two modes, selected by <code>{{daemonMode}}</code>:</p>
+<h3>Mode A — <code>simulated</code> (default; pure Bruno, zero external processes)</h3>
+<p>Bruno itself plays the daemon using <code>{{daemonKey}}</code> (admin bearer):</p>
+<ol>
+  <li><code>POST /api/forge/runtimes/register</code> with a synthetic <code>daemon_id</code> = <code>{{runPrefix}}-daemon</code>, provider <code>claude</code>, fake binary path/version → capture <code>rt_runtimeId</code>.</li>
+  <li><code>POST /api/forge/runtimes/heartbeat</code> keeps it ONLINE for the duration.</li>
+  <li>Create agent on that runtime; assign task; <code>POST /api/forge/tasks/{task_id}/run</code> then <code>POST /runs/{run_id}/dispatch</code>.</li>
+  <li>Since no WS consumer exists, the dispatch lands in the <code>DispatchIntent</code> outbox — assert run status is <code>PENDING</code>/dispatchable rather than <code>RUNNING</code>.</li>
+  <li>Drive the run manually: <code>POST /runs/{run_id}/start</code> → <code>POST /api/forge/agents/{id}/trigger-events</code> (append streamed events) → <code>POST /api/forge/agents/{id}/trigger-complete</code> → assert terminal <code>COMPLETED</code>, events visible via <code>GET /runs/{run_id}/events</code>.</li>
+</ol>
+<p>This exercises every daemon-facing HTTP endpoint and the full run state machine without WS. Known limit: the WS push path itself is untested in this mode.</p>
+<h3>Mode B — <code>real</code> (nightly / pre-release)</h3>
+<p>A <code>docker-compose.qa.yml</code> overlay service runs the actual <code>agentira-cli</code> daemon (device-code auth via <code>/api/auth/cli/start|poll|approve</code> — the approve step scripted with the admin JWT). Bruno then only asserts observable state: runtime auto-registered, <code>GET /api/forge/daemon/connections</code> shows the socket, dispatched run reaches <code>RUNNING</code> without manual <code>start</code>. Same specs, different assertions — branch on <code>{{daemonMode}}</code> inside the scripts.</p>
+
+<h2 id="phases">6. Delivery phases</h2>
+<table>
+<tr><th>Phase</th><th>Deliverable</th><th>Covers (endpoint groups)</th><th>Est.&nbsp;specs</th></tr>
+<tr><td><strong>0 — Foundation</strong> <span class="pill p1">first PR</span></td><td>Env schema (§3), <code>example.bru</code>, fix <code>base_url</code>→<code>baseUrl</code> drift, folder skeleton, README in <code>bruno/</code> explaining how to run each mode</td><td>—</td><td>~5</td></tr>
+<tr><td><strong>1 — Auth &amp; identity</strong></td><td>Login mints <code>auth_jwt</code>; service account minted → <code>sa_apiKey</code>/<code>daemonKey</code>; both auth paths proven</td><td>login, invites, password reset, profiles CRUD, service-accounts CRUD + rotate</td><td>~25</td></tr>
+<tr><td><strong>2 — Core entity CRUD</strong></td><td>Projects, tasks, epics, attachments, notifications — create→read→update→verify→delete each</td><td>folders 03, 05–08 incl. board, move gates, comments, activity, zip/folder uploads</td><td>~60</td></tr>
+<tr><td><strong>3 — Repos &amp; deploy</strong></td><td>Repo CRUD + token store/probe (fake PAT → expect probe failure recorded, not echoed); deploy-settings + credential</td><td>folder 04 + project deploy routes</td><td>~15</td></tr>
+<tr><td><strong>4 — Runtimes &amp; agents</strong></td><td>Simulated daemon registers runtime; agent CRUD bound to it; heartbeat/reset-status; chat surface (messages, conversations, queued, stop, clear)</td><td>folders 10–12</td><td>~30</td></tr>
+<tr><td><strong>5 — Run lifecycle</strong></td><td>prepare→dispatch→start→events→complete happy path; pause/resume; retry after forced fail; cancel; discard; ready-checks; trace events</td><td>folder 13, both daemon modes</td><td>~30</td></tr>
+<tr><td><strong>6 — Advanced ops</strong></td><td>Conductor tick/report/plan, stats, digest, scheduler refresh, cost-estimate, pricing, model catalog; MCP-parity happy path</td><td>folder 14 + mcp addition</td><td>~20</td></tr>
+<tr><td><strong>7 — Authz &amp; negatives</strong></td><td>401/403 matrix per router; revive disabled auth specs; RBAC-gap regression (documents the un-gated workflow mutations)</td><td>folder 15</td><td>~25</td></tr>
+<tr><td><strong>8 — CI</strong></td><td>GitHub Actions job: QA stack up → seed admin → <code>bru run bruno/api --env ci</code> → teardown; nightly variant with <code>daemonMode=real</code></td><td>—</td><td>—</td></tr>
+</table>
+<p class="meta">~210 specs total. Phases 0–2 are independent of forge work and can be parallelized across agents; 4→5 are sequential; 7 depends on 1 only.</p>
+
+<h2 id="conventions">7. Authoring conventions</h2>
+<ul>
+  <li><strong>File naming:</strong> <code>&lt;order&gt;-&lt;verb&gt;_&lt;object&gt;.bru</code>, e.g. <code>3-update_agent.bru</code>. One request per file. <code>docs</code> block in every file states purpose + preconditions (Bruno renders it — this is the explainability layer).</li>
+  <li><strong>Auth:</strong> collection default <code>bearer {{auth_jwt}}</code>; folder-level override to <code>{{daemonKey}}</code> in daemon-facing folders; explicit <code>auth: none</code> only in <code>01-auth</code> and negative specs.</li>
+  <li><strong>Assertions:</strong> every spec asserts status <em>and</em> at least one body invariant. Cleanup asserts <code>[200,204,404]</code>. Async transitions polled via post-response script loop bounded by <code>{{pollRetries}}</code>/<code>{{pollDelayMs}}</code> — never fixed sleeps.</li>
+  <li><strong>Guards:</strong> every dependent spec starts with <code>if (!bru.getVar('proj_id')) bru.runner.skipRequest()</code> so partial folder runs skip instead of exploding.</li>
+  <li><strong>Namespacing:</strong> all created names begin <code>{{runPrefix}}-</code>; <code>99-cleanup</code> sweeps by listing + filtering that prefix, reverse dependency order (runs → agents → runtimes → tasks → epics → projects → service accounts).</li>
+</ul>
+<p>Example skeleton:</p>
+<pre><code>meta { name: "3-update_agent" }
+put { url: {{baseUrl}}/api/forge/agents/{{ag_agentId}} }
+docs { Updates model + system_prompt. Requires 11/1-create_agent. Admin JWT. }
+script:pre-request { if (!bru.getVar('ag_agentId')) bru.runner.skipRequest(); }
+body:json { { "model": "claude-sonnet-5", "system_prompt": "{{runPrefix}} updated" } }
+assert {
+  res.status: eq 200
+  res.body.model: eq claude-sonnet-5
+}
+</code></pre>
+
+<h2 id="ci">8. CI wiring</h2>
+<ol>
+  <li>Workflow spins up <code>docker-compose.qa.yml</code> (project <code>agentira-qa</code>; requires <code>JWT_SECRET</code>, <code>POSTGRES_PASSWORD</code> secrets), waits on <code>00-health</code> endpoints.</li>
+  <li>Seed step creates/asserts the admin account (env-provided credentials).</li>
+  <li><code>npx @usebruno/cli run bruno/api --env ci --env-var adminPassword=$ADMIN_PW --reporter-junit results.xml</code>; junit uploaded as artifact.</li>
+  <li>Per-run <code>runPrefix=ci-${GITHUB_RUN_ID}</code> → concurrent pipelines safe on one QA stack.</li>
+  <li>Nightly job repeats with <code>daemonMode=real</code> and the daemon sidecar service.</li>
+</ol>
+
+<h2 id="risks">9. Risks &amp; open questions</h2>
+<table>
+<tr><th>Item</th><th>Detail / proposed resolution</th></tr>
+<tr><td>Un-gated RBAC mutations</td><td><code>POST /api/roles</code>, <code>/api/permissions</code>, grant/revoke accept any authenticated user. Phase 7 specs assert 403-for-non-admin and will fail until backend is fixed — recommend filing the backend fix as a sibling task and marking these specs expected-fail until then.</td></tr>
+<tr><td>Conductor auto-tick interference</td><td>The 60s conductor tick may dispatch runs on tasks the suite creates. Mitigation: suite projects use <code>{{runPrefix}}</code> names and agents the conductor doesn't own; if flaky, add a QA-stack env switch to disable auto-tick.</td></tr>
+<tr><td>WS endpoints untestable in Bruno</td><td><code>/daemon/ws</code> and <code>/ws/runs/{id}</code> have no Bruno primitive. Covered indirectly in <code>daemonMode=real</code>; direct WS tests would need a pytest sidecar — out of scope here.</td></tr>
+<tr><td>Reconciler timing</td><td>Stale-run failure (30s reconciler) could race pause/resume specs. Poll budgets in §3 sized above it; keep heartbeats flowing in simulated mode.</td></tr>
+<tr><td>Legacy <code>rest/</code> tree fate</td><td>Proposal: freeze it, migrate its unique coverage (roadmap, openclaw-engine) into <code>api/</code> during Phase 6, then delete. Needs owner sign-off.</td></tr>
+<tr><td>Seed admin credentials</td><td>Suite assumes an admin exists (signup is invite-only). QA compose must seed one; credentials flow in via <code>process.env</code> only.</td></tr>
+</table>
+
+<p class="meta">Approval of this document = DoD item 2 ("plan approved"). On approval, Phases 0–2 can be cut into implementation tasks immediately; suggested epic: "Bruno API test suite".</p>
+
+</body>
+</html>
