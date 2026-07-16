@@ -83,6 +83,15 @@ class DeployKeyVerify(BaseModel):
     provider: str
     api_key: str
 
+class DeployConnect(BaseModel):
+    provider: str
+    api_key: str
+    repo: str
+    service_id: str
+
+class DeploymentCreate(BaseModel):
+    branch: str
+
 class InitialTaskSpec(BaseModel):
     title: str
     description: str = ""
@@ -767,6 +776,102 @@ def api_verify_deploy_key(project_id: str, body: DeployKeyVerify):
             project_id, provider=body.provider, api_key=body.api_key)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+# ── Deploy flow: provider connection + deployment lifecycle (AP-451) ──────
+# Implements frontend/docs/deploy-backend-requirements.md §2 — the endpoints
+# src/api.js calls under `// Deploy`. Handlers delegate to services →
+# DeployFlow; a missing project/deployment is 404, a rejected op (stop main)
+# is 409, bad input is 400.
+
+@projects.get("/{project_id}/deploy/provider")
+def api_get_deploy_connection(project_id: str):
+    """The project's provider connection (DeployConnection), or
+    `{"connected": false}` when none is attached. The key is never returned."""
+    try:
+        return services.get_deploy_connection(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@projects.post("/{project_id}/deploy/provider", status_code=201)
+def api_connect_deploy_provider(project_id: str, body: DeployConnect):
+    """Attach a provider (store the key + target) and kick the first deploy of
+    main. Returns the DeployConnection."""
+    try:
+        return services.connect_deploy_provider(
+            project_id, provider=body.provider, api_key=body.api_key,
+            repo=body.repo, service_id=body.service_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.post("/{project_id}/deploy/provider/reverify")
+def api_reverify_deploy_provider(project_id: str):
+    """Re-probe the stored key and refresh its cached validity."""
+    try:
+        return services.reverify_deploy_provider(project_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.delete("/{project_id}/deploy/provider", status_code=204)
+def api_disconnect_deploy_provider(project_id: str):
+    """Detach the provider and tear down any live previews it owns."""
+    try:
+        services.disconnect_deploy_provider(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@projects.get("/{project_id}/deploy/provider/repo-access")
+def api_deploy_repo_access(project_id: str, provider: str = Query("railway")):
+    """Whether the provider can build from the project's repo (+ an install_url
+    when it can't yet)."""
+    try:
+        return services.get_deploy_repo_access(project_id, provider=provider)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.get("/{project_id}/deployments")
+def api_list_deployments(project_id: str):
+    """One BranchEntry per branch — main first, then most-recent. Cheap: this
+    is the UI's 6s poll target."""
+    try:
+        return services.list_deployments(project_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@projects.post("/{project_id}/deployments", status_code=202)
+def api_create_deployment(project_id: str, body: DeploymentCreate):
+    """Deploy a branch. Idempotent per branch while one is queued/building."""
+    try:
+        return services.create_deployment(project_id, branch=body.branch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.post("/{project_id}/deployments/{deployment_id}/redeploy", status_code=202)
+def api_redeploy_deployment(project_id: str, deployment_id: str):
+    """Re-run a deployment in place."""
+    try:
+        return services.redeploy_deployment(project_id, deployment_id)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@projects.delete("/{project_id}/deployments/{deployment_id}", status_code=204)
+def api_stop_deployment(project_id: str, deployment_id: str):
+    """Tear a preview down. The main deployment cannot be stopped (409)."""
+    try:
+        services.stop_deployment(project_id, deployment_id)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except PermissionError as e:
+        raise HTTPException(409, str(e))
+
+@projects.get("/{project_id}/deployments/{deployment_id}/logs")
+def api_deployment_logs(project_id: str, deployment_id: str, cursor: int = Query(0)):
+    """Cursor-paginated, append-only build logs."""
+    try:
+        return services.get_deployment_logs(project_id, deployment_id, cursor=cursor)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
 
 @projects.delete("/{project_id}")
 def api_delete_project(project_id: str):

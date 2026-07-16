@@ -1,0 +1,31 @@
+meta {
+  name: Deploy - Create is rejected without a provider
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deployments
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+body:json {
+  {
+    "branch": "main"
+  }
+}
+
+assert {
+  res.status: eq 400
+}
+
+docs {
+  You cannot deploy before connecting a provider — POST /deployments is a 400
+  ("connect a deploy provider first") until a key + service is on file. No live
+  key needed (AP-451).
+}

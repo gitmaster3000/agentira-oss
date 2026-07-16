@@ -1,0 +1,29 @@
+meta {
+  name: Deploy - Logs for a missing deployment 404
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deployments/does-not-exist/logs?cursor=0
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+assert {
+  res.status: eq 404
+}
+
+docs {
+  An unknown deployment id is a 404, not a 500 — the logs endpoint validates
+  the deployment belongs to the project. No live key needed (AP-451).
+
+  NOTE: the connect -> live-deploy -> logs -> stop happy path needs a real
+  RAILWAY_API_KEY plus a linked Railway service, so it is not scripted here (it
+  cannot run green in CI without secrets); backend/tests/test_deploy_flow.py
+  exercises that whole path against a faked adapter instead.
+}

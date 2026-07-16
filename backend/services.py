@@ -18,6 +18,7 @@ from backend.auth import has_permission
 from backend.notifications import broker
 from backend import agent_notifier
 from backend.deploy.manager import DeploymentManager
+from backend.deploy.flow import DeployFlow
 
 import logging
 import os
@@ -815,6 +816,74 @@ def verify_deploy_key(project_id: str, *, provider: str, api_key: str) -> dict:
     with _session() as db:
         return _deploy_manager.verify_key(
             db, project_id, kind=provider, token=api_key)
+
+
+# Deploy *flow* (provider connection + deployment lifecycle) — same gateway
+# shape: this owns the session/commit and delegates to the DeployFlow handler.
+_deploy_flow = DeployFlow()
+
+
+def get_deploy_connection(project_id: str) -> dict:
+    with _session() as db:
+        return _deploy_flow.get_connection(db, project_id)
+
+
+def connect_deploy_provider(project_id: str, *, provider: str, api_key: str,
+                            repo: str, service_id: str) -> dict:
+    with _session() as db:
+        result = _deploy_flow.connect(
+            db, project_id, provider=provider, api_key=api_key,
+            repo=repo, service_id=service_id)
+        db.commit()
+        return result
+
+
+def reverify_deploy_provider(project_id: str) -> dict:
+    with _session() as db:
+        result = _deploy_flow.reverify(db, project_id)
+        db.commit()
+        return result
+
+
+def disconnect_deploy_provider(project_id: str) -> None:
+    with _session() as db:
+        _deploy_flow.disconnect(db, project_id)
+        db.commit()
+
+
+def get_deploy_repo_access(project_id: str, *, provider: str) -> dict:
+    with _session() as db:
+        return _deploy_flow.repo_access(db, project_id, provider)
+
+
+def list_deployments(project_id: str) -> dict:
+    with _session() as db:
+        return _deploy_flow.list_deployments(db, project_id)
+
+
+def create_deployment(project_id: str, *, branch: str) -> dict:
+    with _session() as db:
+        result = _deploy_flow.create_deployment(db, project_id, branch=branch)
+        db.commit()
+        return result
+
+
+def redeploy_deployment(project_id: str, deployment_id: str) -> dict:
+    with _session() as db:
+        result = _deploy_flow.redeploy(db, project_id, deployment_id)
+        db.commit()
+        return result
+
+
+def stop_deployment(project_id: str, deployment_id: str) -> None:
+    with _session() as db:
+        _deploy_flow.stop(db, project_id, deployment_id)
+        db.commit()
+
+
+def get_deployment_logs(project_id: str, deployment_id: str, *, cursor: int = 0) -> dict:
+    with _session() as db:
+        return _deploy_flow.get_logs(db, project_id, deployment_id, cursor=cursor)
 
 
 def delete_project(project_id: str) -> bool:

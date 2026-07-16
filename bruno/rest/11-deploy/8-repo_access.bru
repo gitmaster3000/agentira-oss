@@ -1,0 +1,28 @@
+meta {
+  name: Deploy - Repo access probe
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider/repo-access?provider=railway
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.granted: isDefined
+  res.body.repo: isDefined
+}
+
+docs {
+  Step 2 of the connect wizard. `granted` is reported optimistically in this
+  build (the real GitHub App install gate is a follow-up); an unattached
+  project gets an install_url so the wizard still has somewhere to send the
+  user. No live key needed (AP-451).
+}

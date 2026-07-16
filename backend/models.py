@@ -445,6 +445,44 @@ class DeployCredential(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class Deployment(Base):
+    """AP-451: one build/deploy of a project branch to its provider.
+
+    Persists the frontend Deploy contract (frontend/docs/deploy-backend-
+    requirements.md §1): the six status pills, the URL, the plain-language
+    `status_reason`, and enough branch/commit metadata to render a
+    `BranchEntry`. `provider_deployment_id` is the opaque adapter handle
+    (e.g. a Railway deployment id) used to poll status/logs/teardown; it is
+    never shown to the client. `logs_json` caches provider log lines so the
+    logs endpoint can cursor-paginate without a live provider round-trip.
+    """
+    __tablename__ = "deployments"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    branch: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_main: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provider_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="railway")
+    provider_deployment_id: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    # Frontend-facing pill: queued | building | live | failed | crashed | stopped.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True, default=None)
+    status_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    trigger: Mapped[str] = mapped_column(String(12), nullable=False, default="manual")
+    step: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    total_steps: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    commit_message: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    author: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    author_is_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    logs_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class ProjectRepo(Base):
     """AP-121: a project can map to multiple git repos.
 

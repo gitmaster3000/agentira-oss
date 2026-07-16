@@ -1,0 +1,26 @@
+meta {
+  name: Deploy - Provider is unconnected
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deploy/provider
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.connected: eq false
+}
+
+docs {
+  A fresh project has no provider attached — GET /deploy/provider is a 200
+  { connected: false }, the shape the Deploy empty state renders. No live key
+  needed (AP-451).
+}

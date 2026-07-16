@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 
-from backend.models import DeployCredential, Project
+from backend.models import Deployment, DeployCredential, Project
+
+# Frontend-facing status pills (frontend/docs/deploy-backend-requirements.md §1).
+ACTIVE_STATUSES = ("queued", "building")
 
 
 # ── Project deploy target ────────────────────────────────────────────────
@@ -105,3 +108,78 @@ def set_credential(db, org_id: str, kind: str, *, token: str | None,
     row.token_valid = valid
     row.token_checked_at = checked_at
     db.flush()
+
+
+# ── Deployments (one row per build of a project branch) ───────────────────
+
+def create_deployment(db, *, org_id: str, project_id: str, branch: str,
+                      is_main: bool, provider_kind: str, trigger: str,
+                      status: str, status_reason: str,
+                      provider_deployment_id: str | None = None,
+                      url: str | None = None, step: int | None = None,
+                      total_steps: int | None = None,
+                      commit_sha: str | None = None,
+                      commit_message: str | None = None,
+                      author: str | None = None,
+                      author_is_agent: bool = False) -> Deployment:
+    """Insert a new deployment row. Caller owns the commit."""
+    row = Deployment(
+        org_id=org_id, project_id=project_id, branch=branch, is_main=is_main,
+        provider_kind=provider_kind, trigger=trigger, status=status,
+        status_reason=status_reason, provider_deployment_id=provider_deployment_id,
+        url=url, step=step, total_steps=total_steps, commit_sha=commit_sha,
+        commit_message=commit_message, author=author, author_is_agent=author_is_agent)
+    db.add(row)
+    db.flush()
+    return row
+
+
+def get_deployment(db, deployment_id: str) -> Deployment | None:
+    return db.get(Deployment, deployment_id)
+
+
+def list_deployments(db, project_id: str) -> list[Deployment]:
+    """Every deployment for a project, newest first."""
+    return (db.query(Deployment)
+              .filter(Deployment.project_id == project_id)
+              .order_by(Deployment.updated_at.desc())
+              .all())
+
+
+def latest_deployment_per_branch(db, project_id: str) -> dict[str, Deployment]:
+    """Most-recent deployment for each branch of a project (branch -> row)."""
+    latest: dict[str, Deployment] = {}
+    for row in list_deployments(db, project_id):  # newest first
+        latest.setdefault(row.branch, row)
+    return latest
+
+
+def active_deployment_for_branch(db, project_id: str, branch: str) -> Deployment | None:
+    """An in-flight (queued/building) deployment for this branch, if any —
+    the idempotency key for `POST /deployments`."""
+    return (db.query(Deployment)
+              .filter(Deployment.project_id == project_id,
+                      Deployment.branch == branch,
+                      Deployment.status.in_(ACTIVE_STATUSES))
+              .order_by(Deployment.updated_at.desc())
+              .first())
+
+
+def update_deployment(db, deployment_id: str, **fields) -> Deployment | None:
+    """Patch mutable fields on a deployment. Caller owns the commit."""
+    row = db.get(Deployment, deployment_id)
+    if row is None:
+        return None
+    for key, value in fields.items():
+        setattr(row, key, value)
+    db.flush()
+    return row
+
+
+def delete_deployments_for_project(db, project_id: str) -> int:
+    """Remove all deployment rows for a project (disconnect teardown).
+    Caller owns the commit. Returns the number deleted."""
+    n = (db.query(Deployment)
+           .filter(Deployment.project_id == project_id)
+           .delete(synchronize_session=False))
+    return n

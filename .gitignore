@@ -75,3 +75,4 @@ backend/static/cli/manifest.json
 # Bruno local secrets (never commit)
 bruno/.env
 .env
+.venv312/

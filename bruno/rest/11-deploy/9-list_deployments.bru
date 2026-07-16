@@ -1,0 +1,35 @@
+meta {
+  name: Deploy - List deployments (main placeholder)
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/api/projects/{{_deploy_pid}}/deployments
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_deploy_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.branches: isDefined
+}
+
+script:post-response {
+  const branches = res.getBody().branches;
+  const main = branches.find(b => b.branch === "main");
+  if (!main) throw new Error("main branch is always listed, even when never deployed");
+  if (main.is_main !== true) throw new Error("main must be flagged is_main");
+  // never deployed yet -> deployment is null (the "Deploy main now" card)
+  if (main.deployment !== null) throw new Error("expected deployment: null before any deploy");
+}
+
+docs {
+  GET /deployments is the UI's 6s poll target and must be cheap. A project that
+  has never deployed still lists `main` with deployment: null. No live key
+  needed (AP-451).
+}
