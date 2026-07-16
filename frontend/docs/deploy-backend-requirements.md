@@ -10,10 +10,20 @@ Every endpoint the UI calls already exists as a stub in `src/api.js` under the
 | endpoint | status |
 |---|---|
 | `POST /deploy/provider/verify` | **live** — AP-446, `backend/deploy/railway.py` |
-| everything else below | not implemented yet |
+| everything else below | **live** — AP-451, `backend/deploy/flow.py` + `backend/rest_api.py` |
 
-Until the rest lands, the wizard clears step 1 (key verification) and then has
-nowhere to go. The remaining endpoints are a separate piece of work.
+The full contract is wired through `services.py` → `DeployFlow` → the adapter
+registry, backed by the `deployments` table, and covered end-to-end by
+`backend/tests/test_deploy_flow.py` (Railway adapter faked) and the
+`bruno/rest/11-deploy` collection. Two honest caveats for this build:
+
+- **Branch enumeration** is derived from persisted deployments (plus `main`),
+  not a live GitHub branch listing — a project shows `main` and any branch it
+  has deployed. Full repo-branch/commit enrichment needs the GitHub App.
+- **`repo-access`** reports `granted` optimistically (no live GitHub App
+  install probe yet), and the **live-Railway build path** is wired through the
+  adapter but not exercised against a real Railway account here — that needs a
+  real token + service linkage (`RAILWAY_API_KEY`).
 
 All routes are relative to the existing API base (`/api`) and authenticate with
 the same bearer JWT as the rest of the app. `project_id` is the Agentira project.
