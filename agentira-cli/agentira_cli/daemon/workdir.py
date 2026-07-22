@@ -31,7 +31,8 @@ def task_workdir(workspace_id: str, task_id: str) -> Path:
 
 def mark_complete(workspace_id: str, task_id: str) -> None:
     """Write .gc_meta.json so GC knows when the task finished."""
-    import json, time as _time
+    import json
+    import time as _time
     meta = WORKSPACES_DIR / workspace_id / task_id / ".gc_meta.json"
     meta.write_text(json.dumps({"completed_at": _time.time()}))
 

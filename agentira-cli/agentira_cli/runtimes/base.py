@@ -7,7 +7,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 logger = logging.getLogger("agentira.runtime")
 

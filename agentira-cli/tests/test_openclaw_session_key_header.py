@@ -8,7 +8,6 @@ WS (run_openclaw_ws) which passes sessionKey in the chat.send frame.
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 from unittest.mock import patch
 

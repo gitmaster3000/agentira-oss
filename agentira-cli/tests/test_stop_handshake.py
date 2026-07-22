@@ -219,10 +219,14 @@ def test_cancel_kills_backgrounded_child_via_group():
     finally:
         # Belt and suspenders.
         for pid in (proc.pid,):
-            try: os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError: pass
-        try: proc.wait(timeout=2)
-        except Exception: pass
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            pass
 
 
 def test_signal_group_falls_back_when_proc_not_a_leader():

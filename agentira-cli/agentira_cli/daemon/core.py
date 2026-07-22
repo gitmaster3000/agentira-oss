@@ -13,8 +13,6 @@ import os
 import queue
 import signal
 import threading
-import time
-import traceback
 
 from agentira_cli.runtimes.registry import detect_all, get_runtime_cls
 from agentira_cli.state.config import DaemonConfig

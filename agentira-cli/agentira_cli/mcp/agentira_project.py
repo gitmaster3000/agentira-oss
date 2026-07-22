@@ -135,7 +135,7 @@ def handle_search_repo(args: dict) -> str:
                 if output:
                     # Strip the repo path prefix for cleaner output.
                     prefix = REPO_PATH.rstrip("/") + "/"
-                    lines = [l.removeprefix(prefix) for l in output.split("\n")]
+                    lines = [line.removeprefix(prefix) for line in output.split("\n")]
                     return "\n".join(lines[:max_results])
                 return "No matches found."
         except FileNotFoundError:

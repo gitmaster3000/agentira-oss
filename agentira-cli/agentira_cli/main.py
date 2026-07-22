@@ -2,11 +2,13 @@ import typer
 
 from agentira_cli.state.env_file import emit_config_warnings, load_cli_env_files
 
+# Env files must load before importing command modules that read env at
+# import time, so these imports intentionally follow the call above.
 emit_config_warnings(load_cli_env_files())
 
-from .commands import daemon as daemon_cmd
-from .commands import runtime as runtime_cmd
-from ._version import get_version
+from .commands import daemon as daemon_cmd  # noqa: E402
+from .commands import runtime as runtime_cmd  # noqa: E402
+from ._version import get_version  # noqa: E402
 
 app = typer.Typer(
     name="agentira",

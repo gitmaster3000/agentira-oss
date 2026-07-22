@@ -68,7 +68,6 @@ def test_setup_timeout_surfaces_as_run_failure(daemon_instance, monkeypatch):
     """If materialize() blocks past the 30s budget (simulated here with
     asyncio.sleep), the handler must post a trigger-complete with a
     descriptive error — not silently abandon the run."""
-    from agentira_cli.daemon import core as core_mod
 
     # Patch materialize to sleep past the wait_for budget. Asyncio
     # detaches when the timeout fires; the thread eventually completes

@@ -13,7 +13,6 @@ import json
 import logging
 import queue
 import threading
-import time
 
 logger = logging.getLogger("agentira.daemon.ws")
 

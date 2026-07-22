@@ -10,9 +10,7 @@ import asyncio
 import json
 import logging
 import os
-import queue
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -131,6 +129,12 @@ async def run_cli_stream(
     """Spawn a CLI runtime with stream-json I/O; drain stdout line-by-line; return StreamResult."""
     result = StreamResult()
     mcp_config_path = ""
+    # Bound before the try so the finally can close them even if we raise
+    # before the subprocess spawns (build_args error, create_subprocess_exec
+    # FileNotFoundError/OSError). Otherwise the finally's close loop throws
+    # UnboundLocalError and masks the real failure.
+    stdout_log_f = None
+    stderr_log_f = None
 
     try:
         if mcp_config_json:
@@ -206,9 +210,7 @@ async def run_cli_stream(
         saw_result_event = False
         # Per-run tee'd log files. Opened in unbuffered binary mode so a
         # crashed daemon doesn't lose recent bytes; closed in the finally
-        # block below.
-        stdout_log_f = None
-        stderr_log_f = None
+        # block below. (Both bound to None above the try.)
         if stdout_log_path:
             try:
                 os.makedirs(os.path.dirname(stdout_log_path), exist_ok=True)

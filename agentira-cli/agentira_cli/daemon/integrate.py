@@ -69,7 +69,6 @@ def integrate_branch(*, source_url: str, branch: str,
         _git(clone, "fetch", "--prune", "origin")
 
         # Resolve target ref: prefer local heads, else origin/<target>.
-        target_ref = target_branch
         has_local = _git(clone, "rev-parse", "--verify", f"refs/heads/{target_branch}")
         if has_local.returncode != 0:
             has_remote = _git(

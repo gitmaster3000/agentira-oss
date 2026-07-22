@@ -74,8 +74,8 @@ def test_stream_events_are_teed_to_stdout_log(tmp_path):
     assert res.success is True
     assert res.text == "hello from heretic"
     assert log.exists(), "stdout.log was not written"
-    lines = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
-    texts = [l for l in lines if l.get("type") == "text"]
+    lines = [json.loads(ln) for ln in log.read_text().splitlines() if ln.strip()]
+    texts = [ln for ln in lines if ln.get("type") == "text"]
     assert texts and texts[0]["text"] == "hello from heretic"
 
 

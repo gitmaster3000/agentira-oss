@@ -7,7 +7,6 @@ legacy path stays untouched.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 

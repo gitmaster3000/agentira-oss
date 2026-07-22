@@ -119,7 +119,9 @@ def test_openclaw_derives_a_real_session_key():
     """OpenClaw's native continuity is sessionKey — adapter must return one."""
     h = OpenClawRuntime.derive_session_handle(
         agent_id="abcdef1234567890", scope_key="task:t1")
-    assert h.startswith("agentira:abcdef12:task:t1")
+    # sessionKey routes to the per-Agentira engine agent: agent:ar-<id8>:<scope>
+    # (format set in openclaw.py / base.py; updated from the legacy agentira: form).
+    assert h.startswith("agent:ar-abcdef12:task:t1")
 
 
 def test_runtimes_without_native_resume_return_empty_handle():
