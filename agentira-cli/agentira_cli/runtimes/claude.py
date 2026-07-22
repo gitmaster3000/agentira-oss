@@ -174,6 +174,7 @@ class ResultEvent:
     error: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
+    session_id: str = ""
 
 
 def parse_stream_line(line: str):

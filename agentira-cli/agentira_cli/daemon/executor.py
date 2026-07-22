@@ -286,6 +286,8 @@ async def run_cli_stream(
                 result.error = event.error
                 result.input_tokens += event.input_tokens
                 result.output_tokens += event.output_tokens
+                if event.session_id and not result.session_id:
+                    result.session_id = event.session_id
 
             elif isinstance(event, TextEvent):
                 ev = {"type": "text", "text": event.text, "model": event.model}

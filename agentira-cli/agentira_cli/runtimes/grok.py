@@ -6,6 +6,7 @@ import os
 import subprocess
 
 from .base import Runtime, derive_session_handle as _derive_session_handle
+from .claude import ResultEvent, TextEvent
 
 logger = logging.getLogger("agentira.runtime.grok")
 
@@ -68,10 +69,36 @@ class GrokRuntime(Runtime):
 
     @classmethod
     def parse_event(cls, line: str):
+        """Map Grok ``streaming-json`` frames to Agentira stream events."""
+        line = line.strip()
+        if not line:
+            return None
         try:
-            return json.loads(line)
+            msg = json.loads(line)
         except json.JSONDecodeError:
             return None
+
+        msg_type = msg.get("type", "")
+        if msg_type == "text":
+            return TextEvent(text=msg.get("data", ""))
+        if msg_type == "end":
+            usage = msg.get("usage") or {}
+            return ResultEvent(
+                success=True,
+                input_tokens=usage.get("input_tokens", 0) or 0,
+                output_tokens=usage.get("output_tokens", 0) or 0,
+                session_id=msg.get("sessionId", "") or "",
+            )
+        if msg_type == "error":
+            usage = msg.get("usage") or {}
+            return ResultEvent(
+                success=False,
+                error=msg.get("message", "") or "grok runtime error",
+                input_tokens=usage.get("input_tokens", 0) or 0,
+                output_tokens=usage.get("output_tokens", 0) or 0,
+                session_id=msg.get("sessionId", "") or "",
+            )
+        return None
 
     @classmethod
     def introspect(cls, binary_path: str) -> dict:
