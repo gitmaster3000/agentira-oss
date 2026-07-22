@@ -698,3 +698,53 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
                       f"run:{run3_id}", f"run:{run4_id}", f"run:{run4_id}"]
     assert results == ["advanced", "handed_back", "advanced",
                        "integration_requested", "advanced"]
+
+
+# ── Manual done→review re-entry must not poison the reviewer's verdict ────
+
+def _log_move(db, pid, task_id, actor, src, dst):
+    from backend.models import Activity
+    db.add(Activity(project_id=pid, task_id=task_id, actor=actor,
+                    action="task.move", detail=f"{src} → {dst}",
+                    diff=json.dumps({"status": {"from": src, "to": dst}})))
+    db.commit()
+
+
+def test_manual_done_to_review_then_approve_integrates_not_rejects(db_session):
+    """AP-379/AP-383 regression: an operator manually moves a task done→review
+    to force a re-review. The reviewer then approves (REVIEW: APPROVE). The
+    driver MUST read the reviewer's own verdict and request integration — it
+    must NOT misread the backward done→review move as a rejection and bounce a
+    corrective run to the implementer."""
+    pid, task_id, run_id = _setup_review_success(db_session, with_approval=True)
+    # The poison: a manual done→review move logged during the reviewer's run.
+    with db_session() as db:
+        _log_move(db, pid, task_id, "Claude-external", "done", "review")
+    sent = []
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: (sent.append(coro), coro.close())), \
+         patch("backend.forge.services.schedule_task_run") as mock_bounce:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True    # merged, not bounced
+    assert out.get("reason") != "review_rejected"
+    mock_bounce.assert_not_called()                     # no corrective run
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"   # awaiting merge
+
+
+def test_approve_after_prior_manual_bounce_still_merges(db_session):
+    """Second observed shape: a manual done→review re-entry happened, the run
+    still finishes with an APPROVE verdict — the verdict wins and the branch
+    integrates (no sticky rejection classification from the entry move)."""
+    pid, task_id, run_id = _setup_review_success(db_session, with_approval=True)
+    with db_session() as db:
+        # two backward re-entries, both before the approving verdict
+        _log_move(db, pid, task_id, "Claude-external", "done", "review")
+        _log_move(db, pid, task_id, "operator", "done", "review")
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: coro.close()), \
+         patch("backend.forge.services.schedule_task_run") as mock_bounce:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    mock_bounce.assert_not_called()

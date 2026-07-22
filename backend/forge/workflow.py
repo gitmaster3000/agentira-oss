@@ -460,12 +460,23 @@ def _rejection_demotion(db, *, run: Run, task: Task,
     run to the reviewer — the wrong agent).
 
     Evidence source: the Activity ledger (`task.move` rows carry a status
-    diff). Any move to an EARLIER column than it came from, logged after this
-    run started, is a deliberate demotion — by the run's agent or a human.
-    Returns {actor, from, to} or None.
+    diff). A rejection is a backward move whose DESTINATION lands the task in
+    an implementer column BEFORE the review/integrate column — the reviewer
+    handing work back to be fixed.
+
+    AP-379/AP-383: a backward move INTO the review column (e.g. an operator
+    manually moving done→review to force a re-review) is NOT a rejection — the
+    task is sitting in review awaiting a verdict, and that verdict comes from
+    the review RUN itself (`_review_approved`), never from how the task entered
+    the column. Reading done→review as a rejection bounced approved, mergeable
+    PRs back to the implementer forever. So only moves landing strictly before
+    the review column count. Returns {actor, from, to} or None.
     """
     from backend.forge.repos import activities as activities_repo
     order = {c.name: i for i, c in enumerate(flow.columns)}
+    review_idx = next(
+        (i for i, c in enumerate(flow.columns)
+         if c.on_success and c.on_success.integrate is not None), None)
     moves = activities_repo.task_moves_since(
         db, task_id=task.id, since=run.created_at)
     for m in moves:
@@ -474,8 +485,13 @@ def _rejection_demotion(db, *, run: Run, task: Task,
         except ValueError:
             continue
         src, dst = diff.get("from"), diff.get("to")
-        if src in order and dst in order and order[dst] < order[src]:
-            return {"actor": m.actor, "from": src, "to": dst}
+        if src not in order or dst not in order or order[dst] >= order[src]:
+            continue
+        # A move landing in the review/integrate column (or later) is a
+        # re-review request, not a hand-back — let the run's own verdict decide.
+        if review_idx is not None and order[dst] >= review_idx:
+            continue
+        return {"actor": m.actor, "from": src, "to": dst}
     return None
 
 
