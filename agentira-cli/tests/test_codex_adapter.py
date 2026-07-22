@@ -164,15 +164,93 @@ def test_declares_stream_json_and_resume():
     assert "resume" in CodexRuntime.capabilities
 
 
-def test_static_models_default_first():
-    assert CodexRuntime.models[0] == "gpt-5-codex"
+def test_no_static_fallback_list():
+    # No hardcoded models: discovery is the only source; absent it the UI
+    # prompts for a free-form model rather than offering stale/dead SKUs.
+    assert CodexRuntime.models == ()
 
 
-def test_introspect_honors_env_override(monkeypatch):
+def test_detect_models_empty_when_no_cache_or_override(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))  # no models_cache.json
+    d = CodexRuntime.detect()
+    if d is not None:  # codex may not be installed in CI
+        assert d.models == []
+
+
+def test_introspect_honors_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTIRA_CODEX_MODELS", " a , b , ")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))  # override wins over cache
     assert CodexRuntime.introspect("/usr/bin/codex") == {"models": ["a", "b"]}
 
 
-def test_introspect_empty_without_override(monkeypatch):
+def test_introspect_empty_without_override_or_cache(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))  # empty dir, no cache file
     assert CodexRuntime.introspect("/usr/bin/codex") == {}
+
+
+# ── live model discovery via models_cache.json ────────────────────────────
+
+def _write_cache(tmp_path, models):
+    (tmp_path / "models_cache.json").write_text(json.dumps({
+        "fetched_at": "2026-07-22T21:18:28Z",
+        "models": models,
+    }))
+
+
+def test_discovery_reads_cache_filters_and_orders(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    _write_cache(tmp_path, [
+        {"slug": "gpt-5.4", "visibility": "list", "priority": 16},
+        {"slug": "gpt-5.6-sol", "visibility": "list", "priority": 1},
+        {"slug": "codex-auto-review", "visibility": "hide", "priority": 43},
+        {"slug": "gpt-5.5", "visibility": "list", "priority": 7},
+    ])
+    # Sorted by priority, hidden SKU dropped.
+    assert CodexRuntime.introspect("/usr/bin/codex") == {
+        "models": ["gpt-5.6-sol", "gpt-5.5", "gpt-5.4"]
+    }
+
+
+def test_discovery_override_beats_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTIRA_CODEX_MODELS", "pinned-model")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    _write_cache(tmp_path, [{"slug": "gpt-5.6-sol", "visibility": "list", "priority": 1}])
+    assert CodexRuntime.introspect("/usr/bin/codex") == {"models": ["pinned-model"]}
+
+
+def test_discovery_survives_corrupt_cache(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "models_cache.json").write_text("{not json")
+    assert CodexRuntime.introspect("/usr/bin/codex") == {}
+
+
+def test_corrupt_cache_logs_a_warning(monkeypatch, tmp_path, caplog):
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    (tmp_path / "models_cache.json").write_text("{not json")
+    with caplog.at_level("WARNING", logger="agentira.runtime.codex"):
+        CodexRuntime.introspect("/usr/bin/codex")
+    assert any("model discovery failed" in r.message for r in caplog.records)
+
+
+def test_absent_cache_does_not_warn(monkeypatch, tmp_path, caplog):
+    # Fresh install (codex never run) is normal, not an error — no warning.
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    with caplog.at_level("WARNING", logger="agentira.runtime.codex"):
+        CodexRuntime.introspect("/usr/bin/codex")
+    assert not any("discovery failed" in r.message for r in caplog.records)
+
+
+def test_cache_hit_logs_source_path(monkeypatch, tmp_path, caplog):
+    monkeypatch.delenv("AGENTIRA_CODEX_MODELS", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    _write_cache(tmp_path, [{"slug": "gpt-5.6-sol", "visibility": "list", "priority": 1}])
+    with caplog.at_level("INFO", logger="agentira.runtime.codex"):
+        CodexRuntime.introspect("/usr/bin/codex")
+    assert any("source=" in r.message and "models_cache.json" in r.message
+               for r in caplog.records)
