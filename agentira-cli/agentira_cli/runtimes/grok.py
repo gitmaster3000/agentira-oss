@@ -14,7 +14,7 @@ class GrokRuntime(Runtime):
     provider = "grok"
     default_binary = "grok"
     env_path_override = "AGENTIRA_GROK_PATH"
-    capabilities = ("stream_json", "resume", "mcp_config")  # CLI only — do not declare http_gateway (grok is invoked via subprocess like claude, not /v1/chat/completions gateway)
+    capabilities = ("stream_json", "resume", "mcp_config")  # MCP is discovered from project config.
     # Fallback models if `grok models` introspection is unavailable.
     # Real list is fetched at runtime detect time by invoking the
     # `grok models` subcommand (headless). See introspect().
@@ -43,24 +43,27 @@ class GrokRuntime(Runtime):
         resume_session_id: str = "",
         allowed_tools: tuple[str, ...] = (),
     ) -> list[str]:
+        """Build arguments for Grok's headless CLI mode.
+
+        Grok's option names and streaming format differ from Claude Code's:
+        in particular, it accepts ``--single``/``--output-format
+        streaming-json`` and rejects Claude's ``--verbose`` and
+        ``stream-json`` values.
+        """
         args = [
-            "-p", prompt,
-            "--output-format", "stream-json",
-            "--verbose",
+            "--single", prompt,
+            "--output-format", "streaming-json",
             "--max-turns", str(max_turns),
         ]
         if model:
             args += ["--model", model]
         if system_prompt:
-            args += ["--system", system_prompt]
-        if mcp_config_path:
-            args += ["--mcp-config", mcp_config_path]
-        if mcp_strict:
-            args.append("--strict-mcp-config")
+            args += ["--system-prompt-override", system_prompt]
         if resume_session_id:
             args += ["--resume", resume_session_id]
         if allowed_tools:
-            args += ["--allowed-tools", " ".join(allowed_tools)]
+            for tool in allowed_tools:
+                args += ["--allow", tool]
         return args
 
     @classmethod

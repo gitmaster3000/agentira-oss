@@ -129,6 +129,8 @@ async def run_cli_stream(
     """Spawn a CLI runtime with stream-json I/O; drain stdout line-by-line; return StreamResult."""
     result = StreamResult()
     mcp_config_path = ""
+    grok_mcp_config_path = ""
+    grok_mcp_config_original = None
     # Bound before the try so the finally can close them even if we raise
     # before the subprocess spawns (build_args error, create_subprocess_exec
     # FileNotFoundError/OSError). Otherwise the finally's close loop throws
@@ -139,6 +141,10 @@ async def run_cli_stream(
     try:
         if mcp_config_json:
             mcp_config_path = _write_mcp_config(mcp_config_json)
+            if getattr(runtime_cls, "provider", "") == "grok":
+                grok_mcp_config_path, grok_mcp_config_original = _prepare_grok_mcp_config(
+                    mcp_config_json, workdir,
+                )
             # Preflight HTTP MCP servers. If a URL is unreachable from the
             # daemon host (common deploy bug: backend baked an internal
             # docker hostname into the config), claude-code silently
@@ -353,6 +359,8 @@ async def run_cli_stream(
                 on_proc(None)
             except Exception:
                 pass
+        if grok_mcp_config_path:
+            _restore_grok_mcp_config(grok_mcp_config_path, grok_mcp_config_original)
         if mcp_config_path:
             try:
                 os.unlink(mcp_config_path)
@@ -506,6 +514,53 @@ def _write_mcp_config(config_json: str) -> str:
     ) as f:
         f.write(config_json)
         return f.name
+
+
+def _prepare_grok_mcp_config(config_json: str, workdir: Optional[str]):
+    """Expose an Agentira MCP bundle through Grok's project config discovery.
+
+    Grok supports MCP, but unlike Claude Code it does not accept a
+    ``--mcp-config`` path. It loads the standard ``.mcp.json`` from the
+    current repository. Merge the dispatch servers for this run and return
+    the original bytes so the worktree is restored during cleanup.
+    """
+    if not config_json or not workdir:
+        return "", None
+    path = os.path.join(workdir, ".mcp.json")
+    try:
+        original = None
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                original = f.read()
+            existing = json.loads(original.decode("utf-8"))
+        else:
+            existing = {}
+        incoming = json.loads(config_json)
+        merged = dict(existing) if isinstance(existing, dict) else {}
+        servers = dict(merged.get("mcpServers") or {})
+        servers.update(incoming.get("mcpServers") or {})
+        merged["mcpServers"] = servers
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, indent=2)
+            f.write("\n")
+        return path, original
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("could not materialize Grok MCP config in %s: %s", workdir, exc)
+        return "", None
+
+
+def _restore_grok_mcp_config(path: str, original) -> None:
+    """Restore the worktree's ``.mcp.json`` after a Grok dispatch."""
+    if not path:
+        return
+    try:
+        if original is None:
+            os.unlink(path)
+        else:
+            with open(path, "wb") as f:
+                f.write(original)
+    except OSError as exc:
+        logger.warning("could not restore Grok MCP config %s: %s", path, exc)
 
 
 def _build_env(extra: dict, strip: Optional[set] = None) -> dict:
