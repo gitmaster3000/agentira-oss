@@ -57,7 +57,7 @@ def test_gather_planning_facts_bounds_unassigned_scan():
             db.add(Task(project_id=project_id, key=f"P1-{i}", title=f"t{i}",
                        description="", status_id=todo.id, assignee=""))
         db.commit()
-    facts = conductor.gather_planning_facts()
+    facts = conductor.gather_planning_facts(project_id)
     assert len(facts["unassigned_tasks"]) == conductor.FACTS_SCAN_LIMIT
 
 

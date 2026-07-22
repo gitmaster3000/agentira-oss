@@ -62,16 +62,12 @@ def _mk_setup():
 # ── run_planning_turn always records a durable turn ─────────────────────
 
 def test_skip_when_nothing_to_plan_still_records_turn(test_db):
+    """No conductor-managed project has plannable work -> nothing to
+    record at all (there is no project to scope a turn to)."""
     conductor.get_or_create_conductor()
     result = conductor.run_planning_turn()
-    assert result == {"skipped": "nothing to plan"}
-    turns = conductor.get_recent_planning_turns()
-    assert len(turns) == 1
-    turn = turns[0]
-    assert turn["status"] == "skipped"
-    assert turn["decisions"][0]["action"] == "skipped"
-    assert "nothing to plan" in turn["decisions"][0]["reason"]
-    assert turn["facts_snapshot"] == {"agents": [], "unassigned_tasks": []}
+    assert result == {"skipped": "no_managed_projects"}
+    assert conductor.get_recent_planning_turns() == []
 
 
 def test_dispatched_turn_records_facts_model_and_scope(test_db):
@@ -81,17 +77,19 @@ def test_dispatched_turn_records_facts_model_and_scope(test_db):
                       return_value={"ok": True}) as mocked:
         result = conductor.run_planning_turn()
     assert mocked.called
-    assert result["ok"] is True
+    proj_result = result["projects"][0]
+    assert proj_result["ok"] is True
 
     turns = conductor.get_recent_planning_turns()
     assert len(turns) == 1
     turn = turns[0]
     assert turn["status"] == "dispatched"
     assert turn["model"] == conductor.CONDUCTOR_DEFAULT_MODEL
-    assert turn["conversation_scope_key"] == "chat:default"
+    assert turn["conversation_scope_key"] == f"turn:{turn['id']}"
     assert turn["duration_ms"] is not None
     assert any(t["id"] == task_id for t in turn["facts_snapshot"]["unassigned_tasks"])
     assert any(a["name"] == "bot1" for a in turn["facts_snapshot"]["agents"])
+    assert turn["facts_snapshot"]["project_id"] == project_id
     assert turn["decisions"] == []  # fills in async as the LLM turn assigns
 
 

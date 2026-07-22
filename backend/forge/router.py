@@ -638,6 +638,8 @@ def conductor_status():
         "last_tick": _conductor.get_last_tick(),
         "last_report": _conductor.get_last_report(),
         "last_plan": _conductor.get_last_plan(),
+        "last_progress_check": _conductor.get_last_progress_check(),
+        "last_sprint_review": _conductor.get_last_sprint_review(),
         "survey": _conductor.survey_workspace(),
     }
 
@@ -663,6 +665,16 @@ def conductor_plan_now():
     unassigned todo backlog to agents. Self-skips if nothing to plan."""
     from backend.forge import conductor as _conductor
     return _conductor.run_planning_turn()
+
+
+@router.post("/conductor/sprint-review")
+def conductor_sprint_review_now():
+    """Run the Conductor's sprint-review (retro) turn immediately, per
+    project — reviews the last 24h, files corrective backlog tasks, and
+    publishes the review as a `done` task. Self-skips per project when the
+    24h digest is empty."""
+    from backend.forge import conductor as _conductor
+    return _conductor.run_sprint_review_turn()
 
 
 @router.get("/conductor/planning-turns")

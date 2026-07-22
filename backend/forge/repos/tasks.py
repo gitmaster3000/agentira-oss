@@ -46,6 +46,19 @@ def unassigned_todo_candidates(db, *, project_ids: Iterable[str],
               .all())
 
 
+def backlog_candidates(db, *, project_id: str, status_id: str,
+                       limit: int = 30) -> list[Task]:
+    """Backlog tasks in `project_id`, oldest first, capped at `limit` — the
+    planning turn's promote-to-todo candidate pool (caller ranks by
+    priority), before run-eligibility filtering."""
+    return (db.query(Task)
+              .filter(Task.project_id == project_id,
+                      Task.status_id == status_id)
+              .order_by(Task.created_at.asc())
+              .limit(limit)
+              .all())
+
+
 def delete_with_children(db, task: Task) -> None:
     """Delete a task and its dependent rows in one transaction (no commit).
 

@@ -99,7 +99,7 @@ def test_planning_facts_include_specialty_and_description(db_session):
         t.description = "JWT auth endpoint with refresh tokens"
         db.commit()
 
-    facts = conductor.gather_planning_facts()
+    facts = conductor.gather_planning_facts(pid)
     a = next(x for x in facts["agents"] if x["name"] == "Backend Implementer")
     assert a["specialty"] == "You are a Backend Implementer."
     assert a["model"] == "claude-sonnet-4-6"

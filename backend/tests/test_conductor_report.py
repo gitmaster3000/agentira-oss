@@ -143,7 +143,15 @@ def test_daily_report_dispatches_an_llm_turn(test_db):
     assert result.get("ok") is True
     assert len(calls) == 1
     assert calls[0]["agent_id"] == cond["id"]
-    assert calls[0]["scope_key"] == "chat:default"
+    assert calls[0]["scope_key"] != "chat:default"
+    assert calls[0]["scope_key"].startswith("turn:")
     assert "DAILY REPORT" in calls[0]["content"]
     # The report result is observable via get_last_report.
     assert _conductor.get_last_report().get("ok") is True
+
+    # AP-4xx: the daily report now also records a durable PlanningTurn
+    # (trigger="daily_report") with its own turn scope.
+    turns = _conductor.get_recent_planning_turns()
+    turn = next(t for t in turns if t["trigger"] == "daily_report")
+    assert turn["status"] == "dispatched"
+    assert turn["conversation_scope_key"] == calls[0]["scope_key"]

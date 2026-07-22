@@ -40,6 +40,28 @@ def append_decision(db, turn_id: str, decision: dict) -> PlanningTurn | None:
     return row
 
 
+def set_scope_key(db, turn_id: str, scope_key: str) -> PlanningTurn | None:
+    """Attach the turn's conversation scope key once the dispatch has a
+    turn_id to build `turn:{turn_id}` from. Caller owns the commit."""
+    row = db.get(PlanningTurn, turn_id)
+    if row is None:
+        return None
+    row.conversation_scope_key = scope_key
+    db.flush()
+    return row
+
+
+def update_status(db, turn_id: str, status: str) -> PlanningTurn | None:
+    """Flip a turn's status (e.g. dispatched -> error) after a send
+    failure. Caller owns the commit."""
+    row = db.get(PlanningTurn, turn_id)
+    if row is None:
+        return None
+    row.status = status
+    db.flush()
+    return row
+
+
 def to_dict(row: PlanningTurn) -> dict:
     return {
         "id": row.id,

@@ -26,17 +26,24 @@ def test_system_prompt_loads_from_file_not_code():
 
 def test_planning_prompt_is_template_driven():
     facts = {
+        "project_id": "P1", "project_name": "Project One",
         "agents": [{"name": "implementer-1", "project_id": "P1",
                     "in_flight": 0, "capacity": 1}],
         "unassigned_tasks": [{"id": "t1", "key": "AP-9", "title": "Do thing",
                               "project_id": "P1", "priority": "high"}],
+        "backlog": [{"id": "t2", "key": "AP-10", "title": "Promote me",
+                    "project_id": "P1", "priority": "medium"}],
+        "capacity": 1,
     }
     out = conductor._compose_planning_prompt(facts)
     assert "QUEUE PLANNING" in out
-    assert "implementer-1" in out and "AP-9" in out
+    assert "implementer-1" in out and "AP-9" in out and "AP-10" in out
+    assert "Project One" in out
     assert "{{" not in out and "}}" not in out  # every placeholder filled
     # Instruction prose lives in the template, not the module.
     assert "best-fit agent IN THE SAME" not in _SRC
+    # Section C: the injection guard is prepended to every composed turn.
+    assert "untrusted" in out.lower() or "DATA" in out
 
 
 def test_report_prompt_is_template_driven():

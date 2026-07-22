@@ -158,6 +158,19 @@ class ForgeScheduler:
             coalesce=True,
         )
         logger.info("Conductor progress check scheduled every %dm.", plan_min)
+
+        # B: sprint review — one retro LLM turn per project, daily. Fixed
+        # cadence (not config-driven like the others yet — see
+        # docs/conductor-turns.md deviations).
+        self._scheduler.add_job(
+            _conductor.run_sprint_review_turn,
+            trigger=CronTrigger(hour=7, minute=30, timezone="UTC"),
+            id="conductor_sprint_review",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Conductor sprint review scheduled at 07:30 UTC.")
         return tick
 
     def stop(self) -> None:

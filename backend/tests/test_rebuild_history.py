@@ -234,3 +234,57 @@ def test_giant_rows_fetched_truncated():
     # USER content: capped at the SQL fetch limit, not the stored size.
     assert "U" * ctx._CONTENT_FETCH_CAP in out
     assert "U" * (ctx._CONTENT_FETCH_CAP + 1) not in out
+
+
+# ── a broken history rebuild degrades to a fresh dispatch, never a crash ──
+# (2026-07-22 hardening, DiskFull recurrence at 23:39 — a wedged/erroring
+# history query must not kill the whole turn.)
+
+def test_broken_history_query_degrades_to_current(monkeypatch):
+    """If the history rebuild query raises (OperationalError or anything
+    else), assemble_context must log a warning and return `current`
+    unchanged — never propagate the exception into the caller."""
+    from backend.forge import context as ctx
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+    with forge_services._session() as db:
+        db.add(AgentMessage(agent_id=agent_id, role=MessageRole.USER,
+                            content="prior", scope_key=scope))
+        db.commit()
+
+    class _BoomSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def query(self, *a, **kw):
+            raise RuntimeError("boom — session wedged")
+
+    monkeypatch.setattr(forge_services, "_session", lambda: _BoomSession())
+    out = ctx.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="fresh dispatch")
+    assert out == "fresh dispatch"
+
+
+def test_broken_history_query_operational_error_degrades_to_current(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from backend.forge import context as ctx
+    agent_id, task_id = _mk_agent_task()
+    scope = f"task:{task_id}"
+
+    class _BoomSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def query(self, *a, **kw):
+            raise OperationalError("SELECT 1", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(forge_services, "_session", lambda: _BoomSession())
+    out = ctx.assemble_context(
+        agent_id=agent_id, scope_key=scope, current="fresh dispatch 2")
+    assert out == "fresh dispatch 2"

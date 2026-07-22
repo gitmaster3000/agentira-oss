@@ -227,6 +227,28 @@ def _in_progress_status_id(db) -> str | None:
     return row.id if row else None
 
 
+def _backlog_status_id(db) -> str | None:
+    row = db.query(Status).filter(Status.name == "backlog").first()
+    return row.id if row else None
+
+
+def _managed_projects(db) -> list[tuple[str, str]]:
+    """Distinct (project_id, project_name) pairs with at least one
+    conductor-enabled, project-bound agent — the set of projects the
+    Conductor's turns iterate over, one turn per project (AP-4xx turn-
+    scopes rework: a turn never mixes more than one project's facts)."""
+    project_ids = {
+        p.default_project_id
+        for p in db.query(Profile)
+                   .filter(Profile.conductor_enabled == True)  # noqa: E712
+                   .filter(Profile.default_project_id.isnot(None))
+                   .all()}
+    if not project_ids:
+        return []
+    return [(p.id, p.name)
+            for p in db.query(Project).filter(Project.id.in_(project_ids)).all()]
+
+
 # Lower rank = dispatched first. Unknown/missing priority sorts as medium.
 _PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -644,15 +666,29 @@ def run_daily_report() -> dict:
 
     facts = gather_report_facts()
     prompt = _compose_report_prompt(facts)
+    # The daily report stays a global (workspace-wide) human digest — but
+    # it still gets its own turn scope (never chat:default) and a durable
+    # PlanningTurn record, same transparency contract as every other turn.
+    turn_id = _record_planning_turn(
+        trigger="daily_report", status="dispatched", facts=facts)
+    scope_key = f"turn:{turn_id}"
     try:
         from backend.forge import services
+        from backend.forge.repos import planning_turns as pt_repo
         services.send_runtime_message(
-            conductor_id, content=prompt, scope_key="chat:default")
+            conductor_id, content=prompt, scope_key=scope_key)
+        with SessionLocal() as db:
+            pt_repo.set_scope_key(db, turn_id, scope_key)
+            db.commit()
         _LAST_REPORT = {"ok": True, "at": datetime.now(timezone.utc).isoformat(),
                         "projects": len(facts.get("projects") or [])}
         logger.info("Conductor daily report dispatched.")
     except Exception as exc:  # noqa: BLE001
         logger.exception("Daily report dispatch failed: %s", exc)
+        with SessionLocal() as db:
+            from backend.forge.repos import planning_turns as pt_repo
+            pt_repo.update_status(db, turn_id, "error")
+            db.commit()
         _LAST_REPORT = {"error": str(exc)}
     return _LAST_REPORT
 
@@ -685,19 +721,39 @@ def _agent_specialty(prof) -> str:
     return txt[:200]
 
 
-def gather_planning_facts() -> dict:
-    """Token-free snapshot for the planning turn: the conductor-enabled
-    agents (with specialty/model, so the planner can skill-match) and the
-    UNASSIGNED, un-run todo tasks (with description/priority) in their
-    projects."""
+def _task_fact(t: "Task") -> dict:
+    """One task's planner-facing fact row: id/key/title/priority + a
+    capped description (never the full text — see FACTS_SCAN_LIMIT note)."""
+    return {
+        "id": t.id, "key": t.key, "title": t.title,
+        "project_id": t.project_id,
+        "priority": t.priority.value if hasattr(t.priority, "value")
+                    else (t.priority or "medium"),
+        "description": (t.description or "")[:300],
+    }
+
+
+# Top-N backlog tasks considered for promotion in a single planning turn.
+BACKLOG_PROMOTE_LIMIT = 30
+
+
+def gather_planning_facts(project_id: str) -> dict:
+    """Token-free snapshot for ONE project's planning turn (AP-4xx turn-
+    scopes rework): the agents bound to this project (with specialty/model,
+    so the planner can skill-match), its UNASSIGNED un-run todo tasks, its
+    top backlog candidates (priority-ranked, capped), and the team's free
+    capacity. Never mixes another project's agents/tasks into the facts —
+    that isolation is the whole point of the per-project turn."""
     with SessionLocal() as db:
+        project = db.get(Project, project_id)
+        project_name = project.name if project else project_id
         todo_id = _todo_status_id(db)
+        backlog_id = _backlog_status_id(db)
         profiles = (db.query(Profile)
                       .filter(Profile.conductor_enabled == True)  # noqa: E712
-                      .filter(Profile.default_project_id.isnot(None))
+                      .filter(Profile.default_project_id == project_id)
                       .all())
         agents: list[dict] = []
-        project_ids: set[str] = set()
         for prof in profiles:
             a = db.query(Agent).filter(Agent.profile_id == prof.id).first()
             if not a:
@@ -710,54 +766,87 @@ def gather_planning_facts() -> dict:
                 "specialty": _agent_specialty(prof),
                 "model": prof.model or "",
             })
-            project_ids.add(prof.default_project_id)
+
+        from backend.forge.repos import runs as runs_repo
+        from backend.forge.repos import tasks as tasks_repo
+        cooldown_minutes, max_attempts = _redispatch_policy()
 
         tasks: list[dict] = []
-        if todo_id and project_ids:
-            from backend.forge.repos import runs as runs_repo
-            from backend.forge.repos import tasks as tasks_repo
+        if todo_id:
             rows = tasks_repo.unassigned_todo_candidates(
-                db, project_ids=project_ids, status_id=todo_id,
+                db, project_ids=[project_id], status_id=todo_id,
                 limit=FACTS_SCAN_LIMIT)
-            cooldown_minutes, max_attempts = _redispatch_policy()
             latest_by_task = runs_repo.latest_runs_by_task(db, [t.id for t in rows])
             rows = [t for t in rows
                     if _task_run_eligible(db, t.id, latest_by_task.get(t.id),
                                           cooldown_minutes=cooldown_minutes,
                                           max_attempts=max_attempts)]
-            for t in rows:
-                tasks.append({
-                    "id": t.id, "key": t.key, "title": t.title,
-                    "project_id": t.project_id,
-                    "priority": t.priority.value if hasattr(t.priority, "value")
-                                else (t.priority or "medium"),
-                    "description": (t.description or "")[:300],
-                })
-    return {"agents": agents, "unassigned_tasks": tasks}
+            tasks = [_task_fact(t) for t in rows]
+
+        backlog: list[dict] = []
+        if backlog_id:
+            # Fetch a wide window, THEN rank by priority, THEN cap. Capping
+            # at the repo layer (created_at order) would freeze the pool on
+            # the N oldest tasks — a fresh critical task behind 30 stale
+            # ones would never surface for promotion.
+            rows = tasks_repo.backlog_candidates(
+                db, project_id=project_id, status_id=backlog_id,
+                limit=FACTS_SCAN_LIMIT)
+            rows.sort(key=lambda t: _PRIORITY_RANK.get(
+                t.priority.value if hasattr(t.priority, "value") else str(t.priority), 2))
+            backlog = [_task_fact(t) for t in rows[:BACKLOG_PROMOTE_LIMIT]]
+
+        capacity = sum(max(0, a["capacity"] - a["in_flight"]) for a in agents)
+
+    return {
+        "project_id": project_id, "project_name": project_name,
+        "agents": agents, "unassigned_tasks": tasks,
+        "backlog": backlog, "capacity": capacity,
+    }
+
+
+def _fenced(body: str) -> str:
+    """Wrap task/agent listing rows in a fenced block — data, not
+    instructions (section C injection guard)."""
+    return f"```\n{body}\n```"
+
+
+def _fmt_task_row(t: dict) -> str:
+    return (f"- task_id={t['id']} [{t.get('key') or '?'}] "
+            f"({t.get('priority') or 'medium'}) — {t['title']}"
+            + (f"\n    {t['description']}" if t.get("description") else ""))
+
+
+def _compose_turn_guard(project_name: str) -> str:
+    """The authoritative injection-guard block prepended to every composed
+    turn prompt (section C) — same pattern as templates/epic_planning."""
+    return _load_prompt("conductor/turn_guard.md").replace(
+        "{{PROJECT}}", project_name or "")
 
 
 def _compose_planning_prompt(facts: dict) -> str:
     """Fill the planning-turn template (config) with the gathered facts.
 
     Code only serialises the facts into rows; all instruction prose lives
-    in templates/conductor/planning_turn.md (prompts-are-config).
+    in templates/conductor/planning_turn.md (prompts-are-config). Task
+    rows are fenced (data, not instructions — section C).
     """
+    project_name = facts.get("project_name") or facts.get("project_id") or ""
     agents = "\n".join(
-        f"- {a['name']} ({a.get('model') or 'model?'}) — project {a['project_id']} — "
+        f"- {a['name']} ({a.get('model') or 'model?'}) — "
         f"{a['in_flight']}/{a['capacity']} in flight"
         + (f"\n    specialty: {a['specialty']}" if a.get("specialty") else "")
         for a in facts["agents"]
     ) or "- (none)"
-    tasks = "\n".join(
-        f"- task_id={t['id']} [{t.get('key') or '?'}] "
-        f"({t.get('priority') or 'medium'}) — {t['title']} "
-        f"— project {t['project_id']}"
-        + (f"\n    {t['description']}" if t.get("description") else "")
-        for t in facts["unassigned_tasks"]
-    ) or "- (none)"
-    return (_load_prompt("conductor/planning_turn.md")
+    tasks = "\n".join(_fmt_task_row(t) for t in facts["unassigned_tasks"]) or "- (none)"
+    backlog = "\n".join(_fmt_task_row(t) for t in facts.get("backlog") or []) or "- (none)"
+    body = (_load_prompt("conductor/planning_turn.md")
+            .replace("{{PROJECT}}", project_name)
             .replace("{{AGENTS}}", agents)
-            .replace("{{TASKS}}", tasks))
+            .replace("{{TASKS}}", _fenced(tasks))
+            .replace("{{BACKLOG}}", _fenced(backlog))
+            .replace("{{CAPACITY}}", str(facts.get("capacity", 0))))
+    return _compose_turn_guard(project_name) + "\n\n" + body
 
 
 def _record_planning_turn(
@@ -812,72 +901,87 @@ def get_recent_planning_turns(limit: int = 20) -> list[dict]:
 
 
 def run_planning_turn() -> dict:
-    """Dispatch one LLM planning turn to the Conductor — it assigns the
-    unassigned todo backlog to agents. Skips (token-free) when there is
-    nothing to plan or the Conductor has no runtime.
+    """Dispatch one LLM planning turn PER conductor-managed project — each
+    project's turn sees only that project's agents/tasks/backlog and gets
+    its own `turn:{turn_id}` conversation scope (AP-4xx turn-scopes rework:
+    the old single aggregate turn on `chat:default` mixed every project's
+    facts into one unbounded-growth conversation). Skips (token-free) per
+    project when there's nothing to plan for it.
 
-    Every invocation produces a durable `PlanningTurn` record (AP-401) —
-    facts snapshot, model, duration, and a skip/dispatch reason — even
+    Every project with plannable work produces a durable `PlanningTurn`
+    record (AP-401) — facts snapshot, model, duration, scope key — even
     when it skips. A dispatched turn's `decisions` list starts empty and
     fills in asynchronously as the Conductor's LLM turn actually assigns
-    tasks (see `record_planning_decision`, called from wherever those
-    assignments land); the full transcript lives in the Conductor's own
-    conversation (`conversation_scope_key`).
+    tasks (see `record_planning_decision`).
+
+    Returns `{"projects": [...]}`, one result dict per managed project, or
+    a top-level `{"skipped": ...}` when the Conductor itself can't run at
+    all (disabled / not seeded / no runtime / nothing to manage).
     """
     global _LAST_PLAN
-    start = time.monotonic()
     if not _conductor_active():
         _LAST_PLAN = {"skipped": "conductor_disabled"}
-        return _LAST_PLAN
-    facts = gather_planning_facts()
-    if not facts["unassigned_tasks"] or not facts["agents"]:
-        _LAST_PLAN = {"skipped": "nothing to plan"}
-        _record_planning_turn(
-            trigger="cron", status="skipped", facts=facts,
-            duration_ms=int((time.monotonic() - start) * 1000),
-            decisions=[{"action": "skipped", "task_id": None, "agent": None,
-                       "reason": "nothing to plan — no unassigned tasks or no agents"}])
         return _LAST_PLAN
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
         if not prof:
             _LAST_PLAN = {"skipped": "no_conductor"}
             return _LAST_PLAN
+        managed = _managed_projects(db)
+        if not managed:
+            _LAST_PLAN = {"skipped": "no_managed_projects"}
+            return _LAST_PLAN
         if not prof.runtime_id:
             _LAST_PLAN = {"skipped": "no_runtime"}
-            _record_planning_turn(
-                trigger="cron", status="skipped", facts=facts, model=prof.model,
-                duration_ms=int((time.monotonic() - start) * 1000),
-                decisions=[{"action": "skipped", "task_id": None, "agent": None,
-                           "reason": "conductor has no runtime bound"}])
             return _LAST_PLAN
         conductor_id = prof.id
         conductor_model = prof.model
 
-    prompt = _compose_planning_prompt(facts)
-    scope_key = "chat:default"
-    try:
-        from backend.forge import services
-        services.send_runtime_message(
-            conductor_id, content=prompt, scope_key=scope_key)
-        _LAST_PLAN = {"ok": True, "at": datetime.now(timezone.utc).isoformat(),
-                      "unassigned": len(facts["unassigned_tasks"]),
-                      "agents": len(facts["agents"])}
-        _record_planning_turn(
+    from backend.forge import services
+    from backend.forge.repos import planning_turns as pt_repo
+    results: list[dict] = []
+    for project_id, project_name in managed:
+        start = time.monotonic()
+        facts = gather_planning_facts(project_id)
+        if not facts["unassigned_tasks"] and not facts["backlog"]:
+            _record_planning_turn(
+                trigger="cron", status="skipped", facts=facts,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                decisions=[{"action": "skipped", "task_id": None, "agent": None,
+                           "reason": "nothing to plan — no unassigned tasks or backlog"}])
+            results.append({"project_id": project_id, "skipped": "nothing to plan"})
+            continue
+
+        turn_id = _record_planning_turn(
             trigger="cron", status="dispatched", facts=facts, model=conductor_model,
-            duration_ms=int((time.monotonic() - start) * 1000),
-            conversation_scope_key=scope_key)
-        logger.info("Conductor planning turn dispatched (%d unassigned).",
-                    len(facts["unassigned_tasks"]))
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Planning turn dispatch failed: %s", exc)
-        _LAST_PLAN = {"error": str(exc)}
-        _record_planning_turn(
-            trigger="cron", status="error", facts=facts, model=conductor_model,
-            duration_ms=int((time.monotonic() - start) * 1000),
-            conversation_scope_key=scope_key,
-            decisions=[{"action": "error", "task_id": None, "agent": None,
-                       "reason": str(exc)}])
+            duration_ms=int((time.monotonic() - start) * 1000))
+        scope_key = f"turn:{turn_id}"
+        prompt = _compose_planning_prompt(facts)
+        try:
+            services.send_runtime_message(
+                conductor_id, content=prompt, scope_key=scope_key)
+            with SessionLocal() as scope_db:
+                pt_repo.set_scope_key(scope_db, turn_id, scope_key)
+                scope_db.commit()
+            results.append({
+                "project_id": project_id, "ok": True, "turn_id": turn_id,
+                "scope_key": scope_key,
+                "unassigned": len(facts["unassigned_tasks"]),
+                "backlog": len(facts["backlog"]),
+            })
+            logger.info("Conductor planning turn dispatched project=%s "
+                        "(%d unassigned, %d backlog).", project_id,
+                        len(facts["unassigned_tasks"]), len(facts["backlog"]))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Planning turn dispatch failed project=%s: %s",
+                             project_id, exc)
+            with SessionLocal() as scope_db:
+                pt_repo.update_status(scope_db, turn_id, "error")
+                scope_db.commit()
+            results.append({"project_id": project_id, "error": str(exc),
+                            "turn_id": turn_id})
+
+    _LAST_PLAN = {"at": datetime.now(timezone.utc).isoformat(), "projects": results}
     return _LAST_PLAN
 
 
@@ -936,11 +1040,14 @@ def _run_last_activity(run: Run) -> datetime:
 
 
 def gather_progress_facts(
-        *, stale_minutes: int = STALLED_NO_ACTIVITY_MINUTES) -> dict:
+        project_id: str | None = None, *,
+        stale_minutes: int = STALLED_NO_ACTIVITY_MINUTES) -> dict:
     """Token-free snapshot of tasks the deterministic layers couldn't move.
 
     Looks at every task in `in_progress` or `review` across projects with
-    a conductor-enabled agent (so we don't scan unrelated workspaces) and
+    a conductor-enabled agent (so we don't scan unrelated workspaces) —
+    or, when `project_id` is given, scoped to that ONE project only (the
+    per-project progress-check turn, AP-4xx turn-scopes rework) — and
     flags it as `stalled` when either:
 
       1. The latest run terminated with outcome=FAILED — last attempt
@@ -971,6 +1078,8 @@ def gather_progress_facts(
                        .filter(Profile.conductor_enabled == True)  # noqa: E712
                        .filter(Profile.default_project_id.isnot(None))
                        .all()}
+        if project_id is not None:
+            managed_project_ids &= {project_id}
         if not managed_project_ids:
             return {"stalled_tasks": [], "threshold_minutes": stale_minutes}
 
@@ -1048,7 +1157,8 @@ def _compose_progress_check_prompt(facts: dict) -> str:
     """Fill the progress-check template (config) with the stalled-task list.
 
     Same pattern as the planning prompt: code serialises facts into rows,
-    prose lives in templates/conductor/progress_check.md.
+    prose lives in templates/conductor/progress_check.md. Fenced (data, not
+    instructions — section C) and prefixed with the injection guard.
     """
     lines = []
     for s in facts["stalled_tasks"]:
@@ -1066,49 +1176,241 @@ def _compose_progress_check_prompt(facts: dict) -> str:
             f"— idle={s['minutes_idle']}m"
             + tail)
     stalled = "\n".join(lines) or "- (none)"
-    return (_load_prompt("conductor/progress_check.md")
-            .replace("{{STALLED}}", stalled)
+    project_name = facts.get("project_name") or facts.get("project_id") or ""
+    body = (_load_prompt("conductor/progress_check.md")
+            .replace("{{STALLED}}", _fenced(stalled))
             .replace("{{THRESHOLD}}", str(facts["threshold_minutes"])))
+    return _compose_turn_guard(project_name) + "\n\n" + body
 
 
 def run_progress_check_turn() -> dict:
-    """Dispatch one LLM judgment turn to the Conductor over the stalled list.
+    """Dispatch one LLM judgment turn PER conductor-managed project, over
+    that project's stalled list only (AP-4xx turn-scopes rework — mirrors
+    `run_planning_turn`'s per-project split). Skips (token-free) per
+    project when nothing is stalled there.
 
-    Skips (token-free) when there is nothing stalled or the Conductor has
-    no runtime. Same shape and dispatch path as `run_planning_turn` — the
-    progress check is meant to run on the same cadence (`plan_interval_minutes`)
-    as planning, so a single Conductor wake-up handles both judgments.
+    Every project produces a durable `PlanningTurn` record
+    (trigger="progress_check") with its own `turn:{turn_id}` scope — never
+    `chat:default`. Same cadence as planning (`plan_interval_minutes`), so
+    a single Conductor wake-up handles both judgments per project.
     """
     global _LAST_PROGRESS_CHECK
     if not _conductor_active():
         _LAST_PROGRESS_CHECK = {"skipped": "conductor_disabled"}
-        return _LAST_PROGRESS_CHECK
-    facts = gather_progress_facts()
-    if not facts["stalled_tasks"]:
-        _LAST_PROGRESS_CHECK = {"skipped": "nothing_stalled"}
         return _LAST_PROGRESS_CHECK
     with SessionLocal() as db:
         prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
         if not prof:
             _LAST_PROGRESS_CHECK = {"skipped": "no_conductor"}
             return _LAST_PROGRESS_CHECK
+        managed = _managed_projects(db)
+        if not managed:
+            _LAST_PROGRESS_CHECK = {"skipped": "no_managed_projects"}
+            return _LAST_PROGRESS_CHECK
         if not prof.runtime_id:
             _LAST_PROGRESS_CHECK = {"skipped": "no_runtime"}
             return _LAST_PROGRESS_CHECK
         conductor_id = prof.id
 
-    prompt = _compose_progress_check_prompt(facts)
-    try:
-        from backend.forge import services
-        services.send_runtime_message(
-            conductor_id, content=prompt, scope_key="chat:default")
-        _LAST_PROGRESS_CHECK = {
-            "ok": True, "at": datetime.now(timezone.utc).isoformat(),
-            "stalled": len(facts["stalled_tasks"]),
-            "threshold_minutes": facts["threshold_minutes"]}
-        logger.info("Conductor progress-check dispatched (%d stalled).",
-                    len(facts["stalled_tasks"]))
-    except Exception as exc:  # noqa: BLE001 — never break the caller
-        logger.exception("Progress-check dispatch failed: %s", exc)
-        _LAST_PROGRESS_CHECK = {"error": str(exc)}
+    from backend.forge import services
+    from backend.forge.repos import planning_turns as pt_repo
+    results: list[dict] = []
+    for project_id, project_name in managed:
+        facts = gather_progress_facts(project_id)
+        if not facts["stalled_tasks"]:
+            results.append({"project_id": project_id, "skipped": "nothing_stalled"})
+            continue
+        facts_snapshot = {**facts, "project_id": project_id,
+                          "project_name": project_name}
+        turn_id = _record_planning_turn(
+            trigger="progress_check", status="dispatched", facts=facts_snapshot)
+        scope_key = f"turn:{turn_id}"
+        prompt = _compose_progress_check_prompt(facts_snapshot)
+        try:
+            services.send_runtime_message(
+                conductor_id, content=prompt, scope_key=scope_key)
+            with SessionLocal() as scope_db:
+                pt_repo.set_scope_key(scope_db, turn_id, scope_key)
+                scope_db.commit()
+            results.append({
+                "project_id": project_id, "ok": True, "turn_id": turn_id,
+                "scope_key": scope_key, "stalled": len(facts["stalled_tasks"]),
+                "threshold_minutes": facts["threshold_minutes"],
+            })
+            logger.info("Conductor progress-check dispatched project=%s "
+                        "(%d stalled).", project_id, len(facts["stalled_tasks"]))
+        except Exception as exc:  # noqa: BLE001 — never break the caller
+            logger.exception("Progress-check dispatch failed project=%s: %s",
+                             project_id, exc)
+            with SessionLocal() as scope_db:
+                pt_repo.update_status(scope_db, turn_id, "error")
+                scope_db.commit()
+            results.append({"project_id": project_id, "error": str(exc),
+                            "turn_id": turn_id})
+
+    _LAST_PROGRESS_CHECK = {"at": datetime.now(timezone.utc).isoformat(),
+                            "projects": results}
     return _LAST_PROGRESS_CHECK
+
+
+# ── Sprint review — the loop's retro (B) ──────────────────────────────────
+#
+# Neither the queue tick nor the planning/progress turns ever look BACK at
+# what shipped, failed, or bounced — so a systemic issue (a gate that keeps
+# bouncing, an agent stuck on the same class of bug) never turns into a
+# corrective backlog task on its own. The sprint review closes that loop:
+# once a day, per project, it reviews the last 24h and (via its MCP tool
+# calls) files corrective backlog tasks and publishes the review itself as
+# a `done` task on the board so a non-technical owner reads it there.
+
+_LAST_SPRINT_REVIEW: dict | None = None
+
+
+def get_last_sprint_review() -> dict | None:
+    return _LAST_SPRINT_REVIEW
+
+
+def gather_sprint_review_facts(project_id: str) -> dict:
+    """Token-free 24h digest for ONE project's sprint review: outcome
+    counts + cost (from `generate_digest`, already project-scoped), the
+    bounce/escalation comment count (systemic-issue signal), and the
+    done/failed task lists for the review prose.
+
+    Gate-evaluation outcomes are deliberately NOT included: `GateEvaluation`
+    has no timestamp column to window by, so a cheap 24h count isn't
+    available without a schema change — out of scope for this pass (see
+    docs/conductor-turns.md deviations).
+    """
+    from backend.forge.digest import generate_digest
+    from datetime import datetime as _dt
+
+    with SessionLocal() as db:
+        project = db.get(Project, project_id)
+        project_name = project.name if project else project_id
+
+    d = generate_digest(project_id=project_id, since="24h")
+    if d.get("error"):
+        return {"project_id": project_id, "project_name": project_name,
+                "counts": {}, "stats": {}, "done": [], "failed": [],
+                "bounce_escalation_count": 0}
+
+    since_ts = _dt.fromisoformat(d["window"]["since"])
+    with SessionLocal() as db:
+        from backend.forge.repos import activities as activities_repo
+        bounce_escalation_count = activities_repo.count_bounce_escalation_comments(
+            db, project_id=project_id, since=since_ts)
+
+    return {
+        "project_id": project_id, "project_name": project_name,
+        "counts": d["counts"], "stats": d["stats"],
+        "done": [{"key": c["task_key"], "title": c["task_title"]}
+                for c in d["done"]],
+        "failed": [{"key": c["task_key"], "title": c["task_title"],
+                    "summary": c["summary"]} for c in d["failed"]],
+        "bounce_escalation_count": bounce_escalation_count,
+    }
+
+
+def _compose_sprint_review_prompt(facts: dict) -> str:
+    """Fill the sprint-review template (config) with the gathered facts.
+
+    Code only serialises facts into rows; all instruction prose lives in
+    templates/conductor/sprint_review.md (prompts-are-config). Task lists
+    are fenced (data, not instructions — section C).
+    """
+    c = facts.get("counts") or {}
+    stats = facts.get("stats") or {}
+    project_name = facts.get("project_name") or facts.get("project_id") or ""
+    done = "\n".join(
+        f"- [{t.get('key') or '?'}] {t.get('title')}" for t in facts.get("done") or []
+    ) or "- (none)"
+    failed = "\n".join(
+        f"- [{t.get('key') or '?'}] {t.get('title')}"
+        + (f" — {t['summary']}" if t.get("summary") else "")
+        for t in facts.get("failed") or []
+    ) or "- (none)"
+    body = (_load_prompt("conductor/sprint_review.md")
+            .replace("{{PROJECT}}", project_name)
+            .replace("{{DONE_COUNT}}", str(c.get("done", 0)))
+            .replace("{{FAILED_COUNT}}", str(c.get("failed", 0)))
+            .replace("{{BLOCKED_COUNT}}", str(c.get("blocked", 0)))
+            .replace("{{NEEDS_INPUT_COUNT}}", str(c.get("needs_input", 0)))
+            .replace("{{IN_FLIGHT_COUNT}}", str(c.get("in_flight", 0)))
+            .replace("{{COST_USD}}", str(stats.get("cost_usd", 0)))
+            .replace("{{BOUNCE_ESCALATION_COUNT}}",
+                     str(facts.get("bounce_escalation_count", 0)))
+            .replace("{{DONE_TASKS}}", _fenced(done))
+            .replace("{{FAILED_TASKS}}", _fenced(failed)))
+    return _compose_turn_guard(project_name) + "\n\n" + body
+
+
+def run_sprint_review_turn() -> dict:
+    """Dispatch one LLM sprint-review (retro) turn PER conductor-managed
+    project, daily. Skips (token-free) per project when the 24h digest is
+    empty (no counts, no bounce/escalation activity — nothing to review).
+
+    Every dispatched project produces a durable `PlanningTurn` record
+    (trigger="sprint_review") with its own `turn:{turn_id}` scope.
+    """
+    global _LAST_SPRINT_REVIEW
+    if not _conductor_active():
+        _LAST_SPRINT_REVIEW = {"skipped": "conductor_disabled"}
+        return _LAST_SPRINT_REVIEW
+    with SessionLocal() as db:
+        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        if not prof:
+            _LAST_SPRINT_REVIEW = {"skipped": "no_conductor"}
+            return _LAST_SPRINT_REVIEW
+        managed = _managed_projects(db)
+        if not managed:
+            _LAST_SPRINT_REVIEW = {"skipped": "no_managed_projects"}
+            return _LAST_SPRINT_REVIEW
+        if not prof.runtime_id:
+            _LAST_SPRINT_REVIEW = {"skipped": "no_runtime"}
+            return _LAST_SPRINT_REVIEW
+        conductor_id = prof.id
+        conductor_model = prof.model
+
+    from backend.forge import services
+    from backend.forge.repos import planning_turns as pt_repo
+    results: list[dict] = []
+    for project_id, project_name in managed:
+        start = time.monotonic()
+        facts = gather_sprint_review_facts(project_id)
+        counts = facts.get("counts") or {}
+        if not any(counts.values()) and not facts.get("bounce_escalation_count"):
+            _record_planning_turn(
+                trigger="sprint_review", status="skipped", facts=facts,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                decisions=[{"action": "skipped", "task_id": None, "agent": None,
+                           "reason": "empty 24h digest — nothing to review"}])
+            results.append({"project_id": project_id, "skipped": "empty_digest"})
+            continue
+
+        turn_id = _record_planning_turn(
+            trigger="sprint_review", status="dispatched", facts=facts,
+            model=conductor_model,
+            duration_ms=int((time.monotonic() - start) * 1000))
+        scope_key = f"turn:{turn_id}"
+        prompt = _compose_sprint_review_prompt(facts)
+        try:
+            services.send_runtime_message(
+                conductor_id, content=prompt, scope_key=scope_key)
+            with SessionLocal() as scope_db:
+                pt_repo.set_scope_key(scope_db, turn_id, scope_key)
+                scope_db.commit()
+            results.append({"project_id": project_id, "ok": True,
+                            "turn_id": turn_id, "scope_key": scope_key})
+            logger.info("Conductor sprint review dispatched project=%s.", project_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Sprint review dispatch failed project=%s: %s",
+                             project_id, exc)
+            with SessionLocal() as scope_db:
+                pt_repo.update_status(scope_db, turn_id, "error")
+                scope_db.commit()
+            results.append({"project_id": project_id, "error": str(exc),
+                            "turn_id": turn_id})
+
+    _LAST_SPRINT_REVIEW = {"at": datetime.now(timezone.utc).isoformat(),
+                           "projects": results}
+    return _LAST_SPRINT_REVIEW

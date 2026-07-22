@@ -29,6 +29,23 @@ def latest_comment_by(db, *, task_id: str, actor: str,
               .first())
 
 
+def count_bounce_escalation_comments(db, *, project_id: str,
+                                     since: datetime) -> int:
+    """Count of workflow bounce/needs-attention comments on `project_id`'s
+    task feed since `since` — the sprint review's systemic-issue signal.
+    Both share `action == "commented"`; distinguished by their detail
+    marker text (see forge/workflow.py `_bounce_gate_failure`)."""
+    from sqlalchemy import or_
+    return (db.query(Activity)
+              .filter(Activity.project_id == project_id,
+                      Activity.actor == "workflow",
+                      Activity.action == "commented",
+                      Activity.created_at >= since,
+                      or_(Activity.detail.ilike("%Bounced back%"),
+                          Activity.detail.ilike("%Needs attention%")))
+              .count())
+
+
 def add_task_comment(db, *, project_id: str, task_id: str,
                      detail: str, actor: str = "workflow") -> None:
     """Post a comment on the task feed. Caller owns the commit."""

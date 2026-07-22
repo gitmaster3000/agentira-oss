@@ -83,12 +83,41 @@ def assemble_context(*, agent_id: str, scope_key: str, current: str,
     from backend.forge.services import _session
 
     roles = [MessageRole.USER, MessageRole.ASSISTANT, MessageRole.TOOL]
+    from sqlalchemy import func
+
+    try:
+        rendered, summary = _rebuild_history(
+            db_ctx=_session, agent_id=agent_id, scope_key=scope_key,
+            roles=roles, token_budget=token_budget, func=func)
+    except Exception as exc:  # noqa: BLE001 — OperationalError included
+        # A wedged/erroring history rebuild must degrade to a fresh-context
+        # dispatch, not kill the whole turn (2026-07-22 DiskFull recurrence).
+        import logging
+        logging.getLogger("agentira.forge.context").warning(
+            "assemble_context: history rebuild failed for scope_key=%s: %s",
+            scope_key, exc)
+        return current
+
+    if not rendered and not summary:
+        return current
+    parts = ["<conversation history>"]
+    if summary:
+        parts.append(f"Earlier context (summary): {summary}")
+    parts.extend(rendered)
+    parts.append("</conversation history>\n")
+    parts.append(current)
+    return "\n".join(parts)
+
+
+def _rebuild_history(*, db_ctx, agent_id: str, scope_key: str,
+                     roles: list, token_budget: int, func):
+    """The actual history rebuild query + budget walk, split out so
+    `assemble_context` can wrap it in one try/except (AP hardening,
+    2026-07-22)."""
     rendered_rev: list[str] = []
     used = 0
     summary: str | None = None
-    from sqlalchemy import func
-
-    with _session() as db:
+    with db_ctx() as db:
         # Fetch only the fields the renderer reads, truncated in SQL. Loading
         # full AgentMessage rows pulls every blob column into memory; the
         # renderer truncates tool entries to _TOOL_ENTRY_TRUNCATE anyway, so
@@ -148,12 +177,4 @@ def assemble_context(*, agent_id: str, scope_key: str, current: str,
             if latest_run and latest_run.summary:
                 summary = latest_run.summary.strip() or None
 
-    if not rendered and not summary:
-        return current
-    parts = ["<conversation history>"]
-    if summary:
-        parts.append(f"Earlier context (summary): {summary}")
-    parts.extend(rendered)
-    parts.append("</conversation history>\n")
-    parts.append(current)
-    return "\n".join(parts)
+    return rendered, summary

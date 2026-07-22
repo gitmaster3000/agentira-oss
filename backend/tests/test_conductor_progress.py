@@ -170,13 +170,13 @@ def test_threshold_is_overrideable(test_db):
 
 
 def test_progress_turn_skips_when_nothing_stalled(test_db):
-    _mk_conductor_agent()
+    _, pid = _mk_conductor_agent()
     conductor.get_or_create_conductor()
     calls = []
     with patch.object(forge_services, "send_runtime_message",
                       lambda *a, **k: calls.append(k)):
         result = conductor.run_progress_check_turn()
-    assert result.get("skipped") == "nothing_stalled"
+    assert result["projects"] == [{"project_id": pid, "skipped": "nothing_stalled"}]
     assert calls == []
 
 
@@ -192,16 +192,24 @@ def test_progress_turn_dispatches_llm_turn_when_stalled(test_db):
     with patch.object(forge_services, "send_runtime_message",
                       lambda *a, **k: calls.append(k)):
         result = conductor.run_progress_check_turn()
-    assert result.get("ok") is True
-    assert result["stalled"] == 1
-    assert result["threshold_minutes"] == conductor.STALLED_NO_ACTIVITY_MINUTES
+    proj_result = result["projects"][0]
+    assert proj_result["ok"] is True
+    assert proj_result["project_id"] == pid
+    assert proj_result["stalled"] == 1
+    assert proj_result["threshold_minutes"] == conductor.STALLED_NO_ACTIVITY_MINUTES
+    assert proj_result["scope_key"] == f"turn:{proj_result['turn_id']}"
     assert len(calls) == 1
     sent = calls[0]
     content = sent["content"]
+    assert sent["scope_key"] == proj_result["scope_key"]
     assert "PROGRESS CHECK" in content                           # template loaded
     assert str(tid) in content                                   # facts injected
     assert "explode" in content                                  # error surfaced
     assert "stalled_reason=" in content                          # row format
+
+    turns = conductor.get_recent_planning_turns()
+    turn = next(t for t in turns if t["trigger"] == "progress_check")
+    assert turn["conversation_scope_key"] == proj_result["scope_key"]
 
 
 def test_progress_turn_off_when_conductor_disabled(test_db):
