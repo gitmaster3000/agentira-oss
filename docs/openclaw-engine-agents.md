@@ -88,6 +88,7 @@ The shared placeholder is **no longer used for execution**.
 | Agent only sees `agentira-cli` | sessionKey not `agent:…` → routed to `main` workspace |
 | Frontend task on CLI-only tree | workdir never bound to engine agent |
 | Session lock / reload storms | MCP re-register every turn (mitigated by fingerprint) |
+| Same chat message stored N times | OpenClaw re-broadcasts the whole-turn snapshot (`replace:true`) after every tool call; a TOOL row broke the open bubble so each snapshot inserted a new row. Fixed in `append_trigger_events`: `replace:true` reclaims the turn's assistant bubble *across* tool rows and deletes sibling snapshots; redelivered tool steps are de-duplicated. |
 
 ## Tests
 

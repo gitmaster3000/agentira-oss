@@ -3873,6 +3873,19 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                 return last
             return None
 
+        def _latest_assistant_text() -> AgentMessage | None:
+            """The trace's assistant-text bubble, *ignoring* intervening tool
+            rows. OpenClaw (stream_events) re-broadcasts the whole-turn
+            snapshot after every tool call; a TOOL row must not force each
+            snapshot into a fresh bubble, or one reply is stored N times."""
+            return (db.query(AgentMessage)
+                      .filter(AgentMessage.trace_id == trace_id,
+                              AgentMessage.role == MessageRole.ASSISTANT,
+                              AgentMessage.tool_name.is_(None))
+                      .order_by(AgentMessage.created_at.desc(),
+                                AgentMessage.id.desc())
+                      .first())
+
         for evt in events:
             evt_type = evt.get("type", "")
             if evt_type == "text":
@@ -3884,7 +3897,10 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                 # monologues loop ("Got it…" × N) in the chat UI.
                 replace = bool(evt.get("replace"))
                 if open_text is None:
-                    open_text = _latest_open_text()
+                    # replace snapshots reclaim the turn's bubble across tool
+                    # rows; plain deltas only extend an *adjacent* open bubble.
+                    open_text = (_latest_assistant_text() if replace
+                                 else _latest_open_text())
                 if open_text is not None:
                     if replace:
                         open_text.content = content
@@ -3903,8 +3919,33 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                         model_used=evt.get("model", "") or "",
                     )
                     db.add(open_text)
+                if replace:
+                    # Collapse any earlier snapshot bubbles from this turn
+                    # (each redelivery previously inserted its own row).
+                    db.flush()
+                    (db.query(AgentMessage)
+                       .filter(AgentMessage.trace_id == trace_id,
+                               AgentMessage.role == MessageRole.ASSISTANT,
+                               AgentMessage.tool_name.is_(None),
+                               AgentMessage.id != open_text.id)
+                       .delete(synchronize_session=False))
             elif evt_type == "tool_use":
                 open_text = None
+                tool_name = evt.get("tool")
+                tool_input = (json.dumps(evt.get("input"))
+                              if evt.get("input") is not None else None)
+                # De-dup redelivered tool steps: same step resent in a later
+                # batch must not spawn a second TOOL row.
+                db.flush()
+                dup = (db.query(AgentMessage)
+                         .filter(AgentMessage.trace_id == trace_id,
+                                 AgentMessage.role == MessageRole.TOOL,
+                                 AgentMessage.tool_name == tool_name,
+                                 AgentMessage.tool_input == tool_input,
+                                 AgentMessage.tool_output.is_(None))
+                         .first())
+                if dup is not None:
+                    continue
                 db.add(AgentMessage(
                     agent_id=agent_id,
                     run_id=run_id,
@@ -3912,11 +3953,13 @@ def append_trigger_events(agent_id: str, *, trace_id: str, run_id: str | None,
                     scope_key=scope or None,
                     role=MessageRole.TOOL,
                     content=evt.get("tool", "") or "",
-                    tool_name=evt.get("tool"),
-                    tool_input=(json.dumps(evt.get("input"))
-                                if evt.get("input") is not None else None),
+                    tool_name=tool_name,
+                    tool_input=tool_input,
                     model_used=evt.get("model", "") or "",
                 ))
+                # Flush so a following text delta sees this TOOL row as the
+                # trace's last message and starts a fresh post-tool bubble.
+                db.flush()
             elif evt_type == "tool_result":
                 open_text = None
                 db.add(AgentMessage(
