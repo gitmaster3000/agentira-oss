@@ -36,7 +36,11 @@ class OpenClawRuntime(Runtime):
     # One OpenClaw engine agent per Agentira agent (ar-<agent8>), workspace
     # bound to the Agentira-provisioned desk, sessionKey routes to that
     # engine so we never land on the user's personal main agent.
-    capabilities = ("stream_events", "resume")
+    # mcp_config: execute_turn registers the agentira MCP servers with the
+    # engine agent (register_agentira_mcps), so board tools (finish_run,
+    # update_task, add_comment) reach the model. Advertise it so the frame
+    # forwards mcp_config_json and `runtime list` reports it honestly.
+    capabilities = ("stream_events", "resume", "mcp_config")
 
     @classmethod
     def derive_session_handle(cls, *, agent_id: str, scope_key: str) -> str:

@@ -107,6 +107,18 @@ def test_skips_when_disk_already_matches(monkeypatch):
     assert run.call_count == 0
 
 
+def test_openclaw_declares_mcp_config_capability():
+    """Found live: `runtime list` reported openclaw as stream_events,resume
+    only, so openclaw-backed (qwen/ollama) agents looked like they had no
+    board tools — a whole run finished with zero agentira MCP calls and
+    nothing on the board. execute_turn does register the servers, so the
+    capability must say so."""
+    from agentira_cli.runtimes.base import Capability
+    from agentira_cli.runtimes.openclaw import OpenClawRuntime
+
+    assert Capability.MCP_CONFIG in OpenClawRuntime.capabilities
+
+
 def test_empty_config_is_noop():
     with mock.patch("subprocess.run", side_effect=_ok) as run:
         result = register_agentira_mcps({"mcpServers": {}})

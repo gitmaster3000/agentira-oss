@@ -4255,8 +4255,16 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
         with _session() as db:
             r = db.query(Run).filter(Run.id == run_id).first()
             if r:
-                if r.outcome is None:
-                    r.outcome = RunOutcome.SUCCEEDED if success else RunOutcome.FAILED
+                # Outcome is the agent's verdict — it comes ONLY from an
+                # explicit finish_run call (which sets r.outcome before we
+                # get here). A clean process exit is NOT a verdict: if the
+                # agent never declared one, we must NOT manufacture a green
+                # SUCCEEDED. Leave outcome=None so status=COMPLETED +
+                # outcome=None reads as "process exited without a verdict"
+                # (see _status_outcome_agreement -> "no_verdict"). Only a
+                # non-success exit with no verdict is stamped FAILED.
+                if r.outcome is None and not success:
+                    r.outcome = RunOutcome.FAILED
                 if diff_stat:
                     r.diff_stat = diff_stat
                 if diff:
