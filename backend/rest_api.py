@@ -5,7 +5,7 @@ from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, APIRouter, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 import os
@@ -583,8 +583,27 @@ def api_delete_service_account(profile_id: str):
 
 # ── Projects Router ──────────────────────────────────────────────────────
 
+
+def enforce_project_route_access(
+    request: Request,
+    actor: str = Depends(get_current_user),
+) -> None:
+    """Router-wide boundary so new project routes are secure by default."""
+    project_id = request.path_params.get("project_id")
+    if not project_id:
+        return
+    is_read = request.method in {"GET", "HEAD", "OPTIONS"}
+    access = "read" if is_read else "write"
+    if not is_read and "/members" in request.url.path:
+        access = "membership_admin"
+    services.authorize_project_access(project_id, actor, access)
+
+
 projects = APIRouter(prefix="/api/projects", tags=["projects"],
-                     dependencies=[Depends(get_current_user)])
+                     dependencies=[
+                         Depends(get_current_user),
+                         Depends(enforce_project_route_access),
+                     ])
 
 @projects.get("")
 def api_list_projects(actor: str = Depends(get_current_user)):
@@ -604,14 +623,18 @@ def api_create_project(body: ProjectCreate, actor: str = Depends(get_current_use
     )
 
 @projects.get("/{project_id}")
-def api_get_project(project_id: str):
-    result = services.get_project(project_id)
+def api_get_project(project_id: str, actor: str = Depends(get_current_user)):
+    result = services.get_project(project_id, actor=actor)
     if not result:
         raise HTTPException(404, "Project not found")
     return result
 
 @projects.patch("/{project_id}")
-def api_update_project(project_id: str, body: ProjectUpdate):
+def api_update_project(
+    project_id: str,
+    body: ProjectUpdate,
+    actor: str = Depends(get_current_user),
+):
     try:
         return services.update_project(
             project_id,
@@ -632,6 +655,7 @@ def api_update_project(project_id: str, body: ProjectUpdate):
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
             ready_checks_ttl_seconds=body.ready_checks_ttl_seconds,
+            actor=actor,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))
@@ -874,14 +898,14 @@ def api_deployment_logs(project_id: str, deployment_id: str, cursor: int = Query
         raise HTTPException(404, str(e))
 
 @projects.delete("/{project_id}")
-def api_delete_project(project_id: str):
-    if not services.delete_project(project_id):
+def api_delete_project(project_id: str, actor: str = Depends(get_current_user)):
+    if not services.delete_project(project_id, actor=actor):
         raise HTTPException(404, "Project not found")
     return {"ok": True}
 
 @projects.get("/{project_id}/members")
-def api_list_project_members(project_id: str):
-    return services.list_project_members(project_id)
+def api_list_project_members(project_id: str, actor: str = Depends(get_current_user)):
+    return services.list_project_members(project_id, actor=actor)
 
 @projects.post("/{project_id}/members")
 def api_add_project_member(project_id: str, body: dict, actor: str = Depends(get_current_user)):
@@ -891,21 +915,26 @@ def api_add_project_member(project_id: str, body: dict, actor: str = Depends(get
         raise HTTPException(404, str(e))
 
 @projects.delete("/{project_id}/members/{profile_name}")
-def api_remove_project_member(project_id: str, profile_name: str):
-    if not services.remove_project_member(project_id, profile_name):
+def api_remove_project_member(
+    project_id: str,
+    profile_name: str,
+    actor: str = Depends(get_current_user),
+):
+    if not services.remove_project_member(project_id, profile_name, actor=actor):
         raise HTTPException(404, "Member not found")
     return {"ok": True}
 
 @projects.get("/{project_id}/board")
-def api_get_board(project_id: str):
+def api_get_board(project_id: str, actor: str = Depends(get_current_user)):
     try:
+        services.authorize_project_access(project_id, actor, "read")
         return services.get_board(project_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 @projects.get("/{project_id}/epics")
-def api_list_epics(project_id: str):
-    return services.list_epics(project_id)
+def api_list_epics(project_id: str, actor: str = Depends(get_current_user)):
+    return services.list_epics(project_id, actor=actor)
 
 @projects.post("/{project_id}/epics")
 def api_create_epic(project_id: str, body: EpicCreate, actor: str = Depends(get_current_user)):
@@ -915,24 +944,35 @@ def api_create_epic(project_id: str, body: EpicCreate, actor: str = Depends(get_
         raise HTTPException(400, str(e))
 
 @projects.get("/{project_id}/roadmap")
-def api_get_roadmap(project_id: str, group_by: str = "epic"):
+def api_get_roadmap(
+    project_id: str,
+    group_by: str = "epic",
+    actor: str = Depends(get_current_user),
+):
     try:
+        services.authorize_project_access(project_id, actor, "read")
         return services.get_roadmap(project_id, group_by=group_by)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 @projects.get("/{project_id}/activity")
-def api_get_project_activity(project_id: str, limit: int = 50):
-    return services.get_project_activity(project_id, limit=limit)
+def api_get_project_activity(
+    project_id: str,
+    limit: int = 50,
+    actor: str = Depends(get_current_user),
+):
+    return services.get_project_activity(project_id, limit=limit, actor=actor)
 
 
 # AP-152: project-level attachments. Same Attachment table as tasks
 # (FK swapped); shared `/api/attachments/{id}/download` and DELETE
 # endpoints above handle either side.
 @projects.get("/{project_id}/attachments")
-def api_list_project_attachments(project_id: str):
-    from backend import attachments as _attachments
-    return _attachments.list_for_project(project_id)
+def api_list_project_attachments(
+    project_id: str,
+    actor: str = Depends(get_current_user),
+):
+    return services.list_project_attachments(project_id, actor=actor)
 
 
 @projects.post("/{project_id}/attachments")
@@ -943,6 +983,7 @@ async def api_upload_project_attachment(project_id: str, file: UploadFile = File
     contents stored as a folder (preserving structure)."""
     from backend import attachments as _attachments
     try:
+        services.authorize_project_access(project_id, actor, "write")
         file_bytes = await file.read()
         if extract:
             return _attachments.add_zip(
@@ -970,6 +1011,7 @@ async def api_upload_project_folder(
     if len(files) != len(paths):
         raise HTTPException(400, "files and paths must have equal length")
     try:
+        services.authorize_project_access(project_id, actor, "write")
         specs = [
             {
                 "relative_path": p,
@@ -1016,8 +1058,8 @@ class ProjectRepoCreate(BaseModel):
 
 
 @projects.get("/{project_id}/repos")
-def api_list_project_repos(project_id: str):
-    return services.list_project_repos(project_id)
+def api_list_project_repos(project_id: str, actor: str = Depends(get_current_user)):
+    return services.list_project_repos(project_id, actor=actor)
 
 
 @projects.post("/{project_id}/repos")
@@ -1080,8 +1122,27 @@ def api_check_project_repo_token(project_id: str, repo_name: str):
 
 # ── Tasks Router ─────────────────────────────────────────────────────────
 
+
+def enforce_task_route_access(
+    request: Request,
+    actor: str = Depends(get_current_user),
+) -> None:
+    """Router-wide indirect-object boundary for task routes."""
+    task_id = request.path_params.get("task_id")
+    if not task_id:
+        return
+    access = "read" if request.method in {"GET", "HEAD", "OPTIONS"} else "write"
+    try:
+        services.authorize_task_access(task_id, actor, access)
+    except ValueError as exc:
+        raise HTTPException(404, "Task not found") from exc
+
+
 tasks = APIRouter(prefix="/api/tasks", tags=["tasks"],
-                  dependencies=[Depends(get_current_user)])
+                  dependencies=[
+                      Depends(get_current_user),
+                      Depends(enforce_task_route_access),
+                  ])
 
 @tasks.get("")
 def api_list_tasks(
@@ -1104,8 +1165,8 @@ def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
         raise HTTPException(400, str(e))
 
 @tasks.get("/{task_id}")
-def api_get_task(task_id: str):
-    result = services.get_task(task_id)
+def api_get_task(task_id: str, actor: str = Depends(get_current_user)):
+    result = services.get_task(task_id, actor=actor)
     if not result:
         raise HTTPException(404, "Task not found")
     return result
@@ -1131,8 +1192,8 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
         raise HTTPException(404, str(e))
 
 @tasks.delete("/{task_id}")
-def api_delete_task(task_id: str):
-    if not services.delete_task(task_id):
+def api_delete_task(task_id: str, actor: str = Depends(get_current_user)):
+    if not services.delete_task(task_id, actor=actor):
         raise HTTPException(404, "Task not found")
     return {"ok": True}
 
@@ -1158,19 +1219,24 @@ def api_add_comment(task_id: str, body: CommentCreate, actor: str = Depends(get_
         raise HTTPException(404, str(e))
 
 @tasks.get("/{task_id}/activity")
-def api_get_activity(task_id: str):
-    return services.get_activity(task_id)
+def api_get_activity(task_id: str, actor: str = Depends(get_current_user)):
+    return services.get_activity(task_id, actor=actor)
 
 @tasks.get("/{task_id}/changes")
-def api_get_changes(task_id: str, since: str):
+def api_get_changes(
+    task_id: str,
+    since: str,
+    actor: str = Depends(get_current_user),
+):
     try:
+        services.authorize_task_access(task_id, actor, "read")
         return services.get_changes_since(task_id, since)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 @tasks.get("/{task_id}/attachments")
-def api_list_attachments(task_id: str):
-    return services.list_attachments(task_id)
+def api_list_attachments(task_id: str, actor: str = Depends(get_current_user)):
+    return services.list_attachments(task_id, actor=actor)
 
 @tasks.post("/{task_id}/attachments")
 async def api_upload_attachment(task_id: str, file: UploadFile = File(...),
@@ -1179,12 +1245,14 @@ async def api_upload_attachment(task_id: str, file: UploadFile = File(...),
     """Upload a single file. With `?extract=true` a .zip is unpacked and its
     contents stored as a folder (preserving structure)."""
     try:
+        services.authorize_task_access(task_id, actor, "write")
         file_bytes = await file.read()
         if extract:
             from backend import attachments as _attachments
             return _attachments.add_zip(task_id=task_id, zip_bytes=file_bytes, uploaded_by=actor)
         return services.add_attachment(task_id=task_id, filename=file.filename, file_bytes=file_bytes,
-                                       content_type=file.content_type or "application/octet-stream", uploaded_by=actor)
+                                       content_type=file.content_type or "application/octet-stream",
+                                       uploaded_by=actor, actor=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -1202,6 +1270,7 @@ async def api_upload_task_folder(
     if len(files) != len(paths):
         raise HTTPException(400, "files and paths must have equal length")
     try:
+        services.authorize_task_access(task_id, actor, "write")
         specs = [
             {
                 "relative_path": p,
@@ -1215,27 +1284,39 @@ async def api_upload_task_folder(
         raise HTTPException(404, str(e))
 
 @tasks.get("/{task_id}/commits")
-def api_list_task_commits(task_id: str):
+def api_list_task_commits(task_id: str, actor: str = Depends(get_current_user)):
+    services.authorize_task_access(task_id, actor, "read")
     return services.list_task_commits(task_id)
 
 @tasks.post("/{task_id}/commits")
-def api_link_commit(task_id: str, body: CommitLink):
+def api_link_commit(
+    task_id: str,
+    body: CommitLink,
+    actor: str = Depends(get_current_user),
+):
     try:
+        services.authorize_task_access(task_id, actor, "write")
         return services.link_commit(task_id, sha=body.sha, message=body.message, author=body.author,
                                      branch=body.branch, url=body.url, repo=body.repo, committed_at=body.committed_at)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 @tasks.post("/{task_id}/prs")
-def api_link_pr(task_id: str, body: PRLink):
+def api_link_pr(
+    task_id: str,
+    body: PRLink,
+    actor: str = Depends(get_current_user),
+):
     try:
+        services.authorize_task_access(task_id, actor, "write")
         return services.link_pr(task_id, pr_number=body.pr_number, title=body.title, author=body.author,
                                  branch=body.branch, url=body.url, repo=body.repo, state=body.state)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 @tasks.get("/{task_id}/suggest-branch")
-def api_suggest_branch(task_id: str):
+def api_suggest_branch(task_id: str, actor: str = Depends(get_current_user)):
+    services.authorize_task_access(task_id, actor, "read")
     result = services.suggest_branch_name(task_id)
     if not result:
         raise HTTPException(404, "Task not found")
@@ -1244,12 +1325,34 @@ def api_suggest_branch(task_id: str):
 
 # ── Attachments (standalone for download/delete by attachment ID) ────────
 
+
+def enforce_attachment_route_access(
+    request: Request,
+    actor: str = Depends(get_current_user),
+) -> None:
+    """Resolve standalone attachment IDs to their project before access."""
+    attachment_id = request.path_params.get("attachment_id")
+    if not attachment_id:
+        return
+    access = "read" if request.method in {"GET", "HEAD", "OPTIONS"} else "write"
+    try:
+        services.authorize_attachment_access(attachment_id, actor, access)
+    except ValueError as exc:
+        raise HTTPException(404, "Attachment not found") from exc
+
+
 attachments = APIRouter(prefix="/api/attachments", tags=["tasks"],
-                        dependencies=[Depends(get_current_user)])
+                        dependencies=[
+                            Depends(get_current_user),
+                            Depends(enforce_attachment_route_access),
+                        ])
 
 @attachments.get("/{attachment_id}/download")
-def api_download_attachment(attachment_id: str):
-    result = services.get_attachment(attachment_id)
+def api_download_attachment(
+    attachment_id: str,
+    actor: str = Depends(get_current_user),
+):
+    result = services.get_attachment(attachment_id, actor=actor)
     if not result:
         raise HTTPException(404, "Attachment not found")
     meta, file_path = result
@@ -1259,28 +1362,50 @@ def api_download_attachment(attachment_id: str):
     return FileResponse(file_path, filename=meta["filename"], media_type=meta["content_type"])
 
 @attachments.delete("/{attachment_id}")
-def api_delete_attachment(attachment_id: str):
-    if not services.delete_attachment(attachment_id):
+def api_delete_attachment(
+    attachment_id: str,
+    actor: str = Depends(get_current_user),
+):
+    if not services.delete_attachment(attachment_id, actor=actor):
         raise HTTPException(404, "Attachment not found")
     return {"ok": True}
 
 
 # ── Epics Router ─────────────────────────────────────────────────────────
 
+
+def enforce_epic_route_access(
+    request: Request,
+    actor: str = Depends(get_current_user),
+) -> None:
+    """Resolve standalone epic IDs to their project before access."""
+    epic_id = request.path_params.get("epic_id")
+    if not epic_id:
+        return
+    access = "read" if request.method in {"GET", "HEAD", "OPTIONS"} else "write"
+    try:
+        services.authorize_epic_access(epic_id, actor, access)
+    except ValueError as exc:
+        raise HTTPException(404, "Epic not found") from exc
+
+
 epics_router = APIRouter(prefix="/api/epics", tags=["epics"],
-                         dependencies=[Depends(get_current_user)])
+                         dependencies=[
+                             Depends(get_current_user),
+                             Depends(enforce_epic_route_access),
+                         ])
 
 @epics_router.get("/{epic_id}")
-def api_get_epic(epic_id: str):
-    epic = services.get_epic(epic_id)
+def api_get_epic(epic_id: str, actor: str = Depends(get_current_user)):
+    epic = services.get_epic(epic_id, actor=actor)
     if not epic:
         raise HTTPException(404, "Epic not found")
     return epic
 
 
 @epics_router.get("/{epic_id}/tasks")
-def api_list_epic_tasks(epic_id: str):
-    return services.list_epic_tasks(epic_id)
+def api_list_epic_tasks(epic_id: str, actor: str = Depends(get_current_user)):
+    return services.list_epic_tasks(epic_id, actor=actor)
 
 
 @epics_router.patch("/{epic_id}")
@@ -1291,8 +1416,8 @@ def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_cur
         raise HTTPException(404, str(e))
 
 @epics_router.delete("/{epic_id}")
-def api_delete_epic(epic_id: str):
-    if not services.delete_epic(epic_id):
+def api_delete_epic(epic_id: str, actor: str = Depends(get_current_user)):
+    if not services.delete_epic(epic_id, actor=actor):
         raise HTTPException(404, "Epic not found")
     return {"ok": True}
 
@@ -1300,8 +1425,11 @@ def api_delete_epic(epic_id: str):
 # AP-351: epic planning — the editable default prompt for the modal, and the
 # action that prepares an "Epic Planning" run.
 @epics_router.get("/{epic_id}/plan-template")
-def api_get_epic_plan_template(epic_id: str):
-    epic = services.get_epic(epic_id)
+def api_get_epic_plan_template(
+    epic_id: str,
+    actor: str = Depends(get_current_user),
+):
+    epic = services.get_epic(epic_id, actor=actor)
     if not epic:
         raise HTTPException(404, "Epic not found")
     from backend.forge import epic_planning
@@ -1309,8 +1437,13 @@ def api_get_epic_plan_template(epic_id: str):
 
 
 @epics_router.post("/{epic_id}/plan", status_code=201)
-def api_plan_epic(epic_id: str, body: EpicPlanRequest):
+def api_plan_epic(
+    epic_id: str,
+    body: EpicPlanRequest,
+    actor: str = Depends(get_current_user),
+):
     from backend.forge import services as _forge_services
+    services.authorize_epic_access(epic_id, actor, "write")
     result = _forge_services.prepare_epic_plan_run(
         epic_id=epic_id, agent_id=body.agent_id, prompt=body.prompt)
     if result.get("error"):
@@ -1323,8 +1456,12 @@ def api_plan_epic(epic_id: str, body: EpicPlanRequest):
 # AP-351: epic-scoped attachments. Same Attachment table + shared
 # /api/attachments/{id}/{download,delete} endpoints handle either side.
 @epics_router.get("/{epic_id}/attachments")
-def api_list_epic_attachments(epic_id: str):
+def api_list_epic_attachments(
+    epic_id: str,
+    actor: str = Depends(get_current_user),
+):
     from backend import attachments as _attachments
+    services.authorize_epic_access(epic_id, actor, "read")
     return _attachments.list_for_epic(epic_id)
 
 
@@ -1336,6 +1473,7 @@ async def api_upload_epic_attachment(epic_id: str, file: UploadFile = File(...),
     contents stored as a folder (preserving structure)."""
     from backend import attachments as _attachments
     try:
+        services.authorize_epic_access(epic_id, actor, "write")
         file_bytes = await file.read()
         if extract:
             return _attachments.add_zip(
@@ -1440,6 +1578,18 @@ async def api_github_webhook(request: Request):
 # ── App Assembly ─────────────────────────────────────────────────────────
 
 app = FastAPI(title="AgentIRA", version="0.2.0", description="Lean task manager for AI agents")
+
+
+@app.exception_handler(PermissionError)
+async def project_access_denied_handler(
+    _request: Request,
+    _exc: PermissionError,
+) -> JSONResponse:
+    """Return one non-enumerating response for all project-boundary denials."""
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Project resource not found or access denied"},
+    )
 
 # AP-194: never wildcard-with-credentials. Prod origins come from
 # CORS_ALLOW_ORIGINS (comma-separated); dev falls back to localhost ports.

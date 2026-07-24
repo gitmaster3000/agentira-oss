@@ -22,7 +22,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.responses import Response, JSONResponse
+from starlette.responses import Response
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -197,19 +197,21 @@ async def list_projects(ctx: Context = None) -> list[dict]:
     return services.list_projects(actor=actor)
 
 @mcp.tool()
-async def get_project(project_id: str) -> dict:
+async def get_project(project_id: str, ctx: Context = None) -> dict:
     """Get project details."""
-    return services.get_project(project_id)
+    return services.get_project(project_id, actor=actor_ctx.get())
 
 @mcp.tool()
-async def update_project(project_id: str, name: str = None, description: str = None) -> dict:
+async def update_project(project_id: str, name: str = None, description: str = None, ctx: Context = None) -> dict:
     """Update project metadata."""
-    return services.update_project(project_id, name, description)
+    return services.update_project(
+        project_id, name, description, actor=actor_ctx.get(),
+    )
 
 @mcp.tool()
-async def delete_project(project_id: str) -> bool:
+async def delete_project(project_id: str, ctx: Context = None) -> bool:
     """Delete a project."""
-    return services.delete_project(project_id)
+    return services.delete_project(project_id, actor=actor_ctx.get())
 
 @mcp.tool()
 async def add_project_member(project_id: str, profile_name: str, ctx: Context = None) -> dict:
@@ -218,9 +220,11 @@ async def add_project_member(project_id: str, profile_name: str, ctx: Context = 
     return services.add_project_member(project_id, profile_name, actor=actor)
 
 @mcp.tool()
-async def remove_project_member(project_id: str, profile_name: str) -> bool:
+async def remove_project_member(project_id: str, profile_name: str, ctx: Context = None) -> bool:
     """Remove a user from a project."""
-    return services.remove_project_member(project_id, profile_name)
+    return services.remove_project_member(
+        project_id, profile_name, actor=actor_ctx.get(),
+    )
 
 # ── Epic Tools ─────────────────────────────────────────────────────────────────
 
@@ -243,9 +247,9 @@ async def update_epic(epic_id: str, title: str = None, description: str = None, 
     return services.update_epic(epic_id, title=title, description=description, color=color, actor=actor)
 
 @mcp.tool()
-async def delete_epic(epic_id: str) -> bool:
+async def delete_epic(epic_id: str, ctx: Context = None) -> bool:
     """Delete an epic."""
-    return services.delete_epic(epic_id)
+    return services.delete_epic(epic_id, actor=actor_ctx.get())
 
 # ── Task Tools ─────────────────────────────────────────────────────────────────
 
@@ -289,11 +293,11 @@ async def list_tasks(
     return services.list_tasks(project_id, status, assignee, priority, actor=actor)
 
 @mcp.tool()
-async def get_task(task_id: str) -> dict | None:
+async def get_task(task_id: str, ctx: Context = None) -> dict | None:
     """Get task details."""
     try:
         logger.info(f"Tool get_task called for task_id='{task_id}'")
-        res = services.get_task(task_id)
+        res = services.get_task(task_id, actor=actor_ctx.get())
         if not res:
             logger.warning(f"Tool get_task: Task {task_id} not found")
             return {"error": "Task not found"}
@@ -330,9 +334,9 @@ async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:
     return services.move_task(task_id, status, actor=actor)
 
 @mcp.tool()
-async def delete_task(task_id: str) -> bool:
+async def delete_task(task_id: str, ctx: Context = None) -> bool:
     """Delete a task."""
-    return services.delete_task(task_id)
+    return services.delete_task(task_id, actor=actor_ctx.get())
 
 # ── Collaboration Tools ────────────────────────────────────────────────────────
 
@@ -343,14 +347,16 @@ async def add_comment(task_id: str, comment: str, ctx: Context = None) -> dict:
     return services.add_comment(task_id, comment, actor=actor)
 
 @mcp.tool()
-async def get_activity(task_id: str) -> list[dict]:
+async def get_activity(task_id: str, ctx: Context = None) -> list[dict]:
     """Get activity history and comments for a task."""
-    return services.get_activity(task_id)
+    return services.get_activity(task_id, actor=actor_ctx.get())
 
 @mcp.tool()
 async def get_task_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
     """Get activity history for a task with pagination and structured diffs."""
-    return services.get_activity(task_id, limit=limit, offset=offset)
+    return services.get_activity(
+        task_id, limit=limit, offset=offset, actor=actor_ctx.get(),
+    )
 
 # ── Notification Tools ─────────────────────────────────────────────────────────
 
@@ -421,9 +427,9 @@ def _proxy_fetch_bytes(attachment_id: str) -> bytes | None:
 
 
 @mcp.tool()
-async def list_attachments(task_id: str) -> list[dict]:
+async def list_attachments(task_id: str, ctx: Context = None) -> list[dict]:
     """List all attachments for a task."""
-    return services.list_attachments(task_id)
+    return services.list_attachments(task_id, actor=actor_ctx.get())
 
 @mcp.tool()
 async def upload_attachment(task_id: str, filename: str, content: str = "", content_base64: str = "", content_type: str = "application/octet-stream") -> dict:
@@ -446,7 +452,10 @@ async def upload_attachment(task_id: str, filename: str, content: str = "", cont
         return {"error": "Provide content (text) or content_base64 (binary)"}
     if _api_base():
         return _proxy_upload(task_id, filename, file_bytes, content_type)
-    return services.add_attachment(task_id, filename, file_bytes, content_type, uploaded_by=actor)
+    return services.add_attachment(
+        task_id, filename, file_bytes, content_type,
+        uploaded_by=actor, actor=actor,
+    )
 
 @mcp.tool()
 async def download_attachment(attachment_id: str) -> dict:
@@ -457,7 +466,9 @@ async def download_attachment(attachment_id: str) -> dict:
     """
     import base64
     from backend import attachments as _attachments
-    result = services.get_attachment_bytes(attachment_id)
+    result = services.get_attachment_bytes(
+        attachment_id, actor=actor_ctx.get(),
+    )
     if result:
         meta, file_bytes = result
         return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
@@ -475,18 +486,19 @@ async def download_attachment(attachment_id: str) -> dict:
 # AP-152: project attachments + base64-free reads.
 
 @mcp.tool()
-async def list_project_attachments(project_id: str) -> list[dict]:
+async def list_project_attachments(project_id: str, ctx: Context = None) -> list[dict]:
     """List attachments uploaded against a project (briefs, designs, brand
     guides). Text files under 50KB include an `inline_text` field —
     everything else exposes a `download_url`. Pair with
     `read_attachment_text` for larger reads.
     """
-    from backend import attachments as _attachments
-    return _attachments.list_for_project(project_id)
+    return services.list_project_attachments(
+        project_id, actor=actor_ctx.get(),
+    )
 
 
 @mcp.tool()
-async def read_attachment_text(attachment_id: str) -> dict:
+async def read_attachment_text(attachment_id: str, ctx: Context = None) -> dict:
     """Read an attachment without base64.
 
     Text/* returns the file's content inline. Binary returns
@@ -494,6 +506,9 @@ async def read_attachment_text(attachment_id: str) -> dict:
     use `$AGENTIRA_API_KEY` from your env to fetch.
     """
     from backend import attachments as _attachments
+    services.authorize_attachment_access(
+        attachment_id, actor_ctx.get(), "read",
+    )
     result = _attachments.read_text(attachment_id)
     if not result:
         return {"error": "Attachment not found"}
@@ -514,9 +529,11 @@ async def read_attachment_text(attachment_id: str) -> dict:
 # ── Project Activity Tools ──────────────────────────────────────────────────────
 
 @mcp.tool()
-async def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:
+async def get_project_activity(project_id: str, limit: int = 50, ctx: Context = None) -> list[dict]:
     """Get recent activity across all tasks in a project. Use limit to control how many entries to return."""
-    return services.get_project_activity(project_id, limit=limit)
+    return services.get_project_activity(
+        project_id, limit=limit, actor=actor_ctx.get(),
+    )
 
 # ── Metadata Tools ─────────────────────────────────────────────────────────────
 
@@ -625,7 +642,7 @@ async def list_project_repos(project_id: str, ctx: Context = None) -> list[dict]
     default_branch, is_primary, created_at}. Use to discover which
     repos a project tracks before picking a `repo_name` on a task.
     """
-    return services.list_project_repos(project_id)
+    return services.list_project_repos(project_id, actor=actor_ctx.get())
 
 
 # ── AP-125: Run artifacts ──────────────────────────────────────────────────────
@@ -662,6 +679,7 @@ async def register_run_artifact(
     try:
         return forge_services.register_run_artifact(
             run_id=run_id, url=url, label=label, kind=kind,
+            actor=actor_ctx.get(),
         )
     except Exception as exc:
         logger.error(f"register_run_artifact failed: {exc}\n{traceback.format_exc()}")

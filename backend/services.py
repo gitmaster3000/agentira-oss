@@ -14,7 +14,7 @@ from backend.models import (
     Role, Permission, RolePermission, ProfilePermission, Status,
     ProjectMember, Notification, TaskCommit, Epic, OAuthAccount, Org
 )
-from backend.auth import has_permission
+from backend.auth import has_permission, project_ids_for_actor, require_project_access
 from backend.notifications import broker
 from backend import agent_notifier
 from backend.deploy.manager import DeploymentManager
@@ -27,6 +27,70 @@ import secrets
 from backend import passwords
 
 logger = logging.getLogger("agentira.services")
+
+
+def authorize_project_access(
+    project_id: str,
+    actor: str,
+    access: str = "read",
+) -> None:
+    """Public boundary helper for routes that delegate outside this module."""
+    with _session() as db:
+        require_project_access(db, actor, project_id, access)
+
+
+def authorize_task_access(
+    task_id: str,
+    actor: str,
+    access: str = "read",
+) -> Task:
+    """Resolve a direct task reference and enforce its owning project."""
+    with _session() as db:
+        task = _resolve_task(db, task_id)
+        if not task:
+            raise ValueError("Task not found")
+        require_project_access(db, actor, task.project_id, access)
+        return task
+
+
+def authorize_epic_access(
+    epic_id: str,
+    actor: str,
+    access: str = "read",
+) -> Epic:
+    """Resolve a direct epic reference and enforce its owning project."""
+    with _session() as db:
+        epic = db.get(Epic, epic_id)
+        if not epic:
+            raise ValueError("Epic not found")
+        require_project_access(db, actor, epic.project_id, access)
+        return epic
+
+
+def authorize_attachment_access(
+    attachment_id: str,
+    actor: str,
+    access: str = "read",
+) -> Attachment:
+    """Resolve any attachment shape to its project before authorization."""
+    with _session() as db:
+        attachment = db.get(Attachment, attachment_id)
+        if not attachment:
+            raise ValueError("Attachment not found")
+        if attachment.project_id:
+            project_id = attachment.project_id
+        elif attachment.task_id:
+            task = db.get(Task, attachment.task_id)
+            project_id = task.project_id if task else None
+        elif attachment.epic_id:
+            epic = db.get(Epic, attachment.epic_id)
+            project_id = epic.project_id if epic else None
+        else:
+            project_id = None
+        if not project_id:
+            raise PermissionError("Project resource not found or access denied")
+        require_project_access(db, actor, project_id, access)
+        return attachment
 
 def _hash_password(password: str) -> str:
     """Hash a password for storage (bcrypt — AP-194)."""
@@ -640,8 +704,9 @@ def list_projects(actor: str = "system") -> list[dict]:
         return [_project_to_dict(p, task_count=counts.get(p.id, 0)) for p in projects]
 
 
-def get_project(project_id: str) -> dict | None:
+def get_project(project_id: str, actor: str = "system") -> dict | None:
     with _session() as db:
+        require_project_access(db, actor, project_id, "read")
         p = db.get(Project, project_id)
         return _project_to_dict(p) if p else None
 
@@ -660,8 +725,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    workspace_kind: Optional[str] = None,
                    workflow_enabled: Optional[bool] = None,
                    workflow_roles_json: Optional[str] = None,
-                   ready_checks_ttl_seconds: Optional[int] = None) -> dict:
+                   ready_checks_ttl_seconds: Optional[int] = None,
+                   actor: str = "system") -> dict:
     with _session() as db:
+        require_project_access(db, actor, project_id, "write")
         p = db.get(Project, project_id)
         if not p:
             raise ValueError(f"Project {project_id} not found")
@@ -886,7 +953,7 @@ def get_deployment_logs(project_id: str, deployment_id: str, *, cursor: int = 0)
         return _deploy_flow.get_logs(db, project_id, deployment_id, cursor=cursor)
 
 
-def delete_project(project_id: str) -> bool:
+def delete_project(project_id: str, actor: str = "system") -> bool:
     """Cascade-delete a project and everything it owns: tasks, epics, members,
     activities, attachments (rows + on-disk files), forge runs, and chats.
 
@@ -898,6 +965,7 @@ def delete_project(project_id: str) -> bool:
     from backend.forge.repos import project_purge
     from backend import attachments
     with _session() as db:
+        require_project_access(db, actor, project_id, "write")
         p = db.get(Project, project_id)
         if not p:
             return False
@@ -915,6 +983,7 @@ def delete_project(project_id: str) -> bool:
 def add_project_member(project_id: str, profile_name: str, actor: str = "system") -> dict:
     """Add a user to a project."""
     with _session() as db:
+        require_project_access(db, actor, project_id, "membership_admin")
         p = db.get(Project, project_id)
         if not p:
             raise ValueError(f"Project {project_id} not found")
@@ -939,9 +1008,10 @@ def add_project_member(project_id: str, profile_name: str, actor: str = "system"
         return _project_to_dict(p)
 
 
-def list_project_members(project_id: str) -> list[dict]:
+def list_project_members(project_id: str, actor: str = "system") -> list[dict]:
     """Return all members of a project as profile dicts."""
     with _session() as db:
+        require_project_access(db, actor, project_id, "read")
         p = db.get(Project, project_id)
         if not p:
             return []
@@ -959,9 +1029,14 @@ def list_project_members(project_id: str) -> list[dict]:
         return [_profile_to_dict(pm.profile) for pm in members]
 
 
-def remove_project_member(project_id: str, profile_name: str) -> bool:
+def remove_project_member(
+    project_id: str,
+    profile_name: str,
+    actor: str = "system",
+) -> bool:
     """Remove a user from a project and clear their task assignments."""
     with _session() as db:
+        require_project_access(db, actor, project_id, "membership_admin")
         p = db.get(Project, project_id)
         prof = _get_profile_by_name(db, profile_name)
         if not p or not prof:
@@ -1013,6 +1088,7 @@ def _epic_to_dict(e: Epic, task_count: Optional[int] = None) -> dict:
 
 def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", actor: str = "system") -> dict:
     with _session() as db:
+        require_project_access(db, actor, project_id, "write")
         project = db.get(Project, project_id)
         if not project:
             raise ValueError(f"Project {project_id} not found")
@@ -1033,16 +1109,9 @@ def create_epic(project_id: str, title: str, description: str = "", color: str =
 def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[dict]:
     with _session() as db:
         q = db.query(Epic)
-
-        if not has_permission(db, actor, "project.view_all"):
-            profile = _get_profile_by_name(db, actor)
-            if not profile:
-                return []
-            my_project_ids = [
-                pm.project_id for pm in 
-                db.query(ProjectMember.project_id).filter(ProjectMember.profile_id == profile.id).all()
-            ]
-            q = q.filter(Epic.project_id.in_(my_project_ids))
+        project_ids = project_ids_for_actor(db, actor)
+        if project_ids is not None:
+            q = q.filter(Epic.project_id.in_(project_ids))
 
         if project_id:
             q = q.filter(Epic.project_id == project_id)
@@ -1051,19 +1120,22 @@ def list_epics(project_id: Optional[str] = None, actor: str = "system") -> list[
         counts = _batch_epic_task_counts(db, [e.id for e in epics])
         return [_epic_to_dict(e, task_count=counts.get(e.id, 0)) for e in epics]
 
-def get_epic(epic_id: str) -> dict | None:
+def get_epic(epic_id: str, actor: str = "system") -> dict | None:
     """Single-epic fetch — returns the dict or None if not found."""
     with _session() as db:
         epic = db.get(Epic, epic_id)
+        if epic:
+            require_project_access(db, actor, epic.project_id, "read")
         return _epic_to_dict(epic) if epic else None
 
 
-def list_epic_tasks(epic_id: str) -> list[dict]:
+def list_epic_tasks(epic_id: str, actor: str = "system") -> list[dict]:
     """All tasks linked to this epic, newest first."""
     with _session() as db:
         epic = db.get(Epic, epic_id)
         if not epic:
             return []
+        require_project_access(db, actor, epic.project_id, "read")
         tasks = (db.query(Task)
                  .filter(Task.epic_id == epic_id)
                  .order_by(Task.updated_at.desc())
@@ -1076,6 +1148,7 @@ def update_epic(epic_id: str, title: Optional[str] = None, description: Optional
         epic = db.get(Epic, epic_id)
         if not epic:
             raise ValueError(f"Epic {epic_id} not found")
+        require_project_access(db, actor, epic.project_id, "write")
         changes = []
         if title is not None and title != epic.title:
             epic.title = title
@@ -1093,11 +1166,12 @@ def update_epic(epic_id: str, title: Optional[str] = None, description: Optional
             db.refresh(epic)
         return _epic_to_dict(epic)
 
-def delete_epic(epic_id: str) -> bool:
+def delete_epic(epic_id: str, actor: str = "system") -> bool:
     with _session() as db:
         epic = db.get(Epic, epic_id)
         if not epic:
             return False
+        require_project_access(db, actor, epic.project_id, "write")
         # Unlink tasks before deleting
         for t in epic.tasks:
             t.epic_id = None
@@ -1143,9 +1217,9 @@ def list_tasks(
     return tasks.TaskService().list(project_id, status, assignee, priority, actor)
 
 
-def get_task(task_id: str) -> dict | None:
+def get_task(task_id: str, actor: str = "system") -> dict | None:
     from backend import tasks
-    return tasks.TaskService().get(task_id)
+    return tasks.TaskService().get(task_id, actor)
 
 
 def update_task(
@@ -1179,9 +1253,9 @@ def move_task(task_id: str, new_status: str, actor: str = "system",
                                     record_transition=record_transition)
 
 
-def delete_task(task_id: str) -> bool:
+def delete_task(task_id: str, actor: str = "system") -> bool:
     from backend import tasks
-    return tasks.TaskService().delete(task_id)
+    return tasks.TaskService().delete(task_id, actor)
 
 
 # ── Activity / comments ─────────────────────────────────────────────────
@@ -1191,6 +1265,7 @@ def add_comment(task_id: str, comment: str, actor: str = "system") -> dict:
         task = _resolve_task(db, task_id)
         if not task:
             raise ValueError(f"Task {task_id} not found")
+        require_project_access(db, actor, task.project_id, "write")
         task_id = task.id
         # Capture while the session is open (task detaches after the block).
         _wake_on_comment = bool(getattr(task.project, "wake_on_comment", False))
@@ -1289,11 +1364,20 @@ def _deliver_comment_to_agent(*, task_id: str, assignee_name: str,
         )
 
 
-def get_activity(task_id: str, limit: int = 100, offset: int = 0) -> list[dict]:
+def get_activity(
+    task_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    actor: str = "system",
+) -> list[dict]:
     with _session() as db:
+        task = _resolve_task(db, task_id)
+        if not task:
+            return []
+        require_project_access(db, actor, task.project_id, "read")
         activities = (
             db.query(Activity)
-            .filter(Activity.task_id == task_id)
+            .filter(Activity.task_id == task.id)
             .order_by(Activity.created_at.desc())
             .offset(offset)
             .limit(limit)
@@ -1323,10 +1407,11 @@ def _project_repo_to_dict(r) -> dict:
     }
 
 
-def list_project_repos(project_id: str) -> list[dict]:
+def list_project_repos(project_id: str, actor: str = "system") -> list[dict]:
     """AP-121: enumerate repos attached to a project."""
     from backend.models import ProjectRepo
     with _session() as db:
+        require_project_access(db, actor, project_id, "read")
         rows = (db.query(ProjectRepo)
                   .filter(ProjectRepo.project_id == project_id)
                   .order_by(ProjectRepo.is_primary.desc(),
@@ -1663,9 +1748,14 @@ def set_webhook_config(project_id: str, enabled: bool, rules: list[dict], token:
         return cfg
 
 
-def get_project_activity(project_id: str, limit: int = 50) -> list[dict]:
+def get_project_activity(
+    project_id: str,
+    limit: int = 50,
+    actor: str = "system",
+) -> list[dict]:
     """Return recent activity across all tasks in a project, newest first."""
     with _session() as db:
+        require_project_access(db, actor, project_id, "read")
         activities = (
             db.query(Activity)
             .filter(Activity.project_id == project_id)
@@ -2020,26 +2110,52 @@ def revoke_profile_permission(profile_id: str, codename: str) -> bool:
 from backend import attachments as _attachments
 
 
-def add_attachment(task_id: str, filename: str, file_bytes: bytes, content_type: str = "application/octet-stream", uploaded_by: str = "system") -> dict:
+def add_attachment(
+    task_id: str,
+    filename: str,
+    file_bytes: bytes,
+    content_type: str = "application/octet-stream",
+    uploaded_by: str = "system",
+    actor: str = "system",
+) -> dict:
+    authorize_task_access(task_id, actor, "write")
     return _attachments.add(
         task_id=task_id, filename=filename, file_bytes=file_bytes,
         content_type=content_type, uploaded_by=uploaded_by,
     )
 
 
-def list_attachments(task_id: str) -> list[dict]:
+def list_attachments(task_id: str, actor: str = "system") -> list[dict]:
+    authorize_task_access(task_id, actor, "read")
     return _attachments.list_for_task(task_id)
 
 
-def get_attachment(attachment_id: str) -> tuple[dict, str] | None:
+def list_project_attachments(
+    project_id: str,
+    actor: str = "system",
+) -> list[dict]:
+    authorize_project_access(project_id, actor, "read")
+    return _attachments.list_for_project(project_id)
+
+
+def get_attachment(
+    attachment_id: str,
+    actor: str = "system",
+) -> tuple[dict, str] | None:
+    authorize_attachment_access(attachment_id, actor, "read")
     return _attachments.get(attachment_id)
 
 
-def get_attachment_bytes(attachment_id: str) -> tuple[dict, bytes] | None:
+def get_attachment_bytes(
+    attachment_id: str,
+    actor: str = "system",
+) -> tuple[dict, bytes] | None:
+    authorize_attachment_access(attachment_id, actor, "read")
     return _attachments.get_bytes(attachment_id)
 
 
-def delete_attachment(attachment_id: str) -> bool:
+def delete_attachment(attachment_id: str, actor: str = "system") -> bool:
+    authorize_attachment_access(attachment_id, actor, "write")
     return _attachments.delete(attachment_id)
 
 
@@ -2671,7 +2787,14 @@ def _seed_defaults(db: Session) -> None:
     db.flush()
 
     # CRUD + Scope permissions
-    for perm in ["task.create", "task.delete", "project.manage", "project.view_all", "transition:*"]:
+    for perm in [
+        "task.create",
+        "task.delete",
+        "project.manage",
+        "project.view_all",
+        "project.write_all",
+        "transition:*",
+    ]:
         if not db.query(Permission).filter(Permission.codename == perm).first():
             db.add(Permission(codename=perm))
     db.flush()

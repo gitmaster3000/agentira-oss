@@ -19,7 +19,7 @@ from typing import Optional
 
 from backend import services
 from backend import agent_notifier
-from backend.auth import has_permission
+from backend.auth import project_ids_for_actor, require_project_access
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
@@ -126,16 +126,7 @@ class TaskService:
             if not project:
                 raise ValueError(f"Project {project_id} not found")
 
-            if not has_permission(db, actor, "project.view_all"):
-                profile = services._get_profile_by_name(db, actor)
-                if not profile:
-                    raise PermissionError(f"User {actor} not found")
-                is_member = db.query(ProjectMember).filter_by(
-                    project_id=project_id, profile_id=profile.id
-                ).first()
-                if not is_member:
-                    raise PermissionError(
-                        f"User {actor} is not a member of project {project_id}")
+            require_project_access(db, actor, project_id, "write")
 
             status_id = services._get_status_id(db, status)
             start_dt = _parse_dt(start_date)
@@ -193,20 +184,9 @@ class TaskService:
         with services._session() as db:
             q = core_tasks_repo.with_list_relations(db.query(Task))
 
-            if not has_permission(db, actor, "project.view_all"):
-                profile = services._get_profile_by_name(db, actor)
-                if not profile:
-                    return []
-                my_project_ids = [
-                    pm.project_id for pm in
-                    db.query(ProjectMember.project_id).filter(
-                        ProjectMember.profile_id == profile.id).all()
-                ]
-                from sqlalchemy import or_
-                q = q.filter(or_(
-                    Task.project_id.in_(my_project_ids),
-                    Task.assignee == actor,
-                ))
+            project_ids = project_ids_for_actor(db, actor)
+            if project_ids is not None:
+                q = q.filter(Task.project_id.in_(project_ids))
 
             if project_id:
                 q = q.filter(Task.project_id == project_id)
@@ -234,11 +214,12 @@ class TaskService:
                 out.append(d)
             return out
 
-    def get(self, task_id: str) -> dict | None:
+    def get(self, task_id: str, actor: str = "system") -> dict | None:
         with services._session() as db:
             t = tasks_repo.resolve_ref(db, task_id)
             if not t:
                 return None
+            require_project_access(db, actor, t.project_id, "read")
             d = services._task_to_dict(t, attachments_count=services._attachment_count(db, t.id))
             info = services._active_run_agents(db, [t.id]).get(t.id)
             d["agent_active"] = info is not None
@@ -270,6 +251,7 @@ class TaskService:
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             task_id = task.id
+            require_project_access(db, actor, task.project_id, "write")
 
             changes: list[str] = []
             diff: dict = {}
@@ -377,6 +359,7 @@ class TaskService:
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             task_id = task.id
+            require_project_access(db, actor, task.project_id, "write")
 
             old = task.status.name
             if old == new_status:
@@ -447,11 +430,12 @@ class TaskService:
         return result
 
     # ── delete ────────────────────────────────────────────────────────────
-    def delete(self, task_id: str) -> bool:
+    def delete(self, task_id: str, actor: str = "system") -> bool:
         with services._session() as db:
             task = tasks_repo.resolve_ref(db, task_id)
             if not task:
                 return False
+            require_project_access(db, actor, task.project_id, "write")
             tasks_repo.delete_with_children(db, task)
             db.commit()
             return True

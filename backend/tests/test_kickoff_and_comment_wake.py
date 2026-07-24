@@ -92,6 +92,7 @@ def _make_agent_for_task(s_name="backend-agent"):
 
     sa = core_services.create_service_account(s_name)
     project = core_services.create_project("P", actor="system")
+    core_services.add_project_member(project["id"], s_name, actor="system")
     task = core_services.create_task(project["id"], "do thing", actor="system",
                                      assignee=s_name)
     # Bind a Forge agent to this profile

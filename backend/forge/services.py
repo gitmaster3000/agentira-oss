@@ -586,7 +586,7 @@ def _parse_artifacts(raw: str | None) -> list[dict]:
 
 
 def register_run_artifact(*, run_id: str, url: str, label: str = "",
-                          kind: str = "url") -> dict:
+                          kind: str = "url", actor: str = "system") -> dict:
     """AP-125: append a structured artifact to a Run.
 
     Called by the agent via the MCP tool of the same name. Idempotent on
@@ -608,6 +608,10 @@ def register_run_artifact(*, run_id: str, url: str, label: str = "",
         r = db.query(Run).filter(Run.id == run_id).first()
         if not r:
             return {"error": "run_not_found"}
+        if not r.project_id:
+            raise PermissionError("Project resource not found or access denied")
+        from backend.auth import require_project_access
+        require_project_access(db, actor, r.project_id, "write")
         existing = _parse_artifacts(r.artifacts_json)
         # Idempotent: if the same (url, kind) is already present, just
         # refresh the label (the agent may have polished it) and return.
@@ -1275,12 +1279,16 @@ def _run_org_scope():
     )
 
 
-def get_active_runs() -> dict:
+def get_active_runs(actor: str = "system") -> dict:
     """Get count and list of active runs for status indicator."""
     with _session() as db:
+        from backend.auth import project_ids_for_actor
         q = db.query(Run).filter(
             Run.status.in_([RunStatus.READY, RunStatus.PENDING, RunStatus.RUNNING, RunStatus.CANCELLING])
         ).filter(Run.trigger_event != "chat.shadow").filter(_run_org_scope())
+        project_ids = project_ids_for_actor(db, actor)
+        if project_ids is not None:
+            q = q.filter(Run.project_id.in_(project_ids))
         runs = q.order_by(Run.created_at.desc()).all()
         return {
             "count": len(runs),
@@ -1290,9 +1298,14 @@ def get_active_runs() -> dict:
 
 def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
-              limit: int = 100, offset: int = 0) -> list[dict]:
+              limit: int = 100, offset: int = 0,
+              actor: str = "system") -> list[dict]:
     with _session() as db:
+        from backend.auth import project_ids_for_actor
         q = db.query(Run)
+        project_ids = project_ids_for_actor(db, actor)
+        if project_ids is not None:
+            q = q.filter(Run.project_id.in_(project_ids))
         if agent_id:
             q = q.filter(Run.agent_id == agent_id)
         if project_id:
@@ -1321,9 +1334,11 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
         return [_run_to_dict(r) for r in runs]
 
 
-def get_run(run_id: str) -> dict | None:
+def get_run(run_id: str, actor: str = "system") -> dict | None:
     with _session() as db:
         r = db.query(Run).filter(Run.id == run_id).filter(_run_org_scope()).first()
+        if r:
+            _assert_run_access(db, r, actor)
         return _run_to_dict(r) if r else None
 
 
@@ -1361,21 +1376,13 @@ def _assert_run_access(db: Session, run: Run, actor: str) -> None:
     Rule: project.view_all wildcard → always allowed. Otherwise the actor
     must be a member of the run's project. Runs without a project_id are
     only visible to wildcard holders (defensive default)."""
-    from backend.auth import has_permission
-    from backend.models import ProjectMember
-    if has_permission(db, actor, "project.view_all"):
-        return
+    from backend.auth import require_project_access
     if not run.project_id:
-        raise PermissionError(f"'{actor}' lacks access to run {run.id}")
-    profile = db.query(Profile).filter(Profile.name == actor).first()
-    if not profile:
-        raise PermissionError(f"'{actor}' is not a known profile")
-    is_member = (db.query(ProjectMember)
-                   .filter_by(project_id=run.project_id, profile_id=profile.id)
-                   .first())
-    if not is_member:
-        raise PermissionError(
-            f"'{actor}' is not a member of project {run.project_id}")
+        from backend.auth import has_permission
+        if has_permission(db, actor, "project.view_all"):
+            return
+        raise PermissionError("Project resource not found or access denied")
+    require_project_access(db, actor, run.project_id, "read")
 
 
 def get_run_detail(run_id: str, *, actor: str = "system") -> dict:
@@ -3816,9 +3823,15 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
     return {"ok": True, "run": run_payload}
 
 
-def list_runs_for_task(task_id: str) -> list[dict]:
+def list_runs_for_task(task_id: str, actor: str = "system") -> list[dict]:
     """Return all runs scheduled against a task, newest first."""
     with _session() as db:
+        from backend.auth import require_project_access
+        from backend.models import Task
+        task = db.get(Task, task_id)
+        if not task:
+            return []
+        require_project_access(db, actor, task.project_id, "read")
         runs = (db.query(Run)
                 .filter(Run.task_id == task_id)
                 .filter(_run_org_scope())
@@ -4426,7 +4439,7 @@ def get_trigger_events(trace_id: str) -> list[dict]:
         return [_bounded_message_dict(m) for m in msgs]
 
 
-def get_run_events(run_id: str) -> list[dict]:
+def get_run_events(run_id: str, actor: str = "system") -> list[dict]:
     """Return the newest messages tagged with this run_id (covers any number
     of triggers that fired against the run; bounded window, ascending order
     within it).
@@ -4434,8 +4447,10 @@ def get_run_events(run_id: str) -> list[dict]:
     Org-scoped via the run's project/agent (see _run_org_scope)."""
     with _session() as db:
         # Gate on run visibility first; returns [] for a foreign-org run_id.
-        if not db.query(Run.id).filter(Run.id == run_id, _run_org_scope()).first():
+        run = db.query(Run).filter(Run.id == run_id, _run_org_scope()).first()
+        if not run:
             return []
+        _assert_run_access(db, run, actor)
         msgs = (db.query(AgentMessage)
                 .filter(AgentMessage.run_id == run_id)
                 .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
@@ -4777,5 +4792,3 @@ def send_runtime_message(
             "error": "Agent has no connected runtime. Start the Agentira "
                      "daemon on the agent's machine to run this agent.",
         }
-
-

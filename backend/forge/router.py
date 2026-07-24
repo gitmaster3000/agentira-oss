@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, Field
 
 from backend.forge import services
-from backend.jwt_auth import require_admin
+from backend.jwt_auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/forge", tags=["forge"])
 
@@ -426,19 +426,20 @@ def agent_heartbeat(agent_id: str, body: HeartbeatRequest):
 # ── Run endpoints ────────────────────────────────────────────────────────
 
 @router.get("/runs/active")
-def get_active_runs():
+def get_active_runs(actor: str = Depends(get_current_user)):
     """Get active runs (READY, PENDING, RUNNING, CANCELLING) for status indicator."""
-    return services.get_active_runs()
+    return services.get_active_runs(actor=actor)
 
 
 @router.get("/runs")
 def list_runs(agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
-              limit: int = 100, offset: int = 0):
+              limit: int = 100, offset: int = 0,
+              actor: str = Depends(get_current_user)):
     try:
         return services.list_runs(agent_id=agent_id, project_id=project_id,
                                   status=status, outcome=outcome,
-                                  limit=limit, offset=offset)
+                                  limit=limit, offset=offset, actor=actor)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
@@ -528,13 +529,13 @@ def run_ready_checks(run_id: str):
 
 
 @router.get("/tasks/{task_id}/runs")
-def list_task_runs(task_id: str):
-    return services.list_runs_for_task(task_id)
+def list_task_runs(task_id: str, actor: str = Depends(get_current_user)):
+    return services.list_runs_for_task(task_id, actor=actor)
 
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: str):
-    result = services.get_run(run_id)
+def get_run(run_id: str, actor: str = Depends(get_current_user)):
+    result = services.get_run(run_id, actor=actor)
     if not result:
         raise HTTPException(404, "Run not found")
     return result
@@ -547,9 +548,9 @@ def get_trigger_events(trace_id: str):
 
 
 @router.get("/runs/{run_id}/events")
-def get_run_events(run_id: str):
+def get_run_events(run_id: str, actor: str = Depends(get_current_user)):
     """Messages tagged with this run_id (across all of its triggers)."""
-    return services.get_run_events(run_id)
+    return services.get_run_events(run_id, actor=actor)
 
 
 @router.post("/runs/{run_id}/cancel")
@@ -992,4 +993,3 @@ def daemon_connections():
     """List currently connected daemon IDs (debug endpoint)."""
     from backend.forge.ws_dispatch import hub
     return {"connected": hub.connected_daemon_ids()}
-

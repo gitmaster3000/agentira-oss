@@ -13,12 +13,11 @@ from __future__ import annotations
 import asyncio
 import threading
 import uuid
-from unittest.mock import patch
 
 import pytest
 
-from backend import services as core_services
 from backend.forge import services as forge_services
+from backend.forge.mcp_registry import build_mcp_config
 from backend.forge.models import ForgeRuntime
 
 
@@ -31,9 +30,13 @@ def test_create_agent_mints_api_key():
     """A managed agent's backing profile must get an api_key so the
     `agentira` MCP server can authenticate it."""
     with forge_services._session() as db:
-        rt = ForgeRuntime(id=uuid.uuid4().hex[:12], daemon_id="d1",
-                          provider="claude", binary_path="/bin/claude",
-                          status="online")
+        rt = ForgeRuntime(
+            id=uuid.uuid4().hex[:12],
+            daemon_id="d1",
+            provider="claude",
+            binary_path="/bin/claude",
+            status="online",
+        )
         db.add(rt)
         db.commit()
         rt_id = rt.id
@@ -42,11 +45,37 @@ def test_create_agent_mints_api_key():
     assert "error" not in result
 
     from backend.models import Profile
+
     with forge_services._session() as db:
         prof = db.query(Profile).filter(Profile.name == "demo-agent").first()
         assert prof is not None
         assert prof.api_key, "create_agent must mint an api_key"
         assert len(prof.api_key) >= 32
+
+
+def test_agent_override_cannot_replace_managed_agentira_identity():
+    """A stale/global MCP override must not replace the agent's bearer key."""
+    config = build_mcp_config(
+        agent_mcp_servers=[],
+        agent_id="damien-id",
+        project_id="project-id",
+        agent_api_key="damien-own-key",
+        mcp_config_override={
+            "mcpServers": {
+                "agentira": {
+                    "type": "http",
+                    "url": "https://wrong.example/mcp",
+                    "headers": {"Authorization": "Bearer gpt-external-key"},
+                },
+                "custom": {"command": "custom-server"},
+            },
+        },
+    )
+
+    agentira = config["mcpServers"]["agentira"]
+    assert agentira["headers"]["Authorization"] == "Bearer damien-own-key"
+    assert agentira["url"] != "https://wrong.example/mcp"
+    assert config["mcpServers"]["custom"] == {"command": "custom-server"}
 
 
 def test_dispatch_coro_runs_in_async_context():

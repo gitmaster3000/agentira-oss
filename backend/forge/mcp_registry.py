@@ -33,7 +33,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
         "url": os.environ.get("AGENTIRA_MCP_URL", "http://localhost:8000/mcp"),
         "auth_env_var": "AGENTIRA_API_KEY",
         "description": "Read/write tasks, projects, comments. Required for finish_run.",
-        "auto": True,   # always injected; users can't deselect
+        "auto": True,  # always injected; users can't deselect
     },
     "memory": {
         "transport": "stdio",
@@ -64,12 +64,14 @@ def list_servers(*, include_auto: bool = True) -> list[dict[str, Any]]:
     for name, defn in REGISTRY.items():
         if not include_auto and defn.get("auto"):
             continue
-        out.append({
-            "name": name,
-            "transport": defn["transport"],
-            "description": defn.get("description", ""),
-            "auto": defn.get("auto", False),
-        })
+        out.append(
+            {
+                "name": name,
+                "transport": defn["transport"],
+                "description": defn.get("description", ""),
+                "auto": defn.get("auto", False),
+            }
+        )
     return out
 
 
@@ -77,14 +79,18 @@ def get_server(name: str) -> dict[str, Any] | None:
     return REGISTRY.get(name)
 
 
-def build_mcp_config(*, agent_mcp_servers: list[str] | None,
-                     agent_id: str, project_id: str | None,
-                     agent_api_key: str | None = None,
-                     mcp_config_override: str | dict | None = None,
-                     disabled_servers: list[str] | None = None,
-                     agent_home_path: str | None = None,
-                     repo_path: str | None = None,
-                     memory_root: str = "~/.agentira/memory") -> dict[str, Any]:
+def build_mcp_config(
+    *,
+    agent_mcp_servers: list[str] | None,
+    agent_id: str,
+    project_id: str | None,
+    agent_api_key: str | None = None,
+    mcp_config_override: str | dict | None = None,
+    disabled_servers: list[str] | None = None,
+    agent_home_path: str | None = None,
+    repo_path: str | None = None,
+    memory_root: str = "~/.agentira/memory",
+) -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
 
@@ -113,7 +119,7 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
         if defn.get("auto_when_project") and project_id:
             selected.add(name)
     # agent's choices, filtered against the registry
-    for name in (agent_mcp_servers or []):
+    for name in agent_mcp_servers or []:
         if name in REGISTRY and not REGISTRY[name].get("auto"):
             selected.add(name)
 
@@ -146,7 +152,9 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
             if agent_home_path:
                 path = os.path.join(
                     os.path.expanduser(agent_home_path),
-                    "memory", scope_proj, "memory.json",
+                    "memory",
+                    scope_proj,
+                    "memory.json",
                 )
             else:
                 path = (
@@ -164,6 +172,7 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
     override_obj: dict[str, Any] | None = None
     if isinstance(mcp_config_override, str) and mcp_config_override.strip():
         import json as _json
+
         try:
             override_obj = _json.loads(mcp_config_override)
         except Exception:
@@ -175,7 +184,12 @@ def build_mcp_config(*, agent_mcp_servers: list[str] | None,
         if not isinstance(override_servers, dict):
             override_servers = override_obj  # bare {name: {...}} form
         for k, v in (override_servers or {}).items():
-            if isinstance(v, dict):
+            # Auto servers are trust boundaries, not user customization
+            # points. In particular, allowing an agent-level override to
+            # replace ``agentira`` also replaces its generated Authorization
+            # header and makes the managed agent act as whichever unrelated
+            # identity supplied that static credential.
+            if isinstance(v, dict) and not REGISTRY.get(k, {}).get("auto"):
                 mcp_servers[k] = v
 
     # Per-agent kill switch — applied LAST so it can strip auto-injected
