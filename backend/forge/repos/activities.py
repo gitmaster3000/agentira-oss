@@ -51,3 +51,39 @@ def add_task_comment(db, *, project_id: str, task_id: str,
     """Post a comment on the task feed. Caller owns the commit."""
     db.add(Activity(project_id=project_id, task_id=task_id, actor=actor,
                     action="commented", detail=detail))
+
+
+def record_review_verdict(db, *, project_id: str, task_id: str, actor: str,
+                          verdict: str, note: str = "") -> None:
+    """Record a reviewer's STRUCTURED verdict (WFE Phase 2).
+
+    The verdict lives in a dedicated `action == "review_verdict"` row with the
+    machine-readable value as its own JSON `diff` field — NOT prose in `detail`
+    that a gate would string-match. `actor` is the server-injected reviewer
+    profile name, so the verdict can't be spoofed by run content. Caller owns
+    the commit."""
+    import json as _json
+    db.add(Activity(project_id=project_id, task_id=task_id, actor=actor,
+                    action="review_verdict",
+                    detail=(note or f"Review verdict: {verdict}"),
+                    diff=_json.dumps({"verdict": verdict})))
+
+
+def latest_review_verdict(db, *, task_id: str, actor: str,
+                          since: datetime) -> str | None:
+    """The actor's most recent structured review verdict on a task at/after
+    `since` — the typed value ("approve" / "reject"), or None if none exists."""
+    import json as _json
+    row = (db.query(Activity)
+             .filter(Activity.task_id == task_id,
+                     Activity.action == "review_verdict",
+                     Activity.actor == actor,
+                     Activity.created_at >= since)
+             .order_by(Activity.created_at.desc())
+             .first())
+    if row is None:
+        return None
+    try:
+        return (_json.loads(row.diff or "{}") or {}).get("verdict")
+    except (ValueError, TypeError):
+        return None

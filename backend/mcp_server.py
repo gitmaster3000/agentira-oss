@@ -596,6 +596,26 @@ async def finish_run(
         raise
 
 @mcp.tool()
+async def submit_review(run_id: str, approve: bool, note: str = "",
+                        ctx: Context = None) -> dict:
+    """Record your STRUCTURED review verdict for the task you're reviewing.
+
+    This is how a reviewer approves or rejects — NOT a comment. The workflow
+    engine merges a branch only when a typed APPROVE verdict from THIS review
+    run exists; a free-text "REVIEW: APPROVE" comment does nothing. Call this
+    once you've checked the PR diff against the DoD.
+
+    Arguments:
+      run_id:  your AGENTIRA_RUN_ID.
+      approve: True to approve the work for merge, False to reject it.
+      note:    optional one-line rationale (shown in the task feed).
+    """
+    from backend.forge import services as forge_services
+    actor = actor_ctx.get()
+    return forge_services.submit_review(run_id, approve=approve, actor=actor,
+                                        note=note)
+
+@mcp.tool()
 async def get_my_involvement(ctx: Context = None) -> dict:
     """Summarize what THIS agent has been involved in across projects.
 

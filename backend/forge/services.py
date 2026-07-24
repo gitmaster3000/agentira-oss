@@ -3823,6 +3823,38 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
     return {"ok": True, "run": run_payload}
 
 
+def submit_review(run_id: str, *, approve: bool, actor: str,
+                  note: str = "") -> dict:
+    """Record a reviewer's STRUCTURED verdict for the task under review (WFE
+    Phase 2). This is the ONLY way an approval becomes merge evidence — the
+    workflow driver reads the typed `review_verdict` row, never a comment.
+
+    `actor` is the server-injected reviewer profile name (from the MCP session);
+    the driver only counts a verdict whose actor matches the review run's own
+    agent, so it can't be posted on someone else's behalf. Recording a verdict
+    is a write on the task, so it goes through the same project boundary as
+    every other write (AP-334/#245) — a non-member can't approve a merge."""
+    from backend.forge.repos import activities as activities_repo
+    from backend.auth import require_project_access
+    from backend.models import Task
+    verdict = "approve" if approve else "reject"
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).first()
+        if not r:
+            return {"ok": False, "error": "Run not found"}
+        if not r.task_id:
+            return {"ok": False, "error": "Run is not tied to a task"}
+        task = db.get(Task, r.task_id)
+        if not task:
+            return {"ok": False, "error": "Task not found"}
+        require_project_access(db, actor, task.project_id, "write")
+        activities_repo.record_review_verdict(
+            db, project_id=task.project_id, task_id=task.id, actor=actor,
+            verdict=verdict, note=note)
+        db.commit()
+    return {"ok": True, "verdict": verdict, "task_id": r.task_id}
+
+
 def list_runs_for_task(task_id: str, actor: str = "system") -> list[dict]:
     """Return all runs scheduled against a task, newest first."""
     with _session() as db:

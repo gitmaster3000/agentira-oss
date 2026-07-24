@@ -467,7 +467,7 @@ def _rejection_demotion(db, *, run: Run, task: Task,
     AP-379/AP-383: a backward move INTO the review column (e.g. an operator
     manually moving done→review to force a re-review) is NOT a rejection — the
     task is sitting in review awaiting a verdict, and that verdict comes from
-    the review RUN itself (`_review_approved`), never from how the task entered
+    the review RUN's typed evidence (`_human_approval_evidence`), never from how it entered
     the column. Reading done→review as a rejection bounced approved, mergeable
     PRs back to the implementer forever. So only moves landing strictly before
     the review column count. Returns {actor, from, to} or None.
@@ -495,36 +495,29 @@ def _rejection_demotion(db, *, run: Run, task: Task,
     return None
 
 
-def _review_approved(db, *, run: Run, task: Task) -> bool:
-    """Incident fix (2026-07-04, PR #167 merged before its review verdict):
-    a run finishing `succeeded` in the review column only proves the
-    reviewer's SESSION completed cleanly — it is NOT approval. A run that
-    rejects (REQUEST_CHANGES) still reports `succeeded`, and a stray/
-    wrong-role run on the same task (e.g. a mistaken re-dispatch) looks
-    identical to an approving one if the driver trusts the column alone.
-
-    Per AGENTIRA_VISION.md §5.3, only EVIDENCE moves state forward: require
-    an explicit `REVIEW: APPROVE` comment, posted by THIS run's own agent,
-    logged after the run started. `Activity.actor` is server-injected from
-    the authenticated MCP session (see `mcp_server.actor_ctx`) — not
-    prompt-writable text — so this can't be spoofed by run content, and it
-    ties the merge to the specific run that produced it.
-    """
+def _reviewer_name(db, run: Run) -> str | None:
+    """The profile name of the run's own agent — the only actor whose review
+    verdict counts for THIS review (server-injected, not prompt-writable)."""
     if not run.agent_id:
-        return False
+        return None
     agent = db.get(Agent, run.agent_id)
     profile = db.get(Profile, agent.profile_id) if agent and agent.profile_id else None
-    if not profile:
-        return False
-    from backend.models import Activity
-    row = (db.query(Activity)
-             .filter(Activity.task_id == task.id,
-                     Activity.actor == profile.name,
-                     Activity.action == "commented",
-                     Activity.created_at >= run.created_at,
-                     Activity.detail.like("REVIEW: APPROVE%"))
-             .first())
-    return row is not None
+    return profile.name if profile else None
+
+
+def _human_approval_evidence(db, *, run: Run, task: Task):
+    """WFE Phase 2: the review verdict comes ONLY from typed evidence.
+
+    Incident fix (2026-07-04, PR #167 merged before its review verdict): a run
+    finishing `succeeded` in the review column proves only that the reviewer's
+    SESSION completed cleanly — it is NOT approval. Approval is a structured
+    `review_verdict` recorded by THIS run's own agent since it started; the old
+    `REVIEW: APPROVE` comment-grep is gone (a forged comment now does nothing).
+    Absent evidence blocks — silence is never approval."""
+    from backend.forge import evidence
+    return evidence.evaluate(
+        "human_approval", task, db,
+        ctx={"reviewer": _reviewer_name(db, run), "since": run.created_at})
 
 
 def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
@@ -725,16 +718,32 @@ def advance_after_run(run_id: str) -> dict:
             if spec.integrate is not None:
                 fails = [f for f in fails
                          if f.name not in ("pr_url_set", "has_branch_or_pr")]
-                if not _review_approved(db, run=run, task=task):
+                # Terminal gate (plan v4 §5): merging requires >=1 typed
+                # evidence.* condition. The human-approval fact is fetched from
+                # the review_verdict store and its snapshot is persisted as its
+                # OWN gate_evaluations row, so a merge-refusal is explainable
+                # from recorded evidence — not a hidden driver decision.
+                approval = _human_approval_evidence(db, run=run, task=task)
+                transitions_repo.record_gate_evaluation(
+                    db, task_id=task.id, from_status=current, to_status=target,
+                    gate_id="evidence:human_approval",
+                    evidence_snapshot={"human_approval": approval.to_dict()},
+                    outcome="allow" if approval.present else "block",
+                    reason="" if approval.present else approval.reason,
+                    duration_ms=int((_time.monotonic() - _started) * 1000),
+                )
+                db.commit()
+                if not approval.present:
                     from backend.models import Activity
                     db.add(Activity(
                         project_id=task.project_id, task_id=task.id,
                         actor="workflow", action="commented",
                         detail=("⛔ **Merge refused** — this run succeeded, but "
-                                "no reviewer approval evidence (`REVIEW: "
-                                "APPROVE`) was found on this task since the "
-                                "run started. The branch stays unmerged until "
-                                "the reviewer records an approval verdict."),
+                                "no verified reviewer approval was found for "
+                                "this task since the run started "
+                                f"({approval.reason}). The branch stays "
+                                "unmerged until the reviewer records an "
+                                "approval verdict (`submit_review`)."),
                     ))
                     db.commit()
                     try:
