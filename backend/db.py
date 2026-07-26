@@ -460,6 +460,22 @@ def _backfill_primary_project_repo(conn: Connection) -> None:
         conn.commit()
 
 
+def backfill_workspace_kind(conn: Connection) -> None:
+    """AP-414: a project with a repo is a git workspace, not a sandbox.
+
+    `workspace_kind` was stamped once and never revisited, so attaching a repo
+    through `project_repos` left the project on 'sandbox' — which blanks the
+    worktree fields at dispatch and drops the agent into an empty directory.
+    Flip those rows (repo_url on the project, or any project_repos row with a
+    remote URL). Idempotent."""
+    conn.execute(text(
+        "UPDATE projects SET workspace_kind='git' "
+        "WHERE workspace_kind='sandbox' AND ("
+        "  (repo_url IS NOT NULL AND repo_url<>'') OR id IN ("
+        "    SELECT project_id FROM project_repos "
+        "    WHERE repo_url IS NOT NULL AND repo_url<>''))"))
+
+
 def _derive_account_type(role_name, runtime_id) -> str:
     """Map a legacy (role_name, runtime_id) pair to a stored account_type.
 
@@ -728,6 +744,9 @@ def run_migrations():
                 conn.execute(text(
                     "UPDATE projects SET workspace_kind='sandbox' "
                     "WHERE workspace_kind IS NULL"))
+            # AP-414: projects that got a repo AFTER the column was stamped
+            # still read 'sandbox' — which provisions an empty dir. Flip them.
+            backfill_workspace_kind(conn)
             # Workflow driver: per-project opt-in + the restricted customer
             # override (role->agent mapping only; the flow is system config).
             added |= _ensure_column(conn, "projects", "workflow_enabled",

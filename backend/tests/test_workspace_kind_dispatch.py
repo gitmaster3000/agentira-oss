@@ -27,8 +27,11 @@ def test_explicit_kind_wins():
 
 
 def test_explicit_kind_overrides_inference():
-    # column says sandbox even though a url is present
-    assert _resolve_workspace_kind(_Proj(workspace_kind="sandbox", repo_url="x")) == "sandbox"
+    # AP-414: a stored 'sandbox' loses to repo presence (it would provision an
+    # empty dir), but an explicit local_folder still wins.
+    assert _resolve_workspace_kind(_Proj(workspace_kind="sandbox", repo_url="x")) == "git"
+    assert _resolve_workspace_kind(
+        _Proj(workspace_kind="local_folder", repo_url="x")) == "local_folder"
 
 
 def test_inference_when_column_blank():

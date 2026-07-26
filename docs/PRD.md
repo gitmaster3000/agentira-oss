@@ -127,7 +127,7 @@ Tabbed/section view; every editable field:
 |---|---|---|
 | **Basics** | `name`, `description`, `key_prefix` | Identity; `key_prefix` drives task keys like `AP-123` |
 | | `conventions_md` | Markdown materialized into every dispatch as `.agentira/CONVENTIONS.md` + sibling `AGENTS.md` / `CLAUDE.md` / `GEMINI.md` symlinks |
-| **Workspace** | `workspace_kind` ∈ {`git`, `local_folder`, `sandbox`} | How the daemon provisions the working copy |
+| **Workspace** | `workspace_kind` ∈ {`git`, `local_folder`, `sandbox`} | How the daemon provisions the working copy. Derived from repo presence: any attached repo (project `repo_url` or a `project_repos` row with a URL) means `git` — a stored `sandbox` is ignored, since it would drop the agent into an empty folder (AP-414). Overridable in Project Settings → Repos → danger zone. |
 | | `repo_path` | Local host filesystem path (same-machine) |
 | | `repo_url` | Remote git URL (daemon clones into `~/.agentira/sources/`) |
 | | `sandbox_mode` ∈ {`""` inherit, `off`, `cwd`, `strict`, `container`} | Project-level containment override |
@@ -497,7 +497,7 @@ Per-run captured: `materialize_reason`, `worktree_path`, `worktree_branch`, `ses
 | `next_task_number` | int | 1 | monotonic counter |
 | `repo_path` | str(500)? | null | local FS path |
 | `repo_url` | str(500)? | null | remote git URL |
-| `workspace_kind` | str(20)? | null→inferred | `git` / `local_folder` / `sandbox` |
+| `workspace_kind` | str(20)? | null→derived | `git` / `local_folder` / `sandbox`; repo presence beats a stored `sandbox` (AP-414) |
 | `conventions_md` | text? | null | materialized at dispatch |
 | `template_name` | str(120)? | null | provenance |
 | `ac_check_types_json` | text? | null | per-template AC checks |

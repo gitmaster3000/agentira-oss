@@ -2252,21 +2252,42 @@ def sync_openclaw_agents() -> list[dict]:
 def _resolve_workspace_kind(project) -> str:
     """Resolve a project's workspace kind: git | sandbox | local_folder.
 
-    The explicit `workspace_kind` column wins; otherwise infer from what the
-    project carries (repo_url → git, repo_path only → local_folder, neither →
-    sandbox), matching the db.py backfill. Threaded into the dispatch frame so
-    the daemon doesn't have to guess git-vs-sandbox from URL presence.
+    The explicit `workspace_kind` column wins EXCEPT for a stale "sandbox" on a
+    project that actually has a repo: sandbox blanks the worktree fields at
+    dispatch, so such a project spawned the agent into an empty directory
+    (AP-414). Repo presence — `repo_url` or any `project_repos` row — means a
+    git workspace; agentira then clones + files the worktree itself. Sandbox is
+    only for projects with no repo at all.
     """
     if project is None:
         return "sandbox"
     kind = (getattr(project, "workspace_kind", None) or "").strip().lower()
-    if kind in ("git", "sandbox", "local_folder"):
+    if kind in ("git", "local_folder"):
         return kind
-    if getattr(project, "repo_url", None):
+    url, path = _project_repo_presence(project)
+    if url:
         return "git"
-    if getattr(project, "repo_path", None):
+    if path:
         return "local_folder"
     return "sandbox"
+
+
+def _project_repo_presence(project) -> tuple[bool, bool]:
+    """(has_remote_url, has_local_path) across the project row AND its
+    `project_repos` rows. A repo attached only through `project_repos` (the
+    multi-repo model) counts — that's the LeadCore case that provisioned an
+    empty dir."""
+    has_url = bool((getattr(project, "repo_url", None) or "").strip())
+    has_path = bool((getattr(project, "repo_path", None) or "").strip())
+    pid = getattr(project, "id", None)
+    if pid and not has_url:
+        from backend import services as _core_services
+        for r in _core_services.list_project_repos(pid):
+            if (r.get("repo_url") or "").strip():
+                has_url = True
+            if (r.get("repo_path") or "").strip():
+                has_path = True
+    return has_url, has_path
 
 
 def _resolve_env_isolation(project) -> dict:
