@@ -463,11 +463,123 @@ function ReposTab({ projectId }) {
 
             <AddRepoForm onSubmit={add} busy={busy === 'add'} />
 
+            <WorkspaceModeDanger projectId={projectId} repos={repos} />
+
             {msg && (
                 <div className={`text-xs ${msg.startsWith('Add') || msg.startsWith('Remove') ? 'text-red-400' : 'text-text-secondary'}`}>
                     {msg}
                 </div>
             )}
+        </div>
+    );
+}
+
+
+// AP-414: where an agent's working copy comes from. Normally derived — a
+// project with an attached repo IS a git workspace, whatever the stored value
+// says (a stale "sandbox" used to drop agents into an empty folder). Exposed
+// here so the value is visible and overridable, in the danger zone because
+// getting it wrong means agents run against the wrong code (or none).
+const WORKSPACE_MODES = [
+    { value: '', label: 'Automatic (recommended)',
+      help: 'Agentira decides from the repos above: a repo attached means agents get a fresh copy of it; no repo means an empty scratch folder.' },
+    { value: 'git', label: 'Always use the attached repo',
+      help: 'Agents get their own fresh copy of the repo, checked out on the task branch. Agentira picks and manages the folder.' },
+    { value: 'local_folder', label: 'Use my own folder on this machine',
+      help: "Agents work off the repo folder path set above instead of a fresh copy. Only for repos the daemon can read — macOS blocks Desktop/Documents/Downloads." },
+    { value: 'sandbox', label: 'Empty scratch folder (no repo)',
+      help: 'Agents start in an empty folder with no code. Ignored while a repo is attached — the repo wins, so agents are never dropped into an empty directory.' },
+];
+
+function effectiveWorkspaceMode(project, repos) {
+    const stored = (project?.workspace_kind || '').trim().toLowerCase();
+    if (stored === 'git' || stored === 'local_folder') return stored;
+    const has = (field) => !!(project?.[field] || '').trim()
+        || (repos || []).some((r) => (r[field] || '').trim());
+    if (has('repo_url')) return 'git';
+    if (has('repo_path')) return 'local_folder';
+    return 'sandbox';
+}
+
+function WorkspaceModeDanger({ projectId, repos }) {
+    const [project, setProject] = useState(null);
+    const [value, setValue] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [msg, setMsg] = useState('');
+
+    useEffect(() => {
+        api.getProject(projectId).then((p) => {
+            setProject(p);
+            setValue(p.workspace_kind || '');
+        }).catch(() => setProject(null));
+    }, [projectId]);
+
+    if (!project) return null;
+
+    const stored = project.workspace_kind || '';
+    const effective = effectiveWorkspaceMode({ ...project, workspace_kind: value }, repos);
+    const overridden = value === 'sandbox' && effective !== 'sandbox';
+    const sel = WORKSPACE_MODES.find((m) => m.value === value) || WORKSPACE_MODES[0];
+    const effLabel = WORKSPACE_MODES.find((m) => m.value === effective)?.label;
+
+    const save = async () => {
+        setSaving(true);
+        setMsg('');
+        try {
+            const updated = await api.updateProject(projectId, { workspace_kind: value });
+            setProject(updated);
+            setMsg('Saved');
+            setTimeout(() => setMsg(''), 2000);
+        } catch (err) {
+            setMsg('Error: ' + (err.message || err));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="mt-8 border border-red-500/30 rounded-xl p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
+                <AlertTriangle className="w-4 h-4" />
+                Danger zone — where agents work
+            </div>
+            <p className="text-xs text-text-secondary">
+                Right now agents on this project get:{' '}
+                <strong className="text-text-primary">{effLabel}</strong>.
+                Changing this changes what every future run sees — pick the wrong
+                one and agents work on the wrong code, or on no code at all.
+            </p>
+            <select className="input" value={value}
+                onChange={(e) => setValue(e.target.value)}>
+                {WORKSPACE_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+            </select>
+            <p className="text-xs text-text-tertiary">{sel.help}</p>
+            {overridden && (
+                <p className="text-xs text-amber-400">
+                    A repo is attached to this project, so this setting is ignored —
+                    agents still get a copy of the repo. Detach every repo above to
+                    really run with an empty folder.
+                </p>
+            )}
+            <div className="flex items-center gap-3">
+                <button className="btn btn-ghost text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                    onClick={save} disabled={saving || value === stored}>
+                    <Save className="w-4 h-4" />
+                    {saving ? 'Saving…' : 'Change workspace mode'}
+                </button>
+                {msg && (
+                    <span className={`text-xs ${msg.startsWith('Error') ? 'text-red-400' : 'text-text-secondary'}`}>
+                        {msg}
+                    </span>
+                )}
+            </div>
+            <p className="text-[11px] text-text-tertiary">
+                Technical: <code className="text-text-secondary">
+                workspace_kind = {stored || '(automatic)'}</code>, resolved to{' '}
+                <code className="text-text-secondary">{effective}</code>.
+            </p>
         </div>
     );
 }
