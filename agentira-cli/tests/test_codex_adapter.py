@@ -62,7 +62,7 @@ def test_build_args_ignores_unsupported_claude_flags():
     # bogus flags.
     args = CodexRuntime.build_args(
         "x",
-        mcp_config_path="/tmp/mcp.json",
+        mcp_config_path="/tmp/does-not-exist-mcp.json",
         mcp_strict=True,
         allowed_tools=("Read", "Bash"),
         max_turns=42,
@@ -71,6 +71,81 @@ def test_build_args_ignores_unsupported_claude_flags():
     assert "--allowedTools" not in args
     assert "--allowed-tools" not in args
     assert "--max-turns" not in args
+
+
+# ── dispatch MCP identity (-c overrides) ──────────────────────────────────
+
+_BUNDLE = {
+    "mcpServers": {
+        "agentira": {
+            "type": "http",
+            "url": "https://mcp.example.com/mcp",
+            "headers": {"Authorization": "Bearer run-token"},
+        },
+        "memory": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-memory"],
+            "env": {"MEMORY_FILE_PATH": "/tmp/mem.json"},
+        },
+    }
+}
+
+
+def _bundle_file(tmp_path, bundle=None):
+    p = tmp_path / "mcp.json"
+    p.write_text(json.dumps(bundle if bundle is not None else _BUNDLE))
+    return str(p)
+
+
+def test_build_args_overrides_agentira_mcp_url(tmp_path):
+    # Without this the run inherits ~/.codex/config.toml's `agentira` server
+    # — the user's *personal* identity — instead of the dispatched agent's.
+    args = CodexRuntime.build_args("x", mcp_config_path=_bundle_file(tmp_path))
+    assert '-c' in args
+    assert 'mcp_servers.agentira.url="https://mcp.example.com/mcp"' in args
+
+
+def test_build_args_auth_header_goes_through_env_not_argv(tmp_path):
+    args = CodexRuntime.build_args("x", mcp_config_path=_bundle_file(tmp_path))
+    var = CodexRuntime.mcp_env_extra(json.dumps(_BUNDLE))
+    assert var == {"AGENTIRA_MCP_HDR_AGENTIRA_AUTHORIZATION": "Bearer run-token"}
+    # The token itself must never land in argv (visible via `ps`).
+    assert not any("run-token" in a for a in args)
+    assert any(
+        a == 'mcp_servers.agentira.env_http_headers='
+             '{ "Authorization" = "AGENTIRA_MCP_HDR_AGENTIRA_AUTHORIZATION" }'
+        for a in args
+    )
+
+
+def test_build_args_injects_stdio_servers(tmp_path):
+    args = CodexRuntime.build_args("x", mcp_config_path=_bundle_file(tmp_path))
+    assert 'mcp_servers.memory.command="npx"' in args
+    assert 'mcp_servers.memory.args=["-y", "@modelcontextprotocol/server-memory"]' in args
+    assert 'mcp_servers.memory.env={ "MEMORY_FILE_PATH" = "/tmp/mem.json" }' in args
+
+
+def test_build_args_mcp_overrides_precede_the_prompt(tmp_path):
+    args = CodexRuntime.build_args("the ask", mcp_config_path=_bundle_file(tmp_path))
+    assert args[-1] == "the ask"
+    assert args[0] == "exec"
+
+
+def test_build_args_resume_keeps_mcp_overrides(tmp_path):
+    args = CodexRuntime.build_args(
+        "again", mcp_config_path=_bundle_file(tmp_path), resume_session_id="sid-1",
+    )
+    assert args[:3] == ["exec", "resume", "sid-1"]
+    assert 'mcp_servers.agentira.url="https://mcp.example.com/mcp"' in args
+    assert args[-1] == "again"
+
+
+def test_build_args_unreadable_bundle_is_ignored(tmp_path):
+    p = tmp_path / "broken.json"
+    p.write_text("{not json")
+    args = CodexRuntime.build_args("x", mcp_config_path=str(p))
+    assert not any(a.startswith("mcp_servers.") for a in args)
+    assert CodexRuntime.mcp_env_extra("{not json") == {}
 
 
 # ── parse_event ───────────────────────────────────────────────────────────

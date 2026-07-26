@@ -174,7 +174,15 @@ async def run_cli_stream(
             allowed_tools=allowed_tools,
         )
 
-        env = _build_env(env_extra or {}, strip=env_strip)
+        runtime_env = dict(env_extra or {})
+        if mcp_config_json:
+            hook = getattr(runtime_cls, "mcp_env_extra", None)
+            if hook:
+                try:
+                    runtime_env.update(hook(mcp_config_json) or {})
+                except Exception as exc:  # noqa: BLE001 — best-effort
+                    logger.warning("mcp_env_extra failed: %s", exc)
+        env = _build_env(runtime_env, strip=env_strip)
 
         # Stream-json lines from claude can exceed asyncio's default 64KB
         # readline limit (single tool_result with a big diff, e.g.). Bump

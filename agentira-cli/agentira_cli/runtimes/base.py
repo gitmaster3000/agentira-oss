@@ -155,6 +155,13 @@ class Runtime:
         return None
 
     @classmethod
+    def mcp_env_extra(cls, mcp_config_json: str) -> dict:
+        """Extra subprocess env this runtime needs to reach the dispatch's
+        MCP servers (e.g. codex passes auth headers by env var name so the
+        token stays out of argv). Default: nothing."""
+        return {}
+
+    @classmethod
     def introspect(cls, binary_path: str) -> dict:
         """Optional: query a running runtime for live config (gateway URL, token, models).
         Override in gateway-type runtimes. Returns {} by default."""

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 from .base import Runtime
@@ -17,14 +18,41 @@ from .claude import (
 logger = logging.getLogger("agentira.runtime.codex")
 
 
+def _header_env_var(server: str, header: str) -> str:
+    """Env var name carrying one dispatched MCP header value."""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", f"{server}_{header}").strip("_").upper()
+    return f"AGENTIRA_MCP_HDR_{slug}"
+
+
+def _toml_inline_table(mapping: dict) -> str:
+    """Render {k: v} as a TOML inline table with quoted keys and values."""
+    return "{ " + ", ".join(
+        f"{json.dumps(str(k))} = {json.dumps(str(v))}"
+        for k, v in sorted(mapping.items())
+    ) + " }"
+
+
+def _load_bundle(source: str, *, is_path: bool) -> dict:
+    """Parse the dispatch MCP bundle; return {} when absent or malformed."""
+    try:
+        raw = Path(source).read_text() if is_path else source
+        data = json.loads(raw)
+    except (OSError, ValueError):
+        return {}
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    return servers if isinstance(servers, dict) else {}
+
+
 class CodexRuntime(Runtime):
     provider = "codex"
     default_binary = "codex"
     env_path_override = "AGENTIRA_CODEX_PATH"
     # CLI runtime like claude/grok — subprocess with JSONL stream, native
-    # session resume (codex `exec resume <thread_id>`). No `mcp_config`: codex
-    # takes MCP servers from ~/.codex/config.toml, not a per-turn flag.
-    capabilities = ("stream_json", "resume")
+    # session resume (codex `exec resume <thread_id>`). Codex has no
+    # `--mcp-config` flag, but `-c mcp_servers.<name>.…` overrides the same
+    # keys it would read from ~/.codex/config.toml, so the dispatch bundle
+    # still reaches the run (see _mcp_overrides).
+    capabilities = ("stream_json", "resume", "mcp_config")
     # Codex has no `codex models` subcommand, but the CLI fetches the
     # account's model catalog (the same list the interactive `/model` picker
     # shows) from chatgpt.com using the logged-in session and caches it to
@@ -74,11 +102,67 @@ class CodexRuntime(Runtime):
         ]
         if model:
             flags += ["-m", model]
+        flags += CodexRuntime._mcp_overrides(
+            _load_bundle(mcp_config_path, is_path=True) if mcp_config_path else {}
+        )
         if resume_session_id:
             # `codex exec resume <SESSION_ID> [PROMPT]` — resume takes the
             # thread_id emitted on `thread.started` plus the follow-up prompt.
             return ["exec", "resume", resume_session_id, *flags, final_prompt]
         return ["exec", *flags, final_prompt]
+
+    @staticmethod
+    def _mcp_overrides(servers: dict) -> list[str]:
+        """Translate the dispatch MCP bundle into `codex -c` overrides.
+
+        Codex reads MCP servers from ~/.codex/config.toml, which on a
+        developer's machine holds their *personal* Agentira credentials.
+        Left alone, a dispatched agent authenticates as whoever owns that
+        file instead of as itself. These per-run overrides replace the same
+        keys, so the run acts as the dispatched agent (AP identity fix).
+
+        Auth headers are passed by *env var name* (`env_http_headers`),
+        never as a literal — argv is world-readable via `ps`. Codex applies
+        env_http_headers over any same-named http_headers from the user's
+        config, so the personal token is shadowed even though the config
+        merge keeps it.
+        """
+        out: list[str] = []
+        for name, defn in sorted(servers.items()):
+            if not isinstance(defn, dict):
+                continue
+            url = defn.get("url")
+            if url:
+                out += ["-c", f"mcp_servers.{name}.url={json.dumps(url)}"]
+                headers = defn.get("headers") or {}
+                if headers:
+                    env_map = {h: _header_env_var(name, h) for h in headers}
+                    out += ["-c", f"mcp_servers.{name}.env_http_headers="
+                                  f"{_toml_inline_table(env_map)}"]
+                continue
+            command = defn.get("command")
+            if not command:
+                continue
+            out += ["-c", f"mcp_servers.{name}.command={json.dumps(command)}"]
+            args = defn.get("args") or []
+            if args:
+                out += ["-c", f"mcp_servers.{name}.args="
+                              f"[{', '.join(json.dumps(str(a)) for a in args)}]"]
+            env = defn.get("env") or {}
+            if env:
+                out += ["-c", f"mcp_servers.{name}.env={_toml_inline_table(env)}"]
+        return out
+
+    @classmethod
+    def mcp_env_extra(cls, mcp_config_json: str) -> dict:
+        """Env vars the dispatch's `env_http_headers` overrides point at."""
+        out: dict = {}
+        for name, defn in _load_bundle(mcp_config_json, is_path=False).items():
+            if not isinstance(defn, dict) or not defn.get("url"):
+                continue
+            for header, value in (defn.get("headers") or {}).items():
+                out[_header_env_var(name, header)] = str(value)
+        return out
 
     @classmethod
     def parse_event(cls, line: str):

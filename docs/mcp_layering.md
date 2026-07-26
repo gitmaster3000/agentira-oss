@@ -47,7 +47,8 @@ runs.
 ### Layer 3 — Agentira's per-dispatch additions (what we own)
 
 Per-agent, per-call, ephemeral. Written to a tempfile and passed as
-`--mcp-config <path>` (claude/codex/gemini) or merged into the request body
+`--mcp-config <path>` (claude/gemini), translated into `-c mcp_servers.…`
+overrides (codex — see below), or merged into the request body
 (gateway runtimes). Contents:
 
 - **`agentira`** MCP (always, auto-injected) — `list_tasks`, `get_task`,
@@ -77,6 +78,23 @@ When claude-code starts, it loads in this order:
 4. Unions them. Name collisions resolve last-write-wins. Our server names
    (`agentira`, `memory`) are deliberately unique to avoid shadowing user
    servers.
+
+### codex: identity must win over the host config
+
+codex has no `--mcp-config`. It reads `mcp_servers` from
+`~/.codex/config.toml`, which on a daemon host usually already holds the
+*user's personal* `agentira` server with their own bearer token. Left
+untouched, every dispatched codex run authenticates as that personal
+identity — board actions attribute to the wrong profile.
+
+The codex adapter therefore emits one `-c mcp_servers.<name>.…` override
+per dispatched server (`agentira`, `memory`, …). Same-named entries in the
+user's config are shadowed on purpose here: **the dispatched agent's
+identity always wins.** Auth headers are passed as
+`env_http_headers = { Authorization = "<ENV VAR NAME>" }` with the token
+supplied through the subprocess env (`Runtime.mcp_env_extra`), so the
+credential never appears in argv. Other servers in the user's config are
+untouched and still merge in.
 
 System prompt assembly:
 
