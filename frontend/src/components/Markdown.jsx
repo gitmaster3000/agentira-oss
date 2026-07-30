@@ -25,8 +25,14 @@ const COMPONENTS = {
     ol: (p) => <ol className="list-decimal pl-6 my-2 text-sm text-text-secondary space-y-0.5" {...p} />,
     li: (p) => <li className="text-sm text-text-secondary" {...p} />,
     a:  (p) => <a className="text-accent-primary underline hover:text-accent-primary-hover" target="_blank" rel="noopener noreferrer" {...p} />,
-    code({ inline, className, children, ...props }) {
-        if (inline) {
+    code({ node, className, children, ...props }) {
+        // react-markdown v10 dropped the `inline` prop, so derive it: a fenced
+        // block either carries a `language-…` class or spans several source
+        // lines (```/content/```). Everything else is inline `code`.
+        const pos = node?.position;
+        const isBlock = /language-/.test(className || '')
+            || (!!pos && pos.end.line > pos.start.line);
+        if (!isBlock) {
             return <code className="px-1.5 py-0.5 rounded bg-bg-panel border border-border-subtle text-[0.85em] font-mono text-text-primary" {...props}>{children}</code>;
         }
         // Editor-style block: a deep "code well" surface, an optional language

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
-import { Breadcrumbs } from '../components/Breadcrumbs';
 import { Markdown } from '../components/Markdown';
+import { CreateTaskModal } from '../components/CreateTaskModal';
 import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
 import { ROUTES } from '../routes';
@@ -161,6 +161,19 @@ export function TaskPage() {
     const [summaryUpdatedAt, setSummaryUpdatedAt] = useState(null);
     const prevSummary = useRef(null);
 
+    // The URL param can be a task key (AP-12) — Forge endpoints only accept
+    // the primary id, so every forge call goes through the loaded task.
+    const taskUid = task?.id;
+
+    // The topbar's "New task" action is a global event; the listener normally
+    // lives in ProjectLayout, which this route is not nested under.
+    const [showCreate, setShowCreate] = useState(false);
+    useEffect(() => {
+        const open = () => setShowCreate(true);
+        window.addEventListener('open-create-task', open);
+        return () => window.removeEventListener('open-create-task', open);
+    }, []);
+
     const loadTask = async () => {
         try {
             const data = await api.getTask(taskId);
@@ -199,12 +212,15 @@ export function TaskPage() {
     }, [taskId]);
 
     // Pulse: poll the task's single run. 5s while active, 30s once terminal.
+    // Keyed on the task's real id, not the URL param — the side panel's
+    // "Open full" link navigates by task key, and Forge resolves runs by id.
     useEffect(() => {
+        if (!taskUid) return;
         let cancelled = false;
         let timer;
         const tick = async () => {
             try {
-                const runs = await api.forge.listTaskRuns(taskId);
+                const runs = await api.forge.listTaskRuns(taskUid);
                 if (cancelled) return;
                 const current = pickCurrentRun(runs);
                 setSummaryUpdatedAt(prev =>
@@ -219,7 +235,7 @@ export function TaskPage() {
         };
         tick();
         return () => { cancelled = true; clearTimeout(timer); };
-    }, [taskId]);
+    }, [taskUid]);
 
     // Keep the Activity tab live — agents and the daemon append activity while
     // the page is open, so poll it (matching the side panel's cadence) instead
@@ -306,7 +322,7 @@ export function TaskPage() {
     const handleScheduleRun = async (agentId) => {
         setScheduling(true);
         try {
-            const result = await api.forge.prepareTaskRun(taskId, agentId);
+            const result = await api.forge.prepareTaskRun(taskUid, agentId);
             setPickingAgent(false);
             const runId = result.id || result.run_id;
             if (runId) navigate(ROUTES.FORGE_RUN(runId));
@@ -366,10 +382,6 @@ export function TaskPage() {
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
             <div className="max-w-7xl mx-auto p-8">
-                <div className="mb-6">
-                    <Breadcrumbs entity="task" data={task} />
-                </div>
-
                 {/* Header */}
                 <div className="flex items-start justify-between gap-4 mb-6">
                     {isEditing ? (
@@ -483,6 +495,14 @@ export function TaskPage() {
 
                 {tab === 'activity' && <ActivityTab activities={activities} />}
             </div>
+
+            {showCreate && (
+                <CreateTaskModal
+                    projectId={task.project_id}
+                    onClose={() => setShowCreate(false)}
+                    onCreated={() => setShowCreate(false)}
+                />
+            )}
         </div>
     );
 }

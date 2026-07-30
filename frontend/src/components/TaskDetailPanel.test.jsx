@@ -154,3 +154,52 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
         expect(screen.getByText(/apply to this repo/i)).toBeInTheDocument();
     });
 });
+
+describe('TaskDetailPanel — layout & resizing', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        localStorage.clear();
+    });
+
+    it('places Description below the Status/Priority/Assignee/Epic fields', async () => {
+        const { container } = render(<Harness task={baseTask()} />);
+        const label = await screen.findByText('Description');
+        const epic = screen.getByLabelText('Epic');
+        expect(
+            label.compareDocumentPosition(epic) & Node.DOCUMENT_POSITION_PRECEDING,
+        ).toBeTruthy();
+        expect(container).toBeTruthy();
+    });
+
+    it('resizes by dragging the divider and remembers the width', async () => {
+        render(<Harness task={baseTask()} />);
+        const panel = await screen.findByRole('complementary');
+        expect(panel.style.width).toBe('384px');
+
+        const handle = screen.getByRole('separator', { name: /resize/i });
+        fireEvent.mouseDown(handle, { clientX: 800 });
+        fireEvent.mouseMove(document, { clientX: 700 });
+        expect(panel.style.width).toBe('484px');
+
+        fireEvent.mouseUp(document);
+        expect(localStorage.getItem('taskPanelWidth')).toBe('484');
+    });
+
+    it('clamps the dragged width to the allowed range', async () => {
+        render(<Harness task={baseTask()} />);
+        const panel = await screen.findByRole('complementary');
+        const handle = screen.getByRole('separator', { name: /resize/i });
+
+        fireEvent.mouseDown(handle, { clientX: 800 });
+        fireEvent.mouseMove(document, { clientX: 5000 });
+        expect(panel.style.width).toBe('320px');
+        fireEvent.mouseUp(document);
+    });
+
+    it('restores a previously saved width', async () => {
+        localStorage.setItem('taskPanelWidth', '520');
+        render(<Harness task={baseTask()} />);
+        const panel = await screen.findByRole('complementary');
+        expect(panel.style.width).toBe('520px');
+    });
+});

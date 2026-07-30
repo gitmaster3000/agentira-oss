@@ -23,6 +23,13 @@ const STATUS = {
 };
 const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
 
+// Panel width: user-draggable, remembered across sessions.
+const WIDTH_KEY = 'taskPanelWidth';
+const MIN_WIDTH = 320;
+const MAX_WIDTH = 900;
+const DEFAULT_WIDTH = 384;
+const clampWidth = (w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w)));
+
 const RAIL = [
     { id: 'info', label: 'Details', icon: Info },
     { id: 'files', label: 'Files', icon: FileText },
@@ -85,6 +92,29 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const scrollRef = useRef(null);
     const sectionRefs = useRef({});
     const fileInputRef = useRef(null);
+
+    const [width, setWidth] = useState(() => {
+        const saved = Number(localStorage.getItem(WIDTH_KEY));
+        return saved ? clampWidth(saved) : DEFAULT_WIDTH;
+    });
+    const widthRef = useRef(width);
+    widthRef.current = width;
+
+    // Drag the left divider to widen/narrow the panel. Dragging left (smaller
+    // clientX) grows it, since the panel is anchored to the right edge.
+    const startResize = (e) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startWidth = widthRef.current;
+        const onMove = (ev) => setWidth(clampWidth(startWidth + (startX - ev.clientX)));
+        const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            localStorage.setItem(WIDTH_KEY, String(widthRef.current));
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    };
 
     const toggleEditing = (val) => setIsEditing(val);
 
@@ -284,10 +314,18 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
     return (
         <aside
-            className="h-full flex flex-col flex-shrink-0 animate-slide-in"
-            style={{ width: 384, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-subtle)' }}
+            className="h-full flex flex-col flex-shrink-0 animate-slide-in relative"
+            style={{ width, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-subtle)' }}
             onClick={e => e.stopPropagation()}
         >
+            <div
+                role="separator"
+                aria-label="Resize panel"
+                aria-orientation="vertical"
+                onMouseDown={startResize}
+                className="absolute top-0 left-0 h-full hover:bg-accent-primary/30 transition-colors"
+                style={{ width: 6, marginLeft: -3, cursor: 'col-resize', zIndex: 10 }}
+            />
             {/* Header: key + epic · open full / edit / delete / close.
                 Fixed 53px height matches the board toolbar so the panel's top
                 divider lines up with the board header's bottom border. While
@@ -476,20 +514,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             )
                         )}
 
-                        <SectionLabel>Description</SectionLabel>
-                        {isEditing ? (
-                            <textarea
-                                className="w-full bg-bg-app border border-border-subtle rounded-lg p-2.5 text-text-secondary focus:outline-none focus:border-accent-primary"
-                                style={{ fontSize: 12.5, lineHeight: 1.6, minHeight: 90, marginBottom: 18 }}
-                                value={formData.description || ''}
-                                onChange={e => setFormData({ ...formData, description: e.target.value })}
-                            />
-                        ) : (
-                            <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }} className="text-text-tertiary break-words">
-                                {task.description ? <Markdown>{task.description}</Markdown> : <span className="italic">No description.</span>}
-                            </div>
-                        )}
-
                         <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr', gap: '12px 10px', fontSize: 12.5, alignItems: 'center', marginBottom: 18 }}>
                             <span className="text-text-tertiary">Status</span>
                             <span className="inline-flex items-center" style={{ gap: 7 }}>
@@ -540,6 +564,22 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </select>
                             </span>
                         </div>
+
+                        {/* Description reads after the at-a-glance fields — the
+                            fields are the scannable part, the prose is the detail. */}
+                        <SectionLabel>Description</SectionLabel>
+                        {isEditing ? (
+                            <textarea
+                                className="w-full bg-bg-app border border-border-subtle rounded-lg p-2.5 text-text-secondary focus:outline-none focus:border-accent-primary"
+                                style={{ fontSize: 12.5, lineHeight: 1.6, minHeight: 90, marginBottom: 18 }}
+                                value={formData.description || ''}
+                                onChange={e => setFormData({ ...formData, description: e.target.value })}
+                            />
+                        ) : (
+                            <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }} className="text-text-tertiary break-words">
+                                {task.description ? <Markdown>{task.description}</Markdown> : <span className="italic">No description.</span>}
+                            </div>
+                        )}
 
                         <div className="flex items-center justify-between" style={{ marginBottom: 9 }}>
                             <SectionLabel inline>Definition of Done</SectionLabel>
