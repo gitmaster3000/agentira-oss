@@ -441,16 +441,21 @@ async def handle_client_run_ws(ws: "WebSocket", run_id: str) -> None:
 
 
 def _auth_ws_token(token: str, *, require_admin: bool = False) -> dict | None:
-    """Validate a JWT presented over a WebSocket. Returns the payload (with
-    org_id) or None. WebSockets bypass the HTTP auth dependencies, so every
-    WS handler must call this explicitly."""
+    """Validate a JWT — or the dev-only static API key — presented over a
+    WebSocket. Returns the payload (with org_id) or None. WebSockets bypass the
+    HTTP auth dependencies, so every WS handler must call this explicitly."""
     if not token:
         return None
-    try:
-        from backend.jwt_auth import decode_token
-        payload = decode_token(token)
-    except Exception:  # noqa: BLE001 — any decode/expiry error → unauthenticated
-        return None
+    from backend.jwt_auth import _dev_bypass_payload, decode_token
+    # Same shortcut the HTTP path takes: a local daemon started with
+    # AGENTIRA_DAEMON_API_KEY connects without a browser login. Gated on
+    # AGENTIRA_ENV=dev inside _dev_bypass_payload, so it is off in prod.
+    payload = _dev_bypass_payload(token)
+    if payload is None:
+        try:
+            payload = decode_token(token)
+        except Exception:  # noqa: BLE001 — any decode/expiry error → unauthenticated
+            return None
     if not payload.get("org_id"):
         return None
     if require_admin:

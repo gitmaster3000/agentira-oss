@@ -235,6 +235,30 @@ def test_daemon_ws_auth_accepts_admin_in_roles(env):
     assert _auth_ws_token(legacy, require_admin=True) is not None
 
 
+def test_daemon_ws_auth_accepts_dev_bypass_key(env, monkeypatch):
+    """A local/dev daemon started with AGENTIRA_DAEMON_API_KEY must connect over
+    the WS, not just register runtimes over REST. Same gating as the HTTP path:
+    only when AGENTIRA_ENV=dev."""
+    from backend.forge.ws_dispatch import _auth_ws_token
+    c, ctx = env
+    monkeypatch.setenv("AGENTIRA_ENV", "dev")
+    monkeypatch.setenv("AGENTIRA_DEV_API_KEY", "dev-daemon-key-local-only")
+    monkeypatch.setenv("AGENTIRA_DEV_PROFILE", "admin")
+
+    payload = _auth_ws_token("dev-daemon-key-local-only", require_admin=True)
+    assert payload is not None
+    assert payload["org_id"] == ctx["org_id"]
+
+    # A non-admin dev profile is still rejected when admin is required.
+    monkeypatch.setenv("AGENTIRA_DEV_PROFILE", "bob")
+    assert _auth_ws_token("dev-daemon-key-local-only", require_admin=True) is None
+
+    # Fail-safe: the bypass does nothing outside dev.
+    monkeypatch.setenv("AGENTIRA_DEV_PROFILE", "admin")
+    monkeypatch.setenv("AGENTIRA_ENV", "prod")
+    assert _auth_ws_token("dev-daemon-key-local-only", require_admin=True) is None
+
+
 # ── API-key fallback identity (daemon / MCP) ─────────────────────────────────
 
 def test_api_key_resolves_to_identity_with_roles(env):
