@@ -213,6 +213,7 @@ def init_db():
     """Create all tables."""
     from backend.models import (  # noqa: F401
         Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
+        Milestone, TaskDependency,
     )
     from backend.forge.models import (  # noqa: F401
         Agent, Run, ForgeRuntime, TransitionEvent, GateEvaluation,
@@ -226,6 +227,7 @@ def init_db():
 _ORG_SCOPED_TABLES = [
     "profiles", "oauth_accounts", "project_members", "notifications",
     "projects", "project_repos", "epics", "tasks", "task_commits",
+    "task_dependencies", "milestones",
     "activities", "attachments", "profile_permissions",
     "forge_agents", "forge_runtimes", "deploy_credentials",
 ]
@@ -804,6 +806,9 @@ def run_migrations():
             added |= _ensure_column(conn, "tasks", "creator", "VARCHAR(120) DEFAULT ''")
             # Task type discriminator (task | bug | ...) — DEFAULT backfills existing rows.
             added |= _ensure_column(conn, "tasks", "type", "VARCHAR(20) DEFAULT 'task' NOT NULL")
+            # AP-496: child tasks + roadmap milestone rollup.
+            added |= _ensure_column(conn, "tasks", "parent_id", "VARCHAR(12)")
+            added |= _ensure_column(conn, "tasks", "milestone_id", "VARCHAR(12)")
             # Scope task-key uniqueness to (project_id, key) instead of globally.
             # Two orgs sharing a key prefix (e.g. both named "Pitch Fox" → "PF")
             # would collide on PF-1 with the old global constraint.
@@ -980,6 +985,11 @@ def run_migrations():
             # replacing len(epic.tasks)) — index the column that query groups by.
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_tasks_epic_id ON tasks(epic_id)"))
+            # AP-496: subtask + milestone rollups group by these columns.
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_parent_id ON tasks(parent_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_milestone_id ON tasks(milestone_id)"))
             conn.commit()
 
         # AP-433: project_members.project_id is covered by the leading
@@ -1086,6 +1096,7 @@ def bootstrap_schema(url: str) -> None:
     """
     from backend.models import (  # noqa: F401
         Org, Invite, Project, Task, Activity, Epic, OAuthAccount, ProjectRepo,
+        Milestone, TaskDependency,
     )
     from backend.forge.models import (  # noqa: F401
         Agent, Run, ForgeRuntime, TransitionEvent, GateEvaluation,

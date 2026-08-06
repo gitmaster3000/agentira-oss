@@ -14,6 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
+from backend import task_graph
 from backend.password_service import password_service
 from backend.jwt_auth import (create_token, get_current_user, require_admin,
                               get_current_user_payload)
@@ -156,6 +157,9 @@ class TaskCreate(BaseModel):
     due_date: Optional[str] = None
     dod_items: Optional[list[dict]] = None
     epic_id: Optional[str] = None
+    # AP-496: create a task already nested / already counted towards a milestone.
+    parent_id: Optional[str] = None
+    milestone_id: Optional[str] = None
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
@@ -173,6 +177,29 @@ class TaskUpdate(BaseModel):
     # Empty/omitted → derive from the task's legacy `repo_name` or fall back
     # to the project's primary.
     repos: Optional[list[str]] = None
+    # AP-496: task-graph pointers. "" detaches, omitted leaves unchanged.
+    parent_id: Optional[str] = None
+    milestone_id: Optional[str] = None
+
+
+class DependencyCreate(BaseModel):
+    task_id: str
+    depends_on_id: str
+
+
+class MilestoneCreate(BaseModel):
+    title: str
+    description: str = ""
+    due_date: Optional[str] = None
+    color: str = "#2ecc71"
+
+
+class MilestoneUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    status: Optional[str] = None
+    color: Optional[str] = None
 
 class TaskMove(BaseModel):
     status: str
@@ -955,6 +982,75 @@ def api_get_roadmap(
     except ValueError as e:
         raise HTTPException(404, str(e))
 
+# ── AP-496: task dependencies + roadmap milestones ──────────────────────
+# Both live under /projects/{id} so project access (the org + membership
+# boundary) is checked once, in the service layer, for every graph mutation.
+
+@projects.get("/{project_id}/dependencies")
+def api_list_dependencies(project_id: str, actor: str = Depends(get_current_user)):
+    return task_graph.list_dependencies(project_id, actor=actor)
+
+
+@projects.post("/{project_id}/dependencies")
+def api_add_dependency(project_id: str, body: DependencyCreate,
+                       actor: str = Depends(get_current_user)):
+    try:
+        return task_graph.add_dependency(
+            project_id, body.task_id, body.depends_on_id, actor=actor)
+    except task_graph.GraphError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@projects.delete("/{project_id}/dependencies/{dep_id}")
+def api_remove_dependency(project_id: str, dep_id: str,
+                          actor: str = Depends(get_current_user)):
+    if not task_graph.remove_dependency(project_id, dep_id, actor=actor):
+        raise HTTPException(404, "Dependency not found")
+    return {"ok": True}
+
+
+@projects.get("/{project_id}/milestones")
+def api_list_milestones(project_id: str, actor: str = Depends(get_current_user)):
+    return task_graph.list_milestones(project_id, actor=actor)
+
+
+@projects.post("/{project_id}/milestones")
+def api_create_milestone(project_id: str, body: MilestoneCreate,
+                         actor: str = Depends(get_current_user)):
+    try:
+        return task_graph.create_milestone(
+            project_id, title=body.title, description=body.description,
+            due_date=body.due_date, color=body.color, actor=actor)
+    except task_graph.GraphError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@projects.patch("/{project_id}/milestones/{milestone_id}")
+def api_update_milestone(project_id: str, milestone_id: str, body: MilestoneUpdate,
+                         actor: str = Depends(get_current_user)):
+    try:
+        return task_graph.update_milestone(
+            project_id, milestone_id, title=body.title,
+            description=body.description, due_date=body.due_date,
+            status=body.status, color=body.color, actor=actor)
+    except task_graph.GraphError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@projects.delete("/{project_id}/milestones/{milestone_id}")
+def api_delete_milestone(project_id: str, milestone_id: str,
+                         actor: str = Depends(get_current_user)):
+    if not task_graph.delete_milestone(project_id, milestone_id, actor=actor):
+        raise HTTPException(404, "Milestone not found")
+    return {"ok": True}
+
+
 @projects.get("/{project_id}/activity")
 def api_get_project_activity(
     project_id: str,
@@ -1160,6 +1256,7 @@ def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
             status=body.status, priority=body.priority, assignee=body.assignee,
             tags=body.tags, start_date=body.start_date, due_date=body.due_date,
             dod_items=body.dod_items, epic_id=body.epic_id, actor=actor,
+            parent_id=body.parent_id, milestone_id=body.milestone_id,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1179,7 +1276,9 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
             priority=body.priority, assignee=body.assignee, tags=body.tags,
             start_date=body.start_date, due_date=body.due_date,
             dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url,
-            epic_id=body.epic_id, repos=body.repos, actor=actor,
+            epic_id=body.epic_id, repos=body.repos,
+            parent_id=body.parent_id, milestone_id=body.milestone_id,
+            actor=actor,
         )
         if body.assignee:
             try:
@@ -1188,6 +1287,15 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
             except Exception:
                 pass  # never break task update due to WS dispatch
         return result
+    except task_graph.GraphError as e:   # invalid parent/milestone → bad request
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+@tasks.get("/{task_id}/subtasks")
+def api_list_subtasks(task_id: str, actor: str = Depends(get_current_user)):
+    try:
+        return task_graph.list_subtasks(task_id, actor=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
 

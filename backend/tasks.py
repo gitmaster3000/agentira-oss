@@ -19,12 +19,14 @@ from typing import Optional
 
 from backend import services
 from backend import agent_notifier
+from backend import task_graph
 from backend.auth import project_ids_for_actor, require_project_access
 from backend.notifications import broker
 from backend.models import Task, TaskPriority, Project, ProjectMember, ProjectRepo, Profile, allow_task_write
 from backend.forge.repos import tasks as tasks_repo
 from backend.forge.repos import transitions as transitions_repo
 from backend.repos import tasks as core_tasks_repo
+from backend.repos import task_graph as core_graph_repo
 
 logger = logging.getLogger("agentira.tasks")
 
@@ -120,6 +122,8 @@ class TaskService:
         dod_items: Optional[list[dict]] = None,
         epic_id: str | None = None,
         actor: str = "system",
+        parent_id: str | None = None,
+        milestone_id: str | None = None,
     ) -> dict:
         with services._session() as db:
             project = db.get(Project, project_id)
@@ -155,6 +159,14 @@ class TaskService:
             )
             db.add(task)
             db.flush()
+
+            # AP-496: let a caller create a task already nested under a parent
+            # or already counted towards a milestone — agents plan that way.
+            if parent_id:
+                task_graph.set_parent(db, task, parent_id)
+            if milestone_id and milestone_id.strip():
+                task_graph.validate_milestone(db, task, milestone_id.strip())
+                task.milestone_id = milestone_id.strip()
 
             services._log_activity(
                 db, actor, "task.create", f"Created task: {title}",
@@ -212,6 +224,11 @@ class TaskService:
                     d["active_agent_id"] = info["agent_id"]
                     d["active_agent_name"] = info["agent_name"]
                 out.append(d)
+            # AP-496: subtask rollup + blocked-by, batched over the whole list.
+            sub_counts = core_graph_repo.subtask_counts(db, ids)
+            for d in out:
+                d["subtasks"] = sub_counts.get(d["id"], {"total": 0, "done": 0})
+            task_graph.annotate_blocking(db, out)
             return out
 
     def get(self, task_id: str, actor: str = "system") -> dict | None:
@@ -221,6 +238,9 @@ class TaskService:
                 return None
             require_project_access(db, actor, t.project_id, "read")
             d = services._task_to_dict(t, attachments_count=services._attachment_count(db, t.id))
+            d["subtasks"] = core_graph_repo.subtask_counts(db, [t.id]).get(
+                t.id, {"total": 0, "done": 0})
+            task_graph.annotate_blocking(db, [d])
             info = services._active_run_agents(db, [t.id]).get(t.id)
             d["agent_active"] = info is not None
             if info:
@@ -244,6 +264,8 @@ class TaskService:
         pr_url: Optional[str] = None,
         epic_id: Optional[str] = None,
         repos: Optional[list[str]] = None,
+        parent_id: Optional[str] = None,
+        milestone_id: Optional[str] = None,
         actor: str = "system",
     ) -> dict:
         with services._session() as db:
@@ -330,6 +352,18 @@ class TaskService:
                     task.repos_json = new_repos_json
                     task.repo_name = cleaned[0] if cleaned else None
                     changes.append(f"repos → {cleaned}")
+
+            # AP-496: graph pointers. Both validate against the task graph
+            # (same project, no cycles) before they touch the row; "" detaches.
+            if parent_id is not None:
+                new_parent = task_graph.set_parent(db, task, parent_id)
+                changes.append(f"parent → {new_parent or 'none'}")
+            if milestone_id is not None:
+                new_milestone = milestone_id.strip() or None
+                if new_milestone:
+                    task_graph.validate_milestone(db, task, new_milestone)
+                task.milestone_id = new_milestone
+                changes.append(f"milestone → {new_milestone or 'none'}")
 
             if changes:
                 services._log_activity(
@@ -436,6 +470,9 @@ class TaskService:
             if not task:
                 return False
             require_project_access(db, actor, task.project_id, "write")
+            # AP-496: drop dependency edges and orphan child tasks first —
+            # both reference this row and neither should die with it.
+            task_graph.on_task_deleted(db, task.id)
             tasks_repo.delete_with_children(db, task)
             db.commit()
             return True

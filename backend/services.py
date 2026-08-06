@@ -182,6 +182,15 @@ def _task_to_dict(t: Task, attachments_count: int = 0, commits_count: int | None
         "type": t.type or "task",
         "project_id": t.project_id,
         "epic_id": t.epic_id,
+        # AP-496: task-graph pointers. `subtasks`/`blocked_by`/`blocks` are
+        # filled in by the batched annotators (task_graph) on the list/get
+        # paths — defaulted here so every serialized task has the same shape.
+        "parent_id": t.parent_id,
+        "milestone_id": t.milestone_id,
+        "subtasks": {"total": 0, "done": 0},
+        "blocked_by": [],
+        "blocks": [],
+        "is_blocked": False,
         "epic_name": t.epic.title if t.epic else None,
         "epic_color": t.epic.color if t.epic else None,
         "title": t.title,
@@ -1196,13 +1205,72 @@ def create_task(
     epic_id: str | None = None,
     actor: str = "system",
     type: str = "task",
+    parent_id: str | None = None,
+    milestone_id: str | None = None,
 ) -> dict:
     """Create a task. Delegates to the typed task domain (backend.tasks)."""
     from backend import tasks
     return tasks.resolve(type).create(
         project_id, title, description, status, priority, assignee, tags,
         start_date, due_date, dod_items, epic_id, actor,
+        parent_id=parent_id, milestone_id=milestone_id,
     )
+
+
+# ── Task graph (AP-496) ─────────────────────────────────────────────────
+# Thin delegations so REST/MCP callers keep talking to `services` while the
+# rules live in backend.task_graph.
+
+def list_subtasks(task_id: str, actor: str = "system") -> list[dict]:
+    from backend import task_graph
+    return task_graph.list_subtasks(task_id, actor=actor)
+
+
+def list_dependencies(project_id: str, actor: str = "system") -> list[dict]:
+    from backend import task_graph
+    return task_graph.list_dependencies(project_id, actor=actor)
+
+
+def add_dependency(project_id: str, task_id: str, depends_on_id: str,
+                   actor: str = "system") -> dict:
+    from backend import task_graph
+    return task_graph.add_dependency(project_id, task_id, depends_on_id, actor=actor)
+
+
+def remove_dependency(project_id: str, dependency_id: str,
+                      actor: str = "system") -> bool:
+    from backend import task_graph
+    return task_graph.remove_dependency(project_id, dependency_id, actor=actor)
+
+
+def list_milestones(project_id: str, actor: str = "system") -> list[dict]:
+    from backend import task_graph
+    return task_graph.list_milestones(project_id, actor=actor)
+
+
+def create_milestone(project_id: str, title: str, description: str = "",
+                     due_date: str | None = None, color: str = "#2ecc71",
+                     actor: str = "system") -> dict:
+    from backend import task_graph
+    return task_graph.create_milestone(
+        project_id, title=title, description=description, due_date=due_date,
+        color=color, actor=actor)
+
+
+def update_milestone(project_id: str, milestone_id: str, title: str | None = None,
+                     description: str | None = None, due_date: str | None = None,
+                     status: str | None = None, color: str | None = None,
+                     actor: str = "system") -> dict:
+    from backend import task_graph
+    return task_graph.update_milestone(
+        project_id, milestone_id, title=title, description=description,
+        due_date=due_date, status=status, color=color, actor=actor)
+
+
+def delete_milestone(project_id: str, milestone_id: str,
+                     actor: str = "system") -> bool:
+    from backend import task_graph
+    return task_graph.delete_milestone(project_id, milestone_id, actor=actor)
 
 
 def list_tasks(
@@ -1236,13 +1304,16 @@ def update_task(
     pr_url: Optional[str] = None,
     epic_id: Optional[str] = None,
     repos: Optional[list[str]] = None,
+    parent_id: Optional[str] = None,
+    milestone_id: Optional[str] = None,
     actor: str = "system",
 ) -> dict:
     """Update a task. Delegates to backend.tasks."""
     from backend import tasks
     return tasks.TaskService().update(
         task_id, title, description, priority, assignee, tags, start_date,
-        due_date, dod_items, branch, pr_url, epic_id, repos, actor,
+        due_date, dod_items, branch, pr_url, epic_id, repos,
+        parent_id=parent_id, milestone_id=milestone_id, actor=actor,
     )
 
 
@@ -1847,6 +1918,7 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
             raise ValueError(f"Project {project_id} not found")
 
         from backend.repos import tasks as core_tasks_repo
+        from backend.repos import task_graph as graph_repo
 
         tasks = (
             core_tasks_repo.with_list_relations(db.query(Task))
@@ -1861,8 +1933,17 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         # epic id + color per group so the UI can link to the epic page.
         groups: dict[str, list] = {}
         group_meta: dict[str, dict] = {}
-        milestones = []
         all_dates = []
+
+        # AP-496: dependency edges + blocked flags for the whole project, so
+        # the roadmap can draw the graph without a request per task.
+        task_ids = [t.id for t in tasks]
+        neighbors = graph_repo.neighbor_tasks(db, task_ids)
+        sub_counts = graph_repo.subtask_counts(db, task_ids)
+        dependencies = [
+            {"id": d.id, "task_id": d.task_id, "depends_on_id": d.depends_on_id}
+            for d in graph_repo.list_dependencies(db, project_id)
+        ]
 
         for t in tasks:
             if group_by == "tag":
@@ -1878,6 +1959,7 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
             status_name = t.status.name
             progress = STATUS_PROGRESS.get(status_name, 0)
 
+            blocked_by = neighbors.get(t.id, {}).get("blocked_by", [])
             task_data = {
                 "id": t.id,
                 "key": t.key or t.id,
@@ -1888,21 +1970,19 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 "start": start,
                 "end": end,
                 "progress": progress,
+                # AP-496 graph fields
+                "parent_id": t.parent_id,
+                "milestone_id": t.milestone_id,
+                "subtasks": sub_counts.get(t.id, {"total": 0, "done": 0}),
+                "blocked_by": blocked_by,
+                "blocks": neighbors.get(t.id, {}).get("blocks", []),
+                "is_blocked": any(b["status"] != "done" for b in blocked_by),
             }
 
             groups.setdefault(group_key, []).append(task_data)
             all_dates.append(start)
             if end:
                 all_dates.append(end)
-
-            # Completed tasks = milestones
-            if status_name == "done":
-                milestones.append({
-                    "id": t.id,
-                    "title": t.title,
-                    "date": t.updated_at.isoformat(),
-                    "epic": group_key,
-                })
 
         # Build summaries
         group_list = []
@@ -1925,14 +2005,33 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         # Sort: groups with in-progress work first, then by progress desc
         group_list.sort(key=lambda e: (-e["in_progress"], -e["progress"], e["name"]))
 
+        # AP-496: milestones are real, dated rows now (was: "any done task"),
+        # with progress derived from the tasks pointing at them.
+        from backend import task_graph as graph_service
+
+        ms_rows = graph_repo.list_milestones(db, project_id)
+        ms_counts = graph_repo.milestone_counts(db, [m.id for m in ms_rows])
+        milestones = [graph_service._milestone_to_dict(m, ms_counts.get(m.id))
+                      for m in ms_rows]
+        # Legacy key kept for the timeline's "recently shipped" strip.
+        recent_completions = sorted(
+            [{"id": t.id, "title": t.title, "date": t.updated_at.isoformat()}
+             for t in tasks if t.status.name == "done"],
+            key=lambda m: m["date"], reverse=True)[:10]
+
         return {
             "project": {"id": project.id, "name": project.name},
             "epics": group_list,
-            "milestones": sorted(milestones, key=lambda m: m["date"], reverse=True)[:10],
+            "milestones": milestones,
+            "recent_completions": recent_completions,
+            "dependencies": dependencies,
             "summary": {
                 "total_tasks": sum(e["total"] for e in group_list),
                 "total_done": sum(e["done"] for e in group_list),
                 "total_epics": len(group_list),
+                "total_milestones": len(milestones),
+                "blocked_tasks": sum(
+                    1 for e in group_list for t in e["tasks"] if t["is_blocked"]),
             },
         }
 

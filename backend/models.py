@@ -536,6 +536,28 @@ class Epic(Base):
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="epic", cascade="all, delete-orphan")
 
 
+class Milestone(Base):
+    """AP-496: a dated roadmap marker (release, demo, deadline).
+
+    Tasks point at a milestone (`Task.milestone_id`); progress is derived from
+    those tasks, never stored, so it can't drift from the board.
+    """
+    __tablename__ = "milestones"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="planned")  # planned | achieved | missed
+    color: Mapped[str] = mapped_column(String(7), default="#2ecc71")
+    creator: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    tasks: Mapped[list["Task"]] = relationship(back_populates="milestone")
+
+
 class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (UniqueConstraint("project_id", "key", name="uq_tasks_project_key"),)
@@ -548,6 +570,11 @@ class Task(Base):
     type: Mapped[str] = mapped_column(String(20), default="task", nullable=False)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True, index=True)
+    # AP-496: child tasks. Self-FK; NULL = a top-level task. Parenting is
+    # validated in backend.task_graph (same project, no cycles).
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True, index=True)
+    # AP-496: roadmap milestone this task rolls up into. NULL = unscheduled.
+    milestone_id: Mapped[str | None] = mapped_column(ForeignKey("milestones.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")
     status_id: Mapped[str] = mapped_column(ForeignKey("statuses.id"), nullable=False, index=True)
@@ -574,6 +601,13 @@ class Task(Base):
 
     project: Mapped["Project"] = relationship(back_populates="tasks")
     epic: Mapped["Epic | None"] = relationship(back_populates="tasks", foreign_keys=[epic_id])
+    # Children survive their parent (see task_graph.detach_children) — the
+    # parent link is an organizational pointer, not ownership.
+    children: Mapped[list["Task"]] = relationship(
+        back_populates="parent", foreign_keys=[parent_id], remote_side=None)
+    parent: Mapped["Task | None"] = relationship(
+        back_populates="children", foreign_keys=[parent_id], remote_side=[id])
+    milestone: Mapped["Milestone | None"] = relationship(back_populates="tasks")
     status: Mapped["Status"] = relationship()
     activities: Mapped[list["Activity"]] = relationship(back_populates="task", cascade="all, delete-orphan",
                                                          order_by="Activity.created_at.desc()")
@@ -687,3 +721,24 @@ class TaskCommit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     task: Mapped["Task"] = relationship(back_populates="commits")
+
+
+class TaskDependency(Base):
+    """AP-496: `task_id` cannot start until `depends_on_id` is done.
+
+    One row per edge, both ends in the same project. Cycles are rejected at
+    write time (backend.task_graph.add_dependency) so the graph stays a DAG
+    and the roadmap can always be laid out.
+    """
+    __tablename__ = "task_dependencies"
+    __table_args__ = (
+        UniqueConstraint("task_id", "depends_on_id", name="uq_task_dependency_edge"),
+    )
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
+    depends_on_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
+    creator: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

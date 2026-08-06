@@ -265,14 +265,17 @@ async def create_task(
     start_date: str = None,
     due_date: str = None,
     dod_items: list[dict] = None,
+    parent_id: str = None,
+    milestone_id: str = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked})."""
+    """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked}). Use parent_id to create it as a subtask of another task, and milestone_id to count it towards a roadmap milestone (see get_roadmap / list_milestones)."""
     actor = actor_ctx.get()
     try:
         logger.info(f"Tool create_task called for project='{project_id}', title='{title}', actor='{actor}'")
         res = services.create_task(
-            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, actor=actor
+            project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, actor=actor,
+            parent_id=parent_id, milestone_id=milestone_id,
         )
         logger.debug(f"Tool create_task success: {res}")
         return res
@@ -321,11 +324,13 @@ async def update_task(
     pr_url: str = None,
     dod_items: list[dict] = None,
     epic_id: str = None,
+    parent_id: str = None,
+    milestone_id: str = None,
     ctx: Context = None,
 ) -> dict:
-    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning. Use epic_id to attach to an epic (or empty string to detach)."""
+    """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning. Use epic_id to attach to an epic (or empty string to detach). Use parent_id to nest this task under another one, and milestone_id to count it towards a milestone — pass "" to either to detach."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, actor=actor)
+    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, parent_id=parent_id, milestone_id=milestone_id, actor=actor)
 
 @mcp.tool()
 async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:
@@ -337,6 +342,91 @@ async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:
 async def delete_task(task_id: str, ctx: Context = None) -> bool:
     """Delete a task."""
     return services.delete_task(task_id, actor=actor_ctx.get())
+
+# ── Roadmap / task graph (AP-496) ─────────────────────────────────────────────
+# An agent that can't read the plan can't work to it. These give the same view
+# the Roadmap page has: the schedule, what blocks what, and what's being aimed
+# at — plus the writes needed to structure work (subtasks, dependencies,
+# milestones) instead of dumping a flat task list.
+
+@mcp.tool()
+async def get_roadmap(project_id: str, group_by: str = "epic", ctx: Context = None) -> dict:
+    """Read the project roadmap: tasks grouped by epic (or 'tag') with start/due
+    dates and progress, the dependency edges between them, every task's
+    is_blocked / blocked_by / blocks / subtasks rollup, the project's milestones
+    with derived progress, and a summary (total/done/blocked counts).
+
+    Read this before planning or picking up work: a task whose is_blocked is
+    true cannot be started yet — finish what it is blocked_by first."""
+    actor = actor_ctx.get()
+    services.authorize_project_access(project_id, actor, "read")
+    return services.get_roadmap(project_id, group_by=group_by)
+
+
+@mcp.tool()
+async def list_subtasks(task_id: str, ctx: Context = None) -> list[dict]:
+    """List the direct child tasks of a task (each with its own subtask rollup)."""
+    return services.list_subtasks(task_id, actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def list_dependencies(project_id: str, ctx: Context = None) -> list[dict]:
+    """List every dependency edge in the project: each row means `task_id` cannot
+    start until `depends_on_id` is done."""
+    return services.list_dependencies(project_id, actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def add_dependency(project_id: str, task_id: str, depends_on_id: str,
+                         ctx: Context = None) -> dict:
+    """Declare that `task_id` waits on `depends_on_id`. Idempotent. Rejected if it
+    would create a cycle, point at itself, or cross projects."""
+    return services.add_dependency(project_id, task_id, depends_on_id,
+                                   actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def remove_dependency(project_id: str, dependency_id: str,
+                            ctx: Context = None) -> bool:
+    """Remove a dependency edge by its id (see list_dependencies)."""
+    return services.remove_dependency(project_id, dependency_id, actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def list_milestones(project_id: str, ctx: Context = None) -> list[dict]:
+    """List the project's milestones with due dates and derived progress
+    (done/total over the tasks linked to each)."""
+    return services.list_milestones(project_id, actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def create_milestone(project_id: str, title: str, description: str = "",
+                           due_date: str = None, color: str = "#2ecc71",
+                           ctx: Context = None) -> dict:
+    """Create a dated roadmap milestone (a launch, demo or deadline). Link tasks to
+    it with update_task(milestone_id=...) — progress is derived from those tasks."""
+    return services.create_milestone(project_id, title=title, description=description,
+                                     due_date=due_date, color=color,
+                                     actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def update_milestone(project_id: str, milestone_id: str, title: str = None,
+                           description: str = None, due_date: str = None,
+                           status: str = None, color: str = None,
+                           ctx: Context = None) -> dict:
+    """Update a milestone. `status` is one of planned | achieved | missed."""
+    return services.update_milestone(project_id, milestone_id, title=title,
+                                     description=description, due_date=due_date,
+                                     status=status, color=color, actor=actor_ctx.get())
+
+
+@mcp.tool()
+async def delete_milestone(project_id: str, milestone_id: str,
+                           ctx: Context = None) -> bool:
+    """Delete a milestone. Its tasks are unlinked, never deleted."""
+    return services.delete_milestone(project_id, milestone_id, actor=actor_ctx.get())
+
 
 # ── Collaboration Tools ────────────────────────────────────────────────────────
 
