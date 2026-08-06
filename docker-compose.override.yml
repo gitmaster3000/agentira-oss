@@ -28,7 +28,9 @@ services:
       # a daemon presenting this key authenticates as the 'preview' profile —
       # no browser login. Only honored when AGENTIRA_ENV=dev.
       - AGENTIRA_DEV_API_KEY=dev-daemon-key-local-only
-      - AGENTIRA_DEV_PROFILE=preview
+      # Must name a profile that exists on a fresh DB — 'admin' is seeded at
+      # bootstrap. Naming one that isn't seeded makes the bypass 401.
+      - AGENTIRA_DEV_PROFILE=admin
       # Where the backend tells `agentira daemon login` to send the browser.
       # Without it the CLI device flow gets a relative /cli-auth and gives up.
       - FRONTEND_URL=http://localhost:3111
