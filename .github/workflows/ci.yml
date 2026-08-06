@@ -96,8 +96,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Bring up only backend + mcp. Frontend is in a sibling repo with
-      # its own CI, and its dev nginx config (mounted via the dev
+      # Bring up only backend + mcp. The frontend has its own workflow
+      # (frontend-ci.yml), and its dev nginx config (mounted via the dev
       # override) lives outside source control. The smoke we care about
       # here is "does the API stack boot end-to-end?" — frontend isn't
       # part of that loop.
