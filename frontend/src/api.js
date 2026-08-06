@@ -173,6 +173,24 @@ export const api = {
     // Board
     getBoard: (projectId) => request(`/projects/${projectId}/board`),
     getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
+
+    // Task graph (AP-496): dependencies + milestones live under the project
+    // so one project-access check covers every graph read/write.
+    listDependencies: (projectId) => request(`/projects/${projectId}/dependencies`),
+    addDependency: (projectId, taskId, dependsOnId) => request(
+        `/projects/${projectId}/dependencies`,
+        { method: 'POST', body: JSON.stringify({ task_id: taskId, depends_on_id: dependsOnId }) }),
+    removeDependency: (projectId, depId) => request(
+        `/projects/${projectId}/dependencies/${depId}`, { method: 'DELETE' }),
+    listMilestones: (projectId) => request(`/projects/${projectId}/milestones`),
+    createMilestone: (projectId, data) => request(`/projects/${projectId}/milestones`,
+        { method: 'POST', body: JSON.stringify(data) }),
+    updateMilestone: (projectId, milestoneId, data) => request(
+        `/projects/${projectId}/milestones/${milestoneId}`,
+        { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteMilestone: (projectId, milestoneId) => request(
+        `/projects/${projectId}/milestones/${milestoneId}`, { method: 'DELETE' }),
+
     getProjectWorkflow: (projectId) => request(`/projects/${projectId}/workflow`),
     getWorkflowPrompts: (projectId) => request(`/projects/${projectId}/workflow/prompts`),
     setWorkflowPromptOverride: (projectId, slug, text) => request(
@@ -366,6 +384,7 @@ export const api = {
     getTask: (id) => request(`/tasks/${id}`),
     updateTask: (id, data) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteTask: (id) => request(`/tasks/${id}`, { method: 'DELETE' }),
+    listSubtasks: (id) => request(`/tasks/${id}/subtasks`),
     moveTask: (taskId, status) => request(`/tasks/${taskId}/move`, { method: 'POST', body: JSON.stringify({ status }) }),
     addComment: (taskId, data) => request(`/tasks/${taskId}/comment`, { method: 'POST', body: JSON.stringify(data) }),
     getActivity: (taskId) => request(`/tasks/${taskId}/activity`),

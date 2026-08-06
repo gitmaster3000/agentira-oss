@@ -6,6 +6,7 @@ import { Markdown } from '../components/Markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
+import { RelationsSection } from '../components/TaskDetail/RelationsSection';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import {
@@ -1149,6 +1150,9 @@ function PlanTab(props) {
                 <div className="bg-bg-card border border-border-subtle rounded-xl px-6 pb-6 shadow-sm">
                     <AttachmentsSection taskId={taskId} />
                 </div>
+
+                {/* AP-496: parent / subtasks / dependencies / milestone */}
+                <RelationsSection task={task} onChanged={loadTask} />
 
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>

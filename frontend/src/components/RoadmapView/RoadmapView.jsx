@@ -1,8 +1,29 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink } from 'lucide-react';
+import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink, GitBranch, ListTree, Ban } from 'lucide-react';
 import { api } from '../../api';
 import { ROUTES } from '../../routes';
+import { MilestonePanel } from './MilestonePanel';
+
+// The calendar and the dependency canvas each pull a sizeable library. They
+// load when their view is opened, so the default timeline stays cheap.
+const CalendarBoard = React.lazy(() =>
+    import('./CalendarBoard').then(m => ({ default: m.CalendarBoard })));
+const DependencyGraph = React.lazy(() =>
+    import('./DependencyGraph').then(m => ({ default: m.DependencyGraph })));
+
+function ViewLoading() {
+    return <div className="card p-6 text-sm text-text-tertiary">Loading view…</div>;
+}
+
+// AP-496: the roadmap is four takes on the same plan. Plain-language labels —
+// a non-engineer owner picks the view, not a Gantt/DAG vocabulary quiz.
+const VIEWS = [
+    { key: 'timeline', label: 'Timeline', icon: CalendarDays },
+    { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+    { key: 'dependencies', label: 'What blocks what', icon: GitBranch },
+    { key: 'milestones', label: 'Milestones', icon: Flag },
+];
 
 const STATUS_COLORS = {
     done: '#2ecc71',
@@ -49,6 +70,21 @@ function TaskRow({ task }) {
             />
             <span className="text-[10px] font-mono text-text-tertiary flex-shrink-0">{task.key || task.id}</span>
             <span className="text-sm text-text-primary flex-1 min-w-0 truncate">{task.title}</span>
+            {/* AP-496: the two graph facts worth seeing without opening the task */}
+            {task.subtasks?.total > 0 && (
+                <span className="text-[10px] text-text-tertiary flex items-center gap-1 flex-shrink-0"
+                      title={`${task.subtasks.done} of ${task.subtasks.total} subtasks done`}>
+                    <ListTree className="w-3 h-3" />
+                    {task.subtasks.done}/{task.subtasks.total}
+                </span>
+            )}
+            {task.is_blocked && (
+                <span className="text-[10px] text-red-400 flex items-center gap-1 flex-shrink-0"
+                      title={`Waiting on ${(task.blocked_by || []).map(b => b.key).join(', ')}`}>
+                    <Ban className="w-3 h-3" />
+                    waiting
+                </span>
+            )}
             {task.assignee && (
                 <span className="text-xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-tertiary hidden group-hover:inline">
                     {task.assignee}
@@ -122,22 +158,20 @@ function EpicSection({ epic }) {
     );
 }
 
-function MilestoneTimeline({ milestones }) {
-    if (!milestones.length) return null;
+function RecentlyShipped({ completions }) {
+    if (!completions?.length) return null;
     return (
         <div className="card">
             <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
-                <Flag className="w-4 h-4 text-green-400" />
-                Recent Milestones
+                <CheckCircle className="w-4 h-4 text-green-400" />
+                Recently shipped
             </h3>
             <div className="relative border-l-2 border-green-500/30 ml-2 pl-4 space-y-3">
-                {milestones.map((m) => (
+                {completions.map((m) => (
                     <div key={m.id} className="relative">
                         <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-green-500" />
                         <div className="text-sm text-text-primary">{m.title}</div>
-                        <div className="text-xs text-text-tertiary">
-                            {formatDate(m.date)} · {m.epic}
-                        </div>
+                        <div className="text-xs text-text-tertiary">{formatDate(m.date)}</div>
                     </div>
                 ))}
             </div>
@@ -160,6 +194,10 @@ function SummaryBar({ summary, groupBy }) {
                 <span>{summary.total_tasks} tasks</span>
                 <span>{summary.total_epics} {groupBy === 'tag' ? 'tags' : 'epics'}</span>
                 <span>{summary.total_done} done</span>
+                {summary.total_milestones > 0 && <span>{summary.total_milestones} milestones</span>}
+                {summary.blocked_tasks > 0 && (
+                    <span className="text-red-400">{summary.blocked_tasks} waiting on other work</span>
+                )}
             </div>
         </div>
     );
@@ -176,7 +214,7 @@ function formatDate(iso) {
  * the project has dates, we render a friendly "no scheduled work" state
  * instead of an empty grid.
  */
-function TimelineStrip({ epics }) {
+function TimelineStrip({ epics, milestones = [] }) {
     // Collect all date-bearing tasks
     const items = [];
     for (const epic of epics || []) {
@@ -207,9 +245,11 @@ function TimelineStrip({ epics }) {
         );
     }
 
-    // Pad axis: 1 week before earliest, 1 week after latest
-    const axisStart = new Date(Math.min(...items.map(i => i.start.getTime())) - 7 * 86400000);
-    const axisEnd   = new Date(Math.max(...items.map(i => i.end.getTime()))   + 7 * 86400000);
+    // Pad axis: 1 week before earliest, 1 week after latest. Dated milestones
+    // extend the axis too, so a marker can never fall off the strip.
+    const dated = milestones.filter(m => m.due_date).map(m => new Date(m.due_date).getTime());
+    const axisStart = new Date(Math.min(...items.map(i => i.start.getTime()), ...dated) - 7 * 86400000);
+    const axisEnd   = new Date(Math.max(...items.map(i => i.end.getTime()), ...dated)   + 7 * 86400000);
     const span = axisEnd - axisStart;
 
     // Month tick positions across the axis
@@ -264,6 +304,23 @@ function TimelineStrip({ epics }) {
                     </div>
                 )}
 
+                {/* AP-496: milestone flags pinned to their date on the axis */}
+                {milestones.filter(m => m.due_date).map((m) => {
+                    const at = new Date(m.due_date);
+                    if (at < axisStart || at > axisEnd) return null;
+                    return (
+                        <div
+                            key={m.id}
+                            className="absolute top-9 bottom-2 border-l border-dashed z-10 pointer-events-none"
+                            style={{ left: `calc(1rem + ${pct(at)})`, borderColor: m.color }}
+                            title={`${m.title} · ${at.toLocaleDateString()} · ${m.done}/${m.total} done`}
+                        >
+                            <Flag className="absolute -top-3 -translate-x-1/2 w-3 h-3"
+                                  style={{ color: m.color }} />
+                        </div>
+                    );
+                })}
+
                 {/* One bar per epic */}
                 <div className="space-y-2">
                     {items.map((item) => (
@@ -298,6 +355,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [groupBy, setGroupBy] = useState('epic');
+    const [view, setView] = useState('timeline');
 
     const loadRoadmap = useCallback(() => {
         if (!projectId) return;
@@ -353,6 +411,15 @@ export function RoadmapView({ projectId: projectIdProp }) {
         return <div className="flex-1 flex items-center justify-center text-red-400 p-6">{error}</div>;
     }
 
+    const removeDependency = async (depId) => {
+        try {
+            await api.removeDependency(projectId, depId);
+            loadRoadmap();
+        } catch (err) {
+            console.error('[Roadmap] removeDependency failed:', err);
+        }
+    };
+
     if (!data || !data.summary || !data.epics || data.summary.total_tasks === 0) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary p-6">
@@ -387,25 +454,73 @@ export function RoadmapView({ projectId: projectIdProp }) {
                 </div>
             </div>
 
-            {/* Timeline strip — actual horizontal time axis with epic bars
-                spanning min(task.start) → max(task.end) per epic. Shows
-                "no scheduled work yet" if nothing has dates. */}
-            <TimelineStrip epics={data.epics} />
+            {/* View switcher — same plan, four readings of it. */}
+            <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit">
+                {VIEWS.map(({ key, label, icon: Icon }) => (
+                    <button
+                        key={key}
+                        onClick={() => setView(key)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                            view === key ? 'bg-bg-app text-text-primary shadow-sm'
+                                         : 'text-text-tertiary hover:text-text-primary'}`}
+                    >
+                        <Icon className="w-3.5 h-3.5" />
+                        {label}
+                    </button>
+                ))}
+            </div>
 
             {/* Summary */}
             <SummaryBar summary={data.summary} groupBy={groupBy} />
 
-            {/* Layout: Epics + Milestones */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                <div className="lg:col-span-2 space-y-3">
-                    {data.epics.map((epic) => (
-                        <EpicSection key={epic.name} epic={epic} />
-                    ))}
-                </div>
-                <div>
-                    <MilestoneTimeline milestones={data.milestones} />
-                </div>
-            </div>
+            {view === 'calendar' && (
+                <React.Suspense fallback={<ViewLoading />}>
+                    <CalendarBoard epics={data.epics} milestones={data.milestones} />
+                </React.Suspense>
+            )}
+
+            {view === 'dependencies' && (
+                <React.Suspense fallback={<ViewLoading />}>
+                    <DependencyGraph
+                        epics={data.epics}
+                        dependencies={data.dependencies}
+                        onRemoveDependency={removeDependency}
+                    />
+                </React.Suspense>
+            )}
+
+            {view === 'milestones' && (
+                <MilestonePanel
+                    projectId={projectId}
+                    milestones={data.milestones}
+                    onChanged={loadRoadmap}
+                />
+            )}
+
+            {view === 'timeline' && (
+                <>
+                    {/* Horizontal time axis: one bar per epic spanning
+                        min(task.start) → max(task.end), with milestone flags
+                        pinned to their dates. */}
+                    <TimelineStrip epics={data.epics} milestones={data.milestones} />
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                        <div className="lg:col-span-2 space-y-3">
+                            {data.epics.map((epic) => (
+                                <EpicSection key={epic.name} epic={epic} />
+                            ))}
+                        </div>
+                        <div className="space-y-5">
+                            <MilestonePanel
+                                projectId={projectId}
+                                milestones={data.milestones}
+                                onChanged={loadRoadmap}
+                            />
+                            <RecentlyShipped completions={data.recent_completions} />
+                        </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 }
