@@ -215,7 +215,7 @@ This is critical for the UI to communicate honestly:
 
 ## 13. Visual / aesthetic notes
 
-Per `agentira-frontend/CONVENTIONS.md` — use Material Design 3 token classes (`var(--accent-primary)`, `var(--text-secondary)`, `text-text-primary` Tailwind utilities). The canvas should feel **dense + technical, not playful**. Real-time motion belongs on the data (task badges riding arrows, merge spinners), not the chrome (no decorative gradients, no purple). Reference inspirations: n8n's editor, GitHub Actions' workflow runs view, Temporal's workflow visualizer.
+Per `frontend/CONVENTIONS.md` — use Material Design 3 token classes (`var(--accent-primary)`, `var(--text-secondary)`, `text-text-primary` Tailwind utilities). The canvas should feel **dense + technical, not playful**. Real-time motion belongs on the data (task badges riding arrows, merge spinners), not the chrome (no decorative gradients, no purple). Reference inspirations: n8n's editor, GitHub Actions' workflow runs view, Temporal's workflow visualizer.
 
 `frontend-design` skill (AP-251) will apply once attached — until then, hold to the existing aesthetic.
 

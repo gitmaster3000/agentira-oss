@@ -13,13 +13,12 @@ All four live in one Railway *project*. Backend + MCP + Postgres talk over Railw
 
 ## One-time setup (10 minutes)
 
-### 1. Fork or push the repos
+### 1. Fork or push the repo
 
-You need two GitHub repos on the deploying account:
-- `<you>/agentira` — backend + MCP
-- `<you>/agentira-frontend` — frontend
+You need one GitHub repo on the deploying account: `<you>/agentira`. It is a monorepo —
+backend, MCP and frontend all deploy from it, each with its own Dockerfile.
 
-If you forked from this repo, you're done. Otherwise push your local clones.
+If you forked from this repo, you're done. Otherwise push your local clone.
 
 ### 2. Create the Railway project
 
@@ -42,10 +41,14 @@ If you forked from this repo, you're done. Otherwise push your local clones.
    The `${{Postgres.DATABASE_URL}}` syntax is Railway's variable reference — it auto-wires the Postgres add-on.
 
    **`AGENTIRA_ADMIN_PASSWORD` is required** (AP-194). In production the backend
-   will not seed a default admin without it — public signup only grants the
-   `member` role, so without this var the workspace would have no administrator.
-   On first boot the backend creates user `admin` with this password; store it
-   in a password manager and rotate from the UI later.
+   will not seed a default admin without it — and since signup is invite-only,
+   an instance with no admin has no way in at all. On first boot the backend
+   creates user `admin` with this password; store it in a password manager and
+   rotate from the UI later.
+
+   **`FRONTEND_URL=https://<your-frontend-domain>` is required** if you want
+   `agentira daemon login` to work. The backend builds the browser approval link
+   from it; unset, the CLI gets a relative path and refuses to continue.
 
    Optional — `CORS_ALLOW_ORIGINS=https://<your-frontend-domain>`. The frontend
    reaches the API same-origin through the nginx proxy, so the app works without
@@ -83,14 +86,19 @@ build instead of crashing the live service at startup.
 
 ### 5. Deploy the frontend service
 
-1. + New → GitHub Repo → pick `<you>/agentira-frontend`. Service name: `frontend`.
-2. Settings → Build → Dockerfile Path: `Dockerfile`.
+1. + New → GitHub Repo → pick `<you>/agentira` again. Service name: `frontend`.
+2. Settings → Build → Dockerfile Path: `frontend/Dockerfile`.
 3. Settings → Networking → Public Networking: **ON**. Generate a domain (Railway gives you `<service>.up.railway.app`) or attach your own.
 4. Settings → Variables:
    ```
    PORT=8080
+   API_UPSTREAM=http://backend.railway.internal:8080
+   API_HOST=backend.railway.internal
    ```
-5. Open `nginx.conf` in your frontend repo — the `proxy_pass` line says `http://flowty-api.railway.internal:8080`. **You must change `flowty-api` to match your backend service's name.** If you named the backend service `backend`, change it to `http://backend.railway.internal:8080`. Push the change. Railway redeploys.
+   `frontend/nginx.conf` substitutes both at container startup — no file edit, no rebuild. Change `backend` to whatever you actually named the backend service.
+
+   Railway's private hostnames are IPv6-only and nginx's startup resolver is IPv4-only. If the proxy can't resolve the internal name, point `API_UPSTREAM` at the backend's public edge URL instead and set `API_HOST` to that hostname.
+5. Go back to the **backend** service and set `FRONTEND_URL` to the domain you just generated. Redeploy it.
 
 ### 6. (Optional) Custom domain
 
@@ -98,7 +106,9 @@ Settings → Networking → Custom Domain on the frontend service. Railway shows
 
 ### 7. Sign in
 
-Visit your frontend domain → log in as **`admin`** with the `AGENTIRA_ADMIN_PASSWORD` you set. That account holds the admin role. (Public **Sign Up** creates `member`-role users, not admins — use it for teammates, then promote them from the UI.) The Conductor and the five default agents (Planner, Backend Implementer, Frontend Implementer, Reviewer, DevOps) are already seeded.
+Visit your frontend domain → log in as **`admin`** with the `AGENTIRA_ADMIN_PASSWORD` you set. That account holds the admin role.
+
+**There is no public sign-up.** Teammates join by invite only — mint one with `python scripts/create_invite.py --role member --org <org_id>` (or `--role admin` to hand someone their own org), then send them the link. Seven agents (Conductor, Planner, Backend Implementer, Frontend Implementer, Reviewer, DevOps, Agentira Guide) are already seeded.
 
 ## Attachments persistence (important)
 

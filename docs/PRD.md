@@ -608,7 +608,7 @@ templates/
 - **Run Detail is currently a debug dump** — AP-188 already reframes it into "Where it worked / Conversation / Logs / Advanced." Honor that grouping.
 - **Inline editing is the canonical pattern** for single-field changes (see TaskPage). Modals are reserved for multi-field creation and destructive confirmations.
 - **Two products, one mental switch** — the app switcher is what's between Studio (planning) and Forge (execution). Don't blur them.
-- **Conventions live in `CONVENTIONS.md` (`agentira-frontend`)**: MD3 token classes, lucide-react icons, theme-token-driven colors. Do not hardcode purple gradients or generic AI aesthetics — the `frontend-design` skill (AP-251 use case) is the right corrective.
+- **Conventions live in `frontend/CONVENTIONS.md`**: MD3 token classes, lucide-react icons, theme-token-driven colors. Do not hardcode purple gradients or generic AI aesthetics — the `frontend-design` skill (AP-251 use case) is the right corrective.
 
 ---
 

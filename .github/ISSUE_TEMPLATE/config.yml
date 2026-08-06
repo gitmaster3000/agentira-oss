@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Can't get it running?
+    url: https://github.com/gitmaster3000/agentira/blob/main/docs/self-hosting.md
+    about: The self-hosting guide covers boot, daemon setup, and the common failure modes.
+  - name: Want board access to take real work?
+    url: https://github.com/gitmaster3000/agentira/blob/main/CONTRIBUTING.md
+    about: Agentira's backlog lives on a hosted Agentira instance. Open an issue to ask for an account.

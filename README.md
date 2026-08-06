@@ -6,7 +6,9 @@
 
 You don't talk to a model — you run a small team of AI agents (Planner, Implementers, Reviewer, DevOps, plus an orchestrator Conductor) against your repos, with traceable runs, verifiable artifacts, and a Kanban board that reflects reality.
 
-[Getting Started](docs/getting-started.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [ADRs](docs/architecture_decision_record.md) · [Vision](AGENTIRA_VISION.md)
+[Self-hosting](docs/self-hosting.md) · [Getting Started](docs/getting-started.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [ADRs](docs/architecture_decision_record.md) · [Contributing](CONTRIBUTING.md)
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -14,7 +16,7 @@ You don't talk to a model — you run a small team of AI agents (Planner, Implem
 
 ## What this is, in 30 seconds
 
-You sign in. A workspace already has six agents — Conductor, Planner, Backend / Frontend Implementer, Reviewer, DevOps — each with a tunable persona and an MCP toolkit. You create a project, drop a brief or design, hit **Run** on the auto-generated "Plan this project" task. The Conductor reads your brief, picks a stack, breaks the work into 3–8 child tasks, and registers a one-page plan as an artifact. You assign tasks to the right agent, hit Run, and they edit code in their own git worktrees, commit, open PRs, and finish with a verdict you can verify. You see everything on the board: status, diff, artifacts, conversation, tokens, cost.
+You sign in. A workspace already has seven agents — Conductor, Planner, Backend / Frontend Implementer, Reviewer, DevOps, and a Guide — each with a tunable persona and an MCP toolkit. You create a project, drop a brief or design, hit **Run** on the auto-generated "Plan this project" task. The Conductor reads your brief, picks a stack, breaks the work into 3–8 child tasks, and registers a one-page plan as an artifact. You assign tasks to the right agent, hit Run, and they edit code in their own git worktrees, commit, open PRs, and finish with a verdict you can verify. You see everything on the board: status, diff, artifacts, conversation, tokens, cost.
 
 **Why this exists.** Cursor and Claude Code are great when you're watching the screen. Agentira is for the time you're *not* watching — overnight, in meetings, on the move. It trades "every keystroke is yours" for "every run produces evidence, every transition is gated, and the board reflects reality."
 
@@ -144,7 +146,7 @@ The full reasoning lives in [docs/architecture_decision_record.md → ADR 009](d
 - Audited escape-hatch MCP tool for path access outside the sandbox.
 - Attachment object storage (Railway Volume or S3) for production deployments.
 
-See the [board](https://github.com/gitmaster3000/agentira) for live status.
+See [Project status](#project-status) for where the board lives.
 
 ---
 
@@ -154,15 +156,12 @@ See the [board](https://github.com/gitmaster3000/agentira) for live status.
 
 ### Prerequisites
 
-- Docker + Docker Compose
-- Node.js 18+ (only if you want to run the frontend outside Docker)
-- A second clone of `agentira-frontend` as a **sibling directory**:
-  ```
-  flowty/
-  ├── agentira/          ← this repo
-  └── agentira-frontend/ ← UI repo (https://github.com/gitmaster3000/agentira-frontend)
-  ```
-  `docker-compose.yml`'s frontend service references `../agentira-frontend` relatively.
+- Docker + Docker Compose — that's it for the stack itself.
+- Python 3.11+ on your machine, for the daemon (it runs on your box, not in Docker).
+- A coding runtime the daemon can drive: the [`claude` CLI](https://github.com/anthropics/claude-code), OpenClaw, Codex, or a local Ollama. At least one, or agents have nothing to execute with.
+- Node.js 20+ only if you want to run the frontend outside Docker.
+
+Dev needs **no `.env` file** — `docker-compose.override.yml` hardcodes dev values on purpose (dev credentials aren't secrets). `.env.example` is for qa/prod.
 
 ### Bring it up
 
@@ -177,18 +176,33 @@ That starts four services on the **dev** profile:
 | frontend | http://localhost:3111 | Vite dev server, HMR |
 | backend | http://localhost:8111 | FastAPI, uvicorn `--reload` |
 | mcp | http://localhost:8000 | MCP server for agents |
-| postgres / sqlite | (dev uses SQLite at `data/agentira.db`) | |
+| postgres | localhost:5432 | Postgres 16 — same engine as prod, on purpose |
 
-Sign in at `http://localhost:3111` — default admin is `admin / admin123` on a fresh DB. The six default agents (Conductor, Planner, Backend / Frontend Implementer, Reviewer, DevOps) are seeded at first boot.
+Sign in at `http://localhost:3111` — default admin is `admin / admin123` on a fresh DB. Seven agents (Conductor, Planner, Backend / Frontend Implementer, Reviewer, DevOps, Agentira Guide) are seeded at first boot.
+
+**Signup is invite-only.** There is no open registration form: the first admin exists from bootstrap, and everyone else joins through an invite. Mint one with `python scripts/create_invite.py --role admin` (new org) or `--role member --org <org_id>` (existing org) — or from the UI once you're signed in.
 
 ### Run the daemon (so agents can actually do work)
 
 ```bash
 pip install -e agentira-cli/
-agentira daemon
+agentira daemon login --api-url http://localhost:8111   # opens the browser, sign in as admin
+agentira daemon start
 ```
 
-The daemon connects to `ws://localhost:8111/api/forge/daemon/ws`, registers any claude CLI it finds on `PATH`, and waits for dispatch frames. Open a project, hit Run on a task, watch the events stream into the Run page.
+`agentira daemon` on its own is a command group — `login` then `start` is the sequence. Check it with `agentira daemon status` and `agentira daemon logs`.
+
+The daemon connects to `ws://localhost:8111/api/forge/daemon/ws`, registers every runtime it finds on `PATH`, and waits for dispatch frames. Open a project, hit Run on a task, watch the events stream into the Run page.
+
+For a local stack you can skip the browser entirely — the dev compose profile ships a static daemon key:
+
+```bash
+AGENTIRA_DAEMON_API_URL=http://127.0.0.1:8111 \
+AGENTIRA_DAEMON_API_KEY=dev-daemon-key-local-only \
+  agentira daemon start
+```
+
+That shortcut is gated on `AGENTIRA_ENV=dev` in the backend and does nothing in any other environment. See [docs/local-testing.md](docs/local-testing.md).
 
 ### Multi-environment compose
 
@@ -196,7 +210,7 @@ Three explicit environments, **all three run simultaneously** on one host (disti
 
 | Env | Frontend | Backend | MCP | DB | Hot reload | Compose project |
 |---|---|---|---|---|---|---|
-| **dev** | 3111 | 8111 | 8000 | SQLite | ✅ | `agentira` (default) |
+| **dev** | 3111 | 8111 | 8000 | Postgres | ✅ | `agentira` (default) |
 | **qa** | 3112 | 8112 | 8001 | Postgres | ❌ | `agentira-qa` |
 | **prod** | 3113 | (internal) | (internal) | Postgres | ❌ | `agentira-prod` |
 
@@ -224,10 +238,11 @@ For qa / prod, copy the `.env.{qa,prod}.example` file and fill in `JWT_SECRET` (
 Full walkthrough: [docs/deployment.md](docs/deployment.md). The short version:
 
 1. Provision Railway project + Postgres add-on.
-2. Deploy three services from the same repo with different Dockerfiles: `Dockerfile` (backend), `Dockerfile.mcp` (mcp), and `agentira-frontend/Dockerfile` (frontend).
+2. Deploy three services from the same repo with different Dockerfiles: `Dockerfile` (backend), `Dockerfile.mcp` (mcp), and `frontend/Dockerfile` (frontend).
 3. Wire `${{Postgres.DATABASE_URL}}` + `${{backend.JWT_SECRET}}` into MCP via Railway variable references.
 4. Mount a 1GB Volume on backend `/app/data` so attachments survive redeploys.
-5. Update `agentira-frontend/nginx.conf`'s `proxy_pass` to match your backend service name.
+5. Set `API_UPSTREAM` / `API_HOST` on the frontend service to your backend's address (they default to the compose `backend` service; `frontend/nginx.conf` substitutes them at startup).
+6. Set `FRONTEND_URL` on the backend to your public frontend address — `agentira daemon login` needs it to build the browser approval link.
 
 Migrations run automatically at startup (`scripts/bootstrap_db.py` → `init_db()`), idempotent on both SQLite and Postgres.
 
@@ -243,7 +258,7 @@ Any MCP-aware client (Claude Desktop, Cursor, Antigravity, etc.) can talk to the
 {
   "mcpServers": {
     "agentira": {
-      "serverUrl": "http://127.0.0.1:8111/mcp",
+      "serverUrl": "http://127.0.0.1:8000/mcp",
       "headers": { "Authorization": "Bearer YOUR_API_KEY" }
     }
   }
@@ -333,7 +348,9 @@ agentira/
 ├── Dockerfile                     # backend
 ├── Dockerfile.mcp                 # MCP server
 ├── railway.toml                   # Railway backend service config
-├── PRE_RELEASE_AUDIT.md           # current readiness snapshot
+├── frontend/                      # React/Vite UI (own package.json, Dockerfile, nginx.conf)
+├── LICENSE                        # Apache-2.0
+├── CONTRIBUTING.md                # how to get a task and get it merged
 ├── CLAUDE.md                      # code-conventions for AI agents working in this repo
 ├── AGENTIRA_VISION.md             # north star
 └── README.md                      # you are here
@@ -348,8 +365,8 @@ agentira/
 | Layer | Stack |
 |---|---|
 | Backend | FastAPI · SQLAlchemy 2 · Pydantic · uvicorn |
-| Database | SQLite (dev) · Postgres 16 (qa / prod) |
-| Tests | pytest · 280+ unit + integration tests |
+| Database | Postgres 16 everywhere — dev, qa, prod and the test harness |
+| Tests | pytest · testcontainers-backed Postgres, never SQLite |
 | MCP | `fastmcp` (HTTP + Stdio transports) |
 | Frontend | React 18 · Vite 6 · TailwindCSS · React-Router · react-markdown |
 | WebSocket dispatch | `websockets` library, per-daemon hub |
@@ -357,31 +374,42 @@ agentira/
 | Daemon | Python `click` CLI, asyncio WS client, subprocess management |
 | Default runtime | `claude` CLI (`@anthropic-ai/claude-code`) |
 | Other runtimes | OpenClaw (HTTP gateway, AP-87 spec), Codex / Gemini scaffolded |
-| Deploy | Docker Compose · Railway (current target) · any K8s-compatible host (future) |
+| Deploy | Docker Compose · Railway · anything that runs Docker + Postgres |
+| License | Apache-2.0 |
 
 ---
 
 ## Testing
 
+Tests run against a real Postgres — `backend/tests/conftest.py` spins one ephemeral
+`testcontainers` instance for the session and gives each test a fresh schema. **Docker
+must be running.** Never SQLite: prod is Postgres, so the tests are too.
+
 ```bash
-# Run the full backend suite (inside the container)
-docker exec agentira-backend-1 python -m pytest backend/tests/ -q
-# → 280+ tests pass on main
+# Full backend suite — 491 passing as of the Apache-2.0 release commit
+python -m pytest backend/tests/ -q
 
-# Specific suite
-docker exec agentira-backend-1 python -m pytest backend/tests/test_gates.py -q
+# One file while iterating
+python -m pytest backend/tests/test_gates.py -q
 
-# Frontend type-check + build
-cd ../agentira-frontend && npx vite build
+# Frontend build
+cd frontend && npm ci && npx vite build
 ```
 
-Two pre-existing failures in `test_run_status_broadcast.py` (pytest-asyncio missing) and `test_template_loader.py` (pydantic v1 validators) are tracked but not blocking — they fail on `main` too.
+`tests/` is the legacy root and folds into `backend/tests/` over time. The
+`Integration test (full suite)` workflow runs both with the CLI installed — trigger it
+by commenting `/integration-test` on a PR.
 
 ---
 
-## Conventions for contributors (and AI agents)
+## Contributing
 
-The full ruleset is in [CLAUDE.md](CLAUDE.md), but the short version:
+Start at [CONTRIBUTING.md](CONTRIBUTING.md). The short version: open a GitHub issue,
+and if you want to take real work, ask for an account on the Agentira instance where
+this project's own board lives — Agentira runs its own development, so contributors
+work the same board the maintainers do.
+
+The full code ruleset is in [CLAUDE.md](CLAUDE.md), but the short version:
 
 - **Modular boundaries.** New domains get their own `backend/<domain>.py` (or `backend/forge/<domain>.py`). Functions over class hierarchies. Reach for OOP only when state or storage actually swaps.
 - **Prompts-as-config.** Agent system prompts live on `Profile.system_prompt` (edited in Agent Settings UI). Task content lives on `Task.description` (edited in Task UI). No prompt text in dispatch code. No re-applying code constants on top of user-edited rows.
@@ -393,13 +421,24 @@ The full ruleset is in [CLAUDE.md](CLAUDE.md), but the short version:
 
 ## Project status
 
-Today's snapshot lives in [PRE_RELEASE_AUDIT.md](PRE_RELEASE_AUDIT.md):
+Working, self-hostable, and used to build itself — but early. Expect rough edges in
+the places a two-person project has rough edges: the daemon installers are manual, sandbox
+enforcement is config-only (Phase 2 is on the roadmap), and the docs lag the code in spots.
 
-- Core platform is in working shape (280+ tests pass, dev/qa/prod compose profiles known-good).
-- 9 backend PRs + 6 frontend PRs are queued and CI-green, adding the AP-152/153/154/155/157/158 feature set.
-- First-user Railway deployment depends on those merges + an end-to-end smoke check + a one-click daemon installer (in roadmap).
+What is solid: the stack boots from a clean clone with `docker compose up`, the full
+loop (board → task → dispatch → runtime → PR) works end to end, and nothing in a
+self-hosted deployment depends on a service the maintainers control.
 
-The board is at [Agentira Platform / AP-*](https://github.com/gitmaster3000/agentira) and is the canonical source of truth for what's in flight.
+The canonical backlog is an Agentira board, not a GitHub Projects board — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to get access.
+
+---
+
+## License
+
+[Apache-2.0](LICENSE). Permissive, with an explicit patent grant — you can run it,
+fork it, and ship it inside a commercial product. See [NOTICE](NOTICE) for the
+attribution notice.
 
 ---
 

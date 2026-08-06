@@ -41,23 +41,37 @@ curl -fsSL https://your-instance.railway.app/api/public/install.sh | bash
 
 # Dev fallback (from source):
 git clone https://github.com/<you>/agentira ~/agentira
-cd ~/agentira/agentira-cli
-pip install -e .
-agentira daemon --backend-url https://your-instance.railway.app
+cd ~/agentira
+pip install -e agentira-cli/
+agentira daemon login --api-url https://your-instance.railway.app
+agentira daemon start
 ```
 
-Customers upgrade with `agentira daemon update` (no GitHub access required).
+Upgrade later with `agentira daemon update` — no GitHub access required.
 
-When you start the daemon, paste the **API key** from your profile page (top-right avatar → **Settings → API key**). The daemon authenticates over WebSocket and stays connected.
+`agentira daemon` on its own is a command group, not a command — `login` then `start`.
+
+`login` opens your browser to the instance's `/cli-auth` page, where you approve this
+daemon while signed in as an admin. The token is stored in
+`~/.agentira/credentials.json`. You don't paste an API key.
 
 ```
+✓ Daemon authorized. You can now run `agentira daemon start`.
+Daemon started (PID 58194) — home /Users/you/.agentira
 WS connected + registered to wss://your-instance.railway.app/api/forge/daemon/ws
-Daemon started — daemon_id=abc12345 runtimes=1
 ```
+
+Check it any time with `agentira daemon status` and `agentira daemon logs`.
 
 If the daemon can't find `claude` in your PATH, install it first (`npm i -g @anthropic-ai/claude-code` or follow Anthropic's instructions).
 
-> **If your terminal closes, the daemon stops.** For longer sessions, run it under `tmux`, `screen`, or your OS's service manager. A signed Mac `.pkg` + Windows `.msi` that auto-start are part of the v1 release — same for the `curl | sh` installer above.
+> **The daemon backgrounds itself** — closing the terminal won't stop it, and
+> `agentira daemon stop` will. On a Mac, `agentira daemon install-launchd` makes it
+> restart on crash and at login. Signed installers for Mac and Windows are part of v1.
+
+> **Login failing with "didn't return a usable verification URL"?** The instance's
+> backend has no `FRONTEND_URL` set — that's an operator fix, see
+> [self-hosting.md](self-hosting.md).
 
 ---
 

@@ -208,7 +208,7 @@ tmux new -s agentira 'agentira daemon'
 | Agents still show grey dots in Forge → Agents | Daemon connected but didn't auto-bind | Click an agent → Runtime dropdown → pick the one your daemon registered |
 | Run starts but agent says "no claude found" | The daemon registered, but the claude binary moved | Restart the daemon (Ctrl-C then `agentira daemon`); it re-detects runtimes |
 | Diff is empty after a run | Agent worked but didn't commit, OR worked outside the worktree | Open the Run page → "Workdir (cwd)" diagnostic → `cd` there to inspect |
-| Browser shows "Failed to fetch" on every API call | Frontend's nginx isn't proxying correctly. **This is an operator problem** — tell whoever gave you the URL | (operator: check `agentira-frontend/nginx.conf` `proxy_pass`) |
+| Browser shows "Failed to fetch" on every API call | Frontend's nginx isn't proxying correctly. **This is an operator problem** — tell whoever gave you the URL | (operator: check `frontend/nginx.conf` `proxy_pass`) |
 
 ---
 
