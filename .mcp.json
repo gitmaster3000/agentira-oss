@@ -4,7 +4,7 @@
       "type": "http",
       "url": "http://127.0.0.1:8000/mcp",
       "headers": {
-        "Authorization": "Bearer 44f736d1c07ac684d8eb8aa464995a092e85d5ead974ba598d7b9fa4ee9110ea"
+        "Authorization": "Bearer YOUR_AGENTIRA_API_KEY"
       }
     }
   }

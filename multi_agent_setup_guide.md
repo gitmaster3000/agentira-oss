@@ -325,7 +325,7 @@ python run.py
 # 3. Run daemon in dry-run mode
 python -m agents.daemon `
   --bot-name antigravity `
-  --api-key 44f736d1c07ac684d8eb8aa464995a092e85d5ead974ba598d7b9fa4ee9110ea `
+  --api-key YOUR_AGENTIRA_API_KEY `
   --dry-run
 ```
 

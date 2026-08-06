@@ -34,7 +34,7 @@ services:
     ports:
       - "3112:80"
     volumes:
-      - ../agentira-frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
 
   postgres:
     image: postgres:16-alpine

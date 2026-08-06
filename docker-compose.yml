@@ -32,7 +32,7 @@ services:
 
   frontend:
     build:
-      context: ../agentira-frontend
+      context: ./frontend
       dockerfile: Dockerfile
     depends_on:
       - backend

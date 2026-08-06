@@ -6,7 +6,7 @@ in-app, but it's here for ops).
 
 Usage:
   AGENTIRA_DB_URL=postgresql://postgres:...@host:port/railway \\
-  FRONTEND_URL=https://flowty-frontend-production.up.railway.app \\
+  FRONTEND_URL=https://agentira.example.com \\
   python scripts/create_invite.py --role admin [--email someone@x.com]
   python scripts/create_invite.py --role member --org <org_id>
 """

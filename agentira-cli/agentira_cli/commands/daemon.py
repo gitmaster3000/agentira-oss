@@ -131,8 +131,8 @@ def login(api_url: str = typer.Option(None, "--api-url",
         # relative path — point the user at the right place explicitly.
         typer.echo(f"Server at {base} didn't return a usable verification URL "
                    f"(got '{verify or 'nothing'}').")
-        typer.echo("If you meant the hosted product, re-run with:")
-        typer.echo("  agentira daemon login --api-url https://flowty-api-production.up.railway.app")
+        typer.echo("If you meant a different instance, re-run with:")
+        typer.echo("  agentira daemon login --api-url https://agentira.example.com")
         raise typer.Exit(1)
     url = f"{verify}?user_code={user_code}"
     typer.echo("Opening your browser to authorize this daemon (sign in as an admin)…")

@@ -55,7 +55,7 @@ Use the `serverUrl` field in your configuration:
     "agentira": {
       "serverUrl": "http://127.0.0.1:8000/sse",
       "headers": {
-        "Authorization": "Bearer cfe6bba64a29941c215328c87fac07bf21995c882c740e149f3d2d83355672a9"
+        "Authorization": "Bearer YOUR_AGENTIRA_API_KEY"
       }
     }
   }

@@ -2,6 +2,7 @@
 import asyncio
 import httpx
 import logging
+import os
 import sys
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -10,8 +11,8 @@ logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 async def main():
     url = "http://localhost:8000/sse"
-    # Full API key for user 'abc' captured carefully
-    api_key = "cfe6bba64a29941c215328c87fac07bf21995c882c740e149f3d2d83355672a9"
+    # Mint one in the UI (Settings → API keys) and export AGENTIRA_API_KEY.
+    api_key = os.environ["AGENTIRA_API_KEY"]
     
     headers = {
         "Authorization": f"Bearer {api_key}"

@@ -14,7 +14,7 @@ class DaemonConfig(BaseSettings):
     Example .env::
 
         AGENTIRA_DAEMON_API_URL=http://127.0.0.1:8111
-        AGENTIRA_DAEMON_API_KEY=44f736d1c07a...
+        AGENTIRA_DAEMON_API_KEY=your-api-key
         AGENTIRA_DAEMON_POLL_INTERVAL=120
     """
 

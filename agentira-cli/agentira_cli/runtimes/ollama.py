@@ -1,6 +1,6 @@
 """Ollama runtime — bare LLM gateway.
 
-Per the runtime architecture (see `/Users/alifaraz/.claude/plans/...`):
+Per the runtime architecture:
 Agentira owns the agent layer (persona, system_prompt, conversation history,
 MCP). Ollama is a bare execution engine — it generates tokens and nothing
 else. No bootstrap, no per-agent persona, no tool execution on the runtime

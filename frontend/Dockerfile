@@ -10,10 +10,10 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
-# API upstream the SPA proxies /api to. Defaults to prod, so the prod build is
-# unchanged; preview/staging Railway envs override these (service variables) to
-# point at the staging API — keeping previews off prod data. nginx:alpine
-# envsubst's ${VAR} in the template at startup (only env-defined vars).
-ENV API_UPSTREAM=https://flowty-api-production.up.railway.app \
-    API_HOST=flowty-api-production.up.railway.app
+# API upstream the SPA proxies /api to. Defaults to the `backend` service from
+# docker-compose.yml, so a plain `docker compose up` works out of the box.
+# Override both (service/env variables) to point at a hosted or staging API.
+# nginx:alpine envsubst's ${VAR} in the template at startup (only env-defined vars).
+ENV API_UPSTREAM=http://backend:8111 \
+    API_HOST=backend
 CMD ["nginx", "-g", "daemon off;"]

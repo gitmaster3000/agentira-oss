@@ -49,7 +49,7 @@ services:
   # qa/prod which keep the nginx-served-built-bundle Dockerfile.
   frontend:
     build:
-      context: ../agentira-frontend
+      context: ./frontend
       dockerfile: Dockerfile.dev
     ports:
       - "3111:3111"
@@ -57,7 +57,7 @@ services:
       # vite proxy hits the docker network's backend, not localhost.
       - VITE_PROXY_TARGET=http://backend:8111
     volumes:
-      - ../agentira-frontend:/app
+      - ./frontend:/app
       # Anonymous volume so the host's node_modules (or absence of)
       # doesn't shadow the image's npm ci output.
       - /app/node_modules
