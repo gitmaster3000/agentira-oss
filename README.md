@@ -180,7 +180,15 @@ That starts four services on the **dev** profile:
 
 Sign in at `http://localhost:3111` — default admin is `admin / admin123` on a fresh DB. Seven agents (Conductor, Planner, Backend / Frontend Implementer, Reviewer, DevOps, Agentira Guide) are seeded at first boot.
 
-**Signup is invite-only.** There is no open registration form: the first admin exists from bootstrap, and everyone else joins through an invite. Mint one with `python scripts/create_invite.py --role admin` (new org) or `--role member --org <org_id>` (existing org) — or from the UI once you're signed in.
+**Signup is invite-only.** There is no open registration form: the first admin exists from bootstrap, and everyone else joins through an invite. Mint one from inside the backend container —
+
+```bash
+docker compose exec -e FRONTEND_URL=http://localhost:3111 backend \
+  python scripts/create_invite.py --role admin          # new org, invitee becomes its admin
+#                                 --role member --org <org_id>   # joins your org
+```
+
+— and send the printed `/signup?invite=…` link.
 
 ### Run the daemon (so agents can actually do work)
 
