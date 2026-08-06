@@ -29,6 +29,9 @@ services:
       # no browser login. Only honored when AGENTIRA_ENV=dev.
       - AGENTIRA_DEV_API_KEY=dev-daemon-key-local-only
       - AGENTIRA_DEV_PROFILE=preview
+      # Where the backend tells `agentira daemon login` to send the browser.
+      # Without it the CLI device flow gets a relative /cli-auth and gives up.
+      - FRONTEND_URL=http://localhost:3111
     depends_on:
       postgres:
         condition: service_healthy
