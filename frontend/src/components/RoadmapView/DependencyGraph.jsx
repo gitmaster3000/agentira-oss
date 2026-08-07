@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ReactFlow, Background, Controls, MiniMap, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { GitBranch } from 'lucide-react';
+import { Workflow } from 'lucide-react';
 import { ROUTES } from '../../routes';
 
 const STATUS_COLORS = {
@@ -72,6 +72,7 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
                 id,
                 position: { x: col * COL_WIDTH, y: row * ROW_HEIGHT },
                 data: {
+                    taskRef: task.key || task.id,
                     label: (
                         <div className="text-left">
                             <div className="text-[10px] font-mono opacity-70">{task.key}</div>
@@ -116,7 +117,7 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
         return (
             <div className="card p-6 text-sm text-text-tertiary">
                 <div className="flex items-center gap-2 text-text-primary font-medium mb-1">
-                    <GitBranch className="w-4 h-4" />
+                    <Workflow className="w-4 h-4" />
                     Nothing depends on anything yet
                 </div>
                 Open a task and add a “waits on” link to say which work has to finish first.
@@ -128,12 +129,12 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
     return (
         <div className="card p-0 overflow-hidden">
             <div className="px-4 py-3 border-b border-border-subtle/40 flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-text-tertiary" />
+                <Workflow className="w-4 h-4 text-text-tertiary" />
                 <span className="text-xs font-medium text-text-primary uppercase tracking-wider">
-                    Dependencies
+                    Dependency flow
                 </span>
                 <span className="text-xs text-text-tertiary ml-auto">
-                    {connectedCount} linked tasks · {edges.length} links · red = still waiting
+                    blocker → dependent · {connectedCount} tasks · {edges.length} links · red = still waiting
                 </span>
             </div>
             <div style={{ height: 560 }}>
@@ -144,7 +145,7 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
                     nodesDraggable={false}
                     nodesConnectable={false}
                     proOptions={{ hideAttribution: false }}
-                    onNodeClick={(_, node) => navigate(ROUTES.STUDIO_TASK(node.id))}
+                    onNodeClick={(_, node) => navigate(ROUTES.STUDIO_TASK(node.data.taskRef || node.id))}
                     onEdgeClick={(_, edge) => {
                         if (!onRemoveDependency) return;
                         if (window.confirm('Remove this dependency link?')) onRemoveDependency(edge.id);

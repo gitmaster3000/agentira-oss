@@ -24,15 +24,16 @@ for; milestones show as flagged all-day entries. Click any task to open it.
 Tasks with no dates aren't shown — the count of them is printed under the
 calendar, so you can see what's still unscheduled instead of it quietly missing.
 
-### What blocks what
+### Dependencies
 A chart of your dependencies, read left to right: everything on the left has to
-finish before the things it points to can start.
+finish before the things it points to can start. Each arrow reads
+**blocker → dependent task**.
 
 - Red arrow = the earlier task isn't done, so the later one is still waiting.
 - Green arrow = that link is satisfied.
 - A red outline on a task means something it needs isn't finished.
 
-Click a task to open it. Click an arrow to remove that link.
+Click a task to open its full page. Click an arrow to remove that link.
 
 If the chart is empty, nothing has been linked yet — see "Saying one task waits on
 another" below.
@@ -67,8 +68,8 @@ Under **Part of**, you can nest the current task under a bigger one instead.
 - **Waits on** — things that must finish before this task can start.
 - **Blocks** — things that are waiting on this task.
 
-Add either with **+** and pick a task. Anything you add shows up in the "What
-blocks what" chart, and a task that's waiting gets a *waiting* badge on the
+Add either with **+** and pick a task. Anything you add shows up in the
+**Dependencies** chart, and a task that's waiting gets a *waiting* badge on the
 roadmap.
 
 You can't create a loop (A waits on B waits on A) — if you try, the panel tells

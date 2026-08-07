@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink, GitBranch, ListTree, Ban } from 'lucide-react';
+import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink, Workflow, ListTree, Ban } from 'lucide-react';
 import { api } from '../../api';
 import { ROUTES } from '../../routes';
 import { MilestonePanel } from './MilestonePanel';
@@ -21,7 +21,7 @@ function ViewLoading() {
 const VIEWS = [
     { key: 'timeline', label: 'Timeline', icon: CalendarDays },
     { key: 'calendar', label: 'Calendar', icon: CalendarDays },
-    { key: 'dependencies', label: 'What blocks what', icon: GitBranch },
+    { key: 'dependencies', label: 'Dependencies', icon: Workflow },
     { key: 'milestones', label: 'Milestones', icon: Flag },
 ];
 
@@ -56,12 +56,18 @@ function EpicProgress({ epic }) {
 }
 
 function TaskRow({ task }) {
+    const navigate = useNavigate();
     const statusColor = STATUS_COLORS[task.status] || STATUS_COLORS.backlog;
     const priorityColor = PRIORITY_DOTS[task.priority] || PRIORITY_DOTS.medium;
     const Icon = task.progress === 100 ? CheckCircle : task.progress > 0 ? Clock : Circle;
 
     return (
-        <div className="flex items-center gap-3 px-4 py-2 hover:bg-bg-hover rounded-md transition-colors group">
+        <button
+            type="button"
+            onClick={() => navigate(ROUTES.STUDIO_TASK(task.key || task.id))}
+            className="flex items-center gap-3 px-4 py-2 hover:bg-bg-hover rounded-md transition-colors group w-full text-left"
+            title={`Open ${task.key || task.id} in full view`}
+        >
             <Icon className="w-3.5 h-3.5 flex-shrink-0" style={{ color: statusColor }} />
             <div
                 className="w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -101,7 +107,7 @@ function TaskRow({ task }) {
                     {formatDate(task.end)}
                 </span>
             )}
-        </div>
+        </button>
     );
 }
 

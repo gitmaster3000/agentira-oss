@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
+import { CalendarDays } from 'lucide-react';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import './calendar-theme.css';
 import { ROUTES } from '../../routes';
@@ -43,7 +44,7 @@ export function CalendarBoard({ epics = [], milestones = [] }) {
                 out.push({
                     id: task.id,
                     kind: 'task',
-                    title: `${task.key} ${task.title}`,
+                    title: `${task.key || task.id} ${task.title}`,
                     start: start || end,
                     end: end || start,
                     allDay: true,
@@ -83,8 +84,28 @@ export function CalendarBoard({ epics = [], milestones = [] }) {
         };
     };
 
+    const jumpToDate = (value) => {
+        if (!value) return;
+        // Parse as local time. `new Date('YYYY-MM-DD')` is UTC and can move the
+        // selected day backwards for users west of Greenwich.
+        setDate(new Date(`${value}T00:00:00`));
+    };
+
     return (
         <div className="card p-3">
+            <div className="flex items-center justify-end gap-2 mb-3">
+                <CalendarDays className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
+                <label htmlFor="roadmap-jump-date" className="text-xs text-text-secondary">
+                    Jump to date
+                </label>
+                <input
+                    id="roadmap-jump-date"
+                    type="date"
+                    className="input text-xs py-1 px-2 w-auto"
+                    value={format(date, 'yyyy-MM-dd')}
+                    onChange={(event) => jumpToDate(event.target.value)}
+                />
+            </div>
             <div className="rbc-agentira" style={{ height: 620 }}>
                 <Calendar
                     localizer={localizer}
@@ -97,7 +118,10 @@ export function CalendarBoard({ epics = [], milestones = [] }) {
                     popup
                     eventPropGetter={eventStyle}
                     onSelectEvent={(event) => {
-                        if (event.kind === 'task') navigate(ROUTES.STUDIO_TASK(event.id));
+                        if (event.kind === 'task') {
+                            const task = event.resource.task;
+                            navigate(ROUTES.STUDIO_TASK(task.key || task.id));
+                        }
                     }}
                     startAccessor="start"
                     endAccessor="end"

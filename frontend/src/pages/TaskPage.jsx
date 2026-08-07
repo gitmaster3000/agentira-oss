@@ -491,6 +491,7 @@ export function TaskPage() {
                         setComment={setComment}
                         handleComment={handleComment}
                         activities={activities}
+                        loadTask={loadTask}
                     />
                 )}
 
@@ -786,6 +787,7 @@ function PlanTab(props) {
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
         commits, copiedField, copyToClipboard,
         taskId, user, comment, setComment, handleComment, activities,
+        loadTask,
         run, runStatus, runActive, summaryUpdatedAt,
         forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun,
     } = props;
