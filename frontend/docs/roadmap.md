@@ -54,6 +54,14 @@ for the record; it doesn't change the progress number.
 
 Open any task and look at the **How this fits in** panel.
 
+The full task page is arranged in two wide sections so the same information is
+easy to scan without a long sidebar. **Overview & planning** keeps the
+description, ownership, run state, details, subtasks, dependencies and milestone
+together. **Collaboration & delivery** puts comments beside the Definition of
+Done, Branch & PR, attachments and timestamps. The separate **Activity** tab
+keeps the complete read-only event history available without mixing it into the
+working view.
+
 ### Breaking a task into subtasks
 Under **Subtasks**, press **+** and pick an existing task in the project. It
 becomes a subtask of the one you're looking at, and the parent shows a `2/5`-style

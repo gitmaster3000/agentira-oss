@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { TaskPage } from './TaskPage';
 import { api } from '../api';
@@ -13,6 +13,10 @@ vi.mock('../api', () => ({
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         listProjectRepos: vi.fn(() => Promise.resolve([])),
         listAttachments: vi.fn(() => Promise.resolve([])),
+        listSubtasks: vi.fn(() => Promise.resolve([])),
+        listTasks: vi.fn(() => Promise.resolve([])),
+        listMilestones: vi.fn(() => Promise.resolve([])),
+        listDependencies: vi.fn(() => Promise.resolve([])),
         addComment: vi.fn(() => Promise.resolve({})),
         updateTask: vi.fn(() => Promise.resolve({})),
         moveTask: vi.fn(() => Promise.resolve({})),
@@ -93,6 +97,23 @@ describe('TaskPage — detail view (AP-353)', () => {
         renderTaskPage();
         await screen.findByText('My task');
         expect(await screen.findByText('all done')).toBeInTheDocument();
+    });
+
+    it('organizes the full page into overview and collaboration bands', async () => {
+        renderTaskPage();
+        await screen.findByText('My task');
+
+        const overview = screen.getByTestId('task-overview-section');
+        const collaboration = screen.getByTestId('task-collaboration-section');
+
+        expect(within(overview).getByText('Description')).toBeInTheDocument();
+        expect(within(overview).getByText('Details')).toBeInTheDocument();
+        expect(within(overview).getByText('How this fits in')).toBeInTheDocument();
+        expect(within(collaboration).getByText('Comments')).toBeInTheDocument();
+        expect(within(collaboration).getByText('Definition of Done')).toBeInTheDocument();
+        expect(within(collaboration).getByText('Branch & PR')).toBeInTheDocument();
+        expect(within(collaboration).getByText('Attachments')).toBeInTheDocument();
+        expect(within(collaboration).getByText('Timestamps')).toBeInTheDocument();
     });
 
     it('exposes an Edit affordance and reveals editable core + detail fields', async () => {

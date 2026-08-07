@@ -793,28 +793,20 @@ function PlanTab(props) {
     } = props;
 
     return (
-        <div className="flex flex-col lg:flex-row gap-12">
-            <div className="flex-1 min-w-0">
-                {/* Run info inline on the main page (no separate Agent tab). */}
-                {!isEditing && (
-                    <div className="mb-10">
-                        <AgentSection
-                            run={run}
-                            runStatus={runStatus}
-                            runActive={runActive}
-                            summaryUpdatedAt={summaryUpdatedAt}
-                            task={task}
-                            forgeAgents={forgeAgents}
-                            pickingAgent={pickingAgent}
-                            setPickingAgent={setPickingAgent}
-                            scheduling={scheduling}
-                            openAgentPicker={openAgentPicker}
-                            handleScheduleRun={handleScheduleRun}
-                        />
-                    </div>
-                )}
+        <div className="space-y-10">
+            <section aria-labelledby="task-overview-heading" data-testid="task-overview-section">
+                <div className="mb-5">
+                    <h2 id="task-overview-heading" className="text-base font-semibold text-text-primary">
+                        Overview &amp; planning
+                    </h2>
+                    <p className="text-xs text-text-tertiary mt-1">
+                        The task brief, current ownership, execution state, and how this work fits the plan.
+                    </p>
+                </div>
 
-                <div className="mb-10">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                    <div className="xl:col-span-8 min-w-0 space-y-6">
+                <div>
                     <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
                     {isEditing ? (
                         <textarea
@@ -833,22 +825,30 @@ function PlanTab(props) {
                     )}
                 </div>
 
-                {/* Comments live in the main column now (no separate tab). */}
-                <CommentsSection
-                    user={user}
-                    comment={comment}
-                    setComment={setComment}
-                    handleComment={handleComment}
-                    activities={activities}
-                    projectId={task.project_id}
-                />
-            </div>
+                        {/* Run info stays in the overview so execution state is
+                            visible without a separate Agent tab. */}
+                        {!isEditing && (
+                            <AgentSection
+                                run={run}
+                                runStatus={runStatus}
+                                runActive={runActive}
+                                summaryUpdatedAt={summaryUpdatedAt}
+                                task={task}
+                                forgeAgents={forgeAgents}
+                                pickingAgent={pickingAgent}
+                                setPickingAgent={setPickingAgent}
+                                scheduling={scheduling}
+                                openAgentPicker={openAgentPicker}
+                                handleScheduleRun={handleScheduleRun}
+                            />
+                        )}
+                    </div>
 
-            <div className="w-full lg:w-80 space-y-8">
+                    <div className="xl:col-span-4 min-w-0 space-y-6">
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-tertiary mb-6 pb-2 border-b border-border-subtle/50">Details</h3>
 
-                    <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-5">
                         <div>
                             <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
                             {isEditing ? (
@@ -968,7 +968,7 @@ function PlanTab(props) {
                         </div>
 
                         {projectRepos.length > 0 && (
-                            <div>
+                            <div className="col-span-2">
                                 <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Repos</label>
                                 <div className="flex flex-wrap gap-1.5">
                                     {(task.repos || []).length > 0
@@ -981,6 +981,41 @@ function PlanTab(props) {
                         )}
                     </div>
                 </div>
+
+                        {/* Parent, subtasks, dependencies and milestone are
+                            planning context, so keep them above the fold. */}
+                        <RelationsSection task={task} onChanged={loadTask} />
+                    </div>
+                </div>
+            </section>
+
+            <section
+                aria-labelledby="task-collaboration-heading"
+                data-testid="task-collaboration-section"
+                className="border-t border-border-subtle pt-8"
+            >
+                <div className="mb-5">
+                    <h2 id="task-collaboration-heading" className="text-base font-semibold text-text-primary">
+                        Collaboration &amp; delivery
+                    </h2>
+                    <p className="text-xs text-text-tertiary mt-1">
+                        Discussion, acceptance criteria, code links, files, and delivery history.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+                    <div className="xl:col-span-7 min-w-0">
+                        <CommentsSection
+                            user={user}
+                            comment={comment}
+                            setComment={setComment}
+                            handleComment={handleComment}
+                            activities={activities}
+                            projectId={task.project_id}
+                        />
+                    </div>
+
+                    <div className="xl:col-span-5 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
 
                 {/* Definition of Done */}
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
@@ -1038,7 +1073,7 @@ function PlanTab(props) {
                 {/* Git Integration */}
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-4">
-                        <GitBranch className="w-3.5 h-3.5" /> Git
+                        <GitBranch className="w-3.5 h-3.5" /> Branch &amp; PR
                     </h3>
 
                     <div className="mb-4">
@@ -1153,9 +1188,6 @@ function PlanTab(props) {
                     <AttachmentsSection taskId={taskId} />
                 </div>
 
-                {/* AP-496: parent / subtasks / dependencies / milestone */}
-                <RelationsSection task={task} onChanged={loadTask} />
-
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
                     <div className="space-y-3">
@@ -1169,7 +1201,9 @@ function PlanTab(props) {
                         </div>
                     </div>
                 </div>
+                    </div>
+                </div>
+            </section>
             </div>
-        </div>
     );
 }
