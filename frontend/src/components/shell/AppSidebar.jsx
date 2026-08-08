@@ -18,19 +18,19 @@ const navStyle = (active) => ({
     display: 'flex', alignItems: 'center', gap: '11px', padding: '8px 10px',
     borderRadius: '9px', cursor: 'pointer', fontSize: '13px', transition: 'background .12s',
     ...(active
-        ? { background: 'rgba(201,184,255,.10)', color: '#c9b8ff', fontWeight: 600 }
-        : { color: '#b1bac4' }),
+        ? { background: 'rgba(201,184,255,.10)', color: 'var(--brand-lavender)', fontWeight: 600 }
+        : { color: 'var(--text-tertiary)' }),
 });
 
-const grayBadge = (n) => <span className="rl" style={{ fontSize: '10px', color: '#768390' }}>{n}</span>;
+const grayBadge = (n) => <span className="rl" style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{n}</span>;
 
 const liveDot = (n) => (
     <span className="rl" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
         <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#38bdf8' }} />
-            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: '#38bdf8', animation: 'livedot 1.8s ease-out infinite' }} />
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--pulse-blue)' }} />
+            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--pulse-blue)', animation: 'livedot 1.8s ease-out infinite' }} />
         </span>
-        <span style={{ fontSize: '10px', color: '#38bdf8', fontWeight: 600 }}>{n}</span>
+        <span style={{ fontSize: '10px', color: 'var(--pulse-blue)', fontWeight: 600 }}>{n}</span>
     </span>
 );
 
@@ -49,7 +49,7 @@ function NavRow({ active, onClick, icon, label, badge }) {
 // Expanded: a text section header. Collapsed: a border-top divider + dimmed icon.
 function RailHeader({ label, icon }) {
     return (
-        <div className="railhdr" style={{ padding: '16px 10px 7px', fontSize: '11.5px', fontWeight: 800, letterSpacing: '.14em', color: '#aeb6c0' }}>
+        <div className="railhdr" style={{ padding: '16px 10px 7px', fontSize: '11.5px', fontWeight: 800, letterSpacing: '.14em', color: 'var(--text-section)' }}>
             {icon}
             <span className="hdrlabel">{label}</span>
         </div>
@@ -114,10 +114,10 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
             className={`railwrap shell-sidebar${rc}${open ? ' shell-sidebar--open' : ''}`}
             style={{ flexShrink: 0, position: 'relative', zIndex: 30, fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}
         >
-            <div className={`rail${rc}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', background: '#14171d', border: '1px solid rgba(255,255,255,.07)', borderRadius: '16px', boxShadow: '0 12px 38px rgba(0,0,0,.45)' }}>
+            <div className={`rail${rc}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', background: 'var(--surface-raised)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', boxShadow: '0 12px 38px rgba(0,0,0,.45)' }}>
                 {/* collapse toggle (top of the rail) */}
                 <div className="railtoggle-wrap" style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'flex-end', padding: '10px 12px 2px' }}>
-                    <div className="hovertint" onClick={onToggleRail} title="Toggle sidebar" style={{ width: '30px', height: '30px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#b1bac4', border: '1px solid rgba(255,255,255,.08)' }}>
+                    <div className="hovertint" onClick={onToggleRail} title="Toggle sidebar" style={{ width: '30px', height: '30px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-tertiary)', border: '1px solid var(--overlay-line)' }}>
                         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><line x1="9" y1="4" x2="9" y2="20" /></svg>
                     </div>
                 </div>
@@ -172,20 +172,20 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                 </div>
 
                 {/* footer user */}
-                <div style={{ position: 'relative', zIndex: 1, borderTop: '1px solid rgba(255,255,255,.06)', padding: '8px' }} ref={userRef}>
+                <div style={{ position: 'relative', zIndex: 1, borderTop: '1px solid var(--overlay-tint)', padding: '8px' }} ref={userRef}>
                     <div className="nav" title={user?.display_name || user?.name || 'User'} onClick={() => setUserOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 9px', borderRadius: '10px', cursor: 'pointer' }}>
-                        <div style={{ width: '28px', height: '28px', flexShrink: 0, borderRadius: '50%', background: 'rgba(201,184,255,.12)', color: '#c9b8ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }}>{userInitial}</div>
+                        <div style={{ width: '28px', height: '28px', flexShrink: 0, borderRadius: '50%', background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }}>{userInitial}</div>
                         <div className="rl" style={{ flex: 1, lineHeight: 1.15 }}>
                             <div style={{ fontSize: '12px', fontWeight: 500 }}>{user?.display_name || user?.name || 'User'}</div>
-                            <div style={{ fontSize: '10px', color: '#768390' }}>{user?.role || 'member'}</div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{user?.role || 'member'}</div>
                         </div>
-                        <svg className="ico rl" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#768390" strokeWidth="2"><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
+                        <svg className="ico rl" width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-muted)' }} strokeWidth="2"><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
                     </div>
                     {userOpen && (
                         // Opens above when expanded; shell.css flies it out to the right of
                         // the rail when collapsed (.rail.rc .usermenu).
-                        <div className="usermenu" style={{ position: 'absolute', bottom: '100%', left: '8px', right: '8px', marginBottom: '6px', background: '#1c2128', border: '1px solid rgba(255,255,255,.09)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 60, padding: '5px' }}>
-                            <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: '#b1bac4' }}>
+                        <div className="usermenu" style={{ position: 'absolute', bottom: '100%', left: '8px', right: '8px', marginBottom: '6px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 60, padding: '5px' }}>
+                            <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-tertiary)' }}>
                                 <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M1 12h4M19 12h4" /></svg>Settings
                             </div>
                             <div className="nav" onClick={() => { localStorage.removeItem('agentira_token'); navigate('/login'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: '#f87171' }}>

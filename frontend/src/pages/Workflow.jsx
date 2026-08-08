@@ -21,8 +21,8 @@ function ToggleBtn({ active, onClick, children }) {
                 fontFamily: 'inherit', fontSize: '11px', fontWeight: 600, borderRadius: '6px',
                 padding: '4px 12px', margin: 0, cursor: 'pointer', lineHeight: 1.5,
                 ...(active
-                    ? { color: '#f0f3f6', background: '#1c2128', border: '1px solid #484f58' }
-                    : { color: '#768390', background: 'transparent', border: '1px solid transparent' }),
+                    ? { color: 'var(--text-primary)', background: 'var(--surface-card)', border: '1px solid var(--border-strong)' }
+                    : { color: 'var(--text-muted)', background: 'transparent', border: '1px solid transparent' }),
             }}
         >{children}</button>
     );
@@ -67,16 +67,16 @@ export function Workflow() {
     const to = gateConditions(selected, flow, columnsUi).to;
 
     return (
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0e1117', minHeight: 0 }}>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--surface-base)', minHeight: 0 }}>
             <style>{'@keyframes pulsedot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}'}</style>
 
             {/* toolbar — sits right under the top bar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '13px 20px', borderBottom: '1px solid #30363d', background: '#161b22', flexWrap: 'wrap', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '13px 20px', borderBottom: '1px solid var(--border-default)', background: 'var(--surface-nav)', flexWrap: 'wrap', flexShrink: 0 }}>
                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '6px', background: 'rgba(128,203,196,.14)' }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.5 6H15a3 3 0 0 1 3 3v6.5" /></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-teal)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.5 6H15a3 3 0 0 1 3 3v6.5" /></svg>
                 </span>
-                <h1 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#f0f3f6' }}>Workflow Engine</h1>
-                <span style={{ fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '11px', color: '#768390' }}>{projectName} · {selected} → {to || '(terminal)'}</span>
+                <h1 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Workflow Engine</h1>
+                <span style={{ fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace', fontSize: '11px', color: 'var(--text-muted)' }}>{projectName} · {selected} → {to || '(terminal)'}</span>
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '7px' }}>
                     <ToggleBtn active={view === 'visual'} onClick={() => setView('visual')}>Visual</ToggleBtn>
                     <ToggleBtn active={view === 'code'} onClick={() => setView('code')}>Code</ToggleBtn>
@@ -95,7 +95,7 @@ export function Workflow() {
                         columnsUi={columnsUi}
                     />
                 </div>
-                <div style={{ width: '380px', flexShrink: 0, borderLeft: '1px solid #30363d', background: '#0e1117', overflowY: 'auto' }}>
+                <div style={{ width: '380px', flexShrink: 0, borderLeft: '1px solid var(--border-default)', background: 'var(--surface-base)', overflowY: 'auto' }}>
                     {view === 'visual'
                         ? <ColumnPanel columnName={selected} flow={flow} columnsUi={columnsUi} projectId={projectId} onPromptSaved={load} />
                         : <RuleCodePane columnName={selected} flow={flow} columnsUi={columnsUi} />}

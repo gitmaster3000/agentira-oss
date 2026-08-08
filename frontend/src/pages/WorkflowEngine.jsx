@@ -10,7 +10,7 @@ const mono = 'var(--font-mono)';
 
 function GearIcon() {
     return (
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
@@ -83,7 +83,7 @@ function Condition({ children }) {
     return (
         <div style={{ background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)', borderLeft: '2px solid var(--brand-teal)', borderRadius: 9, padding: '9px 12px' }}>
             <span style={{ display: 'inline-block', fontSize: 8, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--brand-teal)', fontWeight: 700, marginBottom: 5 }}>Condition</span>
-            <div style={{ fontFamily: mono, fontSize: 11, color: '#c8cdd4' }}>{children}</div>
+            <div style={{ fontFamily: mono, fontSize: 11, color: 'var(--text-secondary)' }}>{children}</div>
         </div>
     );
 }
@@ -100,7 +100,7 @@ function SectionKicker({ dot, label }) {
     return (
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />
-            <span style={{ fontSize: 12, letterSpacing: '.14em', textTransform: 'uppercase', color: '#aeb6c0', fontWeight: 600 }}>{label}</span>
+            <span style={{ fontSize: 12, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--text-section)', fontWeight: 600 }}>{label}</span>
         </div>
     );
 }
@@ -111,7 +111,7 @@ const fn = { color: 'var(--pulse-blue-bright)' };
 const str = { color: 'var(--brand-teal)' };
 const op = { color: 'var(--text-tertiary)' };
 const lit = { color: 'var(--warning)' };
-const cmt = { color: '#5b636e' };
+const cmt = { color: 'var(--text-muted)' };
 const num = { color: 'var(--pulse-blue-bright)' };
 
 function ReviewStarCode() {
@@ -137,10 +137,10 @@ function ReviewStarCode() {
     ];
     return (
         <div style={{ display: 'flex', fontFamily: mono, fontSize: 12.5, lineHeight: 1.8 }}>
-            <div style={{ textAlign: 'right', color: '#3a434f', paddingRight: 16, borderRight: '1px solid #21272f', userSelect: 'none' }}>
+            <div style={{ textAlign: 'right', color: 'var(--border-strong)', paddingRight: 16, borderRight: '1px solid var(--border-default)', userSelect: 'none' }}>
                 {lines.map((_, i) => <div key={i}>{i + 1}</div>)}
             </div>
-            <div style={{ paddingLeft: 16, whiteSpace: 'pre', color: '#c8cdd4', overflowX: 'auto' }}>
+            <div style={{ paddingLeft: 16, whiteSpace: 'pre', color: 'var(--text-secondary)', overflowX: 'auto' }}>
                 {lines.map((l, i) => <div key={i}>{l}</div>)}
             </div>
         </div>
@@ -152,17 +152,17 @@ function AgentiraMark({ size = 30 }) {
         <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Agentira">
             <defs>
                 <linearGradient id="agwe" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#c9b8ff" /><stop offset="1" stopColor="#80cbc4" />
+                    <stop style={{ stopColor: 'var(--brand-lavender)' }} /><stop offset="1" style={{ stopColor: 'var(--brand-teal)' }} />
                 </linearGradient>
             </defs>
             <rect width="64" height="64" rx="16" fill="url(#agwe)" />
-            <path d="M22 44 L32 19 L42 44 M26 36 H38" stroke="#0e1117" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <path d="M22 44 L32 19 L42 44 M26 36 H38" style={{ stroke: 'var(--surface-base)' }} strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
         </svg>
     );
 }
 
-const grantedChip = { fontFamily: mono, fontSize: 11, color: '#c8cdd4', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 9px' };
-const deniedChip = { fontFamily: mono, fontSize: 11, color: '#5b636e', background: 'var(--surface-base)', border: '1px dashed var(--border-subtle)', borderRadius: 6, padding: '4px 9px', textDecoration: 'line-through' };
+const grantedChip = { fontFamily: mono, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-card)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 9px' };
+const deniedChip = { fontFamily: mono, fontSize: 11, color: 'var(--text-muted)', background: 'var(--surface-base)', border: '1px dashed var(--border-subtle)', borderRadius: 6, padding: '4px 9px', textDecoration: 'line-through' };
 const evidenceRow = { display: 'flex', alignItems: 'center', gap: 9, background: 'var(--surface-base)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '9px 11px' };
 
 export function WorkflowEngine() {
@@ -184,7 +184,7 @@ export function WorkflowEngine() {
                         <span style={{ fontSize: 13, color: 'var(--text-tertiary)', marginLeft: 2 }}>/ Workflow Engine</span>
                     </Link>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <Link to={ROUTES.WELCOME} style={{ fontSize: 13.5, color: '#c8cdd4', textDecoration: 'none', padding: '8px 6px' }}>&larr; Back to home</Link>
+                        <Link to={ROUTES.WELCOME} style={{ fontSize: 13.5, color: 'var(--text-secondary)', textDecoration: 'none', padding: '8px 6px' }}>&larr; Back to home</Link>
                         <Link to={ROUTES.SIGNUP} style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--surface-base)', background: 'var(--brand-lavender)', border: '1px solid var(--brand-lavender)', borderRadius: 8, padding: '8px 16px', textDecoration: 'none' }}>Start free</Link>
                     </div>
                 </div>
@@ -194,13 +194,13 @@ export function WorkflowEngine() {
             <section style={{ maxWidth: 1120, margin: '0 auto', padding: '84px 32px 70px' }}>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, border: '1px solid var(--border-subtle)', background: 'var(--surface-raised)', borderRadius: 999, padding: '6px 13px', marginBottom: 26 }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-teal)' }} />
-                    <span style={{ fontSize: 12, letterSpacing: '.1em', textTransform: 'uppercase', color: '#aeb6c0', fontWeight: 500 }}>The Workflow Engine</span>
+                    <span style={{ fontSize: 12, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-section)', fontWeight: 500 }}>The Workflow Engine</span>
                 </div>
                 <h1 style={{ margin: '0 0 22px', fontSize: 'clamp(34px,4.6vw,56px)', fontWeight: 600, letterSpacing: '-0.03em', lineHeight: 1.05, color: 'var(--text-primary)', maxWidth: '18ch' }}>
                     Rules you write. Evidence the agent can't touch.
                 </h1>
                 <p style={{ margin: 0, fontSize: 18, lineHeight: 1.62, color: 'var(--text-secondary)', maxWidth: '64ch' }}>
-                    The engine runs two kinds of rules you control: <strong style={{ color: '#e8ebf0', fontWeight: 600 }}>process</strong> &mdash; who does what when a task lands in a column &mdash; and <strong style={{ color: '#e8ebf0', fontWeight: 600 }}>verification</strong> &mdash; the gate that decides whether it can leave. The agent does the work, but it's the platform, never the agent, that gathers the evidence behind a gate.
+                    The engine runs two kinds of rules you control: <strong style={{ color: 'var(--text-bright)', fontWeight: 600 }}>process</strong> &mdash; who does what when a task lands in a column &mdash; and <strong style={{ color: 'var(--text-bright)', fontWeight: 600 }}>verification</strong> &mdash; the gate that decides whether it can leave. The agent does the work, but it's the platform, never the agent, that gathers the evidence behind a gate.
                 </p>
             </section>
 
@@ -210,7 +210,7 @@ export function WorkflowEngine() {
                     {/* toolbar */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '13px 16px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--surface-nav)' }}>
                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: 6, background: 'var(--tint-teal)' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--brand-teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-teal)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.5 6H15a3 3 0 0 1 3 3v6.5" />
                             </svg>
                         </span>
@@ -218,7 +218,7 @@ export function WorkflowEngine() {
                         <span style={{ fontFamily: mono, fontSize: 11, color: 'var(--text-tertiary)' }}>acme/billing-api &middot; review &rarr; done</span>
                         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 7 }}>
                             <button style={{ fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--brand-lavender)', background: 'var(--accent-subtle)', border: '1px solid rgba(201,184,255,.3)', borderRadius: 6, padding: '4px 11px', margin: 0, cursor: 'pointer', lineHeight: 1.5 }}>
-                                <svg width="11" height="11" viewBox="0 0 24 24" fill="var(--brand-lavender)" stroke="none"><path d="M12 2.5l1.9 5.7 5.7 1.9-5.7 1.9L12 17.7l-1.9-5.7L4.4 10l5.7-1.9z" /></svg>
+                                <svg width="11" height="11" viewBox="0 0 24 24" style={{ fill: 'var(--brand-lavender)' }} stroke="none"><path d="M12 2.5l1.9 5.7 5.7 1.9-5.7 1.9L12 17.7l-1.9-5.7L4.4 10l5.7-1.9z" /></svg>
                                 Build with AI
                             </button>
                             <span style={{ width: 1, height: 18, background: 'var(--border-subtle)', margin: '0 2px' }} />
@@ -233,7 +233,7 @@ export function WorkflowEngine() {
                             <div style={{ position: 'relative', background: 'rgba(20,25,33,.55)', border: '1px solid #2a313c', borderRadius: 14, padding: '20px 18px 16px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 16 }}>
                                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-lavender)' }} />
-                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: '#aeb6c0', fontWeight: 600 }}>The board &middot; every column has a process &amp; a gate</span>
+                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-section)', fontWeight: 600 }}>The board &middot; every column has a process &amp; a gate</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', flexWrap: 'wrap', gap: 0, marginBottom: 6 }}>
                                     <BoardColumn name="Backlog" dotColor="var(--text-tertiary)" barWidth="80%" />
@@ -263,54 +263,54 @@ export function WorkflowEngine() {
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'center', padding: '11px 0' }}>
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3a434f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--border-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
                             </div>
 
                             {/* process */}
                             <div style={{ background: 'rgba(0,188,212,.05)', border: '1px solid rgba(0,188,212,.22)', borderRadius: 14, padding: '20px 18px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 14 }}>
                                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-cyan)' }} />
-                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: '#aeb6c0', fontWeight: 600 }}>Review &middot; process &middot; on enter, route the work</span>
+                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-section)', fontWeight: 600 }}>Review &middot; process &middot; on enter, route the work</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
                                     <ProcessStep accent>
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" /></svg>
-                                        <span style={{ fontSize: 12, color: '#e8ebf0' }}>Enter <span style={{ fontFamily: mono, color: 'var(--text-secondary)' }}>Review</span></span>
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" /></svg>
+                                        <span style={{ fontSize: 12, color: 'var(--text-bright)' }}>Enter <span style={{ fontFamily: mono, color: 'var(--text-secondary)' }}>Review</span></span>
                                     </ProcessStep>
                                     <div style={{ padding: '0 4px', flexShrink: 0 }}><ArrowRightIcon /></div>
                                     <ProcessStep>
                                         <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', background: 'var(--brand-lavender)', fontSize: 9, fontWeight: 700, color: 'var(--surface-base)' }}>R</span>
-                                        <span style={{ fontSize: 12, color: '#e8ebf0' }}>Assign Reviewer</span>
+                                        <span style={{ fontSize: 12, color: 'var(--text-bright)' }}>Assign Reviewer</span>
                                     </ProcessStep>
                                     <div style={{ padding: '0 4px', flexShrink: 0 }}><ArrowRightIcon /></div>
                                     <ProcessStep>
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l14 8-14 8V4z" /></svg>
-                                        <span style={{ fontSize: 12, color: '#e8ebf0' }}>Dispatch run</span>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l14 8-14 8V4z" /></svg>
+                                        <span style={{ fontSize: 12, color: 'var(--text-bright)' }}>Dispatch run</span>
                                     </ProcessStep>
                                     <div style={{ padding: '0 4px', flexShrink: 0 }}><ArrowRightIcon /></div>
                                     <ProcessStep>
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-                                        <span style={{ fontSize: 12, color: '#e8ebf0' }}>Notify</span>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+                                        <span style={{ fontSize: 12, color: 'var(--text-bright)' }}>Notify</span>
                                     </ProcessStep>
                                 </div>
                             </div>
 
                             <div style={{ display: 'flex', justifyContent: 'center', padding: '11px 0' }}>
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3a434f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--border-strong)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
                             </div>
 
                             {/* gate */}
                             <div style={{ background: 'rgba(128,203,196,.05)', border: '1px solid rgba(128,203,196,.26)', borderRadius: 14, padding: '20px 18px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 16 }}>
                                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-teal)' }} />
-                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: '#aeb6c0', fontWeight: 600 }}>Review &middot; gate &middot; on exit, can it leave?</span>
+                                    <span style={{ fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-section)', fontWeight: 600 }}>Review &middot; gate &middot; on exit, can it leave?</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: 4 }}>
                                     {/* trigger */}
                                     <div style={{ background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)', borderLeft: '2px solid var(--brand-lavender)', borderRadius: 11, padding: '13px 14px', width: 186 }}>
                                         <span style={{ display: 'inline-block', fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--brand-lavender)', fontWeight: 700, background: 'rgba(201,184,255,.12)', borderRadius: 4, padding: '2px 7px', marginBottom: 10 }}>Trigger</span>
                                         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 7 }}>On transition</div>
-                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 11, color: '#c8cdd4', background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '5px 9px' }}>
+                                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-sunken)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '5px 9px' }}>
                                             review <span style={{ color: 'var(--text-tertiary)' }}>&rarr;</span> done
                                         </div>
                                     </div>
@@ -357,7 +357,7 @@ export function WorkflowEngine() {
                     ) : (
                         <div style={{ background: 'var(--surface-sunken)', padding: '22px 24px', minHeight: 332 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 11, color: '#c8cdd4', background: 'var(--surface-nav)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 10px' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: mono, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-nav)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 10px' }}>
                                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-lavender)' }} />
                                     review.star
                                 </span>
@@ -369,7 +369,7 @@ export function WorkflowEngine() {
                     )}
                 </div>
                 <p style={{ margin: '16px auto 0', fontSize: 13, color: 'var(--text-tertiary)', textAlign: 'center', maxWidth: '60ch' }}>
-                    Every column on the board gets its own rules: a <strong style={{ color: '#aeb6c0', fontWeight: 600 }}>process</strong> that routes work in on arrival, and a Starlark <strong style={{ color: '#aeb6c0', fontWeight: 600 }}>gate</strong> that verifies the evidence before work is allowed out. Here, the Review column is selected.
+                    Every column on the board gets its own rules: a <strong style={{ color: 'var(--text-section)', fontWeight: 600 }}>process</strong> that routes work in on arrival, and a Starlark <strong style={{ color: 'var(--text-section)', fontWeight: 600 }}>gate</strong> that verifies the evidence before work is allowed out. Here, the Review column is selected.
                 </p>
             </section>
 
@@ -385,17 +385,17 @@ export function WorkflowEngine() {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 20 }}>
                         {[{
                             name: 'Visual', accent: 'var(--brand-lavender)', tint: 'var(--tint-lavender)',
-                            icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--brand-lavender)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.5 6H15a3 3 0 0 1 3 3v6.5" /></svg>,
+                            icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-lavender)' }} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.5 6H15a3 3 0 0 1 3 3v6.5" /></svg>,
                             desc: 'A drag-and-drop node editor. Read the flow and adjust conditions, branches and outcomes — no code, so non-technical owners can follow it.',
                             best: 'reading & tweaking',
                         }, {
                             name: 'AI', accent: 'var(--brand-teal)', tint: 'var(--tint-teal)',
-                            icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="var(--brand-teal)" stroke="none"><path d="M12 2.5l1.9 5.7 5.7 1.9-5.7 1.9L12 17.7l-1.9-5.7L4.4 10l5.7-1.9z" /><path d="M19 3l.6 1.8 1.8.6-1.8.6L19 8l-.6-1.8L16.6 5.6 18.4 5z" /></svg>,
+                            icon: <svg width="17" height="17" viewBox="0 0 24 24" style={{ fill: 'var(--brand-teal)' }} stroke="none"><path d="M12 2.5l1.9 5.7 5.7 1.9-5.7 1.9L12 17.7l-1.9-5.7L4.4 10l5.7-1.9z" /><path d="M19 3l.6 1.8 1.8.6-1.8.6L19 8l-.6-1.8L16.6 5.6 18.4 5z" /></svg>,
                             desc: 'Describe the rule in plain English. Agentira compiles it to Starlark and draws the nodes for you — a first draft in seconds.',
                             best: 'starting fast',
                         }, {
                             name: 'Code', accent: 'var(--accent-cyan)', tint: 'var(--tint-cyan)',
-                            icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6 3 12l5 6M16 6l5 6-5 6" /></svg>,
+                            icon: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6 3 12l5 6M16 6l5 6-5 6" /></svg>,
                             desc: 'Drop into Starlark for everyday gates, or custom Python for richer logic and bespoke evidence sources. Full control when you need it.',
                             best: 'precision & power',
                         }].map((v) => (
@@ -408,7 +408,7 @@ export function WorkflowEngine() {
                                     </div>
                                 </div>
                                 <p style={{ margin: '0 0 14px', fontSize: 14.5, lineHeight: 1.6, color: 'var(--text-secondary)' }}>{v.desc}</p>
-                                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Best for <span style={{ color: '#c8cdd4' }}>{v.best}</span></div>
+                                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Best for <span style={{ color: 'var(--text-secondary)' }}>{v.best}</span></div>
                             </div>
                         ))}
                     </div>
@@ -416,9 +416,9 @@ export function WorkflowEngine() {
                     <div style={{ marginTop: 28, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 14, background: 'var(--surface-raised)', border: '1px solid var(--border-subtle)', borderRadius: 14, padding: '18px 24px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                             <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--brand-lavender)' }}>Visual</span>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h14M13 4l4 4-4 4" /><path d="M21 16H7M11 20l-4-4 4-4" /></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-tertiary)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h14M13 4l4 4-4 4" /><path d="M21 16H7M11 20l-4-4 4-4" /></svg>
                             <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--brand-teal)' }}>AI</span>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h14M13 4l4 4-4 4" /><path d="M21 16H7M11 20l-4-4 4-4" /></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-tertiary)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8h14M13 4l4 4-4 4" /><path d="M21 16H7M11 20l-4-4 4-4" /></svg>
                             <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--accent-cyan)' }}>Code</span>
                         </div>
                         <span style={{ fontSize: 14, color: 'var(--text-secondary)', textAlign: 'center' }}>Fully interchangeable &mdash; switch views anytime, and every edit writes the same underlying rule.</span>
@@ -440,7 +440,7 @@ export function WorkflowEngine() {
                         <div style={{ padding: 26, minWidth: 260 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
                                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'var(--tint-cyan)' }}>
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6 3 12l5 6M16 6l5 6-5 6" /></svg>
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--accent-cyan)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6 3 12l5 6M16 6l5 6-5 6" /></svg>
                                 </span>
                                 <div style={{ lineHeight: 1.25 }}>
                                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Agent runtime</div>
@@ -460,16 +460,16 @@ export function WorkflowEngine() {
                         {/* barrier */}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 14px', background: 'var(--surface-base)', borderLeft: '1px dashed var(--border-active)', borderRight: '1px dashed var(--border-active)', position: 'relative' }}>
                             <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, borderRadius: '50%', background: 'var(--surface-card)', border: '1px solid var(--border-active)' }}>
-                                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-tertiary)' }} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
                             </span>
-                            <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: '#5b636e', fontWeight: 600 }}>trust boundary</span>
+                            <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>trust boundary</span>
                         </div>
 
                         {/* system side */}
                         <div style={{ padding: 26, minWidth: 260, background: '#16191f' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
                                 <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'var(--tint-teal)' }}>
-                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand-teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 4 6v6c0 5 8 8 8 8s8-3 8-8V6l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-teal)' }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 4 6v6c0 5 8 8 8 8s8-3 8-8V6l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>
                                 </span>
                                 <div style={{ lineHeight: 1.25 }}>
                                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Platform</div>
@@ -481,7 +481,7 @@ export function WorkflowEngine() {
                                 {[['GitHub PR state', 'var(--success)'], ['CI run result', 'var(--success)'], ['Commit SHA exists', 'var(--success)'], ['+ your custom evidence', 'var(--brand-teal)']].map(([label, dot]) => (
                                     <div key={label} style={evidenceRow}>
                                         <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />
-                                        <span style={{ fontSize: 12.5, color: '#e8ebf0' }}>{label}</span>
+                                        <span style={{ fontSize: 12.5, color: 'var(--text-bright)' }}>{label}</span>
                                     </div>
                                 ))}
                             </div>

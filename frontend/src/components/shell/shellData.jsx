@@ -3,7 +3,7 @@ import { api } from '../../api';
 
 // Project dot color: use the project's own color if the API provides one,
 // else derive a stable color from its id so each project reads distinctly.
-const RING = ['#c9b8ff', '#80cbc4', '#fdd663', '#c58af9', '#8ab4f8', '#81c995'];
+const RING = ['var(--brand-lavender)', 'var(--brand-teal)', '#fdd663', '#c58af9', '#8ab4f8', '#81c995'];
 export function projectColor(p) {
     if (p?.color) return p.color;
     const id = String(p?.id ?? '');

@@ -10,8 +10,8 @@ import { ConfirmModal } from './ConfirmModal';
 const PRIORITY = {
     critical: { color: '#f85149', bg: 'rgba(248,81,73,.14)' },
     high:     { color: '#ff9800', bg: 'rgba(255,152,0,.14)' },
-    medium:   { color: '#7c8db5', bg: 'rgba(124,141,181,.14)' },
-    low:      { color: '#768390', bg: 'rgba(118,131,144,.14)' },
+    medium:   { color: 'var(--accent-mono-blue)', bg: 'rgba(124,141,181,.14)' },
+    low:      { color: 'var(--text-muted)', bg: 'rgba(118,131,144,.14)' },
 };
 
 export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
@@ -36,7 +36,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
     const prio = PRIORITY[task.priority] || PRIORITY.medium;
     // No priority color on the left edge — only the live-agent indicator,
     // which appears just for active tasks. Priority still reads via its pill.
-    const leftBorder = live ? '#38bdf8' : 'var(--border-subtle)';
+    const leftBorder = live ? 'var(--pulse-blue)' : 'var(--border-subtle)';
 
     return (
         <div
@@ -75,7 +75,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
 
             {/* Key + live / needs-attention */}
             <div className="flex items-center justify-between" style={{ marginBottom: 5 }}>
-                <span style={{ fontSize: 10.5, fontFamily: 'ui-monospace,monospace', color: '#7c8db5' }}>
+                <span style={{ fontSize: 10.5, fontFamily: 'ui-monospace,monospace', color: 'var(--accent-mono-blue)' }}>
                     {task.key || task.id}
                 </span>
                 {live ? (
@@ -83,7 +83,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
                         <span style={{ width: 13, height: 13, borderRadius: 4, background: 'rgba(0,188,212,.16)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" strokeWidth="2.6"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle></svg>
                         </span>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: '#38bdf8' }}>LIVE</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--pulse-blue)' }}>LIVE</span>
                     </span>
                 ) : task.needs_attention ? (
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ff9800" strokeWidth="2" title="Needs attention"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
@@ -103,7 +103,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
                             <Link
                                 to={ROUTES.STUDIO_EPIC(task.epic_id)}
                                 onClick={(e) => e.stopPropagation()}
-                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || '#c9b8ff'}22`, color: task.epic_color || '#c9b8ff' }}
+                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || 'var(--brand-lavender)'}22`, color: task.epic_color || 'var(--brand-lavender)' }}
                                 className="hover:underline"
                                 title={`Open epic: ${task.epic_name}`}
                             >
@@ -111,7 +111,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
                             </Link>
                         ) : (
                             <span
-                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || '#c9b8ff'}22`, color: task.epic_color || '#c9b8ff' }}
+                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || 'var(--brand-lavender)'}22`, color: task.epic_color || 'var(--brand-lavender)' }}
                                 title={`Epic: ${task.epic_name}`}
                             >
                                 {task.epic_name}

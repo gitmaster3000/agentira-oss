@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { getTheme, subscribeTheme, toggleTheme } from '../lib/theme';
 
 export function ThemeToggle() {
-    const [dark, setDark] = useState(() => {
-        return localStorage.getItem('theme') !== 'light';
-    });
+    const [theme, setThemeState] = useState(getTheme);
+    const dark = theme !== 'light';
 
-    useEffect(() => {
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-        localStorage.setItem('theme', dark ? 'dark' : 'light');
-    }, [dark]);
+    useEffect(() => subscribeTheme(setThemeState), []);
 
     return (
         <button
-            onClick={() => setDark(d => !d)}
+            onClick={toggleTheme}
             className="p-2 rounded-xl hover:bg-bg-hover text-text-secondary hover:text-text-primary transition-colors"
             title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
         >

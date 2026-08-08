@@ -29,7 +29,7 @@ describe('TaskCard', () => {
 
     it('keeps the live-agent indicator on the left border when active', () => {
         const { container } = renderCard({ ...base, agent_active: true });
-        // jsdom normalizes #38bdf8 → rgb(56, 189, 248).
-        expect(container.firstChild.style.borderLeft).toContain('rgb(56, 189, 248)');
+        // The live accent is themed — it resolves per day/night palette.
+        expect(container.firstChild.style.borderLeft).toContain('var(--pulse-blue)');
     });
 });

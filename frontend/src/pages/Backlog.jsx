@@ -269,7 +269,7 @@ export function Backlog() {
                                                     <div className="w-2.5 h-2.5 rounded-full mr-3 flex-shrink-0" style={{ backgroundColor: { done: '#2ecc71', review: '#ff9800', in_progress: '#7c4dff', todo: '#00bcd4', backlog: '#5f6368' }[task.status] || '#5f6368' }} title={task.status?.replace('_', ' ')} />
                                                     
                                                     <div className="flex items-center gap-2 flex-1 min-w-0 mr-3">
-                                                        <span className="text-[12px] font-mono font-semibold flex-shrink-0" style={{ color: '#7c8db5' }}>{task.key || task.id}</span>
+                                                        <span className="text-[12px] font-mono font-semibold flex-shrink-0" style={{ color: 'var(--accent-mono-blue)' }}>{task.key || task.id}</span>
                                                         <span className="text-sm truncate font-medium" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
                                                         
                                                         {/* Epic/Tag pills inside row */}

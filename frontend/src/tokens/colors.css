@@ -56,6 +56,14 @@
   --tint-danger:      rgba(248,81,73,.14);
   --tint-selection:   rgba(201,184,255,.30);
 
+  /* ---- Chrome overlays ----
+     Hairlines and tints painted *on top of* a surface. Light-on-dark here,
+     dark-on-light in the day theme, so the same rule reads either way. ---- */
+  --overlay-tint-soft:   rgba(255,255,255,.04);
+  --overlay-tint:        rgba(255,255,255,.06);
+  --overlay-line:        rgba(255,255,255,.09);
+  --overlay-line-strong: rgba(255,255,255,.16);
+
   /* ---- Agent identity ----
      Agents are created by users, so color is never tied to a role.
      An agent's avatar color is auto-assigned by hashing its id onto
@@ -72,4 +80,82 @@
   --priority-high:     #ff9800;
   --priority-medium:   #7c8db5;
   --priority-low:      #768390;
+}
+
+/* ============================================================
+   Day (light) theme — same token names, daylight values.
+   Flipped by <html data-theme="light"> (see src/lib/theme.js).
+   Hues are the dark palette's siblings, darkened only as far as
+   they need to read on white.
+   ============================================================ */
+:root[data-theme="light"] {
+  /* ---- Surfaces (deepest → highest) ---- */
+  --surface-sunken:   #eaeef2;
+  --surface-base:     #ffffff;
+  --surface-raised:   #f6f8fa;
+  --surface-nav:      #f6f8fa;
+  --surface-card:     #ffffff;
+  --surface-hover:    #eef1f5;
+
+  /* ---- Borders & lines ---- */
+  --border-default:   #d8dee4;
+  --border-strong:    #b3bcc6;
+
+  /* ---- Text ---- */
+  --text-primary:     #1f2328;
+  --text-bright:      #14181d;
+  --text-secondary:   #3d444d;
+  --text-tertiary:    #57606a;
+  --text-muted:       #6a737d;
+  --text-section:     #57606a;
+
+  /* ---- Brand ---- */
+  --brand-lavender:   #6e56cf;
+  --brand-teal:       #12867f;
+  --brand-gradient:   linear-gradient(135deg, #6e56cf, #12867f);
+
+  /* ---- Live / Pulse ---- */
+  --pulse-blue:       #0969da;
+  --pulse-blue-bright:#218bff;
+
+  /* ---- Functional accents ---- */
+  --accent-cyan:      #0e7490;
+  --accent-purple:    #6b21d9;
+  --accent-mono-blue: #4a5b86;
+
+  /* ---- Semantic ---- */
+  --success:          #1a7f37;
+  --warning:          #9a6700;
+  --danger:           #cf222e;
+
+  /* ---- Semantic tints ---- */
+  --tint-lavender:    rgba(110,86,207,.10);
+  --tint-teal:        rgba(18,134,127,.10);
+  --tint-pulse:       rgba(9,105,218,.08);
+  --tint-cyan:        rgba(14,116,144,.10);
+  --tint-purple:      rgba(107,33,217,.10);
+  --tint-success:     rgba(26,127,55,.10);
+  --tint-warning:     rgba(154,103,0,.12);
+  --tint-danger:      rgba(207,34,46,.10);
+  --tint-selection:   rgba(110,86,207,.22);
+
+  /* ---- Chrome overlays (dark-on-light) ---- */
+  --overlay-tint-soft:   rgba(31,35,40,.035);
+  --overlay-tint:        rgba(31,35,40,.05);
+  --overlay-line:        rgba(31,35,40,.10);
+  --overlay-line-strong: rgba(31,35,40,.20);
+
+  /* ---- Agent identity ---- */
+  --agent-ring-1:     #b26a00;
+  --agent-ring-2:     #0e7490;
+  --agent-ring-3:     #6e56cf;
+  --agent-ring-4:     #12867f;
+  --agent-ring-5:     #c2185b;
+  --agent-conductor:  #6b21d9;
+
+  /* ---- Priority colors ---- */
+  --priority-critical: #cf222e;
+  --priority-high:     #9a6700;
+  --priority-medium:   #4a5b86;
+  --priority-low:      #6a737d;
 }

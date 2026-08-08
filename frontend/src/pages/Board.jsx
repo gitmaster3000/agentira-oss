@@ -5,7 +5,7 @@ import { TaskCard } from '../components/TaskCard';
 
 // Board status dot colors — from the design system (guidelines/colors-semantic.html).
 const STATUS_COLORS = {
-    backlog: '#768390',
+    backlog: 'var(--text-muted)',
     todo: '#8ab4f8',
     in_progress: '#ff9800',
     review: '#7c4dff',

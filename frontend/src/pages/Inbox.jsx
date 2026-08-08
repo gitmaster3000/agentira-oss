@@ -32,9 +32,9 @@ function studioLink(link) {
 
 const typeColor = (t) => {
     if (/reject|fail|error/i.test(t)) return '#f87171';
-    if (/assign|dispatch|run/i.test(t)) return '#c9b8ff';
+    if (/assign|dispatch|run/i.test(t)) return 'var(--brand-lavender)';
     if (/complete|done|success|approve/i.test(t)) return '#81c995';
-    return '#38bdf8';
+    return 'var(--pulse-blue)';
 };
 
 export function Inbox() {
@@ -82,9 +82,9 @@ export function Inbox() {
             onClick={() => setFilter(key)}
             style={{
                 fontSize: '13px', padding: '5px 12px', borderRadius: '8px', cursor: 'pointer',
-                border: '1px solid ' + (filter === key ? '#c9b8ff' : '#30363d'),
+                border: '1px solid ' + (filter === key ? 'var(--brand-lavender)' : 'var(--border-default)'),
                 background: filter === key ? 'rgba(201,184,255,.10)' : 'transparent',
-                color: filter === key ? '#c9b8ff' : '#b1bac4', fontWeight: filter === key ? 600 : 400,
+                color: filter === key ? 'var(--brand-lavender)' : 'var(--text-tertiary)', fontWeight: filter === key ? 600 : 400,
             }}
         >
             {label}
@@ -94,7 +94,7 @@ export function Inbox() {
     return (
         <div style={{ maxWidth: '760px', margin: '0 auto', padding: '28px 24px', fontFamily: 'var(--font-sans)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
-                <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#e8ebf0' }}>Inbox</h1>
+                <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-bright)' }}>Inbox</h1>
                 {unreadCount > 0 && (
                     <span style={{ fontSize: '11px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '2px 8px' }}>{unreadCount}</span>
                 )}
@@ -111,10 +111,10 @@ export function Inbox() {
                 {tab('unread', `Unread${unreadCount > 0 ? ` (${unreadCount})` : ''}`)}
             </div>
 
-            {loading && <div style={{ color: '#768390', padding: '40px 0', textAlign: 'center' }}>Loading…</div>}
+            {loading && <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>Loading…</div>}
             {error && <div style={{ color: '#f87171', padding: '40px 0', textAlign: 'center' }}>{error}</div>}
             {!loading && !error && shown.length === 0 && (
-                <div style={{ color: '#768390', padding: '48px 0', textAlign: 'center' }}>
+                <div style={{ color: 'var(--text-muted)', padding: '48px 0', textAlign: 'center' }}>
                     {filter === 'unread' ? 'No unread notifications.' : 'Your inbox is empty.'}
                 </div>
             )}
@@ -133,12 +133,12 @@ export function Inbox() {
                                 border: '1px solid ' + (n.read ? 'transparent' : 'rgba(56,189,248,.18)'),
                             }}
                         >
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, marginTop: '5px', background: n.read ? '#30363d' : typeColor(n.type) }} />
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, marginTop: '5px', background: n.read ? 'var(--border-default)' : typeColor(n.type) }} />
                             <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: '13.5px', color: n.read ? '#b1bac4' : '#e8ebf0', fontWeight: n.read ? 400 : 600, lineHeight: 1.35 }}>{n.title}</div>
-                                {n.type && <div style={{ fontSize: '11px', color: '#768390', marginTop: '2px' }}>{n.type}</div>}
+                                <div style={{ fontSize: '13.5px', color: n.read ? 'var(--text-tertiary)' : 'var(--text-bright)', fontWeight: n.read ? 400 : 600, lineHeight: 1.35 }}>{n.title}</div>
+                                {n.type && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{n.type}</div>}
                             </div>
-                            <span style={{ fontSize: '11px', color: '#768390', flexShrink: 0, marginTop: '2px' }}>{timeAgo(n.created_at)}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0, marginTop: '2px' }}>{timeAgo(n.created_at)}</span>
                         </div>
                     ))}
                 </div>

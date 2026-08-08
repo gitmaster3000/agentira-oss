@@ -44,34 +44,9 @@
   --panel-width: 600px;
 }
 
-/* ─── Material Design 3 — Light Theme ──────────────────────────────── */
-:root[data-theme="light"] {
-  --bg-app: #ffffff;
-  --bg-panel: #f6f8fa;
-  --bg-card: #ffffff;
-  --bg-hover: #f0f2f5;
-
-  --border-subtle: #d8dee4;
-  --border-active: #c4cad2;
-
-  --text-primary: #1f2328;
-  --text-secondary: #59636e;
-  --text-tertiary: #8b949e;
-
-  --accent-primary: #6e56cf;
-  --accent-hover: #7d66d9;
-  --accent-subtle: rgba(110, 86, 207, 0.06);
-  --accent-on: #ffffff;
-
-  --bg-surface-purple: #f6f8fa;
-  --bg-dropdown-hover: rgba(110, 86, 207, 0.05);
-
-  --status-backlog: #79747e;
-  --status-todo: #1a73e8;
-  --status-inprogress: #f9ab00;
-  --status-review: #9334e6;
-  --status-done: #1e8e3e;
-}
+/* The light theme is not a second palette here — the chrome variables above
+   are re-pointed at the canonical design tokens in tokens/compat.css, and
+   those tokens flip under :root[data-theme="light"] (tokens/colors.css). */
 
 /* ─── Base ─────────────────────────────────────────────────────────── */
 @layer base {

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { useNavigate } from 'react-router-dom';
 import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, RefreshCw, Cog, X } from 'lucide-react';
+import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
@@ -15,8 +16,8 @@ const roleBadge = (role) => ({
 
 // Design's exact member role badge colours
 const memberBadgeStyle = (role) => role === 'admin'
-    ? { background: 'rgba(201,184,255,.12)', color: '#c9b8ff' }
-    : { background: 'rgba(118,131,144,.14)', color: '#768390' };
+    ? { background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)' }
+    : { background: 'rgba(118,131,144,.14)', color: 'var(--text-muted)' };
 
 const ACCOUNT_META = {
     human:          { label: 'Person',          Icon: User },
@@ -29,16 +30,16 @@ function NavSection({ children, label, branded }) {
     return (
         <div style={{ marginBottom: 4 }}>
             <div style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: '.1em', color: '#768390',
+                fontSize: 10, fontWeight: 700, letterSpacing: '.1em', color: 'var(--text-muted)',
                 padding: branded ? '22px 8px 10px' : '0 8px 10px',
                 display: 'flex', alignItems: 'center', gap: 7,
             }}>
                 {branded && (
                     <span style={{
                         width: 14, height: 14, borderRadius: 4,
-                        background: 'linear-gradient(135deg,#c9b8ff,#80cbc4)',
+                        background: 'linear-gradient(135deg,var(--brand-lavender),var(--brand-teal))',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 8, fontWeight: 800, color: '#0e1117', flexShrink: 0,
+                        fontSize: 8, fontWeight: 800, color: 'var(--surface-base)', flexShrink: 0,
                     }}>A</span>
                 )}
                 {label}
@@ -56,11 +57,11 @@ function NavItem({ active, onClick, children }) {
                 display: 'block', width: '100%', textAlign: 'left',
                 padding: '7px 10px', borderRadius: 9, marginBottom: 2,
                 fontSize: 13, cursor: 'pointer',
-                color: active ? 'var(--text-primary)' : '#768390',
-                background: active ? 'var(--bg-hover,#272d36)' : 'transparent',
+                color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+                background: active ? 'var(--bg-hover,var(--surface-hover))' : 'transparent',
                 transition: 'background .12s, color .12s',
             }}
-            onMouseEnter={e => { if (!active) e.currentTarget.style.background = '#272d36'; }}
+            onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--surface-hover)'; }}
             onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent'; }}
         >
             {children}
@@ -92,17 +93,17 @@ function RoleChips({ value, onChange, disabled }) {
 
 // ── Shared field label ───────────────────────────────────────────────────────
 const FL = ({ children }) => (
-    <div style={{ fontSize: 11.5, color: '#768390', marginBottom: 6 }}>{children}</div>
+    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 6 }}>{children}</div>
 );
 
 // ── Read-only display field (matches design's input-style row) ───────────────
 const DisplayField = ({ value, mono, style }) => (
     <div style={{
         padding: '10px 13px', borderRadius: 10,
-        background: '#1c2128', border: '1px solid #30363d',
+        background: 'var(--surface-card)', border: '1px solid var(--border-default)',
         fontSize: mono ? 12.5 : 13,
         fontFamily: mono ? 'ui-monospace,monospace' : undefined,
-        color: mono ? '#768390' : 'var(--text-primary)',
+        color: mono ? 'var(--text-muted)' : 'var(--text-primary)',
         ...style,
     }}>{value || '— none —'}</div>
 );
@@ -117,14 +118,14 @@ const SettingsInput = ({ type = 'text', value, onChange, placeholder, autoComple
         autoComplete={autoComplete}
         style={{
             width: '100%', padding: '10px 13px', borderRadius: 10,
-            background: '#1c2128', border: '1px solid #30363d',
+            background: 'var(--surface-card)', border: '1px solid var(--border-default)',
             fontSize: mono ? 12.5 : 13, color: 'var(--text-primary)',
             fontFamily: mono ? 'ui-monospace,monospace' : undefined,
             outline: 'none',
             transition: 'border-color .15s',
         }}
         onFocus={e => { e.target.style.borderColor = 'var(--accent-primary)'; }}
-        onBlur={e => { e.target.style.borderColor = '#30363d'; }}
+        onBlur={e => { e.target.style.borderColor = 'var(--border-default)'; }}
         {...rest}
     />
 );
@@ -136,13 +137,13 @@ const Row = ({ onClick, children, style }) => (
         style={{
             display: 'flex', alignItems: 'center', gap: 11,
             padding: '11px 13px', borderRadius: 10,
-            background: '#1c2128', border: '1px solid #30363d',
+            background: 'var(--surface-card)', border: '1px solid var(--border-default)',
             marginBottom: 7, cursor: onClick ? 'pointer' : undefined,
             transition: 'border-color .15s',
             ...style,
         }}
         onMouseEnter={e => { if (onClick) e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
-        onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = '#30363d'; }}
+        onMouseLeave={e => { if (onClick) e.currentTarget.style.borderColor = 'var(--border-default)'; }}
     >
         {children}
     </div>
@@ -156,7 +157,7 @@ function Avatar({ profile, size = 30, radius = '50%' }) {
     return (
         <span style={{
             width: size, height: size, borderRadius: radius, flexShrink: 0,
-            background: 'rgba(201,184,255,.14)', color: '#c9b8ff',
+            background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: size === 54 ? 20 : 12.5, fontWeight: 600,
         }}>
@@ -184,7 +185,7 @@ function RoleBadges({ roles }) {
 
 // ── Sub-section label (like "BOT KEYS ·" in accounts) ───────────────────────
 const SubLabel = ({ children }) => (
-    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: '#768390' }}>
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: 'var(--text-muted)' }}>
         {children}
     </div>
 );
@@ -196,8 +197,8 @@ const AccentBtn = ({ onClick, children }) => (
         style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '7px 12px', borderRadius: 9,
-            background: 'var(--accent-primary,#c9b8ff)',
-            color: 'var(--accent-on,#2d1a6e)',
+            background: 'var(--accent-primary,var(--brand-lavender))',
+            color: 'var(--accent-on,var(--accent-on))',
             fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
             border: 'none', flexShrink: 0,
         }}
@@ -212,9 +213,9 @@ const GhostBtn = ({ onClick, children, danger, disabled }) => (
         style={{
             display: 'flex', alignItems: 'center', gap: 6,
             padding: '8px 14px', borderRadius: 9,
-            border: '1px solid #30363d',
+            border: '1px solid var(--border-default)',
             background: 'transparent',
-            color: danger ? '#f87171' : '#b1bac4',
+            color: danger ? '#f87171' : 'var(--text-tertiary)',
             fontSize: 12.5, cursor: 'pointer',
             transition: 'border-color .15s, color .15s',
         }}
@@ -223,8 +224,8 @@ const GhostBtn = ({ onClick, children, danger, disabled }) => (
             if (!danger) e.currentTarget.style.color = 'var(--text-primary)';
         }}
         onMouseLeave={e => {
-            e.currentTarget.style.borderColor = '#30363d';
-            e.currentTarget.style.color = danger ? '#f87171' : '#b1bac4';
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+            e.currentTarget.style.color = danger ? '#f87171' : 'var(--text-tertiary)';
         }}
     >{children}</button>
 );
@@ -244,8 +245,8 @@ function Modal({ onClose, maxWidth = 448, children }) {
                 style={{
                     width: '100%', maxWidth, margin: '0 16px',
                     borderRadius: 14, boxShadow: '0 24px 48px rgba(0,0,0,.6)',
-                    border: '1px solid #30363d',
-                    background: 'var(--bg-card,#161b22)',
+                    border: '1px solid var(--border-default)',
+                    background: 'var(--bg-card,var(--surface-nav))',
                     padding: 24, display: 'flex', flexDirection: 'column', gap: 16,
                 }}
                 onClick={e => e.stopPropagation()}
@@ -261,8 +262,8 @@ const InfoBanner = ({ children }) => (
     <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '10px 13px', borderRadius: 10,
-        background: 'rgba(118,131,144,.06)', border: '1px dashed #30363d',
-        fontSize: 11.5, color: '#768390',
+        background: 'rgba(118,131,144,.06)', border: '1px dashed var(--border-default)',
+        fontSize: 11.5, color: 'var(--text-muted)',
     }}>{children}</div>
 );
 
@@ -307,16 +308,16 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
             onClick={onClose}
         >
             <div
-                style={{ width: '100%', maxWidth: 440, margin: '0 16px', borderRadius: 14, boxShadow: '0 24px 48px rgba(0,0,0,.6)', border: '1px solid #30363d', background: 'var(--bg-card,#161b22)', overflow: 'hidden' }}
+                style={{ width: '100%', maxWidth: 440, margin: '0 16px', borderRadius: 14, boxShadow: '0 24px 48px rgba(0,0,0,.6)', border: '1px solid var(--border-default)', background: 'var(--bg-card,var(--surface-nav))', overflow: 'hidden' }}
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 20px', borderBottom: '1px solid #30363d' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '18px 20px', borderBottom: '1px solid var(--border-default)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
                         <Avatar profile={profile} size={38} radius={isHuman ? '50%' : 9} />
                         <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile.display_name || profile.name}</div>
-                            <div style={{ fontSize: 11, color: '#768390', marginTop: 1 }}>@{profile.name} · {meta.label}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>@{profile.name} · {meta.label}</div>
                         </div>
                     </div>
                     {editable ? (
@@ -324,11 +325,11 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
                             <GhostBtn onClick={onClose}>Cancel</GhostBtn>
                             <button
                                 onClick={save} disabled={!dirty || busy}
-                                style={{ padding: '7px 16px', borderRadius: 9, background: 'var(--accent-primary,#c9b8ff)', color: 'var(--accent-on,#2d1a6e)', fontSize: 12.5, fontWeight: 600, border: 'none', cursor: dirty && !busy ? 'pointer' : 'default', opacity: (!dirty || busy) ? 0.4 : 1 }}
+                                style={{ padding: '7px 16px', borderRadius: 9, background: 'var(--accent-primary,var(--brand-lavender))', color: 'var(--accent-on,var(--accent-on))', fontSize: 12.5, fontWeight: 600, border: 'none', cursor: dirty && !busy ? 'pointer' : 'default', opacity: (!dirty || busy) ? 0.4 : 1 }}
                             >{busy ? 'Saving…' : 'Save'}</button>
                         </div>
                     ) : (
-                        <button onClick={onClose} style={{ padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: '#768390', cursor: 'pointer' }}><X style={{ width: 16, height: 16 }} /></button>
+                        <button onClick={onClose} style={{ padding: 6, borderRadius: 8, background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}><X style={{ width: 16, height: 16 }} /></button>
                     )}
                 </div>
 
@@ -353,16 +354,16 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
 
                     {/* Password reset — admin resets someone else's */}
                     {isHuman && editable && (
-                        <div style={{ borderTop: '1px solid #30363d', paddingTop: 16 }}>
+                        <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
                             <FL>Password</FL>
                             {tempPw ? (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                    <div style={{ fontSize: 11.5, color: '#768390' }}>Temporary — share securely. User changes it on next sign-in.</div>
+                                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Temporary — share securely. User changes it on next sign-in.</div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <input readOnly value={tempPw} onClick={e => e.target.select()}
-                                            style={{ flex: 1, padding: '10px 13px', borderRadius: 10, background: '#1c2128', border: '1px solid #30363d', fontSize: 13, fontFamily: 'ui-monospace,monospace', color: '#b1bac4', outline: 'none' }} />
+                                            style={{ flex: 1, padding: '10px 13px', borderRadius: 10, background: 'var(--surface-card)', border: '1px solid var(--border-default)', fontSize: 13, fontFamily: 'ui-monospace,monospace', color: 'var(--text-tertiary)', outline: 'none' }} />
                                         <button onClick={() => navigator.clipboard?.writeText(tempPw)}
-                                            style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid #30363d', background: 'transparent', color: '#b1bac4', cursor: 'pointer' }}>
+                                            style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border-default)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }}>
                                             <Copy style={{ width: 14, height: 14 }} />
                                         </button>
                                     </div>
@@ -375,7 +376,7 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
 
                     {/* API key actions — service accounts only */}
                     {isService && (
-                        <div style={{ borderTop: '1px solid #30363d', paddingTop: 16 }}>
+                        <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
                             <FL>API key</FL>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                                 <GhostBtn onClick={onCopyKey}><Key style={{ width: 13, height: 13 }} /> Copy key</GhostBtn>
@@ -387,7 +388,7 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
 
                     {/* Configure — managed agents only */}
                     {isAgent && (
-                        <div style={{ borderTop: '1px solid #30363d', paddingTop: 16 }}>
+                        <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
                             <FL>Configuration</FL>
                             <GhostBtn onClick={onConfigure}><Cog style={{ width: 13, height: 13 }} /> Open agent settings</GhostBtn>
                         </div>
@@ -395,7 +396,7 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
 
                     {/* Delete */}
                     {editable && !isSelfAdmin && (
-                        <div style={{ borderTop: '1px solid #30363d', paddingTop: 14 }}>
+                        <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 14 }}>
                             <GhostBtn onClick={onDelete} danger>
                                 <Trash2 style={{ width: 13, height: 13 }} />
                                 Delete {meta.label.toLowerCase()}
@@ -672,17 +673,18 @@ export function Settings() {
 
     // ── Render ─────────────────────────────────────────────────────────────
     if (loading && !me && !roles.length) {
-        return <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: '#768390' }}>Loading…</div>;
+        return <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>;
     }
 
     return (
         <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
 
             {/* ── Sidebar ─────────────────────────────────────────────────── */}
-            <aside style={{ width: 200, flexShrink: 0, borderRight: '1px solid #30363d', background: 'var(--bg-card,#161b22)', padding: '20px 12px', overflowY: 'auto' }}>
+            <aside style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--border-default)', background: 'var(--bg-card,var(--surface-nav))', padding: '20px 12px', overflowY: 'auto' }}>
                 <NavSection label="ACCOUNT">
                     <NavItem active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>My profile</NavItem>
                     <NavItem active={activeTab === 'security'} onClick={() => setActiveTab('security')}>Security</NavItem>
+                    <NavItem active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')}>Appearance</NavItem>
                 </NavSection>
 
                 {isAdmin && (
@@ -704,7 +706,7 @@ export function Settings() {
 
                         {/* Avatar row */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-                            <span style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(201,184,255,.14)', color: '#c9b8ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 600, flexShrink: 0 }}>
+                            <span style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 600, flexShrink: 0 }}>
                                 {(me.display_name || me.name || '?')[0].toUpperCase()}
                             </span>
                         </div>
@@ -741,7 +743,7 @@ export function Settings() {
                                 disabled={!profileDirty || profileSaving}
                                 style={{
                                     padding: '8px 18px', borderRadius: 9, border: 'none',
-                                    background: 'var(--accent-primary,#c9b8ff)', color: 'var(--accent-on,#2d1a6e)',
+                                    background: 'var(--accent-primary,var(--brand-lavender))', color: 'var(--accent-on,var(--accent-on))',
                                     fontSize: 13, fontWeight: 600, cursor: (!profileDirty || profileSaving) ? 'default' : 'pointer',
                                     opacity: (!profileDirty || profileSaving) ? 0.4 : 1,
                                 }}
@@ -754,7 +756,7 @@ export function Settings() {
                 {activeTab === 'security' && (
                     <div style={{ maxWidth: 560 }}>
                         <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 6px', color: 'var(--text-primary)' }}>Security</h2>
-                        <p style={{ fontSize: 12.5, color: '#768390', margin: '0 0 24px' }}>Your personal credentials for this workspace.</p>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 24px' }}>Your personal credentials for this workspace.</p>
 
                         {isHumanUser && (
                             <>
@@ -786,7 +788,7 @@ export function Settings() {
                                             disabled={pwSaving || !pw.next}
                                             style={{
                                                 padding: '8px 18px', borderRadius: 9, border: 'none',
-                                                background: 'var(--accent-primary,#c9b8ff)', color: 'var(--accent-on,#2d1a6e)',
+                                                background: 'var(--accent-primary,var(--brand-lavender))', color: 'var(--accent-on,var(--accent-on))',
                                                 fontSize: 13, fontWeight: 600,
                                                 cursor: (pwSaving || !pw.next) ? 'default' : 'pointer',
                                                 opacity: (pwSaving || !pw.next) ? 0.4 : 1,
@@ -799,6 +801,9 @@ export function Settings() {
                     </div>
                 )}
 
+                {/* ── Appearance ─────────────────────────────────────────── */}
+                {activeTab === 'appearance' && <AppearanceSettings />}
+
                 {/* ── Members (admin) ────────────────────────────────────── */}
                 {activeTab === 'members' && isAdmin && (
                     <div style={{ maxWidth: 580 }}>
@@ -808,12 +813,12 @@ export function Settings() {
                                 <Plus style={{ width: 13, height: 13 }} /> Invite
                             </AccentBtn>
                         </div>
-                        <p style={{ fontSize: 12.5, color: '#768390', margin: '0 0 18px' }}>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 18px' }}>
                             People with a seat in this workspace. Roles control what they can change org-wide.
                         </p>
 
                         {people.length === 0 ? (
-                            <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 12.5, color: '#768390', fontStyle: 'italic' }}>No members yet.</div>
+                            <div style={{ padding: '32px 0', textAlign: 'center', fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>No members yet.</div>
                         ) : people.map(p => {
                             const primaryRole = (p.roles || [])[0] || p.role;
                             const isMe = me && p.id === me.id;
@@ -823,9 +828,9 @@ export function Settings() {
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                         <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>
                                             {p.display_name || p.name}
-                                            {isMe && <span style={{ color: '#768390', fontWeight: 400 }}> · you</span>}
+                                            {isMe && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> · you</span>}
                                         </div>
-                                        {p.email && <div style={{ fontSize: 11, color: '#768390', marginTop: 1 }}>{p.email}</div>}
+                                        {p.email && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{p.email}</div>}
                                     </div>
                                     {primaryRole && <RoleBadge role={primaryRole} />}
                                 </Row>
@@ -838,7 +843,7 @@ export function Settings() {
                 {activeTab === 'accounts' && isAdmin && (
                     <div style={{ maxWidth: 580 }}>
                         <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 4px', color: 'var(--text-primary)' }}>Accounts</h2>
-                        <p style={{ fontSize: 12.5, color: '#768390', margin: '0 0 24px' }}>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 24px' }}>
                             Non-human identities that can act in this organization — bot keys for external clients and agents run by your daemons.
                         </p>
 
@@ -846,7 +851,7 @@ export function Settings() {
                         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
                             <div>
                                 <SubLabel>BOT KEYS</SubLabel>
-                                <div style={{ fontSize: 11, color: '#5a626c', marginTop: 2 }}>API-key-only identities (no runtime) for external MCP clients like Cursor or Claude Desktop.</div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>API-key-only identities (no runtime) for external MCP clients like Cursor or Claude Desktop.</div>
                             </div>
                             <AccentBtn onClick={handleCreateBot}>
                                 <Plus style={{ width: 12, height: 12 }} /> New
@@ -854,48 +859,48 @@ export function Settings() {
                         </div>
 
                         {botKeys.length === 0 ? (
-                            <div style={{ padding: '20px 13px', borderRadius: 10, background: '#1c2128', border: '1px solid #30363d', marginBottom: 24, fontSize: 12.5, color: '#768390', fontStyle: 'italic' }}>
+                            <div style={{ padding: '20px 13px', borderRadius: 10, background: 'var(--surface-card)', border: '1px solid var(--border-default)', marginBottom: 24, fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                 No bot keys yet.
                             </div>
                         ) : botKeys.map(b => (
                             <Row key={b.id} onClick={() => setManaging(b)} style={{ marginBottom: 8 }}>
-                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(118,131,144,.14)', color: '#768390', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(118,131,144,.14)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                                     <Key style={{ width: 15, height: 15 }} />
                                 </span>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{b.display_name || b.name}</div>
-                                    <div style={{ fontSize: 11, color: '#768390', marginTop: 1 }}>bot key</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>bot key</div>
                                 </div>
-                                <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11, color: '#768390' }}>agr_sa_••••</span>
+                                <span style={{ fontFamily: 'ui-monospace,monospace', fontSize: 11, color: 'var(--text-muted)' }}>agr_sa_••••</span>
                             </Row>
                         ))}
 
                         {/* Agents section */}
                         <div style={{ marginBottom: 10, marginTop: botKeys.length > 0 ? 18 : 0 }}>
                             <SubLabel>AGENTS</SubLabel>
-                            <div style={{ fontSize: 11, color: '#5a626c', marginTop: 2 }}>Autonomous agents running on Agentira, executed by your own daemons' runtimes. Open any to manage its runtime, toolset &amp; triggers.</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Autonomous agents running on Agentira, executed by your own daemons' runtimes. Open any to manage its runtime, toolset &amp; triggers.</div>
                         </div>
 
                         {agentiraAgents.length === 0 ? (
-                            <div style={{ marginBottom: 12, padding: '10px 13px', borderRadius: 10, background: 'rgba(118,131,144,.04)', border: '1px solid #30363d', fontSize: 12.5, color: '#768390', fontStyle: 'italic' }}>
+                            <div style={{ marginBottom: 12, padding: '10px 13px', borderRadius: 10, background: 'rgba(118,131,144,.04)', border: '1px solid var(--border-default)', fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>
                                 No agents yet.
                             </div>
                         ) : agentiraAgents.map(a => (
                             <Row key={a.id} onClick={() => setManaging(a)} style={{ marginBottom: 8 }}>
-                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(201,184,255,.14)', color: '#c9b8ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>
+                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>
                                     {(a.display_name || a.name || '?')[0].toUpperCase()}
                                 </span>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{a.display_name || a.name}</div>
-                                    <div style={{ fontSize: 11, color: '#768390', marginTop: 1 }}>agent</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>agent</div>
                                 </div>
-                                <ChevronRight style={{ width: 15, height: 15, color: '#5a626c', flexShrink: 0 }} />
+                                <ChevronRight style={{ width: 15, height: 15, color: 'var(--text-muted)', flexShrink: 0 }} />
                             </Row>
                         ))}
 
                         <InfoBanner>
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                            Each agent's runtime, toolset &amp; triggers live in <b style={{ color: '#b1bac4', marginLeft: 3 }}>Build → Agents → Settings</b>.
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-muted)' }} strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                            Each agent's runtime, toolset &amp; triggers live in <b style={{ color: 'var(--text-tertiary)', marginLeft: 3 }}>Build → Agents → Settings</b>.
                         </InfoBanner>
                     </div>
                 )}
@@ -904,7 +909,7 @@ export function Settings() {
                 {activeTab === 'permissions' && isAdmin && (
                     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                         {/* Sub-tab bar */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #30363d', flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border-default)', flexShrink: 0 }}>
                             <nav style={{ display: 'flex', gap: 24 }}>
                                 {['roles', 'permissions'].map(t => (
                                     <button
@@ -913,9 +918,9 @@ export function Settings() {
                                         style={{
                                             paddingBottom: 8, fontSize: 12, fontWeight: 700,
                                             textTransform: 'uppercase', letterSpacing: '.08em',
-                                            color: secSubTab === t ? 'var(--accent-primary,#c9b8ff)' : '#768390',
+                                            color: secSubTab === t ? 'var(--accent-primary,var(--brand-lavender))' : 'var(--text-muted)',
                                             background: 'none', border: 'none',
-                                            borderBottom: `2px solid ${secSubTab === t ? 'var(--accent-primary,#c9b8ff)' : 'transparent'}`,
+                                            borderBottom: `2px solid ${secSubTab === t ? 'var(--accent-primary,var(--brand-lavender))' : 'transparent'}`,
                                             cursor: 'pointer', transition: 'color .15s, border-color .15s',
                                         }}
                                     >{t}</button>
@@ -950,30 +955,30 @@ export function Settings() {
                                         };
                                         const open = selectedRoleName === role.name;
                                         return (
-                                            <div key={role.id} style={{ borderRadius: 12, border: '1px solid #30363d', background: '#1c2128', overflow: 'hidden' }}>
+                                            <div key={role.id} style={{ borderRadius: 12, border: '1px solid var(--border-default)', background: 'var(--surface-card)', overflow: 'hidden' }}>
                                                 <div
                                                     style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', transition: 'background .12s' }}
                                                     onClick={() => setSelectedRoleName(open ? null : role.name)}
-                                                    onMouseEnter={e => { e.currentTarget.style.background = '#272d36'; }}
+                                                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-hover)'; }}
                                                     onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                                                 >
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                                        <Shield style={{ width: 18, height: 18, color: open ? '#c9b8ff' : '#768390', flexShrink: 0 }} />
+                                                        <Shield style={{ width: 18, height: 18, color: open ? 'var(--brand-lavender)' : 'var(--text-muted)', flexShrink: 0 }} />
                                                         <div>
                                                             <div style={{ fontWeight: 700, fontSize: 13, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--text-primary)' }}>{role.name}</div>
-                                                            <div style={{ fontSize: 10, color: '#768390', marginTop: 1 }}>{role.permissions.length} permissions assigned</div>
+                                                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{role.permissions.length} permissions assigned</div>
                                                         </div>
                                                     </div>
-                                                    <ChevronRight style={{ width: 15, height: 15, color: '#768390', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }} />
+                                                    <ChevronRight style={{ width: 15, height: 15, color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .2s' }} />
                                                 </div>
 
                                                 {open && (
-                                                    <div style={{ padding: '0 16px 16px', borderTop: '1px solid #30363d' }}>
-                                                        <div style={{ fontSize: 11, color: '#768390', fontStyle: 'italic', margin: '14px 0' }}>{role.description || 'No description.'}</div>
+                                                    <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-default)' }}>
+                                                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', margin: '14px 0' }}>{role.description || 'No description.'}</div>
                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                                                             {Object.entries(groups).map(([groupName, perms]) => perms.length > 0 && (
                                                                 <div key={groupName}>
-                                                                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: '#768390', paddingLeft: 4, borderLeft: '2px solid #c9b8ff', marginBottom: 10 }}>{groupName}</div>
+                                                                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.1em', color: 'var(--text-muted)', paddingLeft: 4, borderLeft: '2px solid var(--brand-lavender)', marginBottom: 10 }}>{groupName}</div>
                                                                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8 }}>
                                                                         {perms.map(perm => {
                                                                             const isGranted = role.permissions.includes(perm.codename);
@@ -984,7 +989,7 @@ export function Settings() {
                                                                                     style={{
                                                                                         padding: '9px 10px', borderRadius: 9, cursor: 'pointer',
                                                                                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                                                                        border: `1px solid ${isGranted ? 'var(--accent-primary,#c9b8ff)' : '#30363d'}`,
+                                                                                        border: `1px solid ${isGranted ? 'var(--accent-primary,var(--brand-lavender))' : 'var(--border-default)'}`,
                                                                                         background: isGranted ? 'rgba(201,184,255,.08)' : 'rgba(0,0,0,.15)',
                                                                                         opacity: isGranted ? 1 : 0.65,
                                                                                         transition: 'opacity .15s, border-color .15s, background .15s',
@@ -994,10 +999,10 @@ export function Settings() {
                                                                                 >
                                                                                     <div style={{ overflow: 'hidden' }}>
                                                                                         <div style={{ fontSize: 10, fontFamily: 'ui-monospace,monospace', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{perm.codename}</div>
-                                                                                        <div style={{ fontSize: 9, color: '#768390', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{perm.description || 'No description'}</div>
+                                                                                        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{perm.description || 'No description'}</div>
                                                                                     </div>
-                                                                                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: `1px solid ${isGranted ? '#c9b8ff' : '#30363d'}`, background: isGranted ? '#c9b8ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 8 }}>
-                                                                                        {isGranted && <Check style={{ width: 8, height: 8, color: '#2d1a6e' }} />}
+                                                                                    <div style={{ width: 14, height: 14, borderRadius: '50%', border: `1px solid ${isGranted ? 'var(--brand-lavender)' : 'var(--border-default)'}`, background: isGranted ? 'var(--brand-lavender)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginLeft: 8 }}>
+                                                                                        {isGranted && <Check style={{ width: 8, height: 8, color: 'var(--accent-on)' }} />}
                                                                                     </div>
                                                                                 </div>
                                                                             );
@@ -1013,12 +1018,12 @@ export function Settings() {
                                     })}
                                 </div>
                             ) : (
-                                <div style={{ borderRadius: 12, border: '1px solid #30363d', background: '#1c2128', overflow: 'hidden' }}>
+                                <div style={{ borderRadius: 12, border: '1px solid var(--border-default)', background: 'var(--surface-card)', overflow: 'hidden' }}>
                                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                         <thead>
-                                            <tr style={{ borderBottom: '1px solid #30363d', background: '#161b22' }}>
-                                                <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: '#768390' }}>Permission</th>
-                                                <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: '#768390' }}>Assigned roles</th>
+                                            <tr style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--surface-nav)' }}>
+                                                <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: 'var(--text-muted)' }}>Permission</th>
+                                                <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '.08em', color: 'var(--text-muted)' }}>Assigned roles</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -1027,21 +1032,21 @@ export function Settings() {
                                                 .map(perm => {
                                                     const assignedRoles = roles.filter(r => r.permissions.includes(perm.codename));
                                                     return (
-                                                        <tr key={perm.id} style={{ borderBottom: '1px solid #30363d', transition: 'background .12s' }}
-                                                            onMouseEnter={e => { e.currentTarget.style.background = '#272d36'; }}
+                                                        <tr key={perm.id} style={{ borderBottom: '1px solid var(--border-default)', transition: 'background .12s' }}
+                                                            onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-hover)'; }}
                                                             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                                                         >
                                                             <td style={{ padding: '10px 14px' }}>
                                                                 <div style={{ fontSize: 11, fontFamily: 'ui-monospace,monospace', fontWeight: 700, color: 'var(--text-primary)' }}>{perm.codename}</div>
-                                                                <div style={{ fontSize: 9, color: '#768390', marginTop: 2 }}>{perm.description || 'No description'}</div>
+                                                                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{perm.description || 'No description'}</div>
                                                             </td>
                                                             <td style={{ padding: '10px 14px' }}>
                                                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                                                                     {assignedRoles.length > 0
                                                                         ? assignedRoles.map(r => (
-                                                                            <span key={r.id} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, fontWeight: 700, textTransform: 'uppercase', background: 'rgba(201,184,255,.1)', color: '#c9b8ff', border: '1px solid rgba(201,184,255,.2)' }}>{r.name}</span>
+                                                                            <span key={r.id} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 5, fontWeight: 700, textTransform: 'uppercase', background: 'rgba(201,184,255,.1)', color: 'var(--brand-lavender)', border: '1px solid rgba(201,184,255,.2)' }}>{r.name}</span>
                                                                         ))
-                                                                        : <span style={{ fontSize: 10, color: '#768390', fontStyle: 'italic' }}>No roles assigned</span>
+                                                                        : <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>No roles assigned</span>
                                                                     }
                                                                 </div>
                                                             </td>
@@ -1066,19 +1071,19 @@ export function Settings() {
                         </div>
                         <div>
                             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>{newBotKey.title || 'Bot key created'}</div>
-                            <div style={{ fontSize: 11.5, color: '#768390', marginTop: 2 }}>Save this API key — it won't be shown again.</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>Save this API key — it won't be shown again.</div>
                         </div>
                     </div>
                     <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', color: '#768390', marginBottom: 8, textTransform: 'uppercase' }}>API key</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' }}>API key</div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <input id="api-key-display" readOnly value={newBotKey.api_key}
                                 onClick={e => e.target.select()}
-                                style={{ flex: 1, padding: '10px 13px', borderRadius: 10, background: '#1c2128', border: '1px solid #30363d', fontSize: 12, fontFamily: 'ui-monospace,monospace', color: '#b1bac4', outline: 'none' }} />
-                            <button onClick={handleCopyKey} style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid #30363d', background: 'transparent', color: '#b1bac4', cursor: 'pointer' }}>
+                                style={{ flex: 1, padding: '10px 13px', borderRadius: 10, background: 'var(--surface-card)', border: '1px solid var(--border-default)', fontSize: 12, fontFamily: 'ui-monospace,monospace', color: 'var(--text-tertiary)', outline: 'none' }} />
+                            <button onClick={handleCopyKey} style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border-default)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }}>
                                 {copied ? <Check style={{ width: 15, height: 15 }} /> : <Copy style={{ width: 15, height: 15 }} />}
                             </button>
-                            <button onClick={() => copyConfig(null, newBotKey.api_key)} style={{ padding: '10px 13px', borderRadius: 9, background: '#c9b8ff', color: '#2d1a6e', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                            <button onClick={() => copyConfig(null, newBotKey.api_key)} style={{ padding: '10px 13px', borderRadius: 9, background: 'var(--brand-lavender)', color: 'var(--accent-on)', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
                                 Copy MCP
                             </button>
                         </div>
@@ -1094,7 +1099,7 @@ export function Settings() {
                 <Modal onClose={promptState.onCancel}>
                     <div>
                         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{promptState.title}</div>
-                        <div style={{ fontSize: 12.5, color: '#768390' }}>{promptState.description}</div>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{promptState.description}</div>
                     </div>
                     <SettingsInput
                         autoFocus
@@ -1104,7 +1109,7 @@ export function Settings() {
                     />
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                         <GhostBtn onClick={promptState.onCancel}>Cancel</GhostBtn>
-                        <button onClick={() => promptState.onConfirm(promptState.value)} style={{ padding: '8px 18px', borderRadius: 9, background: '#c9b8ff', color: '#2d1a6e', border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Confirm</button>
+                        <button onClick={() => promptState.onConfirm(promptState.value)} style={{ padding: '8px 18px', borderRadius: 9, background: 'var(--brand-lavender)', color: 'var(--accent-on)', border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Confirm</button>
                     </div>
                 </Modal>
             )}
@@ -1114,7 +1119,7 @@ export function Settings() {
                 <Modal onClose={confirmState.onCancel}>
                     <div>
                         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>{confirmState.title}</div>
-                        <div style={{ fontSize: 12.5, color: '#768390' }}>{confirmState.description}</div>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{confirmState.description}</div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                         <GhostBtn onClick={confirmState.onCancel}>Cancel</GhostBtn>

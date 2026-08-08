@@ -15,7 +15,7 @@ import { ConfirmModal } from './ConfirmModal';
 
 // Board status → dot color + label (design: guidelines/colors-semantic.html).
 const STATUS = {
-    backlog:     { color: '#768390', label: 'Backlog' },
+    backlog:     { color: 'var(--text-muted)', label: 'Backlog' },
     todo:        { color: '#8ab4f8', label: 'To Do' },
     in_progress: { color: '#ff9800', label: 'In Progress' },
     review:      { color: '#7c4dff', label: 'In Review' },
@@ -299,7 +299,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
         setActiveSection(current);
     };
 
-    const status = STATUS[task.status] || { color: '#768390', label: task.status };
+    const status = STATUS[task.status] || { color: 'var(--text-muted)', label: task.status };
     const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
     const workRuns = taskRuns.filter(r => r.is_work);
     const comments = activities.filter(a => a.action === 'commented');
@@ -332,7 +332,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 editing, the edit/delete pair swaps to Save/Cancel — the same
                 standard used on the Epic page. */}
             <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '0 18px', height: 53, borderBottom: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: '#7c8db5', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: 'var(--accent-mono-blue)', whiteSpace: 'nowrap' }}>
                     {task.key || task.id}
                 </span>
                 <div className="flex-1" />
@@ -409,7 +409,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 className="flex items-center justify-center transition-colors"
                                 style={{
                                     width: 34, height: 34, borderRadius: 8,
-                                    color: active ? '#c9b8ff' : '#768390',
+                                    color: active ? 'var(--brand-lavender)' : 'var(--text-muted)',
                                     background: active ? 'rgba(201,184,255,.12)' : 'transparent',
                                 }}
                             >
@@ -436,8 +436,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     <div style={{ fontSize: 12, fontWeight: 600 }} className="text-text-primary">Agent working now</div>
                                     <div style={{ fontSize: 10.5 }} className="text-text-tertiary">Open to watch the live run</div>
                                 </div>
-                                <span className="flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>
-                                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#38bdf8' }} />LIVE
+                                <span className="flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, color: 'var(--pulse-blue)' }}>
+                                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--pulse-blue)' }} />LIVE
                                 </span>
                             </div>
                         )}
@@ -552,7 +552,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             </span>
                             <span className="text-text-tertiary">Epic</span>
                             <span className="inline-flex items-center" style={{ gap: 7 }}>
-                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: task.epic_id ? (task.epic_color || '#c9b8ff') : 'transparent', flexShrink: 0 }} />
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: task.epic_id ? (task.epic_color || 'var(--brand-lavender)') : 'transparent', flexShrink: 0 }} />
                                 <select
                                     aria-label="Epic"
                                     className="ghost-select"
@@ -598,10 +598,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                         </div>
                         {dodItems.map((item, i) => (
                             <div key={i} className="flex items-center group" style={{ gap: 9, fontSize: 12.5, marginBottom: 6 }}>
-                                <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 flex items-center justify-center" style={{ width: 16, height: 16, borderRadius: 5, background: item.checked ? '#2ecc71' : 'transparent', border: item.checked ? 'none' : '1.5px solid var(--border-strong, #484f58)' }}>
-                                    {item.checked && <Check className="w-2.5 h-2.5" style={{ color: '#0e1117' }} strokeWidth={3} />}
+                                <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 flex items-center justify-center" style={{ width: 16, height: 16, borderRadius: 5, background: item.checked ? '#2ecc71' : 'transparent', border: item.checked ? 'none' : '1.5px solid var(--border-strong, var(--border-strong))' }}>
+                                    {item.checked && <Check className="w-2.5 h-2.5" style={{ color: 'var(--surface-base)' }} strokeWidth={3} />}
                                 </button>
-                                <span className="flex-1" style={item.checked ? { color: '#768390', textDecoration: 'line-through' } : { color: '#e8ebf0' }}>{item.text}</span>
+                                <span className="flex-1" style={item.checked ? { color: 'var(--text-muted)', textDecoration: 'line-through' } : { color: 'var(--text-bright)' }}>{item.text}</span>
                                 <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all"><X className="w-3 h-3" /></button>
                             </div>
                         ))}
@@ -620,7 +620,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </div>
 
                     {/* FILES */}
-                    <div ref={el => (sectionRefs.current.files = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                    <div ref={el => (sectionRefs.current.files = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
                         <SectionLabel>Files</SectionLabel>
                         <div className="flex flex-col" style={{ gap: 8 }}>
                             {attachments.map(att => (
@@ -628,7 +628,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     <button type="button"
                                        onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
                                        className="flex items-center min-w-0 flex-1" style={{ gap: 10, textAlign: 'left', cursor: 'pointer' }}>
-                                        <FileText className="w-4 h-4 flex-shrink-0" style={{ color: '#80cbc4' }} />
+                                        <FileText className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--brand-teal)' }} />
                                         <div className="flex-1 min-w-0">
                                             <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
                                             {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
@@ -650,12 +650,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </div>
 
                     {/* GIT */}
-                    <div ref={el => (sectionRefs.current.git = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                    <div ref={el => (sectionRefs.current.git = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
                         {/* Branch & PR are a per-repo 1:1 mapping — show which repo
                             they belong to so multi-repo tasks read unambiguously. */}
                         {gitRepoLabel && (
                             <div className="flex items-center" style={{ gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                                <span className="inline-flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '.04em', background: 'rgba(128,203,196,.12)', color: '#80cbc4' }}>
+                                <span className="inline-flex items-center" style={{ gap: 5, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '.04em', background: 'rgba(128,203,196,.12)', color: 'var(--brand-teal)' }}>
                                     <GitBranch className="w-3 h-3" /> {gitRepoLabel}
                                 </span>
                                 {isMultiRepo && <span style={{ fontSize: 10.5 }} className="text-text-tertiary">Branch &amp; PR apply to this repo</span>}
@@ -685,8 +685,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 />
                             ) : branchValue ? (
                                 <div className="flex items-center" style={{ gap: 8, padding: '9px 11px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', fontSize: 12 }}>
-                                    <GitBranch className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#80cbc4' }} />
-                                    <span className="flex-1 font-mono truncate" style={{ color: '#b1bac4' }}>{formatBranchDisplay(branchValue)}</span>
+                                    <GitBranch className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--brand-teal)' }} />
+                                    <span className="flex-1 font-mono truncate" style={{ color: 'var(--text-tertiary)' }}>{formatBranchDisplay(branchValue)}</span>
                                     <button onClick={() => setEditingBranch(true)} className="text-text-tertiary hover:text-text-secondary"><Pencil className="w-3 h-3" /></button>
                                     <button onClick={() => copyToClipboard(branchValue, 'branch')} className="text-text-tertiary hover:text-accent-primary">{copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}</button>
                                 </div>
@@ -720,7 +720,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             ) : prUrlValue ? (
                                 <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="flex items-center hover:border-border-strong transition-colors" style={{ gap: 8, padding: '9px 11px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', fontSize: 12.5 }}>
                                     <GitPullRequest className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#a78bfa' }} />
-                                    <span className="flex-1 font-mono truncate" style={{ color: '#80cbc4' }}>{formatPrDisplay(prUrlValue)}</span>
+                                    <span className="flex-1 font-mono truncate" style={{ color: 'var(--brand-teal)' }}>{formatPrDisplay(prUrlValue)}</span>
                                     <ExternalLink className="w-3 h-3 text-text-tertiary" />
                                 </a>
                             ) : (
@@ -742,12 +742,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </div>
 
                     {/* COMMENTS */}
-                    <div ref={el => (sectionRefs.current.comments = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                    <div ref={el => (sectionRefs.current.comments = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
                         <SectionLabel>Comments</SectionLabel>
                         {/* Composer sits ABOVE the thread so it's the first thing
                             you reach, and grows with what you type. */}
                         <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginBottom: 16 }}>
-                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: '#b1bac4', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
+                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: 'var(--text-tertiary)', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
                             <div className="flex-1 min-w-0" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
                                 <MentionInput
                                     multiline
@@ -769,7 +769,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 style={{
                                     width: 32, height: 32, borderRadius: '50%',
                                     background: comment.trim() ? 'var(--accent-primary)' : 'var(--bg-card)',
-                                    color: comment.trim() ? '#2d1a6e' : 'var(--text-tertiary)',
+                                    color: comment.trim() ? 'var(--accent-on)' : 'var(--text-tertiary)',
                                     border: '1px solid var(--border-subtle)',
                                     cursor: comment.trim() ? 'pointer' : 'not-allowed',
                                 }}
@@ -781,7 +781,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             {comments.length === 0 && <p style={{ fontSize: 12 }} className="text-text-tertiary italic">No comments yet.</p>}
                             {comments.map(c => (
                                 <div key={c.id} className="flex" style={{ gap: 9 }}>
-                                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'rgba(201,184,255,.16)', color: '#c9b8ff', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{initials(c.actor)}</span>
+                                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'rgba(201,184,255,.16)', color: 'var(--brand-lavender)', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{initials(c.actor)}</span>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center" style={{ gap: 7, marginBottom: 3 }}>
                                             <span style={{ fontSize: 12, fontWeight: 600 }} className="text-text-primary">{c.actor}</span>
@@ -795,7 +795,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                     </div>
 
                     {/* ACTIVITY */}
-                    <div ref={el => (sectionRefs.current.activity = el)} style={{ borderTop: '1px solid #21262d', marginTop: 20, paddingTop: 18 }}>
+                    <div ref={el => (sectionRefs.current.activity = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
                         <SectionLabel>Activity</SectionLabel>
                         <div className="flex flex-col">
                             {activities.map((a, i) => (
@@ -833,7 +833,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
 
 function SectionLabel({ children, inline }) {
     return (
-        <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', color: '#e8ebf0', marginBottom: inline ? 0 : 11, textTransform: 'uppercase' }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', color: 'var(--text-bright)', marginBottom: inline ? 0 : 11, textTransform: 'uppercase' }}>
             {children}
         </div>
     );

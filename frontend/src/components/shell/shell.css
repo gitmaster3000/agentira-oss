@@ -1,7 +1,7 @@
 /* Chrome interaction styles ported verbatim from Agentira.dc.html.
    Scoped to the shell ports (AppSidebar / AppTopbar). */
 
-.nav:hover { background: #272d36 !important; }
+.nav:hover { background: var(--surface-hover) !important; }
 .ico { flex-shrink: 0; }
 
 /* ── Collapsible icon rail (button-toggled) ────────────────────────────
@@ -26,7 +26,7 @@
     padding: 9px 0 3px !important;
     background: none !important;
     border: none !important;
-    border-top: 1px solid rgba(255, 255, 255, .08) !important;
+    border-top: 1px solid var(--overlay-line) !important;
     border-radius: 0 !important;
 }
 .rail.rc .hdricon { display: block; opacity: .45; }
@@ -57,9 +57,9 @@
 
 /* Hover affordances the design file expresses as `style-hover`. */
 .hoverline { transition: border-color .12s; }
-.hoverline:hover { border-color: rgba(255, 255, 255, .16) !important; }
+.hoverline:hover { border-color: var(--overlay-line-strong) !important; }
 .hovertint { transition: background .12s; }
-.hovertint:hover { background: rgba(255, 255, 255, .06) !important; }
+.hovertint:hover { background: var(--overlay-tint) !important; }
 
 /* ── Mobile chrome: off-canvas rail + hamburger ────────────────────────
    Desktop keeps the floating rail. On narrow viewports the rail becomes a
