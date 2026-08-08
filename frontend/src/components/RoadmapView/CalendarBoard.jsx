@@ -101,7 +101,7 @@ export function CalendarBoard({ epics = [], milestones = [] }) {
                 <input
                     id="roadmap-jump-date"
                     type="date"
-                    className="input text-xs py-1 px-2 w-auto"
+                    className="input input-date text-xs py-1 px-2 w-auto"
                     value={format(date, 'yyyy-MM-dd')}
                     onChange={(event) => jumpToDate(event.target.value)}
                 />

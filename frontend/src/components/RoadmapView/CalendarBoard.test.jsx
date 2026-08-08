@@ -12,6 +12,11 @@ vi.mock('react-big-calendar', () => ({
         return (
             <div>
                 <output data-testid="calendar-date">{format(date, 'yyyy-MM-dd')}</output>
+                {events.filter(event => event.kind === 'task').map(event => (
+                    <output key={event.id} data-testid={`event-dates-${event.id}`}>
+                        {format(event.start, 'yyyy-MM-dd')}–{format(event.end, 'yyyy-MM-dd')}
+                    </output>
+                ))}
                 {task && (
                     <button type="button" onClick={() => onSelectEvent(task)}>
                         {task.title}
@@ -31,6 +36,13 @@ const EPICS = [{
         status: 'in_progress',
         start: '2026-08-06',
         end: '2026-08-07',
+    }, {
+        id: 'due-only',
+        title: 'Due on launch day',
+        status: 'todo',
+        start: null,
+        end: '2026-09-20',
+        created_at: '2026-08-01',
     }],
 }];
 
@@ -59,10 +71,21 @@ describe('CalendarBoard', () => {
         expect(screen.getByText('Full task AP-496')).toBeInTheDocument();
     });
 
+    it('places a due-date-only task on its due date', () => {
+        renderCalendar();
+
+        expect(screen.getByTestId('event-dates-due-only')).toHaveTextContent(
+            '2026-09-20–2026-09-20',
+        );
+    });
+
     it('lets users jump directly to a selected date', () => {
         renderCalendar();
 
-        fireEvent.change(screen.getByLabelText('Jump to date'), {
+        const picker = screen.getByLabelText('Jump to date');
+        expect(picker).toHaveClass('input-date');
+
+        fireEvent.change(picker, {
             target: { value: '2027-04-05' },
         });
 
