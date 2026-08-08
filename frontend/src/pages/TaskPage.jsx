@@ -996,12 +996,13 @@ function PlanTab(props) {
                     </p>
                 </div>
 
-                {/* Delivery facts stay in one compact band so the page only
-                    grows with the discussion below it. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
+                {/* Keep the delivery cards aligned as a single band. Each card
+                    owns its overflow so long lists do not create uneven
+                    floating panels or push the discussion down the page. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
 
                 {/* Definition of Done */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
                             <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
@@ -1054,7 +1055,7 @@ function PlanTab(props) {
                 </div>
 
                 {/* Git Integration */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
                     <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-4">
                         <GitBranch className="w-3.5 h-3.5" /> Branch &amp; PR
                     </h3>
@@ -1167,11 +1168,11 @@ function PlanTab(props) {
                 {/* Files live in the side column now (no separate tab). The
                     AttachmentsSection brings its own header + top border, so it
                     sits directly in the card. */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl px-6 pb-6 shadow-sm">
+                <div className="bg-bg-card border border-border-subtle rounded-xl px-6 pb-6 shadow-sm sm:h-80 overflow-y-auto">
                     <AttachmentsSection taskId={taskId} />
                 </div>
 
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
+                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
                     <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
                     <div className="space-y-3">
                         <div className="flex items-center gap-2 text-text-secondary">
