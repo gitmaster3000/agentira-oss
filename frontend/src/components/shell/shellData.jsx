@@ -1,16 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api } from '../../api';
 
-// Project dot color: use the project's own color if the API provides one,
-// else derive a stable color from its id so each project reads distinctly.
-const RING = ['var(--brand-lavender)', 'var(--brand-teal)', '#fdd663', '#c58af9', '#8ab4f8', '#81c995'];
-export function projectColor(p) {
-    if (p?.color) return p.color;
-    const id = String(p?.id ?? '');
-    let h = 0;
-    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-    return RING[h % RING.length];
-}
+// Projects have no colour of their own. Every project marker uses the one
+// brand accent (--accent-primary), which flips with the day/night theme.
 
 export function projectKey(p) {
     if (p?.key) return p.key;

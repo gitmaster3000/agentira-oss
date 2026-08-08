@@ -38,6 +38,14 @@ like `bg-bg-card` follow the theme too.
   `--shadow-panel` / `--shadow-popover`. Don't hardcode `rgba(0,0,0,…)`
   shadows — they read as smudges on a light canvas.
 
+## Projects have no colour
+
+A project is not colour-coded. Every project marker (switcher dot, dashboard
+card dot) uses `var(--accent-primary)`, and project names render in
+`var(--text-primary)` so they stay readable in both themes. Don't reintroduce
+a per-project palette — coloured names were unreadable on the light canvas and
+the colour carried no meaning.
+
 ## Known gap
 
 The Deploy tab (`src/components/deploy/theme.js`) is a dark-only design port

@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Folder } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useShellData, projectColor, projectKey } from '../components/shell/shellData';
+import { useShellData, projectKey } from '../components/shell/shellData';
 
 // The single "live/running" accent — never used for anything that isn't running
 // (COMPONENT_MAP key behavior #5: one accent for run/activity).
@@ -186,7 +186,7 @@ export function StudioDashboard() {
                             <div key={p.id} onClick={() => navigate(`/studio/board/${p.id}`)} className="nav"
                                 style={{ background: 'var(--surface-card)', border: '1px solid var(--border-default)', borderRadius: '10px', padding: '13px', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '9px' }}>
-                                    <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: projectColor(p), flexShrink: 0 }} />
+                                    <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'var(--accent-primary)', flexShrink: 0 }} />
                                     <span style={{ fontSize: '13.5px', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                                     <span style={{ fontSize: '9px', fontFamily: 'ui-monospace,monospace', color: 'var(--text-muted)', background: 'var(--surface-base)', borderRadius: '4px', padding: '1px 5px', flexShrink: 0 }}>{p.key_prefix || projectKey(p)}</span>
                                 </div>

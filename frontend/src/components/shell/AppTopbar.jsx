@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { api } from '../../api';
 import { useCurrentProjectId, setCurrentProjectId } from '../../currentProject';
-import { useShellData, projectColor } from './shellData';
+import { useShellData } from './shellData';
 
 // Exact port of the Agentira.dc.html top bar: blended into the canvas (no card
 // chrome), holding the logo lockup, the project switcher (moved out of the
@@ -152,8 +152,8 @@ export function AppTopbar({ onNewProject, onMenu }) {
                 <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.12em', color: 'var(--text-muted)', flexShrink: 0 }}>PROJECT</span>
                 <div style={{ position: 'relative', flexShrink: 0 }} ref={projRef}>
                     <div className="hoverline" onClick={() => setProjMenuOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '10px', cursor: 'pointer', background: 'var(--overlay-tint-soft)', border: '1px solid var(--overlay-line)' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: activeProject ? projectColor(activeProject) : 'var(--text-muted)' }} />
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: activeProject ? projectColor(activeProject) : 'var(--text-muted)' }}>{activeProject ? activeProject.name : 'No project'}</span>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: activeProject ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: activeProject ? 'var(--text-primary)' : 'var(--text-muted)' }}>{activeProject ? activeProject.name : 'No project'}</span>
                         {activeLive > 0 ? liveDot(activeLive) : null}
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" strokeWidth="2.2" style={{ stroke: 'var(--text-muted)', marginLeft: '1px' }}><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
                     </div>
@@ -164,7 +164,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                                 const live = runningByProject[p.id] || 0;
                                 return (
                                     <div key={p.id} className="nav" onClick={() => selectProject(p)} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 8px', borderRadius: '10px', cursor: 'pointer' }}>
-                                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: projectColor(p) }} />
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: 'var(--accent-primary)' }} />
                                         <span style={{ fontSize: '13px', flex: 1, color: 'var(--text-bright)' }}>{p.name}</span>
                                         {live > 0 ? <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--pulse-blue)' }} /><span style={{ fontSize: '10px', color: 'var(--pulse-blue)', fontWeight: 600 }}>{live}</span></span> : null}
                                         {activeProject && p.id === activeProject.id ? <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-lavender)' }} strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg> : null}

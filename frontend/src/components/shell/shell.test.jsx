@@ -32,8 +32,8 @@ vi.mock('../../currentProject', () => ({
 }));
 
 const PROJECTS = [
-    { id: 'p1', name: 'Atlas', color: '#c9b8ff' },
-    { id: 'p2', name: 'Beacon', color: '#80cbc4' },
+    { id: 'p1', name: 'Atlas' },
+    { id: 'p2', name: 'Beacon' },
 ];
 
 // Two running runs, both on the active project — drives the "2 running" pill
@@ -171,6 +171,11 @@ describe('AppTopbar — blended bar', () => {
         mountTopbar();
         expect(screen.getByText('PROJECT')).toBeInTheDocument();
         expect(await screen.findByText('Atlas')).toBeInTheDocument();
+    });
+
+    it('names the project in plain readable text, not a per-project colour', async () => {
+        mountTopbar();
+        expect((await screen.findByText('Atlas')).style.color).toBe('var(--text-primary)');
     });
 
     it('opens the SWITCH PROJECT dropdown and switches project on select', async () => {
