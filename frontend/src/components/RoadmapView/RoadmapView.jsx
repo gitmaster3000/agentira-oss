@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
     addDays,
     differenceInCalendarDays,
@@ -469,6 +469,8 @@ function TimelineStrip({ epics, milestones = [], rangeStart = null, rangeEnd = n
 }
 
 export function RoadmapView({ projectId: projectIdProp }) {
+    const outletContext = useOutletContext() || {};
+    const { requestSelectTask } = outletContext;
     const { projectId: projectIdParam } = useParams();
     const projectId = projectIdProp || projectIdParam;
     const [data, setData] = useState(null);
@@ -558,15 +560,6 @@ export function RoadmapView({ projectId: projectIdProp }) {
         return <div className="flex-1 flex items-center justify-center text-red-400 p-6">{error}</div>;
     }
 
-    const removeDependency = async (depId) => {
-        try {
-            await api.removeDependency(projectId, depId);
-            loadRoadmap();
-        } catch (err) {
-            console.error('[Roadmap] removeDependency failed:', err);
-        }
-    };
-
     if (!data || !data.summary || !data.epics || data.summary.total_tasks === 0) {
         return (
             <div className="flex-1 flex flex-col items-center justify-center text-text-tertiary p-6">
@@ -643,7 +636,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                     <DependencyGraph
                         epics={filteredEpics}
                         dependencies={data.dependencies}
-                        onRemoveDependency={removeDependency}
+                        onOpenTask={requestSelectTask}
                     />
                 </React.Suspense>
             )}

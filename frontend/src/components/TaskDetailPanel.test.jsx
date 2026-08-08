@@ -12,6 +12,9 @@ vi.mock('../api', () => ({
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
         getEpics: vi.fn(() => Promise.resolve([])),
+        listSubtasks: vi.fn(() => Promise.resolve([])),
+        listTasks: vi.fn(() => Promise.resolve([])),
+        listMilestones: vi.fn(() => Promise.resolve([])),
         moveTask: vi.fn(() => Promise.resolve({})),
         updateTask: vi.fn(() => Promise.resolve({})),
         forge: { listTaskRuns: vi.fn(() => Promise.resolve([])) },
@@ -42,7 +45,7 @@ function baseTask(overrides = {}) {
 }
 
 // Wrapper drives isEditing the same way the parent pages do.
-function Harness({ task }) {
+function Harness({ task, onSelectTask }) {
     const [isEditing, setIsEditing] = useState(false);
     return (
         <MemoryRouter>
@@ -50,6 +53,7 @@ function Harness({ task }) {
                 task={task}
                 onClose={() => {}}
                 onUpdate={() => {}}
+                onSelectTask={onSelectTask}
                 isEditing={isEditing}
                 setIsEditing={setIsEditing}
             />
@@ -169,6 +173,32 @@ describe('TaskDetailPanel — layout & resizing', () => {
             label.compareDocumentPosition(epic) & Node.DOCUMENT_POSITION_PRECEDING,
         ).toBeTruthy();
         expect(container).toBeTruthy();
+    });
+
+    it('makes each side-panel section collapsible', async () => {
+        render(<Harness task={baseTask()} />);
+        const filesToggle = await screen.findByRole('button', { name: 'Toggle Files section' });
+
+        expect(filesToggle).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.click(filesToggle);
+        expect(filesToggle).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByText('Attach a file')).not.toBeInTheDocument();
+    });
+
+    it('shows planning relationships and only exposes their controls in edit mode', async () => {
+        const onSelectTask = vi.fn();
+        api.listSubtasks.mockResolvedValueOnce([
+            { id: 'T2', key: 'AP-2', title: 'Child work', status: 'todo' },
+        ]);
+        render(<Harness task={baseTask()} onSelectTask={onSelectTask} />);
+
+        expect(await screen.findByText('Child work')).toBeInTheDocument();
+        expect(screen.queryByTitle('Add a subtask')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'AP-2' }));
+        expect(onSelectTask).toHaveBeenCalledWith('T2');
+
+        fireEvent.click(screen.getByTitle('Edit'));
+        expect(screen.getByTitle('Add a subtask')).toBeInTheDocument();
     });
 
     it('resizes by dragging the divider and remembers the width', async () => {

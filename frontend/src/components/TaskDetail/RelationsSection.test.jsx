@@ -24,10 +24,15 @@ const TASK = {
     blocks: [],
 };
 
-function renderSection(task = TASK, onChanged = vi.fn()) {
+function renderSection(task = TASK, onChanged = vi.fn(), isEditing = false, onOpenTask) {
     return render(
         <MemoryRouter>
-            <RelationsSection task={task} onChanged={onChanged} />
+            <RelationsSection
+                task={task}
+                onChanged={onChanged}
+                isEditing={isEditing}
+                onOpenTask={onOpenTask}
+            />
         </MemoryRouter>
     );
 }
@@ -67,8 +72,26 @@ describe('RelationsSection', () => {
         expect(await screen.findByText('Nothing is waiting on this.')).toBeInTheDocument();
     });
 
-    it('adds a dependency in the task → blocker direction', async () => {
+    it('is read-only outside task edit mode', async () => {
         renderSection();
+        await screen.findByText('Child work');
+
+        expect(screen.queryByTitle('Add a subtask')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Add something this task waits on')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Remove this link')).not.toBeInTheDocument();
+        expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    });
+
+    it('opens related tasks through the supplied side-panel callback', async () => {
+        const onOpenTask = vi.fn();
+        renderSection(TASK, vi.fn(), false, onOpenTask);
+
+        fireEvent.click(await screen.findByRole('button', { name: 'AP-3' }));
+        expect(onOpenTask).toHaveBeenCalledWith('t3');
+    });
+
+    it('adds a dependency in the task → blocker direction', async () => {
+        renderSection(TASK, vi.fn(), true);
         await screen.findByText('Do first');
 
         fireEvent.click(screen.getByTitle('Add something this task waits on'));
@@ -82,7 +105,7 @@ describe('RelationsSection', () => {
     });
 
     it('links the task to a milestone', async () => {
-        renderSection();
+        renderSection(TASK, vi.fn(), true);
         await screen.findByText('Counts towards');
         const picker = screen.getAllByRole('combobox').find(
             el => el.textContent.includes('No milestone'));
@@ -94,7 +117,7 @@ describe('RelationsSection', () => {
     it('surfaces a rejected graph change instead of failing silently', async () => {
         api.updateTask.mockRejectedValueOnce(
             new Error('that parent would create a cycle in the task tree'));
-        renderSection();
+        renderSection(TASK, vi.fn(), true);
         await screen.findByText('Child work');
 
         const parentPicker = screen.getAllByRole('combobox').find(

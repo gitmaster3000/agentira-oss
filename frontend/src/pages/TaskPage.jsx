@@ -977,7 +977,7 @@ function PlanTab(props) {
 
                         {/* Parent, subtasks, dependencies and milestone are
                             planning context, so keep them above the fold. */}
-                        <RelationsSection task={task} onChanged={loadTask} />
+                        <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} />
                     </div>
                 </div>
             </section>

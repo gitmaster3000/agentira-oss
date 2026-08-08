@@ -5,11 +5,12 @@ import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
 import { MentionInput } from './MentionInput';
+import { RelationsSection } from './TaskDetail/RelationsSection';
 import {
     Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
     GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
     Info, FileText, MessageSquare, Activity as ActivityIcon, Paperclip,
-    Play, Cpu,
+    Play, Cpu, ListTree, ChevronDown,
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -32,6 +33,7 @@ const clampWidth = (w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w))
 
 const RAIL = [
     { id: 'info', label: 'Details', icon: Info },
+    { id: 'relations', label: 'How this fits', icon: ListTree },
     { id: 'files', label: 'Files', icon: FileText },
     { id: 'git', label: 'Branch & PR', icon: GitBranch },
     { id: 'comments', label: 'Comments', icon: MessageSquare },
@@ -65,7 +67,7 @@ function relTime(value) {
     return new Date(value).toLocaleDateString();
 }
 
-export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditing }) {
+export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditing, setIsEditing }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [activities, setActivities] = useState([]);
@@ -88,6 +90,8 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     const [copiedField, setCopiedField] = useState(null);
     const [formData, setFormData] = useState({ ...task });
     const [activeSection, setActiveSection] = useState('info');
+    const [openSections, setOpenSections] = useState(() =>
+        Object.fromEntries(RAIL.map(({ id }) => [id, true])));
 
     const scrollRef = useRef(null);
     const sectionRefs = useRef({});
@@ -279,12 +283,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
     // Measure section offsets via getBoundingClientRect so the math is
     // independent of offsetParent (the scroll container isn't positioned).
     const scrollTo = (id) => {
+        setOpenSections(prev => ({ ...prev, [id]: true }));
         const el = sectionRefs.current[id];
         const c = scrollRef.current;
         if (el && c) {
             const top = el.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - 12;
             c.scrollTo({ top, behavior: 'smooth' });
         }
+        setActiveSection(id);
+    };
+    const toggleSection = (id) => {
+        setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
         setActiveSection(id);
     };
     const onScroll = () => {
@@ -422,7 +431,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                 {/* Scroll body */}
                 <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-w-0 overflow-y-auto custom-scrollbar" style={{ padding: '16px 18px', position: 'relative', scrollBehavior: 'smooth' }}>
                     {/* INFO */}
-                    <div ref={el => (sectionRefs.current.info = el)}>
+                    <CollapsibleSection
+                        title="Details"
+                        icon={Info}
+                        sectionRef={el => (sectionRefs.current.info = el)}
+                        open={openSections.info}
+                        onToggle={() => toggleSection('info')}
+                    >
                         {liveRun && (
                             <div
                                 onClick={() => navigate(ROUTES.FORGE_RUN(liveRun.id))}
@@ -617,11 +632,36 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             <button onClick={addDodItem} className="text-text-tertiary hover:text-accent-primary"><Plus className="w-4 h-4" /></button>
                         </div>
 
-                    </div>
+                    </CollapsibleSection>
+
+                    {/* Planning relationships share the full-page component.
+                        In both surfaces they are read-only until Edit is active. */}
+                    <CollapsibleSection
+                        title="How this fits"
+                        icon={ListTree}
+                        sectionRef={el => (sectionRefs.current.relations = el)}
+                        open={openSections.relations}
+                        onToggle={() => toggleSection('relations')}
+                        separated
+                    >
+                        <RelationsSection
+                            task={task}
+                            onChanged={onUpdate}
+                            onOpenTask={onSelectTask}
+                            isEditing={isEditing}
+                            compact
+                        />
+                    </CollapsibleSection>
 
                     {/* FILES */}
-                    <div ref={el => (sectionRefs.current.files = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
-                        <SectionLabel>Files</SectionLabel>
+                    <CollapsibleSection
+                        title="Files"
+                        icon={FileText}
+                        sectionRef={el => (sectionRefs.current.files = el)}
+                        open={openSections.files}
+                        onToggle={() => toggleSection('files')}
+                        separated
+                    >
                         <div className="flex flex-col" style={{ gap: 8 }}>
                             {attachments.map(att => (
                                 <div key={att.id} className="flex items-center group hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
@@ -647,10 +687,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                             </button>
                             <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
                         </div>
-                    </div>
+                    </CollapsibleSection>
 
                     {/* GIT */}
-                    <div ref={el => (sectionRefs.current.git = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
+                    <CollapsibleSection
+                        title="Branch & PR"
+                        icon={GitBranch}
+                        sectionRef={el => (sectionRefs.current.git = el)}
+                        open={openSections.git}
+                        onToggle={() => toggleSection('git')}
+                        separated
+                    >
                         {/* Branch & PR are a per-repo 1:1 mapping — show which repo
                             they belong to so multi-repo tasks read unambiguously. */}
                         {gitRepoLabel && (
@@ -739,11 +786,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 ))}
                             </div>
                         )}
-                    </div>
+                    </CollapsibleSection>
 
                     {/* COMMENTS */}
-                    <div ref={el => (sectionRefs.current.comments = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
-                        <SectionLabel>Comments</SectionLabel>
+                    <CollapsibleSection
+                        title="Comments"
+                        icon={MessageSquare}
+                        sectionRef={el => (sectionRefs.current.comments = el)}
+                        open={openSections.comments}
+                        onToggle={() => toggleSection('comments')}
+                        separated
+                    >
                         {/* Composer sits ABOVE the thread so it's the first thing
                             you reach, and grows with what you type. */}
                         <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginBottom: 16 }}>
@@ -792,11 +845,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             ))}
                         </div>
-                    </div>
+                    </CollapsibleSection>
 
                     {/* ACTIVITY */}
-                    <div ref={el => (sectionRefs.current.activity = el)} style={{ borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 18 }}>
-                        <SectionLabel>Activity</SectionLabel>
+                    <CollapsibleSection
+                        title="Activity"
+                        icon={ActivityIcon}
+                        sectionRef={el => (sectionRefs.current.activity = el)}
+                        open={openSections.activity}
+                        onToggle={() => toggleSection('activity')}
+                        separated
+                    >
                         <div className="flex flex-col">
                             {activities.map((a, i) => (
                                 <div key={a.id} className="flex" style={{ gap: 11 }}>
@@ -813,7 +872,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                 </div>
                             ))}
                         </div>
-                    </div>
+                    </CollapsibleSection>
                     <div style={{ height: 80 }} />
                 </div>
             </div>
@@ -836,5 +895,35 @@ function SectionLabel({ children, inline }) {
         <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', color: 'var(--text-bright)', marginBottom: inline ? 0 : 11, textTransform: 'uppercase' }}>
             {children}
         </div>
+    );
+}
+
+function CollapsibleSection({ title, icon: Icon, sectionRef, open, onToggle, separated = false, children }) {
+    return (
+        <section
+            ref={sectionRef}
+            style={separated
+                ? { borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 12 }
+                : undefined}
+        >
+            <button
+                type="button"
+                aria-expanded={open}
+                aria-label={`Toggle ${title} section`}
+                onClick={onToggle}
+                className="w-full flex items-center text-text-secondary hover:text-text-primary transition-colors"
+                style={{ gap: 7, marginBottom: open ? 12 : 0, padding: '4px 0', textAlign: 'left' }}
+            >
+                <Icon className="w-3.5 h-3.5" />
+                <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+                    {title}
+                </span>
+                <ChevronDown
+                    className="w-3.5 h-3.5 ml-auto transition-transform"
+                    style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
+                />
+            </button>
+            {open && children}
+        </section>
     );
 }

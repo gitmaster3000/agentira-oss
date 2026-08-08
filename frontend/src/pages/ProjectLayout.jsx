@@ -293,14 +293,20 @@ export function ProjectLayout() {
             setSelectedTask(null);
             return;
         }
+        let cancelled = false;
         if (board) {
             const found = Object.values(board.columns).flat().find(t => String(t.id) === String(selectedTaskId) || String(t.key) === String(selectedTaskId));
             if (found) {
                 setSelectedTask(found);
-                return;
             }
         }
-        api.getTask(selectedTaskId).then(setSelectedTask).catch(err => console.error('Failed to fetch selected task:', err));
+        // Board cards intentionally carry a compact payload. Always replace the
+        // optimistic card with the complete task so side-panel relationships
+        // (parent, subtasks, dependencies, milestone) cannot appear incomplete.
+        api.getTask(selectedTaskId)
+            .then(task => { if (!cancelled) setSelectedTask(task); })
+            .catch(err => console.error('Failed to fetch selected task:', err));
+        return () => { cancelled = true; };
     }, [selectedTaskId, board]);
 
     if (loading) return <div className="p-8 text-center text-text-secondary">Loading project...</div>;
@@ -365,6 +371,7 @@ export function ProjectLayout() {
                     task={selectedTask}
                     isEditing={isEditing}
                     setIsEditing={setIsEditing}
+                    onSelectTask={requestSelectTask}
                     onClose={() => requestSelectTask(null)}
                     onUpdate={loadBoard}
                 />

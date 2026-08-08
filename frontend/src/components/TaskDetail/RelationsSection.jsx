@@ -62,7 +62,7 @@ function TaskPicker({ options, placeholder, onPick, onCancel }) {
     );
 }
 
-export function RelationsSection({ task, onChanged }) {
+export function RelationsSection({ task, onChanged, isEditing = false, onOpenTask, compact = false }) {
     const navigate = useNavigate();
     const projectId = task?.project_id;
     const [subtasks, setSubtasks] = useState([]);
@@ -88,6 +88,9 @@ export function RelationsSection({ task, onChanged }) {
     }, [task?.id, projectId]);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (!isEditing) setAdding(null);
+    }, [isEditing]);
 
     const run = async (fn) => {
         setError(null);
@@ -100,7 +103,13 @@ export function RelationsSection({ task, onChanged }) {
         }
     };
 
-    const open = (id) => navigate(ROUTES.STUDIO_TASK(id));
+    const open = (id) => {
+        if (onOpenTask) {
+            onOpenTask(id);
+            return;
+        }
+        navigate(ROUTES.STUDIO_TASK(id));
+    };
     const addChild = (childId) => run(async () => {
         await api.updateTask(childId, { parent_id: task.id });
         setAdding(null);
@@ -126,14 +135,17 @@ export function RelationsSection({ task, onChanged }) {
     const blocking = task.blocks || [];
     const parentId = task.parent_id;
     const parent = parentId ? siblings.find(t => t.id === parentId) : null;
+    const milestone = milestones.find(m => m.id === task.milestone_id);
 
     // Candidates exclude anything already linked in that direction — the
     // backend would reject a duplicate anyway; don't offer the dead end.
     const notLinked = (ids) => siblings.filter(t => !ids.includes(t.id));
 
     return (
-        <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm space-y-5">
-            <h3 className="text-xs font-bold uppercase text-text-secondary">How this fits in</h3>
+        <div className={compact
+            ? 'space-y-5'
+            : 'bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm space-y-5'}>
+            {!compact && <h3 className="text-xs font-bold uppercase text-text-secondary">How this fits in</h3>}
             {error && <p className="text-xs text-red-400">{error}</p>}
 
             {/* Parent */}
@@ -141,9 +153,11 @@ export function RelationsSection({ task, onChanged }) {
                 <div className="text-[10px] font-bold uppercase text-text-secondary mb-1.5">Part of</div>
                 {parent ? (
                     <TaskChip task={parent} onOpen={open}
-                              onRemove={() => run(() => api.updateTask(task.id, { parent_id: '' }))}
+                              onRemove={isEditing
+                                  ? () => run(() => api.updateTask(task.id, { parent_id: '' }))
+                                  : undefined}
                               removeTitle="Detach from parent" />
-                ) : (
+                ) : isEditing ? (
                     <select
                         value=""
                         onChange={(e) => e.target.value && run(
@@ -155,6 +169,8 @@ export function RelationsSection({ task, onChanged }) {
                             <option key={t.id} value={t.id}>{(t.key || t.id)} — {t.title}</option>
                         ))}
                     </select>
+                ) : (
+                    <p className="text-xs text-text-tertiary">Not part of a bigger task.</p>
                 )}
             </div>
 
@@ -165,10 +181,12 @@ export function RelationsSection({ task, onChanged }) {
                     <span className="text-[10px] font-bold uppercase text-text-secondary">
                         Subtasks {subtasks.length > 0 && `(${subtasks.filter(s => s.status === 'done').length}/${subtasks.length})`}
                     </span>
-                    <button onClick={() => setAdding(adding === 'child' ? null : 'child')}
-                            className="ml-auto text-text-tertiary hover:text-accent-primary" title="Add a subtask">
-                        <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    {isEditing && (
+                        <button onClick={() => setAdding(adding === 'child' ? null : 'child')}
+                                className="ml-auto text-text-tertiary hover:text-accent-primary" title="Add a subtask">
+                            <Plus className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
                 {adding === 'child' && (
                     <div className="mb-2">
@@ -185,7 +203,7 @@ export function RelationsSection({ task, onChanged }) {
                         <div key={s.id} className="flex items-center gap-1">
                             <CornerDownRight className="w-3 h-3 text-text-tertiary flex-shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <TaskChip task={s} onOpen={open} onRemove={removeChild}
+                                <TaskChip task={s} onOpen={open} onRemove={isEditing ? removeChild : undefined}
                                           removeTitle="Remove from this task" />
                             </div>
                         </div>
@@ -201,11 +219,13 @@ export function RelationsSection({ task, onChanged }) {
                 <div className="flex items-center gap-2 mb-1.5">
                     <Ban className="w-3.5 h-3.5 text-text-tertiary" />
                     <span className="text-[10px] font-bold uppercase text-text-secondary">Waits on</span>
-                    <button onClick={() => setAdding(adding === 'waits' ? null : 'waits')}
-                            className="ml-auto text-text-tertiary hover:text-accent-primary"
-                            title="Add something this task waits on">
-                        <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    {isEditing && (
+                        <button onClick={() => setAdding(adding === 'waits' ? null : 'waits')}
+                                className="ml-auto text-text-tertiary hover:text-accent-primary"
+                                title="Add something this task waits on">
+                            <Plus className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
                 {adding === 'waits' && (
                     <div className="mb-2">
@@ -220,7 +240,7 @@ export function RelationsSection({ task, onChanged }) {
                 <div className="space-y-1.5">
                     {waitingOn.map(t => (
                         <TaskChip key={t.id} task={t} onOpen={open}
-                                  onRemove={(other) => removeLink(other, 'waits')}
+                                  onRemove={isEditing ? (other) => removeLink(other, 'waits') : undefined}
                                   removeTitle="Remove this link" />
                     ))}
                     {waitingOn.length === 0 && adding !== 'waits' && (
@@ -232,11 +252,13 @@ export function RelationsSection({ task, onChanged }) {
             <div>
                 <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-[10px] font-bold uppercase text-text-secondary">Blocks</span>
-                    <button onClick={() => setAdding(adding === 'blocks' ? null : 'blocks')}
-                            className="ml-auto text-text-tertiary hover:text-accent-primary"
-                            title="Add something waiting on this task">
-                        <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    {isEditing && (
+                        <button onClick={() => setAdding(adding === 'blocks' ? null : 'blocks')}
+                                className="ml-auto text-text-tertiary hover:text-accent-primary"
+                                title="Add something waiting on this task">
+                            <Plus className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
                 {adding === 'blocks' && (
                     <div className="mb-2">
@@ -251,7 +273,7 @@ export function RelationsSection({ task, onChanged }) {
                 <div className="space-y-1.5">
                     {blocking.map(t => (
                         <TaskChip key={t.id} task={t} onOpen={open}
-                                  onRemove={(other) => removeLink(other, 'blocks')}
+                                  onRemove={isEditing ? (other) => removeLink(other, 'blocks') : undefined}
                                   removeTitle="Remove this link" />
                     ))}
                     {blocking.length === 0 && adding !== 'blocks' && (
@@ -266,18 +288,26 @@ export function RelationsSection({ task, onChanged }) {
                     <Flag className="w-3.5 h-3.5 text-text-tertiary" />
                     <span className="text-[10px] font-bold uppercase text-text-secondary">Counts towards</span>
                 </div>
-                <select
-                    value={task.milestone_id || ''}
-                    onChange={(e) => run(() => api.updateTask(task.id, { milestone_id: e.target.value }))}
-                    className="w-full text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1.5 text-text-secondary"
-                >
-                    <option value="">No milestone</option>
-                    {milestones.map(m => (
-                        <option key={m.id} value={m.id}>
-                            {m.title}{m.due_date ? ` · ${new Date(m.due_date).toLocaleDateString()}` : ''}
-                        </option>
-                    ))}
-                </select>
+                {isEditing ? (
+                    <select
+                        value={task.milestone_id || ''}
+                        onChange={(e) => run(() => api.updateTask(task.id, { milestone_id: e.target.value }))}
+                        className="w-full text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1.5 text-text-secondary"
+                    >
+                        <option value="">No milestone</option>
+                        {milestones.map(m => (
+                            <option key={m.id} value={m.id}>
+                                {m.title}{m.due_date ? ` · ${new Date(m.due_date).toLocaleDateString()}` : ''}
+                            </option>
+                        ))}
+                    </select>
+                ) : (
+                    <p className="text-xs text-text-tertiary">
+                        {milestone
+                            ? `${milestone.title}${milestone.due_date ? ` · ${new Date(milestone.due_date).toLocaleDateString()}` : ''}`
+                            : 'No milestone.'}
+                    </p>
+                )}
             </div>
         </div>
     );

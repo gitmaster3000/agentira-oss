@@ -1,21 +1,25 @@
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 import { DependencyGraph } from './DependencyGraph';
+
+const mocks = vi.hoisted(() => ({ reactFlowProps: vi.fn() }));
 
 vi.mock('@xyflow/react', () => ({
     MarkerType: { ArrowClosed: 'arrow-closed' },
-    ReactFlow: ({ nodes, onNodeClick, children }) => (
-        <div>
-            {nodes.map(node => (
-                <button key={node.id} type="button" onClick={() => onNodeClick({}, node)}>
-                    {node.data.label}
-                </button>
-            ))}
-            {children}
-        </div>
-    ),
+    ReactFlow: (props) => {
+        mocks.reactFlowProps(props);
+        return (
+            <div>
+                {props.nodes.map(node => (
+                    <button key={node.id} type="button" onClick={() => props.onNodeClick({}, node)}>
+                        {node.data.label}
+                    </button>
+                ))}
+                {props.children}
+            </div>
+        );
+    },
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
@@ -29,32 +33,24 @@ const EPICS = [{
     ],
 }];
 
-function TaskDestination() {
-    const { taskId } = useParams();
-    return <div>Full task {taskId}</div>;
-}
-
 describe('DependencyGraph', () => {
-    it('labels edge direction and opens nodes using short task keys', () => {
+    beforeEach(() => mocks.reactFlowProps.mockClear());
+
+    it('labels edge direction, uses static edges, and opens nodes in the task side view', () => {
+        const onOpenTask = vi.fn();
         render(
-            <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
-                <Routes>
-                    <Route
-                        path="/studio/project/:projectId/roadmap"
-                        element={(
-                            <DependencyGraph
-                                epics={EPICS}
-                                dependencies={[{ id: 'd1', task_id: 't2', depends_on_id: 't1' }]}
-                            />
-                        )}
-                    />
-                    <Route path="/studio/tasks/:taskId" element={<TaskDestination />} />
-                </Routes>
-            </MemoryRouter>,
+            <DependencyGraph
+                epics={EPICS}
+                dependencies={[{ id: 'd1', task_id: 't2', depends_on_id: 't1' }]}
+                onOpenTask={onOpenTask}
+            />,
         );
 
         expect(screen.getByText(/blocker → dependent/)).toBeInTheDocument();
+        expect(mocks.reactFlowProps).toHaveBeenCalledWith(expect.objectContaining({
+            edges: [expect.objectContaining({ id: 'd1', animated: false })],
+        }));
         fireEvent.click(screen.getByRole('button', { name: /AP-42 Ship feature/ }));
-        expect(screen.getByText('Full task AP-42')).toBeInTheDocument();
+        expect(onOpenTask).toHaveBeenCalledWith('AP-42');
     });
 });

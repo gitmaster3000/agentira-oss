@@ -1,9 +1,7 @@
 import React, { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ReactFlow, Background, Controls, MiniMap, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Workflow } from 'lucide-react';
-import { ROUTES } from '../../routes';
 
 const STATUS_COLORS = {
     done: '#2ecc71',
@@ -40,9 +38,7 @@ function layer(taskIds, dependsOn) {
  * dependency are drawn — an unconnected task is board work, not graph work,
  * and drawing all of them turns the canvas into confetti.
  */
-export function DependencyGraph({ epics = [], dependencies = [], onRemoveDependency }) {
-    const navigate = useNavigate();
-
+export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
     const { nodes, edges, connectedCount } = useMemo(() => {
         const byId = new Map();
         for (const epic of epics) {
@@ -104,7 +100,7 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
                 id: d.id,
                 source: d.depends_on_id,   // blocker first: it must finish
                 target: d.task_id,
-                animated: !satisfied,
+                animated: false,
                 style: { stroke: satisfied ? '#2ecc71' : '#e74c3c', strokeWidth: 1.5 },
                 markerEnd: { type: MarkerType.ArrowClosed, color: satisfied ? '#2ecc71' : '#e74c3c' },
             };
@@ -145,11 +141,7 @@ export function DependencyGraph({ epics = [], dependencies = [], onRemoveDepende
                     nodesDraggable={false}
                     nodesConnectable={false}
                     proOptions={{ hideAttribution: false }}
-                    onNodeClick={(_, node) => navigate(ROUTES.STUDIO_TASK(node.data.taskRef || node.id))}
-                    onEdgeClick={(_, edge) => {
-                        if (!onRemoveDependency) return;
-                        if (window.confirm('Remove this dependency link?')) onRemoveDependency(edge.id);
-                    }}
+                    onNodeClick={(_, node) => onOpenTask?.(node.data.taskRef || node.id)}
                 >
                     <Background gap={18} color="var(--border-subtle)" />
                     <Controls showInteractive={false} />
