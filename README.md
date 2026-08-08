@@ -381,7 +381,7 @@ agentira/
 | Auth | JWT (stateless) + Google / GitHub OAuth + username/password |
 | Daemon | Python `click` CLI, asyncio WS client, subprocess management |
 | Default runtime | `claude` CLI (`@anthropic-ai/claude-code`) |
-| Other runtimes | OpenClaw (HTTP gateway, AP-87 spec), Codex / Gemini scaffolded |
+| Other runtimes | Codex CLI, Grok, OpenClaw (HTTP gateway), Ollama — the daemon detects whichever are on `PATH` |
 | Deploy | Docker Compose · Railway · anything that runs Docker + Postgres |
 | License | Apache-2.0 |
 
@@ -394,7 +394,7 @@ Tests run against a real Postgres — `backend/tests/conftest.py` spins one ephe
 must be running.** Never SQLite: prod is Postgres, so the tests are too.
 
 ```bash
-# Full backend suite — 491 passing as of the Apache-2.0 release commit
+# Full backend suite — 735 passing as of the Apache-2.0 release commit
 python -m pytest backend/tests/ -q
 
 # One file while iterating
