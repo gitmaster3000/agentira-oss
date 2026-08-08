@@ -114,7 +114,7 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
             className={`railwrap shell-sidebar${rc}${open ? ' shell-sidebar--open' : ''}`}
             style={{ flexShrink: 0, position: 'relative', zIndex: 30, fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}
         >
-            <div className={`rail${rc}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', background: 'var(--surface-raised)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', boxShadow: '0 12px 38px rgba(0,0,0,.45)' }}>
+            <div className={`rail${rc}`} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', background: 'var(--surface-raised)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', boxShadow: 'var(--shadow-panel)' }}>
                 {/* collapse toggle (top of the rail) */}
                 <div className="railtoggle-wrap" style={{ position: 'relative', zIndex: 1, display: 'flex', justifyContent: 'flex-end', padding: '10px 12px 2px' }}>
                     <div className="hovertint" onClick={onToggleRail} title="Toggle sidebar" style={{ width: '30px', height: '30px', flexShrink: 0, borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-tertiary)', border: '1px solid var(--overlay-line)' }}>
@@ -184,7 +184,7 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                     {userOpen && (
                         // Opens above when expanded; shell.css flies it out to the right of
                         // the rail when collapsed (.rail.rc .usermenu).
-                        <div className="usermenu" style={{ position: 'absolute', bottom: '100%', left: '8px', right: '8px', marginBottom: '6px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 60, padding: '5px' }}>
+                        <div className="usermenu" style={{ position: 'absolute', bottom: '100%', left: '8px', right: '8px', marginBottom: '6px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 60, padding: '5px' }}>
                             <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-tertiary)' }}>
                                 <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M1 12h4M19 12h4" /></svg>Settings
                             </div>

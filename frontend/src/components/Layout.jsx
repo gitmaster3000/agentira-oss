@@ -8,10 +8,11 @@ import { FloatingChat } from './FloatingChat';
 import { PulseDock } from './PulseDock';
 import './shell/shell.css';
 
-// Shell root, ported from Agentira.dc.html: a dark gradient canvas holding a
+// Shell root, ported from Agentira.dc.html: a gradient canvas holding a
 // blended header row, then a row of two floating panels (rail + main).
-const CANVAS = 'radial-gradient(900px 480px at 14% -10%,rgba(201,184,255,.06),transparent),'
-    + 'radial-gradient(1000px 520px at 86% -14%,rgba(56,189,248,.06),transparent),#090b10';
+// Themed — the canvas tokens flip with day/night (tokens/colors.css).
+const CANVAS = 'radial-gradient(900px 480px at 14% -10%,var(--canvas-glow-a),transparent),'
+    + 'radial-gradient(1000px 520px at 86% -14%,var(--canvas-glow-b),transparent),var(--canvas-base)';
 
 export function Layout() {
     const [showCreate, setShowCreate] = useState(false);
@@ -38,7 +39,7 @@ export function Layout() {
                 <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
                     {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
                     <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
-                    <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface-base)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 12px 38px rgba(0,0,0,.35)' }}>
+                    <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface-base)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--shadow-panel)' }}>
                         <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                             <Outlet />
                         </div>

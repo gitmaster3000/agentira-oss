@@ -161,8 +161,8 @@ describe('AppSidebar — collapsible rail', () => {
 describe('AppTopbar — blended bar', () => {
     it('renders the logo lockup and the search pill', () => {
         mountTopbar();
-        expect(screen.getByText('Acme Inc')).toBeInTheDocument();
         expect(screen.getByText('Agentira')).toBeInTheDocument();
+        expect(screen.queryByText('Acme Inc')).not.toBeInTheDocument();
         expect(screen.getByText('Search or jump…')).toBeInTheDocument();
         expect(screen.getByText('⌘K')).toBeInTheDocument();
     });

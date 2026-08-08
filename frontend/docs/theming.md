@@ -30,7 +30,13 @@ like `bg-bg-card` follow the theme too.
   (`--overlay-line`, `--overlay-line-strong`, `--overlay-tint`,
   `--overlay-tint-soft`) instead of `rgba(255,255,255,…)` — white overlays
   disappear on a white background.
-- Adding a colour means adding it to **both** blocks in `colors.css`.
+- Adding a colour means adding it to **both** blocks in `colors.css`. A token
+  whose value is a `var()` reference is exempt — it follows the theme already.
+  `src/tokens/colors.test.js` fails the build if a night token has no day value.
+- The shell canvas (the desk the floating panels sit on) is
+  `--canvas-base` + `--canvas-glow-a/-b`, and panel shadows are
+  `--shadow-panel` / `--shadow-popover`. Don't hardcode `rgba(0,0,0,…)`
+  shadows — they read as smudges on a light canvas.
 
 ## Known gap
 

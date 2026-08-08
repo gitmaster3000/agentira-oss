@@ -141,8 +141,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
             <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flexShrink: 0 }}>
                 <span style={{ width: '30px', height: '30px', borderRadius: '9px', background: 'linear-gradient(135deg,var(--brand-lavender),var(--brand-teal))', color: 'var(--surface-base)', fontSize: '15px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 10px rgba(201,184,255,.35)' }}>A</span>
                 <div style={{ lineHeight: 1.05 }}>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700 }}>Acme Inc</div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Agentira</div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 700 }}>Agentira</div>
                 </div>
             </div>
 
@@ -159,7 +158,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" strokeWidth="2.2" style={{ stroke: 'var(--text-muted)', marginLeft: '1px' }}><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
                     </div>
                     {projMenuOpen && (
-                        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '6px', width: '264px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, padding: '5px', maxHeight: '340px', overflowY: 'auto' }}>
+                        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '6px', width: '264px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 50, padding: '5px', maxHeight: '340px', overflowY: 'auto' }}>
                             <div style={{ fontSize: '9.5px', fontWeight: 700, letterSpacing: '.1em', color: 'var(--text-muted)', padding: '6px 8px 4px' }}>SWITCH PROJECT</div>
                             {projects.map((p) => {
                                 const live = runningByProject[p.id] || 0;
@@ -224,7 +223,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M6 9l6 6 6-6" /></svg>
                     </div>
                     {newOpen && (
-                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '230px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, padding: '6px' }}>
+                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '230px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 50, padding: '6px' }}>
                             {createItem('rgba(128,203,196,.14)', 'var(--brand-teal)', (<><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></>), 'New task', 'File work on the board', () => { setNewOpen(false); window.dispatchEvent(new CustomEvent('open-create-task')); })}
                             {createItem('rgba(197,138,249,.14)', '#c58af9', (<><rect x="3" y="4" width="18" height="6" rx="1" /><rect x="3" y="14" width="18" height="6" rx="1" /></>), 'New epic', 'Group tasks on the roadmap', () => { setNewOpen(false); window.dispatchEvent(new CustomEvent('open-create-epic')); })}
                             {createItem('rgba(201,184,255,.14)', 'var(--brand-lavender)', (<path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18" />), 'New project', 'Guided 5-step wizard', () => { setNewOpen(false); onNewProject && onNewProject(); })}
@@ -236,10 +235,10 @@ export function AppTopbar({ onNewProject, onMenu }) {
                 <div style={{ position: 'relative' }} ref={bellRef}>
                     <div className="hovertint" onClick={() => setBellOpen((o) => !o)} style={{ position: 'relative', padding: '7px', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '9px' }}>
                         <svg className="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
-                        {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid #090b10' }} />}
+                        {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid var(--canvas-base)' }} />}
                     </div>
                     {bellOpen && (
-                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '312px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: '0 20px 44px rgba(0,0,0,.55)', zIndex: 50, overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '312px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 50, overflow: 'hidden' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid var(--overlay-tint)' }}>
                                 <span style={{ fontSize: '12.5px', fontWeight: 700 }}>Notifications</span>
                                 {unread > 0 && <span style={{ fontSize: '11px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 7px' }}>{unread}</span>}

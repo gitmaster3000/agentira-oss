@@ -24,7 +24,7 @@ export function GitHubCallback() {
 
     if (error) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-gray-900 text-gray-100">
+            <div className="flex min-h-screen items-center justify-center bg-bg-app text-text-primary">
                 <div className="text-center space-y-4">
                     <p className="text-red-400">{error}</p>
                     <a href="/login" className="text-blue-400 hover:underline">Back to login</a>
@@ -34,7 +34,7 @@ export function GitHubCallback() {
     }
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-900 text-gray-100">
+        <div className="flex min-h-screen items-center justify-center bg-bg-app text-text-primary">
             <p className="text-gray-400">Signing in with GitHub...</p>
         </div>
     );

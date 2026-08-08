@@ -64,6 +64,13 @@
   --overlay-line:        rgba(255,255,255,.09);
   --overlay-line-strong: rgba(255,255,255,.16);
 
+  /* ---- Shell canvas: the desk the floating panels sit on ---- */
+  --canvas-base:      #090b10;
+  --canvas-glow-a:    rgba(201,184,255,.06);
+  --canvas-glow-b:    rgba(56,189,248,.06);
+  --shadow-panel:     0 12px 38px rgba(0,0,0,.35);
+  --shadow-popover:   0 20px 44px rgba(0,0,0,.55);
+
   /* ---- Agent identity ----
      Agents are created by users, so color is never tied to a role.
      An agent's avatar color is auto-assigned by hashing its id onto
@@ -144,6 +151,13 @@
   --overlay-tint:        rgba(31,35,40,.05);
   --overlay-line:        rgba(31,35,40,.10);
   --overlay-line-strong: rgba(31,35,40,.20);
+
+  /* ---- Shell canvas ---- */
+  --canvas-base:      #eceff4;
+  --canvas-glow-a:    rgba(110,86,207,.07);
+  --canvas-glow-b:    rgba(9,105,218,.06);
+  --shadow-panel:     0 6px 20px rgba(31,35,40,.10);
+  --shadow-popover:   0 14px 34px rgba(31,35,40,.16);
 
   /* ---- Agent identity ---- */
   --agent-ring-1:     #b26a00;
