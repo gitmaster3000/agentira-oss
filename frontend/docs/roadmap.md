@@ -54,11 +54,17 @@ for the record; it doesn't change the progress number.
 
 Open any task and look at the **How this fits in** panel.
 
-The full task page is arranged in two wide sections so the same information is
-easy to scan without a long sidebar. **Overview & planning** keeps the
-description, ownership, run state, details, subtasks, dependencies and milestone
-together. **Collaboration & delivery** puts comments beside the Definition of
-Done, Branch & PR, attachments and timestamps. The separate **Activity** tab
+The full task page has three tabs: **Plan**, **Run** and **Activity**.
+
+**Plan** is arranged in two wide sections so the same information is easy to
+scan without a long sidebar. **Overview & planning** keeps the description,
+details, subtasks, dependencies and milestone together. **Collaboration &
+delivery** puts the Definition of Done, Branch & PR, attachments and timestamps
+in one compact row, with comments underneath — so the page only gets long when
+the discussion does, never from the facts themselves.
+
+**Run** holds everything about the agent working on the task: which agent is
+assigned, how to start it, and the latest run's state and summary. **Activity**
 keeps the complete read-only event history available without mixing it into the
 working view.
 

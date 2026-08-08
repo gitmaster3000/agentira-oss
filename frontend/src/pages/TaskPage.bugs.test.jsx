@@ -80,6 +80,7 @@ describe('TaskPage — full detail view bugs', () => {
         renderTaskPageByKey();
         await screen.findByText('My task');
 
+        fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
         fireEvent.click(await screen.findByRole('button', { name: /run with agent/i }));
         fireEvent.click(await screen.findByText('Implementer'));
 

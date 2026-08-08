@@ -35,6 +35,7 @@ import {
 
 const TABS = [
     { id: 'plan', label: 'Plan', icon: ClipboardList },
+    { id: 'run', label: 'Run', icon: Play },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
 ];
 
@@ -455,16 +456,6 @@ export function TaskPage() {
                         setFormData={setFormData}
                         profiles={profiles}
                         priorityColors={priorityColors}
-                        run={run}
-                        runStatus={runStatus}
-                        runActive={runActive}
-                        summaryUpdatedAt={summaryUpdatedAt}
-                        forgeAgents={forgeAgents}
-                        pickingAgent={pickingAgent}
-                        setPickingAgent={setPickingAgent}
-                        scheduling={scheduling}
-                        openAgentPicker={openAgentPicker}
-                        handleScheduleRun={handleScheduleRun}
                         dodItems={dodItems}
                         newDodText={newDodText}
                         setNewDodText={setNewDodText}
@@ -492,6 +483,22 @@ export function TaskPage() {
                         handleComment={handleComment}
                         activities={activities}
                         loadTask={loadTask}
+                    />
+                )}
+
+                {tab === 'run' && (
+                    <AgentSection
+                        run={run}
+                        runStatus={runStatus}
+                        runActive={runActive}
+                        summaryUpdatedAt={summaryUpdatedAt}
+                        task={task}
+                        forgeAgents={forgeAgents}
+                        pickingAgent={pickingAgent}
+                        setPickingAgent={setPickingAgent}
+                        scheduling={scheduling}
+                        openAgentPicker={openAgentPicker}
+                        handleScheduleRun={handleScheduleRun}
                     />
                 )}
 
@@ -788,8 +795,6 @@ function PlanTab(props) {
         commits, copiedField, copyToClipboard,
         taskId, user, comment, setComment, handleComment, activities,
         loadTask,
-        run, runStatus, runActive, summaryUpdatedAt,
-        forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun,
     } = props;
 
     return (
@@ -800,7 +805,7 @@ function PlanTab(props) {
                         Overview &amp; planning
                     </h2>
                     <p className="text-xs text-text-tertiary mt-1">
-                        The task brief, current ownership, execution state, and how this work fits the plan.
+                        The task brief, current ownership, and how this work fits the plan.
                     </p>
                 </div>
 
@@ -825,23 +830,6 @@ function PlanTab(props) {
                     )}
                 </div>
 
-                        {/* Run info stays in the overview so execution state is
-                            visible without a separate Agent tab. */}
-                        {!isEditing && (
-                            <AgentSection
-                                run={run}
-                                runStatus={runStatus}
-                                runActive={runActive}
-                                summaryUpdatedAt={summaryUpdatedAt}
-                                task={task}
-                                forgeAgents={forgeAgents}
-                                pickingAgent={pickingAgent}
-                                setPickingAgent={setPickingAgent}
-                                scheduling={scheduling}
-                                openAgentPicker={openAgentPicker}
-                                handleScheduleRun={handleScheduleRun}
-                            />
-                        )}
                     </div>
 
                     <div className="xl:col-span-4 min-w-0 space-y-6">
@@ -1003,19 +991,9 @@ function PlanTab(props) {
                     </p>
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-                    <div className="xl:col-span-7 min-w-0">
-                        <CommentsSection
-                            user={user}
-                            comment={comment}
-                            setComment={setComment}
-                            handleComment={handleComment}
-                            activities={activities}
-                            projectId={task.project_id}
-                        />
-                    </div>
-
-                    <div className="xl:col-span-5 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+                {/* Delivery facts stay in one compact band so the page only
+                    grows with the discussion below it. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
 
                 {/* Definition of Done */}
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
@@ -1201,9 +1179,19 @@ function PlanTab(props) {
                         </div>
                     </div>
                 </div>
-                    </div>
+                </div>
+
+                <div className="mt-8">
+                    <CommentsSection
+                        user={user}
+                        comment={comment}
+                        setComment={setComment}
+                        handleComment={handleComment}
+                        activities={activities}
+                        projectId={task.project_id}
+                    />
                 </div>
             </section>
-            </div>
+        </div>
     );
 }

@@ -73,10 +73,12 @@ describe('TaskPage — detail view (AP-353)', () => {
         ]);
     });
 
-    it('has no separate Agent tab', async () => {
+    it('offers a Run tab beside Activity', async () => {
         renderTaskPage();
         await screen.findByText('My task');
-        expect(screen.queryByRole('button', { name: /^agent$/i })).toBeNull();
+        expect(screen.getByRole('button', { name: /^plan$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^activity$/i })).toBeInTheDocument();
     });
 
     it('does not show a run-status pill in the header for a failed run', async () => {
@@ -90,13 +92,17 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(headerRow.textContent).not.toMatch(/Failed/);
     });
 
-    it('shows the run info inline on the main page (not behind a tab)', async () => {
+    it('keeps run info on the Run tab, out of the Plan tab', async () => {
         api.forge.listTaskRuns.mockResolvedValue([
             { id: 'r1', status: 'completed', created_at: '2026-06-02T00:00:00Z', summary: 'all done' },
         ]);
         renderTaskPage();
         await screen.findByText('My task');
+        expect(screen.queryByText('all done')).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
         expect(await screen.findByText('all done')).toBeInTheDocument();
+        expect(screen.queryByTestId('task-overview-section')).toBeNull();
     });
 
     it('organizes the full page into overview and collaboration bands', async () => {
@@ -162,10 +168,11 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(screen.getByTitle('Edit task')).toBeInTheDocument();
     });
 
-    it('can start an agent run from the main page (regression guard)', async () => {
+    it('can start an agent run from the Run tab (regression guard)', async () => {
         renderTaskPage();
         await screen.findByText('My task');
 
+        fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
         fireEvent.click(await screen.findByRole('button', { name: /run with agent/i }));
         fireEvent.click(await screen.findByText('Implementer'));
 
