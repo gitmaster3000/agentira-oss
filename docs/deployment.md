@@ -76,6 +76,11 @@ If you forked from this repo, you're done. Otherwise push your local clones.
    The `${{backend.JWT_SECRET}}` reference reuses the secret you set on backend — they must match.
 5. Deploy.
 
+The MCP service currently uses the v1 Python SDK API. Keep the `mcp[cli]`
+dependency below v2 until `backend/mcp_server.py` is migrated; the MCP image
+build includes an import smoke check so an incompatible SDK fails during the
+build instead of crashing the live service at startup.
+
 ### 5. Deploy the frontend service
 
 1. + New → GitHub Repo → pick `<you>/agentira-frontend`. Service name: `frontend`.

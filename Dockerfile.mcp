@@ -5,7 +5,8 @@ WORKDIR /app
 # Install Python dependencies
 COPY pyproject.toml .
 COPY backend/ backend/
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e . \
+    && python -c "from mcp.server.fastmcp import FastMCP"
 
 # AP-157: ship the agent templates so seed_all() can run from this image too.
 COPY templates/ templates/
