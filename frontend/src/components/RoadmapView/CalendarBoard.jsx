@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
-import { CalendarDays } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import './calendar-theme.css';
 import { ROUTES } from '../../routes';
@@ -21,16 +21,46 @@ const STATUS_COLORS = {
 };
 
 /**
- * Month / week / agenda calendar over the roadmap.
+ * Month / week / agenda detail for the roadmap's unified Schedule view.
  *
  * A task shows on the day(s) it is scheduled for: start → due when both are
  * set, otherwise the single date it has. Tasks with no dates at all are not
  * invented onto the calendar — they're counted in the footer instead, so the
  * gap is visible rather than hidden.
  */
-export function CalendarBoard({ epics = [], milestones = [] }) {
+function CalendarToolbar({ label, onNavigate }) {
+    return (
+        <div className="flex items-center gap-2 mb-3">
+            <button
+                type="button"
+                className="btn btn-ghost px-2"
+                onClick={() => onNavigate('PREV')}
+                aria-label="Previous period"
+            >
+                <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+                type="button"
+                className="btn btn-ghost text-xs"
+                onClick={() => onNavigate('TODAY')}
+            >
+                Today
+            </button>
+            <button
+                type="button"
+                className="btn btn-ghost px-2"
+                onClick={() => onNavigate('NEXT')}
+                aria-label="Next period"
+            >
+                <ChevronRight className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-semibold text-text-primary ml-1">{label}</span>
+        </div>
+    );
+}
+
+export function CalendarBoard({ epics = [], milestones = [], view = 'month' }) {
     const navigate = useNavigate();
-    const [view, setView] = useState('month');
     const [date, setDate] = useState(new Date());
 
     const { events, undated } = useMemo(() => {
@@ -111,10 +141,11 @@ export function CalendarBoard({ epics = [], milestones = [] }) {
                     localizer={localizer}
                     events={events}
                     view={view}
-                    onView={setView}
+                    onView={() => {}}
                     date={date}
                     onNavigate={setDate}
                     views={['month', 'week', 'agenda']}
+                    components={{ toolbar: CalendarToolbar }}
                     popup
                     eventPropGetter={eventStyle}
                     onSelectEvent={(event) => {

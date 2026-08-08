@@ -13,6 +13,10 @@ vi.mock('../../api', () => ({
     },
 }));
 
+vi.mock('./CalendarBoard', () => ({
+    CalendarBoard: ({ view }) => <div>Calendar detail: {view}</div>,
+}));
+
 const ROADMAP = {
     project: { id: 'p1', name: 'Agentira' },
     summary: {
@@ -56,7 +60,7 @@ beforeEach(() => {
 });
 
 describe('RoadmapView navigation', () => {
-    it('uses the Dependencies label and opens timeline tasks in full view by key', async () => {
+    it('uses one Schedule view and opens timeline tasks in full view by key', async () => {
         render(
             <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
                 <Routes>
@@ -66,8 +70,26 @@ describe('RoadmapView navigation', () => {
             </MemoryRouter>,
         );
 
-        expect(await screen.findByRole('button', { name: 'Dependencies' })).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: 'Schedule' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Calendar' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Dependencies' })).toBeInTheDocument();
         fireEvent.click(screen.getByTitle('Open AP-496 in full view'));
         expect(screen.getByText('Full task AP-496')).toBeInTheDocument();
+    });
+
+    it('switches from the timeline to calendar detail inside Schedule', async () => {
+        render(
+            <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
+                <Routes>
+                    <Route path="/studio/project/:projectId/roadmap" element={<RoadmapView />} />
+                </Routes>
+            </MemoryRouter>,
+        );
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Month' }));
+
+        expect(await screen.findByText('Calendar detail: month')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Timeline' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true');
     });
 });

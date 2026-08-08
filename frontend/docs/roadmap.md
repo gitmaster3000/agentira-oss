@@ -3,23 +3,28 @@
 This is the user guide for the planning features. No git or project-management
 jargon needed — if you can describe your plan out loud, you can put it in here.
 
-## The four roadmap views
+## The three roadmap views
 
-Open a project and go to **Roadmap**. The buttons at the top switch between four
-ways of looking at the same plan.
+Open a project and go to **Roadmap**. The buttons at the top switch between three
+planning questions: when work happens, what it depends on, and which milestones
+it serves.
 
-### Timeline
-The default. One coloured bar per epic (or per tag), stretched across the dates
-its tasks are scheduled for. A red line marks today, and small flags mark your
-milestones. Underneath: every epic with its tasks, plus your milestones and a
-"recently shipped" list.
+### Schedule
+The default. **Timeline**, **Month**, **Week** and **Agenda** are modes of the
+same schedule, so you can change the level of date detail without switching to a
+different roadmap view.
+
+Timeline shows one coloured bar per epic (or per tag), stretched across the
+dates its tasks are scheduled for. A red line marks today, and small flags mark
+your milestones. Underneath: every epic with its tasks, plus your milestones and
+a "recently shipped" list.
 
 If nothing has dates yet you'll see *"no scheduled work yet"* — set a start or due
 date on a task and it appears.
 
-### Calendar
-A real month / week / agenda calendar. Tasks show on the days they're scheduled
-for; milestones show as flagged all-day entries. Click any task to open it.
+Month, Week and Agenda show tasks on the days they're scheduled for; milestones
+appear as flagged all-day entries. Click any task to open it. Use the date picker
+to jump directly to another part of the plan.
 
 Tasks with no dates aren't shown — the count of them is printed under the
 calendar, so you can see what's still unscheduled instead of it quietly missing.

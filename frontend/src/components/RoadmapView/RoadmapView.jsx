@@ -6,7 +6,7 @@ import { ROUTES } from '../../routes';
 import { MilestonePanel } from './MilestonePanel';
 
 // The calendar and the dependency canvas each pull a sizeable library. They
-// load when their view is opened, so the default timeline stays cheap.
+// load when their view is opened, so the default schedule timeline stays cheap.
 const CalendarBoard = React.lazy(() =>
     import('./CalendarBoard').then(m => ({ default: m.CalendarBoard })));
 const DependencyGraph = React.lazy(() =>
@@ -16,13 +16,19 @@ function ViewLoading() {
     return <div className="card p-6 text-sm text-text-tertiary">Loading view…</div>;
 }
 
-// AP-496: the roadmap is four takes on the same plan. Plain-language labels —
-// a non-engineer owner picks the view, not a Gantt/DAG vocabulary quiz.
+// The schedule modes are deliberately nested under one roadmap view: timeline
+// and calendar are two scales for the same dated work, not separate concepts.
 const VIEWS = [
-    { key: 'timeline', label: 'Timeline', icon: CalendarDays },
-    { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+    { key: 'schedule', label: 'Schedule', icon: CalendarDays },
     { key: 'dependencies', label: 'Dependencies', icon: Workflow },
     { key: 'milestones', label: 'Milestones', icon: Flag },
+];
+
+const SCHEDULE_MODES = [
+    { key: 'timeline', label: 'Timeline' },
+    { key: 'month', label: 'Month' },
+    { key: 'week', label: 'Week' },
+    { key: 'agenda', label: 'Agenda' },
 ];
 
 const STATUS_COLORS = {
@@ -361,7 +367,8 @@ export function RoadmapView({ projectId: projectIdProp }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [groupBy, setGroupBy] = useState('epic');
-    const [view, setView] = useState('timeline');
+    const [view, setView] = useState('schedule');
+    const [scheduleMode, setScheduleMode] = useState('timeline');
 
     const loadRoadmap = useCallback(() => {
         if (!projectId) return;
@@ -460,7 +467,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                 </div>
             </div>
 
-            {/* View switcher — same plan, four readings of it. */}
+            {/* View switcher — distinct planning questions, not display scales. */}
             <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit">
                 {VIEWS.map(({ key, label, icon: Icon }) => (
                     <button
@@ -478,12 +485,6 @@ export function RoadmapView({ projectId: projectIdProp }) {
 
             {/* Summary */}
             <SummaryBar summary={data.summary} groupBy={groupBy} />
-
-            {view === 'calendar' && (
-                <React.Suspense fallback={<ViewLoading />}>
-                    <CalendarBoard epics={data.epics} milestones={data.milestones} />
-                </React.Suspense>
-            )}
 
             {view === 'dependencies' && (
                 <React.Suspense fallback={<ViewLoading />}>
@@ -503,28 +504,68 @@ export function RoadmapView({ projectId: projectIdProp }) {
                 />
             )}
 
-            {view === 'timeline' && (
+            {view === 'schedule' && (
                 <>
-                    {/* Horizontal time axis: one bar per epic spanning
-                        min(task.start) → max(task.end), with milestone flags
-                        pinned to their dates. */}
-                    <TimelineStrip epics={data.epics} milestones={data.milestones} />
-
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                        <div className="lg:col-span-2 space-y-3">
-                            {data.epics.map((epic) => (
-                                <EpicSection key={epic.name} epic={epic} />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h3 className="text-sm font-semibold text-text-primary">Schedule</h3>
+                            <p className="text-xs text-text-tertiary mt-0.5">
+                                Move between the full plan and calendar detail without leaving this view.
+                            </p>
+                        </div>
+                        <div
+                            className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit"
+                            aria-label="Schedule display"
+                        >
+                            {SCHEDULE_MODES.map(({ key, label }) => (
+                                <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => setScheduleMode(key)}
+                                    aria-pressed={scheduleMode === key}
+                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                        scheduleMode === key
+                                            ? 'bg-bg-app text-text-primary shadow-sm'
+                                            : 'text-text-tertiary hover:text-text-primary'}`}
+                                >
+                                    {label}
+                                </button>
                             ))}
                         </div>
-                        <div className="space-y-5">
-                            <MilestonePanel
-                                projectId={projectId}
-                                milestones={data.milestones}
-                                onChanged={loadRoadmap}
-                            />
-                            <RecentlyShipped completions={data.recent_completions} />
-                        </div>
                     </div>
+
+                    {scheduleMode === 'timeline' ? (
+                        <>
+                            {/* Horizontal time axis: one bar per epic spanning
+                                min(task.start) → max(task.end), with milestone
+                                flags pinned to their dates. */}
+                            <TimelineStrip epics={data.epics} milestones={data.milestones} />
+
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                                <div className="lg:col-span-2 space-y-3">
+                                    {data.epics.map((epic) => (
+                                        <EpicSection key={epic.name} epic={epic} />
+                                    ))}
+                                </div>
+                                <div className="space-y-5">
+                                    <MilestonePanel
+                                        projectId={projectId}
+                                        milestones={data.milestones}
+                                        onChanged={loadRoadmap}
+                                    />
+                                    <RecentlyShipped completions={data.recent_completions} />
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <React.Suspense fallback={<ViewLoading />}>
+                            <CalendarBoard
+                                epics={data.epics}
+                                milestones={data.milestones}
+                                view={scheduleMode}
+                            />
+                        </React.Suspense>
+                    )}
                 </>
             )}
         </div>

@@ -7,11 +7,12 @@ import { CalendarBoard } from './CalendarBoard';
 
 vi.mock('react-big-calendar', () => ({
     dateFnsLocalizer: () => ({}),
-    Calendar: ({ events, onSelectEvent, date }) => {
+    Calendar: ({ events, onSelectEvent, date, view }) => {
         const task = events.find(event => event.kind === 'task');
         return (
             <div>
                 <output data-testid="calendar-date">{format(date, 'yyyy-MM-dd')}</output>
+                <output data-testid="calendar-view">{view}</output>
                 {events.filter(event => event.kind === 'task').map(event => (
                     <output key={event.id} data-testid={`event-dates-${event.id}`}>
                         {format(event.start, 'yyyy-MM-dd')}–{format(event.end, 'yyyy-MM-dd')}
@@ -90,5 +91,15 @@ describe('CalendarBoard', () => {
         });
 
         expect(screen.getByTestId('calendar-date')).toHaveTextContent('2027-04-05');
+    });
+
+    it('renders the schedule mode selected by its parent', () => {
+        render(
+            <MemoryRouter>
+                <CalendarBoard epics={EPICS} view="agenda" />
+            </MemoryRouter>,
+        );
+
+        expect(screen.getByTestId('calendar-view')).toHaveTextContent('agenda');
     });
 });
