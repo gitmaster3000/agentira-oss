@@ -7,12 +7,15 @@ import { CalendarBoard } from './CalendarBoard';
 
 vi.mock('react-big-calendar', () => ({
     dateFnsLocalizer: () => ({}),
-    Calendar: ({ events, onSelectEvent, date, view }) => {
+    Calendar: ({ events, onSelectEvent, onNavigate, date, view, dayPropGetter }) => {
         const task = events.find(event => event.kind === 'task');
         return (
             <div>
                 <output data-testid="calendar-date">{format(date, 'yyyy-MM-dd')}</output>
                 <output data-testid="calendar-view">{view}</output>
+                <output data-testid="range-day-class">
+                    {dayPropGetter(new Date('2026-08-06T00:00:00')).className || ''}
+                </output>
                 {events.filter(event => event.kind === 'task').map(event => (
                     <output key={event.id} data-testid={`event-dates-${event.id}`}>
                         {format(event.start, 'yyyy-MM-dd')}–{format(event.end, 'yyyy-MM-dd')}
@@ -23,6 +26,12 @@ vi.mock('react-big-calendar', () => ({
                         {task.title}
                     </button>
                 )}
+                <button
+                    type="button"
+                    onClick={() => onNavigate(new Date('2027-04-05T00:00:00'))}
+                >
+                    Navigate calendar
+                </button>
             </div>
         );
     },
@@ -52,11 +61,14 @@ function TaskDestination() {
     return <div>Full task {taskId}</div>;
 }
 
-function renderCalendar() {
+function renderCalendar(props = {}) {
     return render(
         <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
             <Routes>
-                <Route path="/studio/project/:projectId/roadmap" element={<CalendarBoard epics={EPICS} />} />
+                <Route
+                    path="/studio/project/:projectId/roadmap"
+                    element={<CalendarBoard epics={EPICS} {...props} />}
+                />
                 <Route path="/studio/tasks/:taskId" element={<TaskDestination />} />
             </Routes>
         </MemoryRouter>,
@@ -80,26 +92,24 @@ describe('CalendarBoard', () => {
         );
     });
 
-    it('lets users jump directly to a selected date', () => {
-        renderCalendar();
+    it('reports calendar navigation to the shared Schedule date control', () => {
+        const onNavigate = vi.fn();
+        renderCalendar({ date: new Date('2026-08-06T00:00:00'), onNavigate });
 
-        const picker = screen.getByLabelText('Jump to date');
-        expect(picker).toHaveClass('input-date');
+        fireEvent.click(screen.getByRole('button', { name: 'Navigate calendar' }));
 
-        fireEvent.change(picker, {
-            target: { value: '2027-04-05' },
-        });
-
-        expect(screen.getByTestId('calendar-date')).toHaveTextContent('2027-04-05');
+        expect(onNavigate).toHaveBeenCalledWith(new Date('2027-04-05T00:00:00'));
     });
 
-    it('renders the schedule mode selected by its parent', () => {
-        render(
-            <MemoryRouter>
-                <CalendarBoard epics={EPICS} view="agenda" />
-            </MemoryRouter>,
-        );
+    it('renders Day mode and highlights the shared selected range', () => {
+        renderCalendar({
+            view: 'day',
+            date: new Date('2026-08-06T00:00:00'),
+            rangeStart: new Date('2026-08-05T00:00:00'),
+            rangeEnd: new Date('2026-08-07T00:00:00'),
+        });
 
-        expect(screen.getByTestId('calendar-view')).toHaveTextContent('agenda');
+        expect(screen.getByTestId('calendar-view')).toHaveTextContent('day');
+        expect(screen.getByTestId('range-day-class')).toHaveTextContent('rbc-selected-range');
     });
 });

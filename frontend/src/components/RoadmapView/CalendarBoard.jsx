@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
-import { format, parse, startOfWeek, getDay } from 'date-fns';
+import { format, parse, parseISO, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import './calendar-theme.css';
 import { ROUTES } from '../../routes';
@@ -19,6 +19,11 @@ const STATUS_COLORS = {
     todo: '#00bcd4',
     backlog: '#5f6368',
 };
+
+function toScheduleDate(value) {
+    if (value instanceof Date) return new Date(value);
+    return typeof value === 'string' ? parseISO(value) : new Date(value);
+}
 
 /**
  * Month / week / agenda detail for the roadmap's unified Schedule view.
@@ -59,17 +64,24 @@ function CalendarToolbar({ label, onNavigate }) {
     );
 }
 
-export function CalendarBoard({ epics = [], milestones = [], view = 'month' }) {
+export function CalendarBoard({
+    epics = [],
+    milestones = [],
+    view = 'month',
+    date = new Date(),
+    rangeStart = null,
+    rangeEnd = null,
+    onNavigate = () => {},
+}) {
     const navigate = useNavigate();
-    const [date, setDate] = useState(new Date());
 
     const { events, undated } = useMemo(() => {
         const out = [];
         let undated = 0;
         for (const epic of epics) {
             for (const task of epic.tasks || []) {
-                const start = task.start ? new Date(task.start) : null;
-                const end = task.end ? new Date(task.end) : null;
+                const start = task.start ? toScheduleDate(task.start) : null;
+                const end = task.end ? toScheduleDate(task.end) : null;
                 if (!start && !end) { undated += 1; continue; }
                 out.push({
                     id: task.id,
@@ -84,7 +96,7 @@ export function CalendarBoard({ epics = [], milestones = [], view = 'month' }) {
         }
         for (const ms of milestones) {
             if (!ms.due_date) continue;
-            const day = new Date(ms.due_date);
+            const day = toScheduleDate(ms.due_date);
             out.push({
                 id: `ms-${ms.id}`,
                 kind: 'milestone',
@@ -114,28 +126,17 @@ export function CalendarBoard({ epics = [], milestones = [], view = 'month' }) {
         };
     };
 
-    const jumpToDate = (value) => {
-        if (!value) return;
-        // Parse as local time. `new Date('YYYY-MM-DD')` is UTC and can move the
-        // selected day backwards for users west of Greenwich.
-        setDate(new Date(`${value}T00:00:00`));
+    const dayStyle = (day) => {
+        if (!rangeStart) return {};
+        const start = toScheduleDate(rangeStart);
+        const end = toScheduleDate(rangeEnd || rangeStart);
+        start.setHours(0, 0, 0, 0);
+        end.setHours(23, 59, 59, 999);
+        return day >= start && day <= end ? { className: 'rbc-selected-range' } : {};
     };
 
     return (
         <div className="card p-3">
-            <div className="flex items-center justify-end gap-2 mb-3">
-                <CalendarDays className="w-4 h-4 text-text-tertiary" aria-hidden="true" />
-                <label htmlFor="roadmap-jump-date" className="text-xs text-text-secondary">
-                    Jump to date
-                </label>
-                <input
-                    id="roadmap-jump-date"
-                    type="date"
-                    className="input input-date text-xs py-1 px-2 w-auto"
-                    value={format(date, 'yyyy-MM-dd')}
-                    onChange={(event) => jumpToDate(event.target.value)}
-                />
-            </div>
             <div className="rbc-agentira" style={{ height: 620 }}>
                 <Calendar
                     localizer={localizer}
@@ -143,9 +144,10 @@ export function CalendarBoard({ epics = [], milestones = [], view = 'month' }) {
                     view={view}
                     onView={() => {}}
                     date={date}
-                    onNavigate={setDate}
-                    views={['month', 'week', 'agenda']}
+                    onNavigate={onNavigate}
+                    views={['month', 'week', 'day', 'agenda']}
                     components={{ toolbar: CalendarToolbar }}
+                    dayPropGetter={dayStyle}
                     popup
                     eventPropGetter={eventStyle}
                     onSelectEvent={(event) => {

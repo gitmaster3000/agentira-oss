@@ -10,9 +10,14 @@ planning questions: when work happens, what it depends on, and which milestones
 it serves.
 
 ### Schedule
-The default. **Timeline**, **Month**, **Week** and **Agenda** are modes of the
-same schedule, so you can change the level of date detail without switching to a
-different roadmap view.
+The default. **Timeline**, **Month**, **Week**, **Day** and **Agenda** are modes
+of the same schedule, so you can change the level of date detail without
+switching to a different roadmap view.
+
+The date-range picker belongs to the whole Schedule view. Your selection stays
+put when you change modes: it becomes the Timeline's visible window and is
+highlighted in the calendar. Calendar previous / next / today navigation moves
+that same range instead of resetting to a hidden default.
 
 Timeline shows one coloured bar per epic (or per tag), stretched across the
 dates its tasks are scheduled for. A red line marks today, and small flags mark
@@ -22,9 +27,9 @@ a "recently shipped" list.
 If nothing has dates yet you'll see *"no scheduled work yet"* — set a start or due
 date on a task and it appears.
 
-Month, Week and Agenda show tasks on the days they're scheduled for; milestones
-appear as flagged all-day entries. Click any task to open it. Use the date picker
-to jump directly to another part of the plan.
+Month, Week, Day and Agenda show tasks on the days they're scheduled for;
+milestones appear as flagged all-day entries. Click any task to open it. Use the
+range picker to focus every mode on a specific planning window.
 
 Tasks with no dates aren't shown — the count of them is printed under the
 calendar, so you can see what's still unscheduled instead of it quietly missing.

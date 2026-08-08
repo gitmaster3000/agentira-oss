@@ -1,0 +1,56 @@
+/* react-datepicker is the single shared Schedule range control. Map its
+   light-only defaults onto the app's theme tokens in every Schedule mode. */
+.schedule-datepicker-popper {
+    z-index: 40;
+}
+
+.schedule-datepicker.react-datepicker {
+    color: var(--text-primary);
+    background: var(--bg-card);
+    border-color: var(--border-subtle);
+    border-radius: 12px;
+    box-shadow: 0 12px 36px color-mix(in srgb, var(--text-primary) 18%, transparent);
+    font-family: inherit;
+    overflow: hidden;
+}
+
+.schedule-datepicker .react-datepicker__header {
+    background: var(--bg-panel);
+    border-color: var(--border-subtle);
+}
+
+.schedule-datepicker .react-datepicker__current-month,
+.schedule-datepicker .react-datepicker__day-name,
+.schedule-datepicker .react-datepicker__day {
+    color: var(--text-primary);
+}
+
+.schedule-datepicker .react-datepicker__day:hover,
+.schedule-datepicker .react-datepicker__day--keyboard-selected {
+    background: var(--bg-hover);
+}
+
+.schedule-datepicker .react-datepicker__day--in-range,
+.schedule-datepicker .react-datepicker__day--in-selecting-range {
+    color: var(--text-primary);
+    background: var(--accent-subtle);
+}
+
+.schedule-datepicker .react-datepicker__day--range-start,
+.schedule-datepicker .react-datepicker__day--range-end,
+.schedule-datepicker .react-datepicker__day--selected {
+    color: var(--accent-on);
+    background: var(--accent-primary);
+}
+
+.schedule-datepicker .react-datepicker__day--outside-month {
+    color: var(--text-tertiary);
+}
+
+.schedule-datepicker .react-datepicker__month-select,
+.schedule-datepicker .react-datepicker__year-select {
+    color: var(--text-primary);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+}

@@ -65,6 +65,10 @@
     background: var(--accent-subtle);
 }
 
+.rbc-agentira .rbc-selected-range {
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
 .rbc-agentira .rbc-event {
     border-radius: 4px;
     font-size: 11px;

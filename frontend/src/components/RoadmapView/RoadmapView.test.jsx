@@ -2,6 +2,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
+import { format } from 'date-fns';
 import { RoadmapView } from './RoadmapView';
 import { api } from '../../api';
 
@@ -14,7 +15,31 @@ vi.mock('../../api', () => ({
 }));
 
 vi.mock('./CalendarBoard', () => ({
-    CalendarBoard: ({ view }) => <div>Calendar detail: {view}</div>,
+    CalendarBoard: ({ view, rangeStart, rangeEnd, onNavigate }) => (
+        <div>
+            <output>
+                Calendar detail: {view} · range: {rangeStart && format(rangeStart, 'yyyy-MM-dd')}–
+                {rangeEnd && format(rangeEnd, 'yyyy-MM-dd')}
+            </output>
+            <button type="button" onClick={() => onNavigate(new Date('2026-10-01T00:00:00'))}>
+                Navigate shared schedule
+            </button>
+        </div>
+    ),
+}));
+
+vi.mock('./ScheduleDateRangePicker', () => ({
+    ScheduleDateRangePicker: ({ onChange }) => (
+        <button
+            type="button"
+            onClick={() => onChange([
+                new Date('2026-09-10T00:00:00'),
+                new Date('2026-09-20T00:00:00'),
+            ])}
+        >
+            Choose September range
+        </button>
+    ),
 }));
 
 const ROADMAP = {
@@ -41,6 +66,8 @@ const ROADMAP = {
             status: 'in_progress',
             priority: 'critical',
             progress: 25,
+            start: '2026-08-06',
+            end: '2026-08-07',
         }],
     }],
     dependencies: [],
@@ -77,7 +104,7 @@ describe('RoadmapView navigation', () => {
         expect(screen.getByText('Full task AP-496')).toBeInTheDocument();
     });
 
-    it('switches from the timeline to calendar detail inside Schedule', async () => {
+    it('uses the same selected range for the timeline and Day calendar mode', async () => {
         render(
             <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
                 <Routes>
@@ -86,10 +113,19 @@ describe('RoadmapView navigation', () => {
             </MemoryRouter>,
         );
 
-        fireEvent.click(await screen.findByRole('button', { name: 'Month' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Choose September range' }));
+        expect(screen.getByText('No scheduled work falls inside this date range.')).toBeInTheDocument();
 
-        expect(await screen.findByText('Calendar detail: month')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Day' }));
+
+        expect(await screen.findByText(
+            'Calendar detail: day · range: 2026-09-10–2026-09-20',
+        )).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Navigate shared schedule' }));
+        expect(await screen.findByText(
+            'Calendar detail: day · range: 2026-10-01–2026-10-11',
+        )).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Timeline' })).toHaveAttribute('aria-pressed', 'false');
-        expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Day' })).toHaveAttribute('aria-pressed', 'true');
     });
 });

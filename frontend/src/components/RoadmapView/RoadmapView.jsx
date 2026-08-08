@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import {
+    addDays,
+    differenceInCalendarDays,
+    endOfDay,
+    endOfMonth,
+    endOfWeek,
+    parseISO,
+    startOfDay,
+    startOfMonth,
+    startOfWeek,
+} from 'date-fns';
 import { CalendarDays, CheckCircle, Clock, Circle, ChevronDown, ChevronRight, Flag, Target, ExternalLink, Workflow, ListTree, Ban } from 'lucide-react';
 import { api } from '../../api';
 import { ROUTES } from '../../routes';
@@ -9,6 +20,8 @@ import { MilestonePanel } from './MilestonePanel';
 // load when their view is opened, so the default schedule timeline stays cheap.
 const CalendarBoard = React.lazy(() =>
     import('./CalendarBoard').then(m => ({ default: m.CalendarBoard })));
+const ScheduleDateRangePicker = React.lazy(() =>
+    import('./ScheduleDateRangePicker').then(m => ({ default: m.ScheduleDateRangePicker })));
 const DependencyGraph = React.lazy(() =>
     import('./DependencyGraph').then(m => ({ default: m.DependencyGraph })));
 
@@ -28,6 +41,7 @@ const SCHEDULE_MODES = [
     { key: 'timeline', label: 'Timeline' },
     { key: 'month', label: 'Month' },
     { key: 'week', label: 'Week' },
+    { key: 'day', label: 'Day' },
     { key: 'agenda', label: 'Agenda' },
 ];
 
@@ -217,7 +231,12 @@ function SummaryBar({ summary, groupBy }) {
 
 function formatDate(iso) {
     if (!iso) return '';
-    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return toScheduleDate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function toScheduleDate(value) {
+    if (value instanceof Date) return new Date(value);
+    return typeof value === 'string' ? parseISO(value) : new Date(value);
 }
 
 /**
@@ -226,7 +245,7 @@ function formatDate(iso) {
  * the project has dates, we render a friendly "no scheduled work" state
  * instead of an empty grid.
  */
-function TimelineStrip({ epics, milestones = [] }) {
+function TimelineStrip({ epics, milestones = [], rangeStart = null, rangeEnd = null }) {
     // Collect all date-bearing tasks
     const items = [];
     for (const epic of epics || []) {
@@ -234,8 +253,8 @@ function TimelineStrip({ epics, milestones = [] }) {
             .map(t => ({ start: t.start || t.start_date, end: t.end || t.due_date || t.start || t.start_date }))
             .filter(d => d.start || d.end);
         if (dates.length === 0) continue;
-        const earliest = dates.map(d => new Date(d.start || d.end)).reduce((a, b) => a < b ? a : b);
-        const latest   = dates.map(d => new Date(d.end || d.start)).reduce((a, b) => a > b ? a : b);
+        const earliest = dates.map(d => toScheduleDate(d.start || d.end)).reduce((a, b) => a < b ? a : b);
+        const latest   = dates.map(d => toScheduleDate(d.end || d.start)).reduce((a, b) => a > b ? a : b);
         items.push({
             name: epic.name,
             color: epic.color || '#7c4dff',
@@ -257,19 +276,50 @@ function TimelineStrip({ epics, milestones = [] }) {
         );
     }
 
-    // Pad axis: 1 week before earliest, 1 week after latest. Dated milestones
-    // extend the axis too, so a marker can never fall off the strip.
-    const dated = milestones.filter(m => m.due_date).map(m => new Date(m.due_date).getTime());
-    const axisStart = new Date(Math.min(...items.map(i => i.start.getTime()), ...dated) - 7 * 86400000);
-    const axisEnd   = new Date(Math.max(...items.map(i => i.end.getTime()), ...dated)   + 7 * 86400000);
+    // A selected range is authoritative across Schedule. Without one, retain
+    // the useful auto-fit behaviour around all scheduled work.
+    const hasRange = Boolean(rangeStart);
+    const selectedEnd = rangeEnd || rangeStart;
+    const dated = milestones.filter(m => m.due_date).map(m => toScheduleDate(m.due_date).getTime());
+    const axisStart = hasRange
+        ? startOfDay(toScheduleDate(rangeStart))
+        : new Date(Math.min(...items.map(i => i.start.getTime()), ...dated) - 7 * 86400000);
+    const axisEnd = hasRange
+        ? endOfDay(toScheduleDate(selectedEnd))
+        : new Date(Math.max(...items.map(i => i.end.getTime()), ...dated) + 7 * 86400000);
     const span = axisEnd - axisStart;
 
-    // Month tick positions across the axis
+    const visibleItems = items.filter(item => item.end >= axisStart && item.start <= axisEnd);
+    if (hasRange && visibleItems.length === 0) {
+        return (
+            <div className="card p-4 text-sm text-text-tertiary">
+                <div className="flex items-center gap-2">
+                    <CalendarDays className="w-4 h-4" />
+                    <span>No scheduled work falls inside this date range.</span>
+                </div>
+            </div>
+        );
+    }
+
+    // Scale ticks to the selected window so short ranges remain readable.
     const ticks = [];
-    let cursor = new Date(axisStart.getFullYear(), axisStart.getMonth(), 1);
+    const dayMs = 86400000;
+    const spanDays = span / dayMs;
+    let cursor;
+    let advance;
+    if (spanDays <= 14) {
+        cursor = new Date(axisStart);
+        advance = d => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    } else if (spanDays <= 90) {
+        cursor = new Date(axisStart);
+        advance = d => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 7);
+    } else {
+        cursor = new Date(axisStart);
+        advance = d => new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    }
     while (cursor <= axisEnd) {
         ticks.push(new Date(cursor));
-        cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+        cursor = advance(cursor);
     }
 
     const pct = (d) => `${((d.getTime() - axisStart.getTime()) / span) * 100}%`;
@@ -283,9 +333,13 @@ function TimelineStrip({ epics, milestones = [] }) {
                 <CalendarDays className="w-4 h-4 text-text-tertiary" />
                 <span className="text-xs font-medium text-text-primary uppercase tracking-wider">Timeline</span>
                 <span className="text-xs text-text-tertiary ml-auto">
-                    {axisStart.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                    {axisStart.toLocaleDateString(undefined, spanDays <= 90
+                        ? { month: 'short', day: 'numeric', year: 'numeric' }
+                        : { month: 'short', year: 'numeric' })}
                     {' → '}
-                    {axisEnd.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}
+                    {axisEnd.toLocaleDateString(undefined, spanDays <= 90
+                        ? { month: 'short', day: 'numeric', year: 'numeric' }
+                        : { month: 'short', year: 'numeric' })}
                 </span>
             </div>
 
@@ -299,7 +353,9 @@ function TimelineStrip({ epics, milestones = [] }) {
                             style={{ left: pct(t) }}
                         >
                             <span className="absolute -top-0.5 left-1 text-[10px] uppercase tracking-wider text-text-tertiary whitespace-nowrap">
-                                {t.toLocaleDateString(undefined, { month: 'short', year: t.getMonth() === 0 ? 'numeric' : undefined })}
+                                {t.toLocaleDateString(undefined, spanDays <= 90
+                                    ? { month: 'short', day: 'numeric' }
+                                    : { month: 'short', year: t.getMonth() === 0 ? 'numeric' : undefined })}
                             </span>
                         </div>
                     ))}
@@ -318,7 +374,7 @@ function TimelineStrip({ epics, milestones = [] }) {
 
                 {/* AP-496: milestone flags pinned to their date on the axis */}
                 {milestones.filter(m => m.due_date).map((m) => {
-                    const at = new Date(m.due_date);
+                    const at = toScheduleDate(m.due_date);
                     if (at < axisStart || at > axisEnd) return null;
                     return (
                         <div
@@ -335,25 +391,29 @@ function TimelineStrip({ epics, milestones = [] }) {
 
                 {/* One bar per epic */}
                 <div className="space-y-2">
-                    {items.map((item) => (
-                        <div key={item.name} className="relative h-7 flex items-center group">
-                            {/* Background row */}
-                            <div className="absolute inset-y-0 left-0 right-0 border-t border-border-subtle/20" />
-                            {/* The bar */}
-                            <div
-                                className="absolute h-5 rounded-md flex items-center justify-between px-2 text-[10px] font-medium text-white whitespace-nowrap overflow-hidden"
-                                style={{
-                                    left: pct(item.start),
-                                    width: widthPct(item.start, item.end),
-                                    backgroundColor: item.color,
-                                }}
-                                title={`${item.name} · ${item.start.toLocaleDateString()} → ${item.end.toLocaleDateString()} · ${item.progress}%`}
-                            >
-                                <span className="truncate">{item.name}</span>
-                                <span className="opacity-75 ml-2 flex-shrink-0">{item.progress}%</span>
+                    {visibleItems.map((item) => {
+                        const visibleStart = item.start < axisStart ? axisStart : item.start;
+                        const visibleEnd = item.end > axisEnd ? axisEnd : item.end;
+                        return (
+                            <div key={item.name} className="relative h-7 flex items-center group">
+                                {/* Background row */}
+                                <div className="absolute inset-y-0 left-0 right-0 border-t border-border-subtle/20" />
+                                {/* The bar */}
+                                <div
+                                    className="absolute h-5 rounded-md flex items-center justify-between px-2 text-[10px] font-medium text-white whitespace-nowrap overflow-hidden"
+                                    style={{
+                                        left: pct(visibleStart),
+                                        width: widthPct(visibleStart, visibleEnd),
+                                        backgroundColor: item.color,
+                                    }}
+                                    title={`${item.name} · ${item.start.toLocaleDateString()} → ${item.end.toLocaleDateString()} · ${item.progress}%`}
+                                >
+                                    <span className="truncate">{item.name}</span>
+                                    <span className="opacity-75 ml-2 flex-shrink-0">{item.progress}%</span>
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </div>
@@ -369,6 +429,30 @@ export function RoadmapView({ projectId: projectIdProp }) {
     const [groupBy, setGroupBy] = useState('epic');
     const [view, setView] = useState('schedule');
     const [scheduleMode, setScheduleMode] = useState('timeline');
+    const [[rangeStart, rangeEnd], setScheduleRange] = useState([null, null]);
+
+    const navigateSchedule = useCallback((nextDate) => {
+        const nextStart = startOfDay(toScheduleDate(nextDate));
+        if (!rangeStart) {
+            if (scheduleMode === 'month') {
+                setScheduleRange([startOfMonth(nextStart), endOfMonth(nextStart)]);
+            } else if (scheduleMode === 'week') {
+                setScheduleRange([startOfWeek(nextStart), endOfWeek(nextStart)]);
+            } else if (scheduleMode === 'agenda') {
+                setScheduleRange([nextStart, addDays(nextStart, 29)]);
+            } else {
+                setScheduleRange([nextStart, null]);
+            }
+            return;
+        }
+        const durationDays = rangeEnd
+            ? differenceInCalendarDays(rangeEnd, rangeStart)
+            : 0;
+        setScheduleRange([
+            nextStart,
+            durationDays > 0 ? addDays(nextStart, durationDays) : null,
+        ]);
+    }, [rangeStart, rangeEnd, scheduleMode]);
 
     const loadRoadmap = useCallback(() => {
         if (!projectId) return;
@@ -506,31 +590,41 @@ export function RoadmapView({ projectId: projectIdProp }) {
 
             {view === 'schedule' && (
                 <>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                         <div>
                             <h3 className="text-sm font-semibold text-text-primary">Schedule</h3>
                             <p className="text-xs text-text-tertiary mt-0.5">
                                 Move between the full plan and calendar detail without leaving this view.
                             </p>
                         </div>
-                        <div
-                            className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit"
-                            aria-label="Schedule display"
-                        >
-                            {SCHEDULE_MODES.map(({ key, label }) => (
-                                <button
-                                    key={key}
-                                    type="button"
-                                    onClick={() => setScheduleMode(key)}
-                                    aria-pressed={scheduleMode === key}
-                                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                                        scheduleMode === key
-                                            ? 'bg-bg-app text-text-primary shadow-sm'
-                                            : 'text-text-tertiary hover:text-text-primary'}`}
-                                >
-                                    {label}
-                                </button>
-                            ))}
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                            <React.Suspense fallback={<div className="input w-[220px] h-9 py-2" />}>
+                                <ScheduleDateRangePicker
+                                    startDate={rangeStart}
+                                    endDate={rangeEnd}
+                                    onChange={setScheduleRange}
+                                />
+                            </React.Suspense>
+                            <div
+                                className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit"
+                                aria-label="Schedule display"
+                                role="group"
+                            >
+                                {SCHEDULE_MODES.map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        type="button"
+                                        onClick={() => setScheduleMode(key)}
+                                        aria-pressed={scheduleMode === key}
+                                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                                            scheduleMode === key
+                                                ? 'bg-bg-app text-text-primary shadow-sm'
+                                                : 'text-text-tertiary hover:text-text-primary'}`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
 
@@ -539,7 +633,12 @@ export function RoadmapView({ projectId: projectIdProp }) {
                             {/* Horizontal time axis: one bar per epic spanning
                                 min(task.start) → max(task.end), with milestone
                                 flags pinned to their dates. */}
-                            <TimelineStrip epics={data.epics} milestones={data.milestones} />
+                            <TimelineStrip
+                                epics={data.epics}
+                                milestones={data.milestones}
+                                rangeStart={rangeStart}
+                                rangeEnd={rangeEnd}
+                            />
 
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                                 <div className="lg:col-span-2 space-y-3">
@@ -563,6 +662,10 @@ export function RoadmapView({ projectId: projectIdProp }) {
                                 epics={data.epics}
                                 milestones={data.milestones}
                                 view={scheduleMode}
+                                date={rangeStart || new Date()}
+                                rangeStart={rangeStart}
+                                rangeEnd={rangeEnd}
+                                onNavigate={navigateSchedule}
                             />
                         </React.Suspense>
                     )}
