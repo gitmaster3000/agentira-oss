@@ -154,6 +154,7 @@ export function TaskPage() {
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState({
         title: '', description: '', status: 'backlog', priority: 'medium', assignee: '', tags: [],
+        due_date: '',
     });
 
     // Single source of truth for live run state (DoD: "Live run state
@@ -284,6 +285,8 @@ export function TaskPage() {
             priority: task.priority || 'medium',
             assignee: task.assignee || '',
             tags: task.tags || [],
+            // Date inputs want YYYY-MM-DD; API returns full ISO timestamps.
+            due_date: task.due_date ? String(task.due_date).slice(0, 10) : '',
         });
         setIsEditing(true);
     };
@@ -298,6 +301,8 @@ export function TaskPage() {
                 priority: formData.priority,
                 assignee: formData.assignee,
                 tags: formData.tags,
+                // Empty string clears the due date (backend treats "" as null).
+                due_date: formData.due_date || '',
             });
             // Status transitions go through the dedicated /move endpoint.
             if (formData.status && formData.status !== task.status) {
@@ -1169,6 +1174,25 @@ function PlanTab(props) {
                 <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
                     <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-text-secondary">
+                            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="text-xs flex-1">Due</span>
+                            {isEditing ? (
+                                <input
+                                    type="date"
+                                    aria-label="Due date"
+                                    className="input input-date text-xs py-1 px-2 w-auto"
+                                    value={formData.due_date || ''}
+                                    onChange={e => setFormData({ ...formData, due_date: e.target.value })}
+                                />
+                            ) : (
+                                <span className="text-xs" data-testid="task-due-date">
+                                    {task.due_date
+                                        ? new Date(task.due_date).toLocaleDateString()
+                                        : 'Not set'}
+                                </span>
+                            )}
+                        </div>
                         <div className="flex items-center gap-2 text-text-secondary">
                             <Calendar className="w-3.5 h-3.5" />
                             <span className="text-xs">Created: {new Date(task.created_at).toLocaleDateString()}</span>

@@ -563,6 +563,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, isEditing, setIsEditi
                                     {epics.map(ep => <option key={ep.id} value={ep.id}>{ep.title}</option>)}
                                 </select>
                             </span>
+                            <span className="text-text-tertiary">Due</span>
+                            <span className="inline-flex items-center" style={{ gap: 7 }}>
+                                <input
+                                    type="date"
+                                    aria-label="Due date"
+                                    className="input input-date text-xs py-1 px-2 w-auto"
+                                    // Date input wants YYYY-MM-DD; clear with "" (backend → null).
+                                    value={task.due_date ? String(task.due_date).slice(0, 10) : ''}
+                                    onChange={e => saveField({ due_date: e.target.value || '' })}
+                                />
+                            </span>
                         </div>
 
                         {/* Description reads after the at-a-glance fields — the

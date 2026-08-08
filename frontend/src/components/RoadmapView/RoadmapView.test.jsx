@@ -45,7 +45,7 @@ vi.mock('./ScheduleDateRangePicker', () => ({
 const ROADMAP = {
     project: { id: 'p1', name: 'Agentira' },
     summary: {
-        total_tasks: 1,
+        total_tasks: 2,
         total_epics: 1,
         total_done: 0,
         total_milestones: 0,
@@ -58,7 +58,7 @@ const ROADMAP = {
         progress: 0,
         in_progress: 1,
         done: 0,
-        total: 1,
+        total: 2,
         tasks: [{
             id: '9edb082ca059',
             key: 'AP-496',
@@ -68,6 +68,14 @@ const ROADMAP = {
             progress: 25,
             start: '2026-08-06',
             end: '2026-08-07',
+        }, {
+            id: 'a89b4e7a8589',
+            key: 'AP-501',
+            title: 'Add due date to tasks',
+            status: 'todo',
+            priority: 'medium',
+            progress: 0,
+            // no end / due_date — undated (AP-501 filter coverage)
         }],
     }],
     dependencies: [],
@@ -127,5 +135,32 @@ describe('RoadmapView navigation', () => {
         )).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Timeline' })).toHaveAttribute('aria-pressed', 'false');
         expect(screen.getByRole('button', { name: 'Day' })).toHaveAttribute('aria-pressed', 'true');
+    });
+});
+
+describe('RoadmapView due-date filter (AP-501)', () => {
+    it('filters timeline tasks by due date', async () => {
+        render(
+            <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
+                <Routes>
+                    <Route path="/studio/project/:projectId/roadmap" element={<RoadmapView />} />
+                </Routes>
+            </MemoryRouter>,
+        );
+
+        expect(await screen.findByTitle('Open AP-496 in full view')).toBeInTheDocument();
+        expect(screen.getByTitle('Open AP-501 in full view')).toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('Filter by due date'), {
+            target: { value: 'has_due' },
+        });
+        expect(screen.getByTitle('Open AP-496 in full view')).toBeInTheDocument();
+        expect(screen.queryByTitle('Open AP-501 in full view')).not.toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('Filter by due date'), {
+            target: { value: 'no_due' },
+        });
+        expect(screen.queryByTitle('Open AP-496 in full view')).not.toBeInTheDocument();
+        expect(screen.getByTitle('Open AP-501 in full view')).toBeInTheDocument();
     });
 });

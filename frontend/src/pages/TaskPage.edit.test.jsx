@@ -156,6 +156,28 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(api.moveTask).toHaveBeenCalledWith('T1', 'in_progress');
     });
 
+    it('shows due date in Timestamps and saves it from edit mode (AP-501)', async () => {
+        api.getTask.mockResolvedValue(baseTask({ due_date: '2026-09-15T00:00:00Z' }));
+        renderTaskPage();
+        await screen.findByText('My task');
+
+        const collaboration = screen.getByTestId('task-collaboration-section');
+        expect(within(collaboration).getByText('Timestamps')).toBeInTheDocument();
+        // Read mode shows the existing due date (locale-formatted).
+        expect(within(collaboration).getByTestId('task-due-date').textContent).toMatch(/9\/15\/2026|15\/9\/2026|2026/);
+
+        fireEvent.click(screen.getByTitle('Edit task'));
+        const dueInput = screen.getByLabelText('Due date');
+        expect(dueInput.value).toBe('2026-09-15');
+        fireEvent.change(dueInput, { target: { value: '2026-10-01' } });
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1',
+            expect.objectContaining({ due_date: '2026-10-01' }),
+        ));
+    });
+
     it('Cancel exits edit mode without saving', async () => {
         renderTaskPage();
         await screen.findByText('My task');

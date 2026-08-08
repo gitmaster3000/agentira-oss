@@ -27,6 +27,11 @@ a "recently shipped" list.
 If nothing has dates yet you'll see *"no scheduled work yet"* — set a start or due
 date on a task and it appears.
 
+Use the **Filter by due date** control in the roadmap header to focus the plan:
+*All dates*, *Has due date*, *Overdue*, *Due this week*, or *No due date*. The
+filter applies to the schedule (timeline and calendar modes) and dependencies
+views.
+
 Month, Week, Day and Agenda show tasks on the days they're scheduled for;
 milestones appear as flagged all-day entries. Click any task to open it. Use the
 range picker to focus every mode on a specific planning window.

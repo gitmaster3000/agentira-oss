@@ -171,7 +171,11 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                 priority: formData.priority,
                 assignee: formData.assignee,
                 epic_id: formData.epic_id !== undefined ? formData.epic_id : undefined,
-                tags: typeof formData.tags === 'string' ? formData.tags.split(',') : formData.tags
+                tags: typeof formData.tags === 'string' ? formData.tags.split(',') : formData.tags,
+                // Empty string clears; omit day-shift by sending YYYY-MM-DD.
+                due_date: formData.due_date
+                    ? String(formData.due_date).slice(0, 10)
+                    : '',
             });
             setIsEditing(false);
             onUpdate();
@@ -375,7 +379,23 @@ export function TaskDetailModal({ task, onClose, onUpdate }) {
                                 )}
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Created</label>
+                                <label className="block text-xs font-semibold uppercase mb-1" style={{ color: 'var(--text-secondary)' }}>Due date</label>
+                                {isEditing ? (
+                                    <input
+                                        type="date"
+                                        aria-label="Due date"
+                                        className="input"
+                                        value={formData.due_date ? String(formData.due_date).slice(0, 10) : ''}
+                                        onChange={e => setFormData({ ...formData, due_date: e.target.value })}
+                                    />
+                                ) : (
+                                    <div className="text-xs" style={{ color: 'var(--text-secondary)' }} data-testid="modal-due-date">
+                                        {task.due_date
+                                            ? new Date(task.due_date).toLocaleDateString()
+                                            : 'Not set'}
+                                    </div>
+                                )}
+                                <label className="block text-xs font-semibold uppercase mb-1 mt-2" style={{ color: 'var(--text-secondary)' }}>Created</label>
                                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{new Date(task.created_at).toLocaleString()}</div>
                                 <label className="block text-xs font-semibold uppercase mb-1 mt-2" style={{ color: 'var(--text-secondary)' }}>Updated</label>
                                 <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>{new Date(task.updated_at).toLocaleString()}</div>

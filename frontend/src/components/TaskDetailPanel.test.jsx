@@ -203,3 +203,29 @@ describe('TaskDetailPanel — layout & resizing', () => {
         expect(panel.style.width).toBe('520px');
     });
 });
+
+describe('TaskDetailPanel — due date (AP-501)', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('shows due date in the Details section and saves on change', async () => {
+        render(<Harness task={baseTask({ due_date: '2026-08-20T00:00:00Z' })} />);
+        const due = await screen.findByLabelText('Due date');
+        expect(due.value).toBe('2026-08-20');
+
+        fireEvent.change(due, { target: { value: '2026-09-01' } });
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1',
+            expect.objectContaining({ due_date: '2026-09-01' }),
+        ));
+    });
+
+    it('clears due date when the date input is emptied', async () => {
+        render(<Harness task={baseTask({ due_date: '2026-08-20T00:00:00Z' })} />);
+        const due = await screen.findByLabelText('Due date');
+        fireEvent.change(due, { target: { value: '' } });
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1',
+            expect.objectContaining({ due_date: '' }),
+        ));
+    });
+});

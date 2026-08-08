@@ -75,11 +75,17 @@ function EpicProgress({ epic }) {
     );
 }
 
+/** Roadmap API uses `end` for due date; task payloads may also expose due_date. */
+function taskDueDate(task) {
+    return task.end || task.due_date || null;
+}
+
 function TaskRow({ task }) {
     const navigate = useNavigate();
     const statusColor = STATUS_COLORS[task.status] || STATUS_COLORS.backlog;
     const priorityColor = PRIORITY_DOTS[task.priority] || PRIORITY_DOTS.medium;
     const Icon = task.progress === 100 ? CheckCircle : task.progress > 0 ? Clock : Circle;
+    const due = taskDueDate(task);
 
     return (
         <button
@@ -122,13 +128,55 @@ function TaskRow({ task }) {
             >
                 {task.status.replace('_', ' ')}
             </span>
-            {task.end && (
-                <span className="text-xs text-text-tertiary whitespace-nowrap">
-                    {formatDate(task.end)}
+            {due && (
+                <span className="text-xs text-text-tertiary whitespace-nowrap" title="Due date">
+                    due {formatDate(due)}
                 </span>
             )}
         </button>
     );
+}
+
+const DUE_FILTERS = [
+    { key: 'all', label: 'All dates' },
+    { key: 'has_due', label: 'Has due date' },
+    { key: 'overdue', label: 'Overdue' },
+    { key: 'this_week', label: 'Due this week' },
+    { key: 'no_due', label: 'No due date' },
+];
+
+function startOfLocalDay(d = new Date()) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function matchesDueFilter(task, filter) {
+    if (filter === 'all') return true;
+    const due = taskDueDate(task);
+    if (filter === 'has_due') return !!due;
+    if (filter === 'no_due') return !due;
+    if (!due) return false;
+    const dueDay = startOfLocalDay(new Date(due));
+    const today = startOfLocalDay();
+    if (filter === 'overdue') {
+        return dueDay < today && task.status !== 'done';
+    }
+    if (filter === 'this_week') {
+        const weekEnd = new Date(today);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+        return dueDay >= today && dueDay < weekEnd;
+    }
+    return true;
+}
+
+/** Filter epic groups by due-date filter; drop empty groups. */
+function filterEpicsByDue(epics, filter) {
+    if (filter === 'all') return epics;
+    return (epics || [])
+        .map((epic) => ({
+            ...epic,
+            tasks: (epic.tasks || []).filter((t) => matchesDueFilter(t, filter)),
+        }))
+        .filter((epic) => epic.tasks.length > 0);
 }
 
 function EpicSection({ epic }) {
@@ -429,6 +477,8 @@ export function RoadmapView({ projectId: projectIdProp }) {
     const [groupBy, setGroupBy] = useState('epic');
     const [view, setView] = useState('schedule');
     const [scheduleMode, setScheduleMode] = useState('timeline');
+    // AP-501: filter the plan by due date so owners can focus overdue / this week.
+    const [dueFilter, setDueFilter] = useState('all');
     const [[rangeStart, rangeEnd], setScheduleRange] = useState([null, null]);
 
     const navigateSchedule = useCallback((nextDate) => {
@@ -527,27 +577,45 @@ export function RoadmapView({ projectId: projectIdProp }) {
         );
     }
 
+    const filteredEpics = filterEpicsByDue(data.epics, dueFilter);
+
     return (
         <div className="flex-1 p-6 overflow-y-auto space-y-5 h-full max-h-[calc(100vh-64px)]">
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
                     <CalendarDays className="w-5 h-5 text-text-tertiary" />
                     Roadmap — {data?.project?.name}
                 </h2>
-                <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle">
-                    <button
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'tag' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
-                        onClick={() => setGroupBy('tag')}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <label htmlFor="roadmap-due-filter" className="text-xs text-text-secondary sr-only">
+                        Filter by due date
+                    </label>
+                    <select
+                        id="roadmap-due-filter"
+                        aria-label="Filter by due date"
+                        className="input text-xs py-1.5 px-2 w-auto"
+                        value={dueFilter}
+                        onChange={(e) => setDueFilter(e.target.value)}
                     >
-                        By Tag
-                    </button>
-                    <button
-                        className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'epic' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
-                        onClick={() => setGroupBy('epic')}
-                    >
-                        By Epic
-                    </button>
+                        {DUE_FILTERS.map((f) => (
+                            <option key={f.key} value={f.key}>{f.label}</option>
+                        ))}
+                    </select>
+                    <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle">
+                        <button
+                            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'tag' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
+                            onClick={() => setGroupBy('tag')}
+                        >
+                            By Tag
+                        </button>
+                        <button
+                            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${groupBy === 'epic' ? 'bg-bg-app text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary'}`}
+                            onClick={() => setGroupBy('epic')}
+                        >
+                            By Epic
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -573,7 +641,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
             {view === 'dependencies' && (
                 <React.Suspense fallback={<ViewLoading />}>
                     <DependencyGraph
-                        epics={data.epics}
+                        epics={filteredEpics}
                         dependencies={data.dependencies}
                         onRemoveDependency={removeDependency}
                     />
@@ -634,7 +702,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                                 min(task.start) → max(task.end), with milestone
                                 flags pinned to their dates. */}
                             <TimelineStrip
-                                epics={data.epics}
+                                epics={filteredEpics}
                                 milestones={data.milestones}
                                 rangeStart={rangeStart}
                                 rangeEnd={rangeEnd}
@@ -642,9 +710,15 @@ export function RoadmapView({ projectId: projectIdProp }) {
 
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                                 <div className="lg:col-span-2 space-y-3">
-                                    {data.epics.map((epic) => (
-                                        <EpicSection key={epic.name} epic={epic} />
-                                    ))}
+                                    {filteredEpics.length === 0 ? (
+                                        <div className="card p-4 text-sm text-text-tertiary">
+                                            No tasks match this due-date filter.
+                                        </div>
+                                    ) : (
+                                        filteredEpics.map((epic) => (
+                                            <EpicSection key={epic.name} epic={epic} />
+                                        ))
+                                    )}
                                 </div>
                                 <div className="space-y-5">
                                     <MilestonePanel
@@ -659,7 +733,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                     ) : (
                         <React.Suspense fallback={<ViewLoading />}>
                             <CalendarBoard
-                                epics={data.epics}
+                                epics={filteredEpics}
                                 milestones={data.milestones}
                                 view={scheduleMode}
                                 date={rangeStart || new Date()}
