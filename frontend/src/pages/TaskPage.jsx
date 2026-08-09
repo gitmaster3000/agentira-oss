@@ -824,7 +824,7 @@ function PlanTab(props) {
             <section
                 aria-label="Task overview"
                 data-testid="task-overview-section"
-                className="grid grid-cols-1 xl:grid-cols-4 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
+                className="grid grid-cols-1 xl:grid-cols-4 2xl:grid-cols-5 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
             >
                 {/* The card clips its own corners and the body scrolls inside
                     it, so long text never runs past the rounded edge. */}
@@ -852,10 +852,12 @@ function PlanTab(props) {
                 {/* Everything else about the task lives in one panel of
                     collapsible sections — same shape as the side panel, so a
                     section reads the same wherever you meet it. */}
-                <div className="xl:col-span-2 min-w-0 xl:h-full bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
+                <div className="xl:col-span-2 2xl:col-span-3 min-w-0 xl:h-full bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
+                {/* On a wide screen the sections flow into two columns instead
+                    of one tall stack, so the extra width buys you less scrolling. */}
                 <div
                     data-testid="task-info-pane"
-                    className="h-full overflow-y-auto custom-scrollbar p-5"
+                    className="h-full overflow-y-auto custom-scrollbar p-5 2xl:columns-2 2xl:gap-x-8 [&>section]:break-inside-avoid"
                 >
 
                 <CollapsibleSection
