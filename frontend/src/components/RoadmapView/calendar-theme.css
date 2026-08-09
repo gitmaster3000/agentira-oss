@@ -1,0 +1,90 @@
+/* react-big-calendar ships a light-only stylesheet. These overrides map it
+   onto the app's theme tokens, so the calendar follows light/dark like every
+   other surface instead of burning a white rectangle into the page. */
+
+.rbc-agentira .rbc-calendar {
+    color: var(--text-primary);
+}
+
+.rbc-agentira .rbc-toolbar button {
+    color: var(--text-secondary);
+    background: var(--bg-panel);
+    border-color: var(--border-subtle);
+    border-radius: 6px;
+}
+
+.rbc-agentira .rbc-toolbar button:hover,
+.rbc-agentira .rbc-toolbar button:focus {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-active);
+}
+
+.rbc-agentira .rbc-toolbar button.rbc-active {
+    color: var(--accent-on);
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.rbc-agentira .rbc-toolbar-label {
+    font-weight: 600;
+}
+
+.rbc-agentira .rbc-month-view,
+.rbc-agentira .rbc-time-view,
+.rbc-agentira .rbc-agenda-view table.rbc-agenda-table {
+    background: var(--bg-card);
+    border-color: var(--border-subtle);
+    border-radius: 8px;
+}
+
+.rbc-agentira .rbc-header,
+.rbc-agentira .rbc-month-row + .rbc-month-row,
+.rbc-agentira .rbc-day-bg + .rbc-day-bg,
+.rbc-agentira .rbc-time-content,
+.rbc-agentira .rbc-time-header-content,
+.rbc-agentira .rbc-timeslot-group,
+.rbc-agentira .rbc-agenda-view table.rbc-agenda-table tbody > tr > td {
+    border-color: var(--border-subtle);
+}
+
+.rbc-agentira .rbc-header {
+    color: var(--text-tertiary);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    padding: 6px 4px;
+}
+
+.rbc-agentira .rbc-off-range-bg {
+    background: var(--bg-panel);
+}
+
+.rbc-agentira .rbc-today {
+    background: var(--accent-subtle);
+}
+
+.rbc-agentira .rbc-selected-range {
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.rbc-agentira .rbc-event {
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 1px 5px;
+}
+
+.rbc-agentira .rbc-event.rbc-selected {
+    outline: 2px solid var(--accent-primary);
+}
+
+.rbc-agentira .rbc-show-more {
+    background: transparent;
+    color: var(--accent-primary);
+}
+
+.rbc-agentira .rbc-overlay {
+    background: var(--bg-card);
+    border-color: var(--border-subtle);
+}

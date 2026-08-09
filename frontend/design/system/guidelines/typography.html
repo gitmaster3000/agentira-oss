@@ -1,0 +1,76 @@
+<!-- @dsCard group="Type" viewport="700x430" subtitle="System-UI chrome + true mono for keys & code" name="Typography" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 26px 28px; }
+  .wrap { display: flex; flex-direction: column; gap: 22px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 12px; }
+
+  .fam { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .famcard { border: 1px solid var(--border-default); border-radius: var(--radius-xl);
+             background: var(--surface-card); padding: 14px 16px; }
+  .famcard .big { font-size: 22px; color: var(--text-primary); font-weight: var(--weight-semibold); }
+  .famcard .mono { font-family: var(--font-mono); }
+  .famcard .lbl { font: var(--type-meta); color: var(--text-muted); margin-top: 6px; }
+
+  .scale { display: flex; flex-direction: column; gap: 0; }
+  .row { display: flex; align-items: baseline; gap: 16px; padding: 7px 0;
+         border-bottom: 1px solid var(--border-default); }
+  .row:last-child { border-bottom: 0; }
+  .row .tok { width: 64px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); flex: none; }
+  .row .px  { width: 42px; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); flex: none; }
+  .row .smp { color: var(--text-primary); font-weight: var(--weight-medium); white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; }
+
+  .weights { display: flex; gap: 24px; flex-wrap: wrap; }
+  .weights span { color: var(--text-primary); font-size: 18px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">Families</div>
+      <div class="fam">
+        <div class="famcard">
+          <div class="big">Build agents that ship.</div>
+          <div class="lbl">--font-sans · system UI · product chrome</div>
+        </div>
+        <div class="famcard">
+          <div class="big mono">ACM-142 · run_id: 7f3a</div>
+          <div class="lbl">--font-mono · keys, code, config, tokens</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="eyebrow">Type scale</div>
+      <div class="scale">
+        <div class="row"><span class="tok">text-36</span><span class="px">36</span><span class="smp" style="font-size:36px;font-weight:600;letter-spacing:-0.01em">Hero / marketing</span></div>
+        <div class="row"><span class="tok">text-28</span><span class="px">28</span><span class="smp" style="font-size:28px;font-weight:600">Dashboard greeting</span></div>
+        <div class="row"><span class="tok">text-20</span><span class="px">20</span><span class="smp" style="font-size:20px;font-weight:600">Page title</span></div>
+        <div class="row"><span class="tok">text-16</span><span class="px">16</span><span class="smp" style="font-size:16px;font-weight:600">Card title / section head</span></div>
+        <div class="row"><span class="tok">text-14</span><span class="px">14</span><span class="smp" style="font-size:14px">Emphasized body & inputs</span></div>
+        <div class="row"><span class="tok">text-13</span><span class="px">13</span><span class="smp" style="font-size:13px">Default UI text · nav items</span></div>
+        <div class="row"><span class="tok">text-12</span><span class="px">12</span><span class="smp" style="font-size:12px;color:var(--text-tertiary)">Secondary UI · card body</span></div>
+        <div class="row"><span class="tok">text-11</span><span class="px">11</span><span class="smp" style="font-size:11px;color:var(--text-muted)">Meta rows · captions</span></div>
+        <div class="row"><span class="tok">text-10</span><span class="px">10</span><span class="smp" style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em">Eyebrows & badges</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="eyebrow">Weights</div>
+      <div class="weights">
+        <span style="font-weight:400">Regular 400</span>
+        <span style="font-weight:500">Medium 500</span>
+        <span style="font-weight:600">Semibold 600</span>
+        <span style="font-weight:700">Bold 700</span>
+        <span style="font-weight:800">Extra 800</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

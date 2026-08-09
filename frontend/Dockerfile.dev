@@ -1,0 +1,18 @@
+# Dev image — runs Vite's dev server directly so source edits HMR
+# straight into the running container. Used by docker-compose.override.yml
+# in the agentira repo. Production / qa / prod stay on the nginx Dockerfile.
+
+FROM node:20-slim
+WORKDIR /app
+
+# Install deps once into the image so first start is fast. The compose
+# override mounts the host source on top of /app, but we keep
+# /app/node_modules as an anonymous volume so the host's node_modules
+# (or absence of them) doesn't shadow the image's install.
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 3111
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

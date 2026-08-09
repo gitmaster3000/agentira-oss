@@ -1,0 +1,1007 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, Link, useSearchParams, useNavigate } from 'react-router-dom';
+import {
+    ArrowLeft, Bot, Zap, Clock, DollarSign, AlertTriangle, CheckCircle,
+    XCircle, Pause, Play, Ban, RefreshCw, User, Wrench, MessageSquare,
+    ClipboardList, Folder,
+    // AP-126: artifact panel icons. One per kind so a glance is enough
+    // to tell a PR from a file from a log.
+    GitPullRequest, GitCommit, File, Link as LinkIcon,
+    ScrollText, FileText, Package, Copy, Check,
+} from 'lucide-react';
+import { api } from '../../api';
+import { ToolInput } from '../../components/AskUserQuestionCard';
+import { Breadcrumbs } from '../../components/Breadcrumbs';
+
+// Canonical run statuses — must match docs/run-state-machine.md and the
+// backend RunStatus enum. 8 states; the single `interrupting` transient
+// replaces the old pausing/cancelling/resuming trio (intent decides where it
+// lands: PAUSED for Stop, CANCELLED for Discard).
+const STATUS_CONFIG = {
+    // AP-112: READY = prepared, waiting for the user to review/edit the
+    // prompt and press Start. Visually distinct from PENDING so users see
+    // "this is waiting on me", not "this is queued".
+    ready:         { bg: '#3b82f6', label: 'Ready',     icon: Play },
+    pending:       { bg: '#5f6368', label: 'Queued',    icon: Clock },
+    running:       { bg: '#f1c40f', label: 'Running',   icon: RefreshCw },
+    // Single transient: Stop or Discard requested, daemon hasn't confirmed
+    // yet. Stop/Resume/Discard buttons disable while interrupting so the user
+    // can't double-click into a race. The terminal state lands on the daemon's
+    // trigger-complete (or the reconciler escalates after the threshold).
+    interrupting:  { bg: '#9aa0a6', label: 'Stopping…', icon: Pause },
+    paused:        { bg: '#9aa0a6', label: 'Paused',    icon: Pause },
+    completed:     { bg: '#2ecc71', label: 'Completed', icon: CheckCircle },
+    failed:        { bg: '#e74c3c', label: 'Failed',    icon: XCircle },
+    cancelled:     { bg: '#9aa0a6', label: 'Cancelled', icon: Ban },
+};
+
+// "Stop in flight" — buttons disable, no auto-resume.
+export const TRANSIENT_RUN_STATUSES = new Set(['interrupting']);
+
+export function RunDetail() {
+    const { runId } = useParams();
+    const [searchParams] = useSearchParams();
+    // AP-109: entry-point hint. `?from=runs` means user clicked in from a
+    // cross-agent list (global Runs page, Forge overview); breadcrumb falls
+    // back to `Forge › Runs › Run X` instead of the agent path. Absence of
+    // the param (e.g. agent-runs-tab click, shared link) uses agent path.
+    const from = searchParams.get('from');
+    const navigate = useNavigate();
+    const [run, setRun] = useState(null);
+    const [events, setEvents] = useState([]);
+    const [triggerEvent, setTriggerEvent] = useState(null);
+    const [loading, setLoading] = useState(true);
+    // AP-112: prompt editor state for PENDING runs. Seeded from
+    // run.initial_prompt on first load; user edits in-place.
+    const [editedPrompt, setEditedPrompt] = useState(null);
+    const [starting, setStarting] = useState(false);
+    // AP-113: pre-run checklist, fetched while the run is READY.
+    const [readyChecks, setReadyChecks] = useState(null);
+
+    const load = async () => {
+        try {
+            const [r, evts] = await Promise.all([
+                api.forge.getRun(runId),
+                api.forge.listRunEvents(runId),
+            ]);
+            setRun(r);
+            setEvents(evts);
+            // AP-112: seed the editor once with the server-stored prompt.
+            // Don't overwrite on subsequent polls (would clobber the user's
+            // typing). The editor only matters while status === 'pending'.
+            setEditedPrompt((prev) => prev == null ? (r.initial_prompt || '') : prev);
+            // AP-113: pull the READY checklist while the run waits to start.
+            if (r.status === 'ready') {
+                api.forge.getRunReadyChecks(runId).then(setReadyChecks).catch(() => {});
+            }
+            api.forge.getTriggerEvent(runId).then(setTriggerEvent).catch(() => {});
+        } catch (err) {
+            console.error('Failed to load run:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // P4: live run-status updates via WebSocket. The 5s poll stays as a
+    // fallback (longer cadence: WS is the fast path). When the WS pushes
+    // a status, we patch the local `run` immediately so transient
+    // states (Pausing…/Cancelling…/Resuming…) and the terminal landing
+    // appear without waiting for a poll.
+    const [wsConnected, setWsConnected] = useState(false);
+    useEffect(() => {
+        load();
+        // Poll cadence: 5s when WS is down, 30s when WS is connected.
+        const interval = setInterval(load, wsConnected ? 30000 : 5000);
+        return () => clearInterval(interval);
+    }, [runId, wsConnected]);
+
+    useEffect(() => {
+        // Same-origin proxy or env override. Falls back to ws/wss based
+        // on the page protocol.
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        // Browsers can't set Authorization on a WS — pass the JWT as a query
+        // param so the server can authenticate + org-scope the subscription.
+        const tok = localStorage.getItem('agentira_token') || '';
+        const url = `${proto}://${window.location.host}/api/forge/ws/runs/${runId}?token=${encodeURIComponent(tok)}`;
+        let ws;
+        let stopped = false;
+        try {
+            ws = new WebSocket(url);
+        } catch {
+            return;
+        }
+        ws.onopen = () => { if (!stopped) setWsConnected(true); };
+        ws.onclose = () => { if (!stopped) setWsConnected(false); };
+        ws.onerror = () => { if (!stopped) setWsConnected(false); };
+        ws.onmessage = (ev) => {
+            try {
+                const m = JSON.parse(ev.data);
+                if (m.type === 'run_status' && m.run_id === runId) {
+                    setRun((prev) => prev
+                        ? { ...prev, status: m.status,
+                            outcome: m.outcome ?? prev.outcome }
+                        : prev);
+                }
+            } catch { /* malformed frame — ignore */ }
+        };
+        return () => {
+            stopped = true;
+            try { ws.close(); } catch { /* ignore */ }
+        };
+    }, [runId]);
+
+    if (loading) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary">Loading run...</div>;
+    }
+
+    if (!run) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary">Run not found</div>;
+    }
+
+    const s = STATUS_CONFIG[run.status] || STATUS_CONFIG.queued;
+    const StatusIcon = s.icon;
+    const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0) + (run.total_tokens || 0);
+    // "Cancellable" — Stop button shows. PAUSED is cancellable too: the
+    // user might want to abandon the work entirely instead of resuming.
+    // Transient states (pausing/cancelling/resuming) are intentionally
+    // excluded — the daemon hasn't confirmed yet, so a second Stop would
+    // race the first. The reconciler escalates stuck transients.
+    const isActive = ['queued', 'pending', 'running',
+                      'blocked', 'paused'].includes(run.status);
+    // AP-112: READY = the prompt-editor screen. Hide the top
+    // pause/resume/stop controls there — they're meaningless before
+    // dispatch, and the editor card has its own Start/Discard buttons.
+    const isReady = run.status === 'ready';
+
+    return (
+        <div className="flex-1 p-6 space-y-6 max-w-5xl">
+            <Breadcrumbs entity="run" data={run} opts={{ from }} />
+            {/* Header */}
+            <div className="flex items-center gap-3">
+                <div className="flex-1">
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl font-bold text-text-primary">Run {run.id}</h1>
+                        <span
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold text-white"
+                            style={{ backgroundColor: s.bg }}
+                        >
+                            <StatusIcon className="w-3.5 h-3.5" />
+                            {s.label}
+                        </span>
+                        {isActive && (
+                            <span className="relative flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-yellow-500" />
+                            </span>
+                        )}
+                    </div>
+                    {/* AP-109: meaningful quick-links instead of bare IDs.
+                        Explicit "<Type>: <Name>" labels so a glance tells
+                        you what each pill is. Chat opens the agent chat
+                        pinned to this task's scope (Stop in chat = Pause). */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {run.agent_name && (
+                            <Link
+                                to={`/forge/agents/${run.agent_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                            >
+                                <Bot className="w-3 h-3" />
+                                <span className="text-text-tertiary">Agent:</span>
+                                <span>{run.agent_name}</span>
+                            </Link>
+                        )}
+                        {run.task_id && (
+                            <Link
+                                to={`/studio/tasks/${run.task_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                                title={run.task_title || run.task_id}
+                            >
+                                <ClipboardList className="w-3 h-3" />
+                                <span className="text-text-tertiary">Task:</span>
+                                <span>{run.task_key || run.task_title || run.task_id.slice(0, 8)}</span>
+                            </Link>
+                        )}
+                        {run.project_id && (
+                            <Link
+                                to={`/studio/project/${run.project_id}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover hover:bg-bg-app text-xs text-text-secondary hover:text-text-primary"
+                            >
+                                <Folder className="w-3 h-3" />
+                                <span className="text-text-tertiary">Project:</span>
+                                <span>{run.project_name || run.project_id.slice(0, 8)}</span>
+                            </Link>
+                        )}
+                    </div>
+                </div>
+                {/* Run controls — pause / resume / stop. Pause is best-effort
+                    for CLI runtimes (SIGSTOP); openclaw HTTP runs ignore
+                    pause. Stop is terminal. */}
+                {/* Stop = pause + preserve session, always resumable (the
+                    canonical Stop from docs/run-state-machine.md). Best-effort
+                    for CLI runtimes; openclaw HTTP runs complete naturally. */}
+                {!isReady && run.status === 'running' && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                await api.forge.pauseRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Stop failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-yellow-500 hover:bg-yellow-500/10"
+                        title="Stop — pauses the run; you can resume it later"
+                    >
+                        <Pause className="w-4 h-4" /> Stop
+                    </button>
+                )}
+                {!isReady && run.status === 'paused' && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                await api.forge.resumeRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Resume failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-green-500 hover:bg-green-500/10"
+                        title="Resume"
+                    >
+                        <Play className="w-4 h-4" /> Resume
+                    </button>
+                )}
+                {/* Discard = terminal cancel (the old "Stop"). Throws the run
+                    away; not resumable. Secondary to Stop. Hidden while
+                    interrupting so a second click can't race the daemon. */}
+                {!isReady && isActive && run.status !== 'interrupting' && (
+                    <button
+                        onClick={async () => {
+                            if (!window.confirm('Discard this run? The agent is killed and the run is thrown away — this cannot be undone.')) return;
+                            try {
+                                await api.forge.cancelRun(runId);
+                                await load();
+                            } catch (err) {
+                                alert('Discard failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                        title="Discard this run (terminal — cannot be resumed)"
+                    >
+                        <Ban className="w-4 h-4" /> Discard
+                    </button>
+                )}
+                {/* Restart: explicit re-run of a terminal Run. Schedules a
+                    fresh run for the same (task, agent) with a context
+                    hint pointing back here. Only shown for terminal runs
+                    that came from a task (free-floating chat runs can't
+                    be restarted — there's no task to schedule against). */}
+                {!isReady && !isActive && run.task_id && (
+                    <button
+                        onClick={async () => {
+                            try {
+                                const res = await api.forge.retryRun(runId);
+                                const newId = res?.run_id || res?.id;
+                                if (newId) navigate(`/forge/runs/${newId}`);
+                                else await load();
+                            } catch (err) {
+                                alert('Restart failed: ' + (err.message || err));
+                            }
+                        }}
+                        className="btn btn-ghost text-accent-primary hover:bg-accent-subtle"
+                        title="Restart — schedules a new run for this task"
+                    >
+                        <RefreshCw className="w-4 h-4" /> Restart
+                    </button>
+                )}
+                {/* Refresh only while the run is active — terminal runs are
+                    settled, and the Restart button above already uses
+                    RefreshCw, so showing both would put two same-icon
+                    buttons next to each other. */}
+                {!isReady && isActive && (
+                    <button onClick={load} className="btn btn-ghost" title="Refresh">
+                        <RefreshCw className="w-4 h-4" />
+                    </button>
+                )}
+            </div>
+
+            {/* AP-112: editable prompt for PENDING runs.
+                The user landed here from clicking Run on a task. The prompt
+                was built server-side from task title/description/DoD and
+                persisted on the Run row. Edit, Start to dispatch, Discard
+                to throw away. Once dispatched, this card disappears (status
+                flips to running and the rest of the page takes over). */}
+            {isReady && <ReadyChecksCard data={readyChecks} />}
+
+            {isReady && (
+                <div className="card border border-accent-primary/30">
+                    <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                            <Play className="w-5 h-5" /> Review prompt before starting
+                        </h2>
+                        <span className="text-xs text-text-tertiary">
+                            Sent verbatim to the agent on Start
+                        </span>
+                    </div>
+                    <textarea
+                        value={editedPrompt || ''}
+                        onChange={(e) => setEditedPrompt(e.target.value)}
+                        className="w-full min-h-[280px] bg-bg-app border border-border-subtle rounded-md p-3 text-sm font-mono text-text-primary focus:outline-none focus:border-accent-primary resize-y"
+                        placeholder="The prompt the agent will receive…"
+                        disabled={starting}
+                    />
+                    <div className="flex items-center gap-2 mt-3">
+                        <button
+                            disabled={starting || !editedPrompt?.trim()}
+                            onClick={async () => {
+                                setStarting(true);
+                                try {
+                                    await api.forge.dispatchRun(runId, editedPrompt);
+                                    await load();
+                                } catch (err) {
+                                    alert('Start failed: ' + (err.message || err));
+                                } finally {
+                                    setStarting(false);
+                                }
+                            }}
+                            className="btn btn-primary"
+                        >
+                            <Play className="w-4 h-4" />
+                            {starting ? 'Starting…' : 'Start run'}
+                        </button>
+                        <button
+                            disabled={starting}
+                            onClick={() => {
+                                if (editedPrompt !== (run.initial_prompt || '')) {
+                                    if (!window.confirm('Reset the prompt to the original?')) return;
+                                }
+                                setEditedPrompt(run.initial_prompt || '');
+                            }}
+                            className="btn btn-ghost"
+                            title="Reset to the server-built prompt"
+                        >
+                            <RefreshCw className="w-4 h-4" /> Reset
+                        </button>
+                        <div className="flex-1" />
+                        <button
+                            disabled={starting}
+                            onClick={async () => {
+                                if (!window.confirm('Discard this run? The PENDING row will be deleted.')) return;
+                                try {
+                                    await api.forge.discardRun(runId);
+                                    navigate(-1);
+                                } catch (err) {
+                                    alert('Discard failed: ' + (err.message || err));
+                                }
+                            }}
+                            className="btn btn-ghost text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            title="Delete this pending run"
+                        >
+                            <Ban className="w-4 h-4" /> Discard
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* AP-126: Artifacts — structured "here's what got built"
+                links the agent registered via register_run_artifact.
+                Empty-success guard: if the run is succeeded but
+                produced nothing (no artifacts, no diff, no PR), call
+                that out loudly rather than hiding the panel — same
+                hallucinated-completion failure mode the backend now
+                blocks at finish_run time. */}
+            {Array.isArray(run.artifacts) && run.artifacts.length > 0 ? (
+                <ArtifactsPanel artifacts={run.artifacts} />
+            ) : (
+                isTerminalSuccess(run) && !hasAnyOutput(run) && (
+                    <div className="card bg-yellow-500/10 border border-yellow-500/30 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm text-text-secondary">
+                            <div className="font-medium text-yellow-300 mb-1">
+                                Agent declared success but produced no output.
+                            </div>
+                            No registered artifacts, empty diff, no PR on the linked task.
+                            Likely a hallucinated completion. Open the chat or stdout.log to
+                            see what the agent actually did, then retry the task with a
+                            clearer prompt or check the task description for ambiguity.
+                        </div>
+                    </div>
+                )
+            )}
+
+            {/* Summary */}
+            {run.summary && (
+                <div className="card bg-bg-hover border-l-4" style={{ borderLeftColor: s.bg }}>
+                    <p className="text-sm text-text-primary">{run.summary}</p>
+                </div>
+            )}
+
+            {/* Error */}
+            {run.error && (
+                <div className="card bg-red-500/5 border border-red-500/20">
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                        <div>
+                            <div className="text-sm font-medium text-red-400 mb-1">Error</div>
+                            <pre className="text-xs text-text-secondary whitespace-pre-wrap font-mono">{run.error}</pre>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Conversation — bounded preview of the most recent messages
+                tagged with this run_id. Capped at a fixed height (no infinite
+                scroll); older turns are summarized as a count. AP-109: when
+                there's a task, the whole card links to the combined agent
+                chat scoped to this task, where the full, send-able thread
+                lives. Moved up top (was below the metrics/diagnostics) so the
+                conversation is the first thing you read on the run. */}
+            {(() => {
+                const { shown, hiddenCount } = previewEvents(events);
+                const inner = (
+                    <>
+                        <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+                            <MessageSquare className="w-5 h-5" /> Conversation
+                            {run.task_id && run.agent_id && (
+                                <span className="ml-auto text-xs text-accent-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                                    Open in chat →
+                                </span>
+                            )}
+                        </h2>
+                        {events.length === 0 ? (
+                            <p className="text-sm text-text-tertiary">
+                                {isActive ? 'Waiting for the agent…' : 'No messages on this run.'}
+                            </p>
+                        ) : (
+                            <>
+                                {hiddenCount > 0 && (
+                                    <p className="text-xs text-text-tertiary mb-3">
+                                        {hiddenCount} earlier message{hiddenCount === 1 ? '' : 's'} hidden — open in chat for the full thread.
+                                    </p>
+                                )}
+                                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                                    {shown.map((m) => (
+                                        <MessageRow key={m.id} m={m} />
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </>
+                );
+                if (run.task_id && run.agent_id) {
+                    return (
+                        <Link
+                            to={`/forge/agents/${run.agent_id}?tab=chat&scope=${encodeURIComponent(`task:${run.task_id}`)}`}
+                            className="card block group hover:border-accent-primary/40 transition-colors"
+                            title="Open in agent chat — Stop in chat pauses this run"
+                        >
+                            {inner}
+                        </Link>
+                    );
+                }
+                return <div className="card">{inner}</div>;
+            })()}
+
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <MetricCard
+                    icon={Clock} label="Duration"
+                    value={run.duration_ms != null ? formatDuration(run.duration_ms) : '\u2014'}
+                    color="#7c4dff"
+                />
+                <MetricCard
+                    icon={Zap} label="Tokens"
+                    value={totalTokens > 0 ? totalTokens.toLocaleString() : '\u2014'}
+                    sub={totalTokens > 0 ? `${(run.input_tokens || 0).toLocaleString()} in / ${(run.output_tokens || 0).toLocaleString()} out` : null}
+                    color="#00bcd4"
+                />
+                <MetricCard
+                    icon={DollarSign} label="Cost"
+                    value={run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)}` : '\u2014'}
+                    color="#f1c40f"
+                />
+                <MetricCard
+                    icon={Bot} label="Model"
+                    value={run.model_used || '\u2014'}
+                    sub={run.provider || null}
+                    color="#2ecc71"
+                />
+            </div>
+
+            {/* Timeline */}
+            <div className="card">
+                <h2 className="text-lg font-semibold text-text-primary mb-4">Timeline</h2>
+                <div className="space-y-3">
+                    <TimelineEntry label="Created" time={run.created_at} />
+                    {run.started_at && <TimelineEntry label="Started" time={run.started_at} />}
+                    {run.completed_at && <TimelineEntry label="Completed" time={run.completed_at} color="#2ecc71" />}
+                    {run.cancelled_at && <TimelineEntry label="Cancelled" time={run.cancelled_at} color="#9aa0a6" />}
+                    {run.finished_at && run.status === 'failed' && <TimelineEntry label="Failed" time={run.finished_at} color="#e74c3c" />}
+                </div>
+            </div>
+
+            {/* Trigger Event */}
+            {triggerEvent && (
+                <div className="card">
+                    <h2 className="text-lg font-semibold text-text-primary mb-4">Trigger Event</h2>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                        <div><span className="text-text-tertiary">Source:</span> <span className="text-text-primary">{triggerEvent.source}</span></div>
+                        <div><span className="text-text-tertiary">Type:</span> <span className="text-text-primary">{triggerEvent.event_type}</span></div>
+                        <div><span className="text-text-tertiary">Actor:</span> <span className="text-text-primary">{triggerEvent.actor || '\u2014'}</span></div>
+                        <div><span className="text-text-tertiary">Subject:</span> <span className="text-text-primary">{triggerEvent.subject_type ? `${triggerEvent.subject_type}:${triggerEvent.subject_id}` : '\u2014'}</span></div>
+                    </div>
+                </div>
+            )}
+
+            {/* Trace ids — each turn shares one. Useful for grepping logs. */}
+            {(() => {
+                const traceIds = [...new Set(events.map(m => m.trace_id).filter(Boolean))];
+                if (traceIds.length === 0) return null;
+                return (
+                    <div className="text-xs text-text-tertiary">
+                        trace_id{traceIds.length > 1 ? 's' : ''}:{' '}
+                        {traceIds.map(t => <code key={t} className="font-mono mr-2">{t}</code>)}
+                    </div>
+                );
+            })()}
+
+            {/* Metadata — AP-109: meaningful links, not bare IDs. Each row
+                shows the human label as the primary link and tucks the raw
+                id underneath in small monospace for grep-ability. */}
+            <div className="card">
+                <h2 className="text-lg font-semibold text-text-primary mb-4">Details</h2>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                    <DetailLink
+                        label="Agent"
+                        to={`/forge/agents/${run.agent_id}`}
+                        primary={run.agent_name || `agent ${run.agent_id.slice(0, 8)}`}
+                        id={run.agent_id}
+                        icon={Bot}
+                    />
+                    {run.task_id && (
+                        <DetailLink
+                            label="Task"
+                            to={`/studio/tasks/${run.task_id}`}
+                            primary={run.task_title || run.task_key || `task ${run.task_id.slice(0, 8)}`}
+                            sub={run.task_key && run.task_title ? run.task_key : null}
+                            id={run.task_id}
+                            icon={ClipboardList}
+                        />
+                    )}
+                    {run.project_id && (
+                        <DetailLink
+                            label="Project"
+                            to={`/studio/project/${run.project_id}`}
+                            primary={run.project_name || `project ${run.project_id.slice(0, 8)}`}
+                            id={run.project_id}
+                            icon={Folder}
+                        />
+                    )}
+                    <div>
+                        <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Run</div>
+                        <div className="text-text-primary font-mono text-xs">{run.id}</div>
+                    </div>
+                    {run.workspace_id && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Workspace</div>
+                            <div className="text-text-primary font-mono text-xs">{run.workspace_id}</div>
+                        </div>
+                    )}
+                    {run.trigger_event && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Trigger</div>
+                            <div className="text-text-primary">{run.trigger_event}</div>
+                        </div>
+                    )}
+                    {run.updated_at && (
+                        <div>
+                            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">Last updated</div>
+                            <div className="text-text-primary">{new Date(run.updated_at).toLocaleString()}</div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Diagnostics — where the agent ran, which branch, which
+                claude session. Surfaces the silent-empty-dir failure mode
+                so the user knows immediately why a run "did nothing". Moved
+                to the bottom: it's deep technical detail, below the
+                conversation/metrics/details a human reads first. */}
+            <RunDiagnostics run={run} />
+        </div>
+    );
+}
+
+// AP-113: pre-run checklist shown on the READY screen.
+const CHECK_STYLE = {
+    ok:   { icon: CheckCircle,   color: '#2ecc71' },
+    warn: { icon: AlertTriangle, color: '#f1c40f' },
+    fail: { icon: XCircle,       color: '#e74c3c' },
+};
+
+function ReadyChecksCard({ data }) {
+    if (!data || !Array.isArray(data.checks)) return null;
+    const { checks, ready, summary } = data;
+    return (
+        <div className={`card border ${ready ? 'border-border-subtle' : 'border-red-500/40'}`}>
+            <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" /> Pre-run checks
+                </h2>
+                <span className="text-xs text-text-tertiary">
+                    {summary.ok} ok · {summary.warn} warning{summary.warn === 1 ? '' : 's'}
+                    {summary.fail ? ` · ${summary.fail} blocking` : ''}
+                </span>
+            </div>
+            {!ready && (
+                <div className="text-sm text-red-400 mb-3">
+                    This run can't start until the blocking checks are resolved.
+                </div>
+            )}
+            <div className="space-y-2">
+                {checks.map((c) => {
+                    const s = CHECK_STYLE[c.status] || CHECK_STYLE.ok;
+                    const Icon = s.icon;
+                    return (
+                        <div key={c.key} className="flex items-start gap-2.5">
+                            <Icon className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: s.color }} />
+                            <div className="min-w-0">
+                                <div className="text-sm text-text-primary">{c.label}</div>
+                                <div className="text-xs text-text-tertiary">{c.detail}</div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+function MessageRow({ m }) {
+    const role = m.role || 'assistant';
+    const cfg = ROLE_CONFIG[role] || ROLE_CONFIG.assistant;
+    const Icon = cfg.icon;
+    return (
+        <div className="flex gap-3">
+            <div
+                className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: cfg.color + '18' }}
+            >
+                <Icon className="w-4 h-4" style={{ color: cfg.color }} />
+            </div>
+            <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-xs font-semibold text-text-primary capitalize">{cfg.label}</span>
+                    {m.tool_name && role === 'tool' && (
+                        <span className="text-xs text-text-tertiary font-mono">{m.tool_name}</span>
+                    )}
+                    {m.created_at && (
+                        <span className="text-xs text-text-tertiary ml-auto">{timeAgo(m.created_at)}</span>
+                    )}
+                </div>
+                <pre
+                    className="text-sm text-text-secondary whitespace-pre-wrap break-words font-sans bg-bg-app/40 rounded-md p-3 border border-border-subtle/30"
+                    style={{ wordBreak: 'break-word' }}
+                >
+                    {m.content || '(empty)'}
+                </pre>
+                <ToolInput toolName={m.tool_name} toolInput={m.tool_input} />
+            </div>
+        </div>
+    );
+}
+
+const ROLE_CONFIG = {
+    user:      { icon: User,          label: 'You',       color: '#3b82f6' },
+    assistant: { icon: Bot,           label: 'Agent',     color: '#10b981' },
+    tool:      { icon: Wrench,        label: 'Tool',      color: '#f97316' },
+    system:    { icon: MessageSquare, label: 'System',    color: '#a855f7' },
+};
+
+function DetailLink({ label, to, primary, sub, id, icon: Icon }) {
+    return (
+        <Link to={to} className="block group">
+            <div className="text-text-tertiary text-xs uppercase tracking-wider mb-0.5">{label}</div>
+            <div className="flex items-center gap-1.5 text-accent-primary group-hover:underline">
+                {Icon && <Icon className="w-3.5 h-3.5" />}
+                <span className="truncate">{primary}</span>
+            </div>
+            {sub && <div className="text-text-secondary text-xs mt-0.5 truncate">{sub}</div>}
+            {id && <div className="text-text-tertiary text-[10px] font-mono mt-0.5 truncate">{id}</div>}
+        </Link>
+    );
+}
+
+// AP-126: structured artifact links the agent registered for this run.
+// Backend caps the list at 50; here we render them as a tight grid with
+// per-kind icons so the human's eye gets "PR | report | log" at a
+// glance rather than wading through 50 generic links.
+const ARTIFACT_ICON = {
+    pr: GitPullRequest,
+    commit: GitCommit,
+    file: File,
+    log: ScrollText,
+    report: FileText,
+    url: LinkIcon,
+};
+
+function ArtifactsPanel({ artifacts }) {
+    return (
+        <div className="card space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                <Package className="w-4 h-4 text-accent-primary" />
+                Artifacts
+                <span className="text-text-tertiary text-xs">
+                    {artifacts.length}
+                </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {artifacts.map((a, i) => (
+                    <ArtifactRow key={i} artifact={a} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+
+// One artifact row. HTTP URLs open in a new tab; everything else (local
+// file paths the daemon registered) gets a click-to-copy affordance —
+// the user pastes into their terminal to `cat`/`open` the file locally.
+// Both cases also expose a separate Copy button so you can grab the
+// underlying string without leaving the page.
+function ArtifactRow({ artifact: a }) {
+    const Icon = ARTIFACT_ICON[a.kind] || LinkIcon;
+    const isHttp = /^https?:\/\//i.test(a.url);
+    const [copied, setCopied] = React.useState(false);
+
+    const copy = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+            await navigator.clipboard.writeText(a.url || '');
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+        } catch {
+            // Fallback for non-secure contexts: select via a hidden textarea.
+            const ta = document.createElement('textarea');
+            ta.value = a.url || '';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch {}
+            document.body.removeChild(ta);
+        }
+    };
+
+    const body = (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-bg-hover hover:bg-bg-app transition-colors min-w-0 w-full text-left">
+            <Icon className="w-4 h-4 text-text-secondary flex-shrink-0" />
+            <div className="min-w-0 flex-1">
+                <div className="text-sm text-text-primary truncate">
+                    {a.label || a.url}
+                </div>
+                {a.label && (
+                    <div className="text-xs text-text-tertiary truncate font-mono">
+                        {a.url}
+                    </div>
+                )}
+            </div>
+            <button
+                type="button"
+                onClick={copy}
+                className="p-1 rounded hover:bg-bg-card text-text-tertiary hover:text-text-primary flex-shrink-0 transition-colors"
+                title={copied ? 'Copied' : 'Copy path'}
+            >
+                {copied
+                    ? <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    : <Copy className="w-3.5 h-3.5" />}
+            </button>
+        </div>
+    );
+
+    // HTTPS artifact → wrap the body in an anchor so clicking the label
+    // navigates. The Copy button stopPropagation's its click so it
+    // doesn't open the link.
+    if (isHttp) {
+        return (
+            <a href={a.url} target="_blank" rel="noreferrer" className="block">
+                {body}
+            </a>
+        );
+    }
+    // Local path artifact → the whole row is a copy button. No
+    // confusing "click does nothing" state, no need for the user to know
+    // which icon does which.
+    return (
+        <button type="button" onClick={copy} className="block w-full text-left">
+            {body}
+        </button>
+    );
+}
+
+// AP-296 (T5): plain-language badge for where this run STARTED — fresh, stale,
+// or pinned. Maps the daemon's worktree reason (also in meta.json) to one line
+// anyone can read. Technical detail (branch) hides in the title/hover.
+function FreshnessBadge({ reason, branch }) {
+    if (!branch) return null;   // non-git run — nothing to say about freshness
+    const MAP = {
+        pinned_stale_base: ['📌', 'Pinned to a fixed point', 'text-yellow-400'],
+        rebase_conflict_kept_base: ['⚠️', "Kept its base — couldn't auto-update (conflict)", 'text-yellow-400'],
+        base_not_found_used_head: ['⚠️', 'Base not found — started from the last copy', 'text-yellow-400'],
+    };
+    const [icon, text, color] = MAP[reason] || ['✅', 'Started current', 'text-green-400'];
+    return (
+        <div className={`flex items-center gap-1.5 text-sm mb-2 ${color}`} title={branch}>
+            <span>{icon}</span><span>{text}</span>
+        </div>
+    );
+}
+
+// Run diagnostics — surfaces the daemon's view of WHERE the agent ran.
+// Especially calls out the "agent ran in an empty scratch dir" failure
+// mode (materialize_reason="repo_path_not_found:...") that used to be
+// silent.
+function RunDiagnostics({ run }) {
+    const reason = run.materialize_reason || '';
+    const fellBack = reason.startsWith('repo_path_not_found');
+    const noRepo = reason === 'no_repo_path';
+
+    return (
+        <div className="card space-y-2">
+            <h2 className="text-lg font-semibold text-text-primary mb-2">
+                Where it ran
+            </h2>
+
+            <FreshnessBadge reason={reason} branch={run.worktree_branch} />
+
+            {fellBack && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded p-3 mb-2 text-sm text-red-300">
+                    <div className="font-semibold mb-1">⚠ Agent ran in an empty scratch directory.</div>
+                    <div className="text-xs text-text-secondary">
+                        The repo path stamped on the dispatch frame didn't exist on the daemon's host machine.
+                        The agent had no codebase to work on — that's why nothing was produced.
+                        Detail: <code className="text-text-tertiary">{reason}</code>.
+                        Fix: attach a valid repo via Project Settings → Repos.
+                    </div>
+                </div>
+            )}
+            {noRepo && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-3 mb-2 text-sm text-yellow-300">
+                    No repo on the dispatch frame — agent ran in its scratch workdir.
+                    Attach a repo on the project settings page if it should have a codebase.
+                </div>
+            )}
+
+            <DiagRow label="Workdir (cwd)" value={run.workdir} mono />
+            <DiagRow label="Worktree branch" value={run.worktree_branch} mono />
+            <DiagRow label="Worktree path (stamped)" value={run.worktree_path}
+                hint="The path the backend asked the daemon to use. ~ resolves on the daemon host."
+                mono />
+            <DiagRow label="Claude session id" value={run.session_id} mono />
+            {run.session_id && run.workdir && (
+                <DiagRow label="Session file"
+                    value={`~/.claude/projects/${encodeClaudePath(run.workdir)}/${run.session_id}.jsonl`}
+                    hint="On the daemon host. Useful for verifying --resume found the right file."
+                    mono />
+            )}
+            {run.log_dir && (
+                <>
+                    <DiagRow label="Per-run logs" value={run.log_dir}
+                        hint="On the daemon host. Per-run dir — stdout.log + stderr.log + meta.json. ls $(echo VALUE | sed s~^~~$HOME~) — or use the helpers below."
+                        mono />
+                    <DiagRow label="    stdout"
+                        value={`${run.log_dir.replace(/\/$/, '')}/stdout.log`}
+                        hint="Full raw claude stream-json output, lossless."
+                        mono />
+                    <DiagRow label="    stderr"
+                        value={`${run.log_dir.replace(/\/$/, '')}/stderr.log`}
+                        hint="claude stderr — error messages land here."
+                        mono />
+                    <DiagRow label="    meta.json"
+                        value={`${run.log_dir.replace(/\/$/, '')}/meta.json`}
+                        hint="cwd / branch / session_id / materialize_reason snapshot at run end."
+                        mono />
+                </>
+            )}
+            <DiagRow label="Daemon log (global)"
+                value="~/.agentira/daemon.log"
+                hint="On the daemon host. Interleaved across all runs — grep by trace_id."
+                mono />
+        </div>
+    );
+}
+
+function DiagRow({ label, value, hint, mono }) {
+    return (
+        <div className="grid grid-cols-[170px_1fr] gap-3 items-baseline">
+            <div className="text-xs text-text-tertiary">{label}</div>
+            <div>
+                <div className={`text-sm text-text-primary break-all ${mono ? 'font-mono' : ''}`}>
+                    {value || <span className="text-text-tertiary italic">—</span>}
+                </div>
+                {hint && <div className="text-[11px] text-text-tertiary mt-0.5">{hint}</div>}
+            </div>
+        </div>
+    );
+}
+
+// claude-code encodes the cwd by replacing path separators with '-' and
+// stripping leading '/'. Mirrors what `~/.claude/projects/` directory
+// names look like so we can show the user where to find the session.
+function encodeClaudePath(p) {
+    if (!p) return '';
+    return p.replace(/^\//, '-').replace(/\//g, '-').replace(/\/$/, '');
+}
+
+// Terminal + agent-declared-success. Distinct from "process completed
+// cleanly" — the agent has to explicitly say outcome=succeeded.
+function isTerminalSuccess(run) {
+    return run.outcome === 'succeeded';
+}
+
+// Did the run produce ANY artifact a human can open? Artifacts list,
+// non-empty git diff, or a PR URL on the linked task.
+function hasAnyOutput(run) {
+    if (Array.isArray(run.artifacts) && run.artifacts.length > 0) return true;
+    if ((run.diff_stat || '').trim()) return true;
+    if ((run.task_pr_url || '').trim()) return true;
+    return false;
+}
+
+// Bounded conversation preview. The Run page shows only the most recent
+// turns inside a fixed-height box — it never grows without limit. The
+// full, send-able thread lives in the combined chat (click the card).
+// Returns the tail slice plus how many older messages were dropped.
+const PREVIEW_EVENT_LIMIT = 8;
+export function previewEvents(events, limit = PREVIEW_EVENT_LIMIT) {
+    if (!Array.isArray(events) || events.length === 0) {
+        return { shown: [], hiddenCount: 0 };
+    }
+    if (events.length <= limit) {
+        return { shown: events, hiddenCount: 0 };
+    }
+    return { shown: events.slice(-limit), hiddenCount: events.length - limit };
+}
+
+
+function MetricCard({ icon: Icon, label, value, sub, color }) {
+    return (
+        <div className="card flex items-start gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
+                <Icon className="w-4 h-4" style={{ color }} />
+            </div>
+            <div className="min-w-0">
+                <div className="text-lg font-bold text-text-primary truncate">{value}</div>
+                <div className="text-xs text-text-secondary">{label}</div>
+                {sub && <div className="text-xs text-text-tertiary mt-0.5 truncate">{sub}</div>}
+            </div>
+        </div>
+    );
+}
+
+function TimelineEntry({ label, time, color = '#7c4dff' }) {
+    return (
+        <div className="flex items-center gap-3">
+            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+            <span className="text-sm text-text-primary font-medium w-24">{label}</span>
+            <span className="text-sm text-text-secondary">{new Date(time).toLocaleString()}</span>
+            <span className="text-xs text-text-tertiary ml-auto">{timeAgo(time)}</span>
+        </div>
+    );
+}
+
+function formatDuration(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function timeAgo(isoString) {
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}

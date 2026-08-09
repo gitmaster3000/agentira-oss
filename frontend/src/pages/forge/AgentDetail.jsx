@@ -1,0 +1,2546 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+    Bot, ArrowLeft, Wifi, WifiOff, Loader, Play, Clock, DollarSign,
+    MessageSquare, Settings2, Activity, Webhook, Calendar, Send,
+    ChevronDown, Eye, EyeOff, Zap, RefreshCw, ToggleLeft, ToggleRight,
+    Terminal, User, Wrench, AlertCircle, CheckCircle, XCircle, Plus, X, Folder, FolderPlus, Check,
+    MessageSquarePlus, ClipboardList, Square,
+    Info as InfoIcon,
+} from 'lucide-react';
+import { api } from '../../api';
+import { ToolInput } from '../../components/AskUserQuestionCard';
+import { Breadcrumbs } from '../../components/Breadcrumbs';
+import { GitTokenField } from '../../components/GitTokenField';
+import { mergeWindow, serverLoadedCount } from '../../lib/chatPagination';
+
+const STATUS_STYLES = {
+    online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
+    offline: { color: '#5f6368', icon: WifiOff, label: 'Offline' },
+    busy:    { color: '#f1c40f', icon: Loader, label: 'Busy' },
+};
+
+const TABS = [
+    { id: 'overview', label: 'Overview', icon: Activity },
+    { id: 'chat', label: 'Chat', icon: MessageSquare },
+    { id: 'runs', label: 'Runs', icon: Play },
+    { id: 'projects', label: 'Projects', icon: Folder },
+    { id: 'config', label: 'Config', icon: Settings2 },
+    { id: 'webhooks', label: 'Webhooks', icon: Webhook },
+    { id: 'live', label: 'Live', icon: Eye },
+];
+
+export function AgentDetail() {
+    const { agentId } = useParams();
+    const [searchParams] = useSearchParams();
+    // AP-109: deep links from RunDetail open the chat panel pinned to the
+    // run's task scope. `?tab=chat&scope=task:<id>` is the contract.
+    const initialTab = searchParams.get('tab') || 'overview';
+    const initialScope = searchParams.get('scope') || null;
+    const [agent, setAgent] = useState(null);
+    const [tab, setTab] = useState(initialTab);
+    const [loading, setLoading] = useState(true);
+
+    const loadAgent = useCallback(async () => {
+        try {
+            const data = await api.forge.getAgent(agentId);
+            setAgent(data);
+        } catch (err) {
+            console.error('Failed to load agent:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [agentId]);
+
+    useEffect(() => {
+        loadAgent();
+        const interval = setInterval(loadAgent, 8000);
+        return () => clearInterval(interval);
+    }, [loadAgent]);
+
+    if (loading) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary">Loading agent...</div>;
+    }
+    if (!agent) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary">Agent not found</div>;
+    }
+
+    const status = STATUS_STYLES[agent.status] || STATUS_STYLES.offline;
+    const StatusIcon = status.icon;
+
+    return (
+        <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-5 pb-0 space-y-4">
+                <Breadcrumbs entity="agent" data={agent} />
+                <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-bg-hover flex items-center justify-center">
+                        <Bot className="w-5 h-5 text-text-secondary" />
+                    </div>
+                    <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-xl font-bold text-text-primary">{agent.name}</h1>
+                            <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                                style={{ backgroundColor: status.color + '20', color: status.color }}
+                            >
+                                <StatusIcon className="w-3 h-3" />
+                                {status.label}
+                            </span>
+                        </div>
+                        <div className="text-sm text-text-tertiary flex items-center gap-2">
+                            {agent.runtime_provider && (
+                                <span
+                                    className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400"
+                                    title={agent.runtime_version || agent.runtime_provider}
+                                >
+                                    {agent.runtime_provider}
+                                </span>
+                            )}
+                            <span>{agent.model || 'no model set'}</span>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm text-text-secondary">
+                        <span className="flex items-center gap-1"><Play className="w-3.5 h-3.5" /> {agent.total_runs} runs</span>
+                        <span className="flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" /> ${agent.total_cost_usd.toFixed(4)}</span>
+                        {agent.status === 'busy' && (
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        await api.forge.resetAgentStatus(agentId);
+                                        loadAgent();
+                                    } catch (err) {
+                                        console.error('Reset failed:', err);
+                                    }
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+                                title="Reset status — unstick agent and fail orphaned runs"
+                            >
+                                <RefreshCw className="w-3 h-3" /> Reset
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-0 border-b border-border-subtle -mx-6 px-6">
+                    {TABS.map((t) => (
+                        <button
+                            key={t.id}
+                            onClick={() => setTab(t.id)}
+                            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                                tab === t.id
+                                    ? 'border-accent-primary text-accent-primary'
+                                    : 'border-transparent text-text-tertiary hover:text-text-secondary'
+                            }`}
+                        >
+                            <t.icon className="w-4 h-4" />
+                            {t.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {/* Tab Content */}
+            <div className="flex-1 overflow-auto">
+                {tab === 'overview' && <OverviewTab agent={agent} onTab={setTab} />}
+                {tab === 'chat' && <ChatTab agentId={agentId} agent={agent} initialScope={initialScope} />}
+                {tab === 'runs' && <RunsTab agentId={agentId} />}
+                {tab === 'projects' && <ProjectsTab agentId={agentId} />}
+                {tab === 'config' && <ConfigTab agent={agent} onSaved={loadAgent} />}
+                {tab === 'webhooks' && <WebhooksTab agentId={agentId} />}
+                {tab === 'live' && <LiveTab agentId={agentId} agent={agent} />}
+            </div>
+        </div>
+    );
+}
+
+
+// ── Overview Tab ────────────────────────────────────────────────────────
+
+function OverviewTab({ agent, onTab }) {
+    const [costs, setCosts] = useState(null);
+    const [runtimeCosts, setRuntimeCosts] = useState(null);
+    const [runtimeStatus, setRuntimeStatus] = useState(null);
+    const [pricing, setPricing] = useState(null);
+    const [projects, setProjects] = useState([]);
+    const [costFocus, setCostFocus] = useState(false);
+    const costRef = useRef(null);
+
+    useEffect(() => {
+        api.forge.getAgentCosts(agent.id).then(setCosts).catch(console.error);
+        api.forge.getRuntimeStatus(agent.id).then(setRuntimeStatus).catch(console.error);
+        api.forge.getRuntimeCosts(agent.id).then(setRuntimeCosts).catch(console.error);
+        api.forge.getPricing().then(setPricing).catch(console.error);
+        api.forge.listAgentProjects(agent.id).then(setProjects).catch(() => setProjects([]));
+    }, [agent.id]);
+
+    const _price = (model) => {
+        if (!model || !pricing) return null;
+        return pricing[model] || pricing[`google/${model}`] || pricing[model.replace('google/', '')];
+    };
+
+    return (
+        <div className="p-6 space-y-6">
+            {/* Quick Stats */}
+            {!costFocus && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <StatCard icon={Play} label="Total Runs" value={agent.total_runs} color="#7c4dff" />
+                    <StatCard
+                        icon={DollarSign}
+                        label="Total Cost"
+                        value={`$${(runtimeCosts?.runtime?.estimated_cost_usd || agent.total_cost_usd).toFixed(4)}`}
+                        color="#f1c40f"
+                        onClick={() => { setCostFocus(true); setTimeout(() => costRef.current?.scrollIntoView({ behavior: 'smooth' }), 50); }}
+                        expandable
+                    />
+                    <StatCard
+                        icon={Folder}
+                        label="Assigned Projects"
+                        value={projects.length}
+                        sub={projects.length > 0
+                            ? projects.slice(0, 2).map(p => p.name).join(', ') + (projects.length > 2 ? ` +${projects.length - 2} more` : '')
+                            : 'Not in any project'}
+                        color="#ec4899"
+                        onClick={() => onTab && onTab('projects')}
+                        expandable={projects.length > 0}
+                    />
+                    <StatCard icon={Clock} label="Last Heartbeat" value={agent.last_heartbeat ? timeAgo(agent.last_heartbeat) : 'Never'} color="#00bcd4" />
+                    <StatCard
+                        icon={Calendar}
+                        label="Schedule"
+                        value={agent.schedule_enabled ? `${agent.schedule_start} - ${agent.schedule_end}` : 'Disabled'}
+                        sub={agent.schedule_enabled ? `${agent.schedule_tz} · ${agent.schedule_days}` : null}
+                        color="#2ecc71"
+                    />
+                </div>
+            )}
+
+            {/* Cost Focus Header */}
+            {costFocus && (
+                <div className="flex items-center justify-between" ref={costRef}>
+                    <h2 className="text-lg font-bold text-text-primary flex items-center gap-2">
+                        <DollarSign className="w-5 h-5 text-yellow-400" />
+                        Cost &amp; Usage Detail
+                    </h2>
+                    <button onClick={() => setCostFocus(false)} className="text-sm text-accent-primary hover:underline">Back to Overview</button>
+                </div>
+            )}
+
+            {/* Cost Detail Table — shown in focus mode */}
+            {costFocus && (
+                <div className="card space-y-4">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-xs text-text-tertiary uppercase tracking-wider border-b border-border-subtle">
+                                    <th className="text-left pb-2 pr-4">Source / Model</th>
+                                    <th className="text-right pb-2 px-3">Input Tokens</th>
+                                    <th className="text-right pb-2 px-3">Output Tokens</th>
+                                    <th className="text-right pb-2 px-3">Cache Read</th>
+                                    <th className="text-right pb-2 px-3">Input $/1M</th>
+                                    <th className="text-right pb-2 px-3">Output $/1M</th>
+                                    <th className="text-right pb-2 px-3">Input Cost</th>
+                                    <th className="text-right pb-2 px-3">Output Cost</th>
+                                    <th className="text-right pb-2 pl-3">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {/* Runtime rows */}
+                                {runtimeCosts?.runtime && runtimeCosts.runtime.total_tokens > 0 && (() => {
+                                    const rt = runtimeCosts.runtime;
+                                    const p = _price(rt.model);
+                                    const inC = rt.total_input_tokens / 1_000_000 * (p?.input || 0);
+                                    const outC = rt.total_output_tokens / 1_000_000 * (p?.output || 0);
+                                    return (
+                                        <tr className="border-b border-border-subtle/50 bg-bg-hover/30">
+                                            <td className="py-3 pr-4">
+                                                <div className="text-text-primary font-medium">{rt.model}</div>
+                                                <div className="text-xs text-text-tertiary">Runtime (OpenClaw) · {rt.session_count} sessions</div>
+                                            </td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{rt.total_input_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{rt.total_output_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary font-mono">{(rt.total_cache_read || 0).toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.input}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.output}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${inC.toFixed(4)}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${outC.toFixed(4)}</td>
+                                            <td className="text-right py-3 pl-3 text-emerald-400 font-semibold">${(inC + outC).toFixed(4)}</td>
+                                        </tr>
+                                    );
+                                })()}
+                                {/* Forge tracked runs */}
+                                {costs && Object.entries(costs.by_model).map(([model, data]) => {
+                                    const p = _price(model);
+                                    const inC = data.input_tokens / 1_000_000 * (p?.input || 0);
+                                    const outC = data.output_tokens / 1_000_000 * (p?.output || 0);
+                                    const total = data.cost_usd || (inC + outC);
+                                    return (
+                                        <tr key={model} className="border-b border-border-subtle/50">
+                                            <td className="py-3 pr-4">
+                                                <div className="text-text-primary font-medium">{model}</div>
+                                                <div className="text-xs text-text-tertiary">Forge Runs · {data.runs} runs</div>
+                                            </td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{data.input_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary font-mono">{data.output_tokens.toLocaleString()}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">—</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.input}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-tertiary">{p ? `$${p.output}` : '—'}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${inC.toFixed(4)}</td>
+                                            <td className="text-right py-3 px-3 text-text-secondary">${outC.toFixed(4)}</td>
+                                            <td className="text-right py-3 pl-3 text-emerald-400 font-semibold">${total.toFixed(4)}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    {/* Totals */}
+                    {runtimeCosts?.runtime && (
+                        <div className="flex justify-between items-center pt-3 border-t border-border-subtle text-sm">
+                            <span className="text-text-tertiary">
+                                Total: {(runtimeCosts.runtime.total_input_tokens + runtimeCosts.runtime.total_output_tokens).toLocaleString()} tokens
+                            </span>
+                            <span className="text-text-primary font-bold text-lg">
+                                ${(runtimeCosts.runtime.estimated_cost_usd || 0).toFixed(4)}
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* OpenClaw Live Status — hidden in cost focus */}
+            {!costFocus && (
+            <div className="card">
+                <h3 className="text-sm font-semibold text-text-primary mb-3">OpenClaw Status</h3>
+                {runtimeStatus?.error ? (
+                    <div className="text-xs text-red-400">{runtimeStatus.error}</div>
+                ) : (
+                    <>
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className={`w-3 h-3 rounded-full ${runtimeStatus?.online ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                            <span className="text-sm text-text-primary font-medium">
+                                {runtimeStatus?.online ? 'Online' : 'No active sessions'}
+                            </span>
+                            {runtimeStatus?.model && (
+                                <span className="px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary">{runtimeStatus.model}</span>
+                            )}
+                            {runtimeStatus?.heartbeat_enabled && (
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-xs text-emerald-400">heartbeat</span>
+                            )}
+                        </div>
+                        {runtimeStatus?.sessions?.length > 0 && (
+                            <div className="space-y-1.5">
+                                <div className="text-xs text-text-tertiary font-medium uppercase tracking-wider">Active Sessions</div>
+                                {runtimeStatus.sessions.map((s, i) => (
+                                    <div key={i} className="flex items-center justify-between px-3 py-2 rounded bg-bg-hover text-xs">
+                                        <span className="text-text-primary font-mono">{s.key}</span>
+                                        <div className="flex items-center gap-3 text-text-secondary">
+                                            <span>{s.model}</span>
+                                            <span>{((s.input_tokens || 0) + (s.output_tokens || 0)).toLocaleString()} tok</span>
+                                            {s.percent_used != null && (
+                                                <span className={s.percent_used > 80 ? 'text-red-400 font-medium' : ''}>
+                                                    {s.percent_used}% ctx
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        {runtimeStatus?.total_input_tokens > 0 && (
+                            <div className="flex gap-4 mt-3 pt-3 border-t border-border-subtle text-xs text-text-tertiary">
+                                <span>Input: {runtimeStatus.total_input_tokens.toLocaleString()}</span>
+                                <span>Output: {runtimeStatus.total_output_tokens.toLocaleString()}</span>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+            )}
+
+            {/* Cost Breakdown — Runtime & Forge — hidden in cost focus */}
+            {!costFocus && runtimeCosts?.runtime && runtimeCosts.runtime.total_tokens > 0 && (
+                <div className="card">
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Usage &amp; Cost (Runtime)</h3>
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Input Tokens</div>
+                                <div className="text-lg font-semibold text-text-primary">{runtimeCosts.runtime.total_input_tokens.toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Output Tokens</div>
+                                <div className="text-lg font-semibold text-text-primary">{runtimeCosts.runtime.total_output_tokens.toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Cache Read</div>
+                                <div className="text-lg font-semibold text-text-primary">{(runtimeCosts.runtime.total_cache_read || 0).toLocaleString()}</div>
+                            </div>
+                            <div className="p-3 rounded-md bg-bg-hover">
+                                <div className="text-xs text-text-tertiary mb-1">Estimated Cost</div>
+                                <div className="text-lg font-semibold text-emerald-400">${runtimeCosts.runtime.estimated_cost_usd.toFixed(4)}</div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-text-tertiary px-1">
+                            <span>Model: <span className="text-text-secondary">{runtimeCosts.runtime.model}</span></span>
+                            <span>Sessions: <span className="text-text-secondary">{runtimeCosts.runtime.session_count}</span></span>
+                            {(() => {
+                                const m = runtimeCosts.runtime.model;
+                                if (!m || !pricing) return null;
+                                const p = pricing[m] || pricing[`google/${m}`] || pricing[m.replace('google/', '')];
+                                if (!p) return <span className="text-yellow-400">pricing not found for {m}</span>;
+                                const inCost = (runtimeCosts.runtime.total_input_tokens / 1_000_000 * p.input);
+                                const outCost = (runtimeCosts.runtime.total_output_tokens / 1_000_000 * p.output);
+                                return <>
+                                    <span>Input: <span className="text-text-secondary">${p.input}/1M tok</span></span>
+                                    <span>Output: <span className="text-text-secondary">${p.output}/1M tok</span></span>
+                                    <span>Calculated: <span className="text-emerald-400">${(inCost + outCost).toFixed(4)}</span></span>
+                                </>;
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {!costFocus && costs && Object.keys(costs.by_model).length > 0 && (
+                <div className="card">
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Cost Breakdown by Model (Forge Runs)</h3>
+                    <div className="space-y-2">
+                        {Object.entries(costs.by_model).map(([model, data]) => (
+                            <div key={model} className="flex items-center justify-between px-3 py-2 rounded-md bg-bg-hover text-sm">
+                                <div>
+                                    <span className="text-text-primary font-medium">{model}</span>
+                                    <span className="text-text-tertiary ml-2">{data.runs} runs</span>
+                                </div>
+                                <div className="flex items-center gap-4 text-text-secondary text-xs">
+                                    <span>In: {data.input_tokens.toLocaleString()}</span>
+                                    <span>Out: {data.output_tokens.toLocaleString()}</span>
+                                    <span className="font-medium text-sm">${data.cost_usd.toFixed(4)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex justify-end mt-3 pt-3 border-t border-border-subtle text-sm">
+                        <span className="text-text-secondary">Total: </span>
+                        <span className="text-text-primary font-bold ml-1">${costs.total_cost_usd.toFixed(4)}</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Config Summary */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="card">
+                    <h3 className="text-sm font-semibold text-text-primary mb-2">System Prompt</h3>
+                    <pre className="text-xs text-text-secondary whitespace-pre-wrap max-h-40 overflow-auto bg-bg-hover rounded p-3">
+                        {agent.system_prompt || '(not set)'}
+                    </pre>
+                </div>
+                <div className="card">
+                    <h3 className="text-sm font-semibold text-text-primary mb-2">Personality</h3>
+                    <pre className="text-xs text-text-secondary whitespace-pre-wrap max-h-40 overflow-auto bg-bg-hover rounded p-3">
+                        {agent.personality || '(not set)'}
+                    </pre>
+                </div>
+            </div>
+
+        </div>
+    );
+}
+
+
+// ── Chat Tab ───────────────────────────────────────────────────────────
+
+// Local mirror of services._scope_label — used when a scope is newly
+// selected but the conversation row doesn't exist yet, so the backend
+// /conversations endpoint hasn't returned a label for it.
+function _localScopeLabel(scopeKey, projects) {
+    if (!scopeKey) return 'Chat';
+    if (scopeKey === 'chat:default') return 'General';
+    if (scopeKey.startsWith('chat:user:')) return `General (${scopeKey.slice(10, 14)})`;
+    if (scopeKey.startsWith('chat:project:')) {
+        const pid = scopeKey.split(':', 3)[2];
+        const p = (projects || []).find((x) => x.id === pid);
+        return p ? `About ${p.name}` : `About project ${pid.slice(0, 8)}`;
+    }
+    if (scopeKey.startsWith('task:')) return `Task ${scopeKey.slice(5, 13)}`;
+    if (scopeKey.startsWith('run:')) return `Task run ${scopeKey.slice(4, 12)}`;
+    return scopeKey;
+}
+
+function ChatTab({ agentId, agent, initialScope = null }) {
+    const [messages, setMessages] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [autoScroll, setAutoScroll] = useState(true);
+    const [input, setInput] = useState('');
+    const [sending, setSending] = useState(false);
+    // Project context for chat is no longer picked here. It resolves at
+    // send time from the agent's assigned project + the current screen.
+    // Users can inspect what's being sent via the `/context` slash command.
+    // OR explicitly attach via the + button (popover lists the agent's
+    // assigned projects); attached project overrides screen/default for
+    // the next sends until removed.
+    const [agentProjects, setAgentProjects] = useState([]);
+    const [contextOpen, setContextOpen] = useState(false);
+    const [attachedProject, setAttachedProject] = useState(null);
+    const [inputFocused, setInputFocused] = useState(false);
+    const [conversation, setConversation] = useState(null);
+    const [conversations, setConversations] = useState([]);
+    // ADR 008 / AP-93: when a send wakes a paused run, server returns
+    // resumed_run_id — surface as an ephemeral badge above the input.
+    const [resumedNotice, setResumedNotice] = useState(null);
+    // ADR 008 / AP-93: for task scopes, track whether a run is currently
+    // working so the Stop button stays visible the whole time the agent
+    // is busy — not just during the brief send-API window.
+    const [scopeActiveRun, setScopeActiveRun] = useState(null);
+    // AP-182: the most recent run in this scope that produced durable work
+    // (is_work). Rendered as an inline Run card so the chat-vs-work line is
+    // visible right here — work emerged into a Run; chit-chat stayed chat.
+    const [scopeWorkRun, setScopeWorkRun] = useState(null);
+    // ADR 009 / E2: daemon-reported "a turn is live for this scope" — keeps
+    // Stop available for ANY in-flight turn (incl. run-less chats, and across
+    // a backend restart), replacing the 10-minute staleness guess.
+    const [scopeLive, setScopeLive] = useState(false);
+    // Latches off the thinking indicator for a scope after the user clicks
+    // Stop. Cleared when the user sends in that scope again. Without this,
+    // the heuristic stack (_userTurnLive / _runRunning / scopeLive) can keep
+    // the spinner up for up to 10 min after a confirmed cancel — happens
+    // when a shadow run never reached the daemon so cancel pauses it but
+    // doesn't terminate the user-message-with-no-reply state. Per-scope so
+    // switching chats doesn't carry a stopped flag across.
+    const [stoppedScopes, setStoppedScopes] = useState({});
+    // AP-179: messages the user queued behind the active turn (FIFO). Rendered
+    // as "queued" pills so it's clear what runs next.
+    const [queued, setQueued] = useState([]);
+    // AP-93: 1Hz tick that drives the "thinking… Ns" elapsed counter.
+    // Only running while the indicator is visible — see useEffect below.
+    const [nowTick, setNowTick] = useState(() => Date.now());
+    // AP-109: when opened via `?scope=task:<id>` from a Run detail page,
+    // pin the chat to that scope so Stop = Pause works against the right run.
+    const [selectedScope, setSelectedScope] = useState(initialScope); // null = follow attached/screen
+    const [chatPickerOpen, setChatPickerOpen] = useState(false);
+    const [newChatFlyoutOpen, setNewChatFlyoutOpen] = useState(false);
+    const [projectFlyoutOpen, setProjectFlyoutOpen] = useState(false);
+    // Close-delay refs so the cursor can transit the gap between menu and
+    // its flyout without the flyout slamming shut. Clear on re-enter; close
+    // after ~180ms of "left" state.
+    const newChatCloseTimer = useRef(null);
+    const projectCloseTimer = useRef(null);
+    const openNewChat = () => { clearTimeout(newChatCloseTimer.current); setNewChatFlyoutOpen(true); };
+    const closeNewChat = () => { newChatCloseTimer.current = setTimeout(() => { setNewChatFlyoutOpen(false); setProjectFlyoutOpen(false); }, 180); };
+    const openProject = () => { clearTimeout(projectCloseTimer.current); setProjectFlyoutOpen(true); };
+    const closeProject = () => { projectCloseTimer.current = setTimeout(() => setProjectFlyoutOpen(false), 180); };
+    const bottomRef = useRef(null);
+    const containerRef = useRef(null);
+    const inputRef = useRef(null);
+
+    const msgCountRef = useRef(0);
+    // Windowed message loading. The chat keeps a sliding window: the live
+    // tail is refreshed by the 3s poll; older pages are fetched on demand as
+    // the user scrolls up (with prefetch so it feels seamless). Without this,
+    // a thread past PAGE_SIZE messages froze on its first N and new turns
+    // never appeared in the view.
+    const PAGE_SIZE = 80;
+    const PREFETCH_PX = 600;              // start loading older this far from top
+    const messagesRef = useRef([]);       // latest messages, for stale-free reads
+    const loadingOlderRef = useRef(false);
+    const reachedStartRef = useRef(false); // older fetch returned < PAGE → no more
+    const [loadingOlder, setLoadingOlder] = useState(false);
+
+    useEffect(() => {
+        api.forge.listAgentProjects(agentId).then(setAgentProjects).catch(() => setAgentProjects([]));
+    }, [agentId]);
+
+    // Scope is auto-derived from the screen (which project/task page you're
+    // on) and can be explicitly overridden via the dropdown. The attached
+    // project (+ button) does NOT change scope — it's a per-message
+    // reference, layered into user_context separately.
+    const screenProjectId = (() => {
+        const route = window.location.pathname;
+        const m = route.match(/\/studio\/board\/([^/]+)/) || route.match(/\/forge\/projects\/([^/]+)/);
+        return m ? m[1] : '';
+    })();
+    const screenScope = screenProjectId
+        ? `chat:project:${screenProjectId}`
+        : (agent?.default_project_id ? `chat:project:${agent.default_project_id}` : 'chat:default');
+    const activeScope = selectedScope || screenScope;
+
+    // Live tail: newest PAGE_SIZE messages, merged into the window so older
+    // pages already loaded are retained. Merge/sort/offset logic is shared with
+    // the FloatingChat quick chat — see lib/chatPagination.
+    const loadMessages = useCallback(async () => {
+        try {
+            const data = await api.forge.listMessages(agentId, {
+                limit: PAGE_SIZE, scope_key: activeScope,
+            });
+            setMessages((prev) => mergeWindow(prev, data));
+        } catch (err) {
+            console.error('Failed to load messages:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [agentId, activeScope]);
+
+    // Older page: fetched on scroll-up / prefetch. offset = how many server
+    // rows are already loaded (backend pages backward from newest). Anchors
+    // scroll so prepending doesn't jump the viewport.
+    const loadOlder = useCallback(async () => {
+        if (loadingOlderRef.current || reachedStartRef.current) return;
+        const serverLoaded = serverLoadedCount(messagesRef.current);
+        if (serverLoaded === 0) return;
+        loadingOlderRef.current = true;
+        setLoadingOlder(true);
+        try {
+            const older = await api.forge.listMessages(agentId, {
+                limit: PAGE_SIZE, offset: serverLoaded, scope_key: activeScope,
+            });
+            if (!older || older.length === 0) { reachedStartRef.current = true; return; }
+            if (older.length < PAGE_SIZE) reachedStartRef.current = true;
+            const c = containerRef.current;
+            const before = c ? c.scrollHeight : 0;
+            setMessages((prev) => mergeWindow(prev, older));
+            // Restore scroll position after the prepend so the user stays put.
+            requestAnimationFrame(() => {
+                if (c) c.scrollTop += (c.scrollHeight - before);
+            });
+        } catch (err) {
+            console.error('Failed to load older messages:', err);
+        } finally {
+            loadingOlderRef.current = false;
+            setLoadingOlder(false);
+        }
+    }, [agentId, activeScope]);
+
+    // Look up conversation state from the activeScope (which already factors
+    // in the user's explicit selection vs attached project fallback). The
+    // /conversation endpoint takes a project_id and computes the scope; for
+    // an explicit non-project scope (e.g. a task run, or chat:default) we
+    // pull the row from the conversations list directly.
+    const loadConversation = useCallback(() => {
+        if (!activeScope) { setConversation(null); return; }
+        if (activeScope.startsWith('chat:project:')) {
+            const pid = activeScope.split(':', 3)[2];
+            api.forge.getConversation(agentId, pid).then(setConversation).catch(() => setConversation(null));
+        } else {
+            const match = conversations.find((c) => c.scope_key === activeScope);
+            setConversation(match || { scope_key: activeScope, has_session: false, session_id: '', message_count: 0 });
+        }
+    }, [agentId, activeScope, conversations]);
+    useEffect(() => { loadConversation(); }, [loadConversation]);
+
+    const loadConversations = useCallback(() => {
+        api.forge.listConversations(agentId).then(setConversations).catch(() => setConversations([]));
+    }, [agentId]);
+    useEffect(() => { loadConversations(); }, [loadConversations]);
+
+    // Keep a ref of the live messages so loadOlder can compute the offset
+    // without a stale closure.
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
+
+    // Reset the window whenever the scope changes: clear, load the tail, then
+    // prefetch one older page so there's scroll headroom immediately.
+    useEffect(() => {
+        reachedStartRef.current = false;
+        loadingOlderRef.current = false;
+        setMessages([]);
+        let cancelled = false;
+        (async () => {
+            await loadMessages();
+            if (!cancelled) loadOlder();   // preload one page "back"
+        })();
+        const interval = setInterval(() => { loadMessages(); loadConversation(); }, 3000);
+        return () => { cancelled = true; clearInterval(interval); };
+    }, [loadMessages, loadConversation, loadOlder]);
+
+    // Prefetch older pages as the user nears the top — seamless scrollback.
+    const onScroll = useCallback(() => {
+        const c = containerRef.current;
+        if (c && c.scrollTop < PREFETCH_PX) loadOlder();
+    }, [loadOlder]);
+
+    // AP-93: 1Hz tick driving the "thinking… Ns" counter. Only runs
+    // while the latest message is the user's (or a task run is going) —
+    // i.e. the indicator is visible. Idle chats don't tick.
+    useEffect(() => {
+        const live = scopeActiveRun
+            && ['running', 'pending', 'interrupting'].includes(scopeActiveRun.status);
+        if (!live) return;
+        const id = setInterval(() => setNowTick(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, [scopeActiveRun]);
+
+    // ADR 008 / AP-93: poll for an active run in this task scope so Stop
+    // stays visible whenever the agent is actually working. Non-task
+    // scopes have no Run to pause, so we skip this entirely.
+    useEffect(() => {
+        if (!activeScope || !activeScope.startsWith('task:')) {
+            setScopeActiveRun(null);
+            setScopeWorkRun(null);
+            return;
+        }
+        const taskId = activeScope.slice(5);
+        const ACTIVE = new Set(['running', 'paused', 'pending', 'interrupting']);
+        let alive = true;
+        const tick = async () => {
+            try {
+                const runs = await api.forge.listTaskRuns(taskId);
+                if (!alive) return;
+                const mine = (runs || []).filter(r => r.agent_id === agentId);
+                setScopeActiveRun(mine.find(r => ACTIVE.has(r.status)) || null);
+                // Latest work run (is_work is set at completion) — drives the
+                // inline Run card. Newest first.
+                const work = mine
+                    .filter(r => r.is_work)
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                setScopeWorkRun(work[0] || null);
+            } catch {
+                setScopeActiveRun(null);
+                setScopeWorkRun(null);
+            }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
+
+    // ADR 009 / E2: poll the daemon-reported live-turn mirror for this scope
+    // (every scope, not just task scopes) so Stop stays available exactly
+    // while something is running — no 10-minute heuristic, restart-proof.
+    useEffect(() => {
+        if (!activeScope) { setScopeLive(false); return; }
+        let alive = true;
+        const tick = async () => {
+            try {
+                const r = await api.forge.scopeLive(agentId, activeScope);
+                if (alive) setScopeLive(!!(r && r.live));
+            } catch { if (alive) setScopeLive(false); }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
+
+    // AP-179: poll the FIFO message queue for this conversation so the
+    // "queued" pills stay current while a turn is running.
+    useEffect(() => {
+        if (!activeScope || !activeScope.startsWith('task:')) { setQueued([]); return; }
+        let alive = true;
+        const tick = async () => {
+            try {
+                const q = await api.forge.listQueued(agentId, activeScope);
+                if (alive) setQueued(Array.isArray(q) ? q : []);
+            } catch { if (alive) setQueued([]); }
+        };
+        tick();
+        const t = setInterval(tick, 3000);
+        return () => { alive = false; clearInterval(t); };
+    }, [activeScope, agentId]);
+
+    // Auto-scroll only when the NEWEST message changes (a real new turn) —
+    // keyed off the last message's id, not the count. Prepending older pages
+    // grows the count too, and keying off length would yank the viewport to
+    // the bottom mid-scrollback.
+    const _lastMsgId = messages.length ? messages[messages.length - 1].id : null;
+    useEffect(() => {
+        if (autoScroll && bottomRef.current && _lastMsgId !== msgCountRef.current) {
+            bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+        msgCountRef.current = _lastMsgId;
+    }, [_lastMsgId, autoScroll]);
+
+    // Resolve context client-side. Priority:
+    //   1. explicit attached project (via + popover) — user override wins
+    //   2. URL-derived project (when chatting from a project page)
+    //   3. agent's default project (its Studio assignment)
+    // Backend uses project_id to set the runtime cwd + load conventions + MCP.
+    const buildUserContext = () => {
+        const route = window.location.pathname;
+        // project_id drives scope + cwd. Pull from activeScope when it
+        // points at a project (the source of truth for which conversation
+        // we're in); fallback to screen/default.
+        let project_id = '';
+        if (activeScope && activeScope.startsWith('chat:project:')) {
+            project_id = activeScope.split(':', 3)[2];
+        } else {
+            project_id = screenProjectId || agent?.default_project_id || '';
+        }
+        const ctx = {
+            surface: 'forge_agent_chat',
+            route,
+        };
+        if (project_id) ctx.project_id = project_id;
+        // Attached project is a per-message reference, not the scope. Pass
+        // it as a separate `references` list so the agent knows "hey, also
+        // think about this project" without losing the current conversation.
+        if (attachedProject?.id && attachedProject.id !== project_id) {
+            ctx.references = [{
+                kind: 'project',
+                id: attachedProject.id,
+                name: attachedProject.name || '',
+            }];
+        }
+        return ctx;
+    };
+
+    const handleSend = async () => {
+        if (!input.trim() || sending) return;
+        const trimmed = input.trim();
+
+        // ADR 008 / AP-93: `/clear` — wipe agent memory for THIS scope.
+        // Drops the runtime session handle + visible messages. Run rows,
+        // diffs, and task comments are untouched.
+        if (trimmed === '/clear') {
+            setInput('');
+            if (!window.confirm(`Clear ${_localScopeLabel(activeScope, agentProjects)}? This wipes the agent's memory of this chat. Run history and diffs are kept.`)) {
+                inputRef.current?.focus();
+                return;
+            }
+            try {
+                await api.forge.clearConversation(agentId, activeScope);
+                setMessages([]);
+                await loadConversations();
+                await loadConversation();
+            } catch (err) {
+                setMessages((prev) => [...prev, {
+                    id: `local-clear-${Date.now()}`,
+                    role: 'system',
+                    content: `Clear failed: ${err.message || err}`,
+                    created_at: new Date().toISOString(),
+                }]);
+            }
+            inputRef.current?.focus();
+            return;
+        }
+
+        // `/context` slash command — show what would be sent, don't dispatch.
+        if (trimmed === '/context' || trimmed.startsWith('/context ')) {
+            const ctx = buildUserContext();
+            let projectSource = 'none';
+            if (ctx.project_id) {
+                if (attachedProject?.id === ctx.project_id) projectSource = 'attached via +';
+                else if (ctx.project_id === agent?.default_project_id) projectSource = 'agent assignment';
+                else projectSource = 'current screen';
+            }
+            setInput('');
+            inputRef.current?.focus();
+            try {
+                const preview = await api.forge.getDispatchPreview(agentId, ctx.project_id);
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `local-context-${Date.now()}`,
+                        role: 'system',
+                        content: '',  // unused — preview field drives the render
+                        preview: { ...preview, ctx, projectSource },
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+            } catch (err) {
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `local-context-${Date.now()}`,
+                        role: 'system',
+                        content: `Could not load dispatch preview: ${err.message || err}`,
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+            }
+            return;
+        }
+
+        setInput('');
+        await postMessage(trimmed);
+    };
+
+    // Shared post path: optimistic render + dispatch + reload. Used by the
+    // input box (handleSend, after its slash-command handling) and by
+    // clickable AskUserQuestion answers.
+    const postMessage = async (content) => {
+        const text = (content || '').trim();
+        if (!text) return;
+        // AP-93: optimistic user message so the Stop button appears
+        // instantly. Tagged so we drop it once the persisted row arrives.
+        const localId = `local-user-${Date.now()}`;
+        setMessages(prev => [...prev, {
+            id: localId,
+            role: 'user',
+            content: text,
+            created_at: new Date().toISOString(),
+        }]);
+        setSending(true);
+        // A new send clears the "stopped" latch so the thinking indicator lights.
+        setStoppedScopes(prev => {
+            if (!prev[activeScope]) return prev;
+            const next = { ...prev }; delete next[activeScope]; return next;
+        });
+        try {
+            const res = await api.forge.sendRuntimeChat(agentId, {
+                content: text,
+                user_context: buildUserContext(),
+                // AP-105: pin the conversation. Without this, sending a
+                // message while viewing a run:<id> or chat:user:<id> scope
+                // would default-route to chat:project/chat:default and
+                // diverge from what the picker shows.
+                scope_key: activeScope || null,
+            });
+            // ADR 008 / AP-93: if this send woke a paused run, surface it
+            // so the user sees that their message resumed the work.
+            if (res && res.resumed_run_id) {
+                setResumedNotice({ runId: res.resumed_run_id, at: Date.now() });
+                setTimeout(() => setResumedNotice((n) =>
+                    n && n.at === res.resumed_run_id ? null : n), 6000);
+            }
+            // Drop the optimistic local user message — the persisted one
+            // arrives via loadMessages and the dedupe would otherwise dupe.
+            setMessages(prev => prev.filter(m => m.id !== localId));
+            await loadMessages();
+        } catch (err) {
+            console.error('Send failed:', err);
+        } finally {
+            setSending(false);
+            inputRef.current?.focus();
+        }
+    };
+
+    if (loading) return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading chat...</div>;
+
+    // AP-182: agent-is-working signal — AUTHORITATIVE, not guessed. It's the
+    // live run status (pending/running/interrupting — every task-chat turn has
+    // a real run now) OR the daemon-reported live turn (scopeLive, every scope,
+    // 30s ageout, restart-proof). The old 10-minute message-age heuristic is
+    // gone: the reconciler fails a dead dispatch, so neither signal sticks.
+    const _liveStatuses = ['pending', 'running', 'interrupting'];
+    const _runLive = !!scopeActiveRun && _liveStatuses.includes(scopeActiveRun.status);
+    // A user-pressed Stop in this scope hides the indicator instantly until the
+    // next send (optimistic), independent of the poll cadence.
+    const _stoppedHere = !!stoppedScopes[activeScope];
+    const agentThinking = !_stoppedHere && (_runLive || scopeLive);
+    // Elapsed seconds since the run started (task scopes); chat scopes just
+    // show the dots without a counter.
+    const _thinkStartMs = (_runLive && scopeActiveRun?.started_at)
+        ? new Date(scopeActiveRun.started_at).getTime() : null;
+    const thinkingElapsedSec = _thinkStartMs
+        ? Math.max(0, Math.floor((nowTick - _thinkStartMs) / 1000))
+        : 0;
+
+    const ROLE_STYLES = {
+        system:    { bg: 'bg-purple-500/10', border: 'border-purple-500/20', icon: Terminal, label: 'System', color: '#a855f7' },
+        user:      { bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   icon: Send,     label: 'Sent',   color: '#3b82f6' },
+        assistant: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', icon: Bot,     label: 'Agent',  color: '#10b981' },
+        tool:      { bg: 'bg-orange-500/10',  border: 'border-orange-500/20',  icon: Wrench,  label: 'Tool',   color: '#f97316' },
+    };
+
+    return (
+        <div className="flex flex-col h-full">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between px-6 py-2 border-b border-border-subtle bg-bg-panel">
+                {/* Current chat name + switcher. One button. Click opens a
+                    clean popover with all chats + "new chat" actions. */}
+                <div className="relative flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setChatPickerOpen((v) => !v)}
+                        className="flex items-center gap-1.5 text-sm text-text-primary hover:bg-bg-hover rounded-md px-2 py-1 transition-colors"
+                        title="Switch chat or start a new one"
+                    >
+                        <span
+                            className={
+                                conversation?.has_session
+                                    ? 'w-1.5 h-1.5 rounded-full bg-accent-primary'
+                                    : 'w-1.5 h-1.5 rounded-full bg-text-tertiary opacity-50'
+                            }
+                            title={conversation?.has_session ? 'Resumable' : 'Fresh'}
+                        />
+                        <span className="font-medium">
+                            {(conversations.find((c) => c.scope_key === activeScope)?.label) || _localScopeLabel(activeScope, agentProjects)}
+                        </span>
+                        {/* Loaded-window / total-thread count. The total comes
+                            from the conversation row (whole thread); messages
+                            is only what's currently in the window. */}
+                        <span className="text-text-tertiary text-xs tabular-nums">
+                            {conversation?.message_count != null
+                                ? `(${messages.length}/${conversation.message_count})`
+                                : `(${messages.length})`}
+                        </span>
+                        <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
+                    </button>
+                    {chatPickerOpen && (() => {
+                        // Optimistic active list: include selected scope even
+                        // if its conversation row doesn't exist yet (no message
+                        // sent → no row in forge_conversations). The synthetic
+                        // entry shows 0 messages and resolves to the real row
+                        // after first dispatch.
+                        const known = new Map(conversations.map((c) => [c.scope_key, c]));
+                        if (activeScope && !known.has(activeScope)) {
+                            known.set(activeScope, {
+                                scope_key: activeScope,
+                                label: _localScopeLabel(activeScope, agentProjects),
+                                message_count: 0,
+                                has_session: false,
+                            });
+                        }
+                        const activeList = Array.from(known.values());
+                        const existingKeys = new Set(activeList.map((c) => c.scope_key));
+                        const startableProjects = (agentProjects || []).filter((p) => !existingKeys.has(`chat:project:${p.id}`));
+                        const generalExists = existingKeys.has('chat:default');
+                        return (
+                            <>
+                                <div className="fixed inset-0 z-30" onClick={() => { setChatPickerOpen(false); setNewChatFlyoutOpen(false); setProjectFlyoutOpen(false); }} />
+                                <div
+                                    className="absolute left-0 top-full mt-1 z-40 w-72 rounded-md border border-border-subtle shadow-xl flex flex-col overflow-hidden"
+                                    style={{ backgroundColor: '#1a1a1a', maxHeight: 'min(360px, 70vh)' }}
+                                    data-testid="agent-chat-picker"
+                                >
+                                    {activeList.length > 0 && (
+                                        <div className="py-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                                            <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Active</div>
+                                            {activeList.map((c) => {
+                                                const isActive = c.scope_key === activeScope;
+                                                return (
+                                                    <button
+                                                        key={c.scope_key}
+                                                        type="button"
+                                                        onClick={() => { setSelectedScope(c.scope_key); setChatPickerOpen(false); }}
+                                                        className={`w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-hover ${isActive ? 'bg-bg-hover' : ''}`}
+                                                    >
+                                                        <span className={c.has_session ? 'w-1.5 h-1.5 rounded-full bg-accent-primary' : 'w-1.5 h-1.5 rounded-full bg-text-tertiary opacity-40'} />
+                                                        <span className="text-sm text-text-primary flex-1 truncate">{c.label}</span>
+                                                        <span className="text-xs text-text-tertiary">{c.message_count}</span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* New Chat — single hover/click menu item that
+                                        flyouts to a submenu with General / Project / Task.
+                                        Project nests one level deeper into a project list. */}
+                                    <div className="py-1 border-t border-border-subtle flex-shrink-0">
+                                        <div
+                                            className="relative"
+                                            onMouseEnter={openNewChat}
+                                            onMouseLeave={closeNewChat}
+                                        >
+                                            <button
+                                                type="button"
+                                                onClick={() => setNewChatFlyoutOpen((v) => !v)}
+                                                className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                            >
+                                                <Plus className="w-3.5 h-3.5 text-accent-primary" />
+                                                <span className="text-sm text-text-primary flex-1 font-medium">New Chat</span>
+                                                <ChevronDown className="w-3 h-3 text-text-tertiary -rotate-90" />
+                                            </button>
+                                            {newChatFlyoutOpen && (
+                                                <div
+                                                    onMouseEnter={openNewChat}
+                                                    onMouseLeave={closeNewChat}
+                                                    className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1"
+                                                    style={{ backgroundColor: '#1a1a1a' }}
+                                                >
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            const key = generalExists
+                                                                ? `chat:user:${Math.random().toString(36).slice(2, 10)}`
+                                                                : 'chat:default';
+                                                            setSelectedScope(key);
+                                                            setChatPickerOpen(false);
+                                                            setNewChatFlyoutOpen(false);
+                                                        }}
+                                                        className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                                    >
+                                                        <MessageSquarePlus className="w-3.5 h-3.5 text-accent-primary" />
+                                                        <span className="text-sm text-text-primary flex-1">General</span>
+                                                        {generalExists && (
+                                                            <span className="text-[10px] text-text-tertiary">new</span>
+                                                        )}
+                                                    </button>
+                                                    {/* Project nested flyout */}
+                                                    <div
+                                                        className="relative"
+                                                        onMouseEnter={() => startableProjects.length > 0 && openProject()}
+                                                        onMouseLeave={closeProject}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            disabled={startableProjects.length === 0}
+                                                            className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                                                            title={startableProjects.length === 0 ? 'All assigned projects already have chats' : ''}
+                                                        >
+                                                            <FolderPlus className="w-3.5 h-3.5 text-accent-primary" />
+                                                            <span className="text-sm text-text-primary flex-1">Project</span>
+                                                            <ChevronDown className="w-3 h-3 text-text-tertiary -rotate-90" />
+                                                        </button>
+                                                        {projectFlyoutOpen && startableProjects.length > 0 && (
+                                                            <div
+                                                                onMouseEnter={openProject}
+                                                                onMouseLeave={closeProject}
+                                                                className="absolute left-full top-0 z-50 w-52 rounded-md border border-border-subtle shadow-xl py-1 overflow-y-auto overscroll-contain"
+                                                                style={{ backgroundColor: '#1a1a1a', maxHeight: 'min(360px, 70vh)' }}
+                                                            >
+                                                                <div className="px-3 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Pick a project</div>
+                                                                {startableProjects.map((p) => (
+                                                                    <button
+                                                                        key={p.id}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setSelectedScope(`chat:project:${p.id}`);
+                                                                            setChatPickerOpen(false);
+                                                                            setNewChatFlyoutOpen(false);
+                                                                            setProjectFlyoutOpen(false);
+                                                                        }}
+                                                                        className="w-full text-left px-3 py-1.5 hover:bg-bg-hover flex items-center gap-2"
+                                                                    >
+                                                                        <Folder className="w-3.5 h-3.5 text-text-tertiary" />
+                                                                        <span className="text-sm text-text-primary truncate">{p.name}</span>
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        disabled
+                                                        className="w-full text-left px-3 py-1.5 flex items-center gap-2 opacity-40 cursor-not-allowed"
+                                                        title="Coming soon — task-scoped chats land with AP-93"
+                                                    >
+                                                        <ClipboardList className="w-3.5 h-3.5 text-accent-primary" />
+                                                        <span className="text-sm text-text-primary flex-1">Task</span>
+                                                        <span className="text-[10px] text-text-tertiary">soon</span>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        );
+                    })()}
+                </div>
+                <div className="flex items-center gap-2">
+                    <button onClick={loadMessages} className="btn btn-ghost py-1 px-2 text-xs">
+                        <RefreshCw className="w-3 h-3" /> Refresh
+                    </button>
+                    <button
+                        onClick={() => setAutoScroll(!autoScroll)}
+                        className={`btn btn-ghost py-1 px-2 text-xs ${autoScroll ? 'text-accent-primary' : ''}`}
+                    >
+                        {autoScroll ? <ToggleRight className="w-3 h-3" /> : <ToggleLeft className="w-3 h-3" />}
+                        Auto-scroll
+                    </button>
+                </div>
+            </div>
+
+            {/* Messages */}
+            <div ref={containerRef} onScroll={onScroll} className="flex-1 overflow-auto p-6 space-y-3">
+                {loadingOlder && (
+                    <div className="flex justify-center py-2 text-text-tertiary">
+                        <Loader className="w-4 h-4 animate-spin" />
+                    </div>
+                )}
+                {messages.length === 0 ? (
+                    <div className="text-center py-16 text-text-tertiary">
+                        <MessageSquare className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                        <p>No messages yet. Messages will appear when the agent starts communicating.</p>
+                    </div>
+                ) : (
+                    messages.map((msg) => {
+                        const style = ROLE_STYLES[msg.role] || ROLE_STYLES.user;
+                        const RoleIcon = style.icon;
+                        return (
+                            <div key={msg.id} className={`rounded-lg border ${style.bg} ${style.border} p-4`}>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <RoleIcon className="w-4 h-4" style={{ color: style.color }} />
+                                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: style.color }}>
+                                        {style.label}
+                                    </span>
+                                    {msg.model_used && (
+                                        <span className="text-xs text-text-tertiary px-1.5 py-0.5 rounded bg-bg-hover">{msg.model_used}</span>
+                                    )}
+                                    {(msg.input_tokens > 0 || msg.output_tokens > 0) && (
+                                        <span className="text-xs text-text-tertiary">
+                                            {msg.input_tokens}in / {msg.output_tokens}out
+                                        </span>
+                                    )}
+                                    {msg.cost_usd > 0 && (
+                                        <span className="text-xs text-text-tertiary">${msg.cost_usd.toFixed(4)}</span>
+                                    )}
+                                    <span className="text-xs text-text-tertiary ml-auto">{formatTime(msg.created_at)}</span>
+                                </div>
+                                {msg.preview
+                                    ? <ContextPreviewCard preview={msg.preview} />
+                                    : <pre className="text-sm text-text-primary whitespace-pre-wrap font-mono leading-relaxed">{msg.content}</pre>}
+                                {msg.tool_name && (
+                                    <div className="mt-2 pt-2 border-t border-border-subtle">
+                                        <div className="text-xs font-medium text-text-secondary mb-1">
+                                            <Wrench className="w-3 h-3 inline mr-1" />{msg.tool_name}
+                                        </div>
+                                        <ToolInput toolName={msg.tool_name} toolInput={msg.tool_input} onAnswer={postMessage} />
+                                        {msg.tool_output && (
+                                            <details className="text-xs mt-1">
+                                                <summary className="text-text-tertiary cursor-pointer hover:text-text-secondary">Output</summary>
+                                                <pre className="mt-1 p-2 bg-bg-hover rounded text-text-secondary overflow-auto max-h-32">{msg.tool_output}</pre>
+                                            </details>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
+                {/* AP-93: thinking indicator. Shown while the agent owes
+                    a reply — pulses gently, sits at the end of the
+                    thread, disappears the instant a real message arrives. */}
+                {agentThinking && (
+                    <div className="flex gap-3 px-1 py-2">
+                        <div className="w-7 h-7 rounded-md bg-emerald-500/10 flex items-center justify-center flex-shrink-0">
+                            <Bot className="w-3.5 h-3.5 text-emerald-400" />
+                        </div>
+                        <div className="flex items-center gap-1.5 text-text-tertiary text-xs">
+                            <span className="inline-flex gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '150ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" style={{ animationDelay: '300ms' }} />
+                            </span>
+                            <span>thinking…</span>
+                            <span className="tabular-nums text-text-tertiary/70">{thinkingElapsedSec}s</span>
+                        </div>
+                    </div>
+                )}
+                <div ref={bottomRef} />
+            </div>
+
+            {/* Send bar */}
+            <div className="px-6 py-3 border-t border-border-subtle bg-bg-panel relative">
+                {/* Floating: project picker popover, anchored to the + button. Closes
+                    on outside click via a transparent backdrop. */}
+                {contextOpen && (
+                    <>
+                        <div className="fixed inset-0 z-10" onClick={() => setContextOpen(false)} />
+                        <div className="absolute bottom-full left-6 mb-2 z-20 rounded-md border border-border-subtle bg-bg-panel p-2 w-72 shadow-lg">
+                            <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5 px-1">
+                                Attach project context
+                            </div>
+                            {agentProjects.length === 0 ? (
+                                <div className="text-xs text-text-tertiary px-2 py-2">
+                                    Agent isn't assigned to any project yet.
+                                </div>
+                            ) : (
+                                agentProjects.map((p) => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => { setAttachedProject(p); setContextOpen(false); }}
+                                        className="w-full text-left px-2 py-1.5 rounded hover:bg-bg-hover text-sm text-text-primary flex items-center justify-between"
+                                    >
+                                        <span className="truncate">{p.name}</span>
+                                        {p.key_prefix && (
+                                            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary ml-2">{p.key_prefix}</span>
+                                        )}
+                                    </button>
+                                ))
+                            )}
+                        </div>
+                    </>
+                )}
+                {/* Floating: slash-command suggestions, only while the input
+                    is focused. Blur (clicking anywhere else) hides them. */}
+                {inputFocused && (
+                    <SlashCommandSuggest input={input} onPick={(cmd) => {
+                        setInput(cmd + ' ');
+                        inputRef.current?.focus();
+                    }} />
+                )}
+                {/* ADR 008 / AP-93: ephemeral badge that this message resumed
+                    a paused run. Auto-hides after a few seconds. */}
+                {resumedNotice && (
+                    <div className="mb-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-green-500/10 border border-green-500/20 text-green-400 text-xs">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        Resumed paused run {String(resumedNotice.runId).slice(0, 8)}
+                    </div>
+                )}
+                {scopeWorkRun && (
+                    <Link
+                        to={`/forge/runs/${scopeWorkRun.id}`}
+                        className="flex items-center gap-2 mb-2 px-2.5 py-1.5 rounded-lg border border-border bg-bg-secondary hover:bg-bg-tertiary text-xs no-underline"
+                        title="This conversation produced a Run — open it"
+                    >
+                        <span className="px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary font-medium">Run</span>
+                        <span className="text-text-secondary capitalize">{scopeWorkRun.outcome || scopeWorkRun.status}</span>
+                        {scopeWorkRun.diff_stat && (
+                            <span className="text-text-tertiary truncate">· {scopeWorkRun.diff_stat}</span>
+                        )}
+                        <span className="ml-auto text-text-tertiary shrink-0">View →</span>
+                    </Link>
+                )}
+                {queued.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-2 px-1">
+                        <span className="text-xs text-text-tertiary">Queued · runs after the current turn:</span>
+                        {queued.map((q) => (
+                            <span
+                                key={q.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-600 text-xs"
+                                title="Queued — dispatches when the current turn finishes"
+                            >
+                                ⏳ <span className="truncate max-w-[200px]">{q.content}</span>
+                            </span>
+                        ))}
+                    </div>
+                )}
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => setContextOpen(!contextOpen)}
+                        className="btn btn-ghost py-2.5 px-2.5"
+                        title="Attach a project to this chat"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                    {/* Input wrapper styled like an .input so the attached-project
+                        chip sits inline next to the caret, not above the row. */}
+                    <div
+                        className="input flex-1 flex items-center gap-2 cursor-text"
+                        onClick={() => inputRef.current?.focus()}
+                    >
+                        {attachedProject && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-accent-subtle text-accent-primary text-xs shrink-0">
+                                <span className="truncate max-w-[140px]">📎 {attachedProject.name}</span>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setAttachedProject(null); }}
+                                    className="hover:text-text-primary"
+                                    title="Remove attachment"
+                                >
+                                    <X className="w-3 h-3" />
+                                </button>
+                            </span>
+                        )}
+                        <input
+                            ref={inputRef}
+                            className="flex-1 bg-transparent border-0 outline-none text-text-primary placeholder:text-text-tertiary min-w-0"
+                            placeholder={attachedProject ? 'Add a message…' : 'Send a message — / for commands'}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                            onFocus={() => setInputFocused(true)}
+                            onBlur={() => setInputFocused(false)}
+                            disabled={sending}
+                        />
+                    </div>
+                    {agentThinking ? (
+                        <button
+                            onClick={() => {
+                                // Optimistic: flip the UI NOW. Latch the
+                                // stopped flag for this scope so the
+                                // thinking heuristics can't re-assert.
+                                const _scope = activeScope;
+                                setStoppedScopes(prev => ({ ...prev, [_scope]: true }));
+                                setMessages(prev => [...prev, {
+                                    id: `local-stop-${Date.now()}`,
+                                    role: 'system',
+                                    content: '⏹ Stopped',
+                                    created_at: new Date().toISOString(),
+                                }]);
+                                if (sending) setSending(false);
+                                // Fire-and-forget cancel. Backend / daemon
+                                // do their best; UI doesn't block.
+                                api.forge.stopChat(agentId, _scope).catch(err => {
+                                    console.error('Stop failed (background):', err);
+                                });
+                            }}
+                            className="btn btn-ghost py-2.5 text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                            title={scopeActiveRun
+                                ? `Stop — pauses run ${String(scopeActiveRun.id).slice(0, 8)}`
+                                : 'Stop'}
+                        >
+                            <Square className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <button onClick={handleSend} disabled={!input.trim() || sending} className="btn btn-primary py-2.5">
+                            <Send className="w-4 h-4" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
+// ── Slash-command suggestion popover ───────────────────────────────────
+
+const SLASH_COMMANDS = [
+    { name: '/context', desc: 'Show what context (project, MCP, env, prompts) will be sent on the next message' },
+    { name: '/clear', desc: "Wipe the agent's memory for this chat (run history and diffs are kept)" },
+];
+
+function SlashCommandSuggest({ input, onPick }) {
+    if (!input.startsWith('/')) return null;
+    const query = input.slice(1).split(/\s/)[0].toLowerCase();
+    const matches = SLASH_COMMANDS.filter(c => c.name.slice(1).startsWith(query));
+    if (matches.length === 0) return null;
+    return (
+        <div className="absolute bottom-full left-16 right-16 mb-1 z-20 rounded-md border border-border-subtle bg-bg-panel shadow-lg overflow-hidden max-w-md">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary px-3 py-1.5 bg-bg-hover/50">
+                Slash commands
+            </div>
+            {matches.map(cmd => (
+                <button
+                    key={cmd.name}
+                    onMouseDown={(e) => { e.preventDefault(); onPick(cmd.name); }}
+                    className="w-full text-left px-3 py-2 hover:bg-bg-hover flex items-center gap-3 transition-colors"
+                >
+                    <code className="text-sm text-accent-primary font-mono">{cmd.name}</code>
+                    <span className="text-xs text-text-tertiary truncate">{cmd.desc}</span>
+                </button>
+            ))}
+        </div>
+    );
+}
+
+
+// ── Context preview card (renders the /context output as a structured panel) ───
+
+function ContextPreviewCard({ preview }) {
+    const p = preview || {};
+    const proj = p.project || {};
+    const ag = p.agent || {};
+    const env = p.env_vars || {};
+    const sp = p.system_prompt_addenda || {};
+    const persona = p.persona_system_prompt || '';
+    return (
+        <div className="text-sm">
+            <div className="text-xs text-text-tertiary mb-3 flex items-center gap-2">
+                <span className="font-mono px-1.5 py-0.5 rounded bg-bg-hover">/context</span>
+                <span>for @{ag.name || '—'}</span>
+            </div>
+
+            <Section label="Project">
+                {proj.id ? (
+                    <>
+                        <Row k="name" v={proj.name || proj.id} />
+                        {proj.source && <Row k="source" v={proj.source.replace('_', ' ')} />}
+                        {proj.repo_path && <Row k="repo" v={<code className="text-xs">{proj.repo_path}</code>} />}
+                        {proj.conventions_md_preview && (
+                            <Row k="conventions" v={<em className="text-text-tertiary">"{proj.conventions_md_preview.slice(0, 140)}{proj.conventions_md_preview.length > 140 ? '…' : ''}"</em>} />
+                        )}
+                    </>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">— none. Chat runs without a project cwd.</div>
+                )}
+            </Section>
+
+            <Section label="Runtime">
+                <Row k="provider" v={<span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-xs">{ag.runtime_provider || '—'}</span>} />
+                <Row k="model" v={ag.model || '—'} />
+            </Section>
+
+            <Section label="MCP servers">
+                {p.mcp_servers?.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                        {p.mcp_servers.map(s => (
+                            <span key={s} className="px-2 py-0.5 rounded bg-accent-subtle text-accent-primary text-xs font-mono">{s}</span>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">— none (no project bound)</div>
+                )}
+            </Section>
+
+            <Section label="Env vars">
+                <div className="text-xs text-text-tertiary mb-1">Injected by daemon:</div>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                    {(env.injected_by_daemon || []).map(k => (
+                        <span key={k} className="px-2 py-0.5 rounded bg-bg-hover text-text-secondary text-xs font-mono">{k}</span>
+                    ))}
+                </div>
+                {env.user_provided_names?.length > 0 ? (
+                    <>
+                        <div className="text-xs text-text-tertiary mb-1">User-provided secrets (names only):</div>
+                        <div className="flex flex-wrap gap-1.5">
+                            {env.user_provided_names.map(k => (
+                                <span key={k} className="px-2 py-0.5 rounded bg-yellow-500/15 text-yellow-400 text-xs font-mono">{k}</span>
+                            ))}
+                        </div>
+                    </>
+                ) : (
+                    <div className="text-xs text-text-tertiary italic">No user-provided secrets yet</div>
+                )}
+            </Section>
+
+            <Section label="System-prompt addenda">
+                <Row k="conventions pointer" v={<Yes v={sp.conventions_pointer_will_be_added} />} />
+                <Row k="memory tool hint" v={<Yes v={sp.memory_addendum_will_be_added} />} />
+                <Row k="screen/page preamble" v={<Yes v={true} />} />
+            </Section>
+
+            {persona && (
+                <Section label="Persona system prompt">
+                    <div className="text-xs text-text-secondary italic max-h-24 overflow-auto bg-bg-hover/50 rounded p-2 font-mono">
+                        "{persona.slice(0, 400)}{persona.length > 400 ? '…' : ''}"
+                    </div>
+                </Section>
+            )}
+
+            <div className="text-[11px] text-text-tertiary mt-3 pt-2 border-t border-border-subtle/40">
+                Task context (<code>mcp__agentira__get_task</code>) is pulled on demand by the agent — not eagerly attached.
+            </div>
+        </div>
+    );
+}
+
+// Click-toggle info popover. Hover works too (Safari/touch don't reliably
+// show native title tooltips, so we render our own).
+function InfoTip({ text }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e) => {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open]);
+    return (
+        <span ref={ref} className="relative inline-flex items-center">
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                onMouseEnter={() => setOpen(true)}
+                onMouseLeave={() => setOpen(false)}
+                className="inline-flex items-center text-text-tertiary hover:text-text-secondary"
+                aria-label="info"
+            >
+                <InfoIcon className="w-3.5 h-3.5" />
+            </button>
+            {open && (
+                <span
+                    role="tooltip"
+                    className="absolute left-4 top-full mt-1 z-50 w-72 p-2.5 rounded-md text-[11px] leading-snug border shadow-xl"
+                    style={{
+                        backgroundColor: '#1a1a1a',
+                        color: '#e8e8e8',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        pointerEvents: 'auto',
+                    }}
+                >
+                    {text}
+                </span>
+            )}
+        </span>
+    );
+}
+
+function Section({ label, children }) {
+    return (
+        <div className="mb-3">
+            <div className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1.5">{label}</div>
+            {children}
+        </div>
+    );
+}
+
+function Row({ k, v }) {
+    return (
+        <div className="flex items-baseline gap-2 mb-0.5">
+            <span className="text-text-tertiary text-xs w-28 shrink-0">{k}</span>
+            <span className="text-sm text-text-primary flex-1 min-w-0 truncate">{v}</span>
+        </div>
+    );
+}
+
+function Yes({ v }) {
+    return v
+        ? <span className="text-emerald-400 text-xs">✓ yes</span>
+        : <span className="text-text-tertiary text-xs">— no</span>;
+}
+
+
+// ── Runs Tab ───────────────────────────────────────────────────────────
+
+function RunsTab({ agentId }) {
+    const navigate = useNavigate();
+    const [runs, setRuns] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const data = await api.forge.listRuns({ agent_id: agentId, limit: 50 });
+                setRuns(data);
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+        const interval = setInterval(load, 8000);
+        return () => clearInterval(interval);
+    }, [agentId]);
+
+    const RUN_STATUS = {
+        pending:   { bg: '#5f6368', label: 'Pending', icon: Clock },
+        running:   { bg: '#f1c40f', label: 'Running', icon: Loader },
+        completed: { bg: '#2ecc71', label: 'Done', icon: CheckCircle },
+        failed:    { bg: '#e74c3c', label: 'Failed', icon: XCircle },
+        cancelled: { bg: '#9aa0a6', label: 'Cancelled', icon: AlertCircle },
+    };
+
+    if (loading) return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading runs...</div>;
+
+    return (
+        <div className="p-6">
+            {runs.length === 0 ? (
+                <div className="text-center py-16 text-text-tertiary">
+                    <Play className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <p>No runs for this agent yet.</p>
+                </div>
+            ) : (
+                <div className="card p-0 overflow-hidden">
+                    <table className="w-full text-sm">
+                        <thead>
+                            <tr className="border-b border-border-subtle text-text-tertiary text-xs uppercase">
+                                <th className="text-left px-4 py-3 font-medium">Status</th>
+                                <th className="text-left px-4 py-3 font-medium">Task</th>
+                                <th className="text-left px-4 py-3 font-medium">Trigger</th>
+                                <th className="text-left px-4 py-3 font-medium">Model</th>
+                                <th className="text-right px-4 py-3 font-medium">Duration</th>
+                                <th className="text-right px-4 py-3 font-medium">Tokens</th>
+                                <th className="text-right px-4 py-3 font-medium">Cost</th>
+                                <th className="text-right px-4 py-3 font-medium">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {runs.map((run) => {
+                                const s = RUN_STATUS[run.status] || RUN_STATUS.pending;
+                                const total = (run.input_tokens || 0) + (run.output_tokens || 0);
+                                return (
+                                    <tr
+                                        key={run.id}
+                                        onClick={() => navigate(`/forge/runs/${run.id}`)}
+                                        className="border-b border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer"
+                                        title="Open run details"
+                                    >
+                                        <td className="px-4 py-3">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white" style={{ backgroundColor: s.bg }}>
+                                                {s.label}
+                                            </span>
+                                        </td>
+                                        <td className="px-4 py-3 text-text-secondary truncate max-w-[200px]">{run.task_title || '—'}</td>
+                                        <td className="px-4 py-3">
+                                            {run.trigger_event ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary">
+                                                    <Zap className="w-3 h-3" />{run.trigger_event}
+                                                </span>
+                                            ) : '—'}
+                                        </td>
+                                        <td className="px-4 py-3 text-text-tertiary text-xs truncate max-w-[120px]">{run.model_used || '—'}</td>
+                                        <td className="px-4 py-3 text-right text-text-secondary">{run.duration_ms != null ? formatDuration(run.duration_ms) : '—'}</td>
+                                        <td className="px-4 py-3 text-right text-text-secondary">{total > 0 ? total.toLocaleString() : '—'}</td>
+                                        <td className="px-4 py-3 text-right text-text-secondary">{run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)}` : '—'}</td>
+                                        <td className="px-4 py-3 text-right text-text-tertiary text-xs">{timeAgo(run.created_at)}</td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+// ── Config Tab ─────────────────────────────────────────────────────────
+
+function ConfigTab({ agent, onSaved }) {
+    const [form, setForm] = useState({
+        name: agent.name || '',
+        model: agent.model || '',
+        runtime_id: agent.runtime_id || '',
+        default_project_id: agent.default_project_id || '',
+        system_prompt: agent.system_prompt || '',
+        personality: agent.personality || '',
+        mcp_servers: Array.isArray(agent.mcp_servers) ? agent.mcp_servers : [],
+        mcp_disabled: Array.isArray(agent.mcp_disabled) ? agent.mcp_disabled : [],
+        mcp_strict: !!agent.mcp_strict,
+        mcp_config_override: agent.mcp_config_override || '',
+        home_path: agent.home_path || '',
+        // Conductor cadence config (only rendered for the Conductor).
+        conductor_tick_seconds: agent.conductor_tick_seconds ?? 60,
+        conductor_report_time: agent.conductor_report_time || '09:00',
+        conductor_report_enabled: agent.conductor_report_enabled ?? true,
+        conductor_plan_interval_minutes: agent.conductor_plan_interval_minutes ?? 10,
+        // Whether the Conductor may auto-dispatch work to this worker agent.
+        conductor_enabled: agent.conductor_enabled ?? false,
+        max_concurrent_runs: agent.max_concurrent_runs ?? 1,
+        // AP-155: per-agent containment posture. '' = workspace default.
+        sandbox_mode: agent.sandbox_mode || '',
+    });
+    const isConductor = agent.is_system && agent.name === 'Conductor';
+    const [runtimes, setRuntimes] = useState([]);
+    const [projects, setProjects] = useState([]);
+    const [mcpServers, setMcpServers] = useState([]); // full registry incl. auto
+    const [saving, setSaving] = useState(false);
+    const [msg, setMsg] = useState('');
+    const [editingMcp, setEditingMcp] = useState(false);
+    const [mcpConfig, setMcpConfig] = useState(null);
+    const [hostTools, setHostTools] = useState(null);
+    const [runtimeProvider, setRuntimeProvider] = useState('');
+
+    useEffect(() => {
+        api.forge.listRuntimes().catch(() => []).then((rts) => setRuntimes(rts || []));
+        api.getProjects().catch(() => []).then((ps) => setProjects(ps || []));
+        api.forge.listMcpServers(true).catch(() => []).then(setMcpServers);
+        api.forge.getDispatchPreview(agent.id).catch(() => null).then((p) => {
+            if (!p) return;
+            if (p.mcp_config) setMcpConfig(p.mcp_config);
+            if (p.host_tools) setHostTools(p.host_tools);
+            if (p.runtime_provider) setRuntimeProvider(p.runtime_provider);
+        });
+    }, [agent.id]);
+
+    const toggleMcp = async (name) => {
+        // A name is "built-in" (auto) when the registry says so. Built-ins
+        // toggle into/out of `mcp_disabled` (kill-switch list). Opt-ins
+        // toggle into/out of `mcp_servers` (allow-list).
+        const regEntry = mcpServers.find((s) => s.name === name);
+        const isAuto = !!regEntry?.auto;
+        let next;
+        if (isAuto) {
+            const cur = form.mcp_disabled || [];
+            const nextDisabled = cur.includes(name)
+                ? cur.filter((s) => s !== name)
+                : [...cur, name];
+            next = { ...form, mcp_disabled: nextDisabled };
+        } else {
+            const current = form.mcp_servers || [];
+            const nextList = current.includes(name)
+                ? current.filter((s) => s !== name)
+                : [...current, name];
+            next = { ...form, mcp_servers: nextList };
+        }
+        setForm(next);
+        // Persist immediately so the chip change matches the live config.
+        try {
+            await api.forge.updateAgent(agent.id, next);
+            const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+            if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+            onSaved();
+        } catch (err) {
+            setMsg('Error: ' + err.message);
+        }
+    };
+
+    const selectedRuntime = runtimes.find((r) => r.id === form.runtime_id) || null;
+    // Models surfaced by the daemon for the selected runtime. Free-form input
+    // still works via the datalist — type anything claude-code accepts.
+    const runtimeModels = selectedRuntime?.models || [];
+
+    const saveAgent = async () => {
+        // AP-91: managed agents must keep a runtime. Block client-side too
+        // so the user sees the rule before round-tripping; backend enforces
+        // anyway (returns 400 with the same message).
+        if (!form.runtime_id) {
+            setMsg('Runtime is required — a managed agent can\'t be downgraded to a service account. Delete the agent or pick a different runtime.');
+            return;
+        }
+        setSaving(true);
+        try {
+            // default_project_id is a nullable FK server-side; the "— none —"
+            // option is value="" which the backend rejects. Send null, not "".
+            const payload = { ...form, default_project_id: form.default_project_id || null };
+            await api.forge.updateAgent(agent.id, payload);
+            // Re-fetch the resolved MCP config so the "Live config" preview
+            // reflects what just got saved (otherwise it stays stale).
+            const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+            if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+            setEditingMcp(false);
+            setMsg('Saved');
+            onSaved();
+            setTimeout(() => setMsg(''), 2000);
+        } catch (err) {
+            setMsg('Error: ' + err.message);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="p-6 space-y-6 max-w-3xl">
+            {/* AP-302: agent's personal git token — used to clone/push repos
+                when the target project repo has no token of its own. */}
+            <section className="card space-y-4">
+                <h3 className="text-sm font-semibold text-text-primary">Git Access</h3>
+                <GitTokenField
+                    hasToken={agent.has_git_token}
+                    valid={agent.git_token_valid}
+                    checkedAt={agent.git_token_checked_at}
+                    label="Personal git access token"
+                    hint="Fallback PAT for this agent. A project repo's own token takes precedence."
+                    onSave={async (t) => {
+                        await api.setGitToken(agent.profile_id, t);
+                        onSaved();
+                    }}
+                    onCheck={async () => {
+                        await api.checkGitToken(agent.profile_id);
+                        onSaved();
+                    }} />
+            </section>
+
+            {/* Basic */}
+            <section className="card space-y-4">
+                <h3 className="text-sm font-semibold text-text-primary">Basic Configuration</h3>
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs text-text-tertiary mb-1">Name</label>
+                        <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                    </div>
+                    <div>
+                        <label className="block text-xs text-text-tertiary mb-1">Model</label>
+                        <input
+                            className="input"
+                            list="agent-model-options"
+                            value={form.model}
+                            onChange={(e) => setForm({ ...form, model: e.target.value })}
+                            placeholder={runtimeModels[0] || 'sonnet'}
+                        />
+                        <datalist id="agent-model-options">
+                            {runtimeModels.map((m) => <option key={m} value={m} />)}
+                        </datalist>
+                        <p className="text-xs text-text-tertiary mt-1">
+                            Pick from the daemon's catalog or type any value (e.g. <code>sonnet</code>, <code>claude-sonnet-4-5</code>, <code>sonnet[1m]</code>).
+                        </p>
+                    </div>
+                    {/* AP-86: no more "bot profile" picker. The agent IS the
+                        profile (1:1 by id). Identity is implicit. */}
+                    <div className="col-span-2">
+                        <label className="block text-xs text-text-tertiary mb-1">Project assignment</label>
+                        <select
+                            className="input"
+                            value={form.default_project_id}
+                            onChange={(e) => setForm({ ...form, default_project_id: e.target.value })}
+                        >
+                            <option value="">— none (generic agent) —</option>
+                            {projects.map(p => (
+                                <option key={p.id} value={p.id}>
+                                    {p.name}{p.repo_path ? ` · ${p.repo_path}` : ''}
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-text-tertiary mt-1">
+                            Chats from this agent default to this project's repo + conventions + MCP — no need to pick per chat. Users can still override for a single chat session via the dropdown on the Chat tab.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            {/* Daemon Runtime */}
+            <section className="card space-y-4">
+                <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-text-primary">Daemon Runtime</h3>
+                    <InfoTip text="The execution engine that runs this agent. Runtimes auto-register when 'agentira daemon start' runs on a machine with claude-code / codex / gemini-cli / openclaw / ollama installed. Persona, tools, conventions, and memory are owned by Agentira and travel with the agent — change the runtime here and the same agent runs on a different engine." />
+                </div>
+                {runtimes.length === 0 ? (
+                    <div className="px-3 py-4 rounded-md bg-bg-hover text-sm text-text-tertiary">
+                        No daemon runtimes registered. Start the daemon on a machine with claude-code / codex / gemini-cli installed.
+                    </div>
+                ) : (
+                    <>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Runtime</label>
+                            <select
+                                className="input"
+                                value={form.runtime_id}
+                                onChange={(e) => setForm({ ...form, runtime_id: e.target.value, model: '' })}
+                            >
+                                {!agent.runtime_id && <option value="">— select runtime —</option>}
+                                {runtimes.map((r) => (
+                                    <option key={r.id} value={r.id}>
+                                        {r.provider} {r.version ? `· ${r.version}` : ''} {r.device_name ? `· ${r.device_name}` : ''} ({r.status})
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        {selectedRuntime && (
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                <Info label="Provider" value={selectedRuntime.provider} />
+                                <Info label="Version" value={selectedRuntime.version || '—'} />
+                                <Info label="Device" value={selectedRuntime.device_name || '—'} />
+                                <Info label="Status" value={selectedRuntime.status} accent={selectedRuntime.status === 'online' ? '#10b981' : '#9aa0a6'} />
+                                <div className="col-span-2">
+                                    <Info label="Binary" value={selectedRuntime.binary_path} mono />
+                                </div>
+                                {selectedRuntime.models?.length > 0 && (
+                                    <div className="col-span-2">
+                                        <Info label={`Models (${selectedRuntime.models.length})`} value={selectedRuntime.models.join(', ')} mono />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </>
+                )}
+            </section>
+
+            {/* Home — the agent's persistent directory on disk */}
+            <section className="card space-y-3">
+                <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-text-primary">Home</h3>
+                    <InfoTip text="The agent's home directory on disk. Its repo copies, memory, and scratch files live here. Default is ~/.agentira/agents/<id>/home/. Stable per agent — the daemon always runs the agent here." />
+                </div>
+                <input
+                    className="input font-mono text-xs"
+                    value={form.home_path}
+                    placeholder={agent.home_path || "~/.agentira/agents/<id>/home/"}
+                    onChange={(e) => setForm({ ...form, home_path: e.target.value })}
+                />
+                <p className="text-[11px] text-text-tertiary">
+                    Leave blank for the default. Changing this after the agent has run will leave the old directory orphaned — copy or migrate manually if you care about the old state.
+                </p>
+            </section>
+
+            {/* Toolset — three layers, what comes from where */}
+            <section className="card space-y-4">
+                <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-text-primary">Toolset</h3>
+                    <InfoTip text="Tools available to this agent at dispatch, layered. Agentira composes on top of the runtime's own tools — it doesn't replace them. See docs/mcp_layering.md for the full model." />
+                </div>
+
+                {/* Layer 1 — runtime built-ins */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">Layer 1 · Runtime built-ins</span>
+                        {runtimeProvider && (
+                            <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary">{runtimeProvider}</code>
+                        )}
+                        <InfoTip text="Tools the runtime binary ships with (Read, Edit, Bash, Grep, etc. for claude-code). Not configurable by Agentira — they come with the engine." />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(hostTools?.builtins || []).map((t) => (
+                            <code key={t} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary">{t}</code>
+                        ))}
+                        {(!hostTools || (hostTools.builtins || []).length === 0) && (
+                            <span className="text-xs text-text-tertiary italic">{hostTools ? 'none' : 'daemon hasn\'t reported yet'}</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Layer 2 — user host config */}
+                <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">Layer 2 · Host config (user-owned)</span>
+                        <InfoTip text="MCP servers and md files the user has installed on their own machine (e.g. ~/.claude.json, ~/.claude/CLAUDE.md). Inherited automatically — Agentira merges these into every agent's config. Enable strict mode on the profile to ignore them." />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {(hostTools?.host_mcp_servers || []).map((s) => (
+                            <span key={s.name} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary inline-flex items-center gap-1">
+                                {s.name}
+                                <span className="text-[10px] text-text-tertiary">·{s.transport}</span>
+                            </span>
+                        ))}
+                        {(hostTools?.host_md_files || []).map((f) => (
+                            <span key={f.path} className="px-2 py-0.5 rounded text-xs font-mono bg-bg-hover text-text-secondary" title={`${f.size} bytes`}>{f.path}</span>
+                        ))}
+                        {hostTools && (hostTools.host_mcp_servers || []).length === 0 && (hostTools.host_md_files || []).length === 0 && (
+                            <span className="text-xs text-text-tertiary italic">no host MCP or md files discovered</span>
+                        )}
+                        {!hostTools && (
+                            <span className="text-xs text-text-tertiary italic">daemon hasn't reported yet</span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Layer 3 — Agentira-managed: one unified editor.
+                    View shows the resolved config (read-only); Edit mode lets
+                    the user modify the JSON directly. Saving stores it as the
+                    override, which merges over registry defaults at dispatch. */}
+                <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-accent-primary font-semibold">Layer 3 · Agentira-managed</span>
+                        <InfoTip text="Servers Agentira controls per-agent. Click any chip to toggle on/off. Built-ins (agentira, memory) come from the registry; entries you add via Custom JSON appear as 'custom'. Same name in Custom JSON = your version wins." />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-2 items-center">
+                            {mcpServers.map((s) => {
+                                const isAuto = !!s.auto;
+                                const isDisabled = isAuto && (form.mcp_disabled || []).includes(s.name);
+                                const isOn = isAuto ? !isDisabled : form.mcp_servers.includes(s.name);
+                                return (
+                                    <button
+                                        key={s.name}
+                                        type="button"
+                                        onClick={() => toggleMcp(s.name)}
+                                        title={s.description || s.name}
+                                        className={
+                                            isOn
+                                                ? (isAuto
+                                                    ? 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle/60 text-accent-primary hover:bg-accent-subtle transition-colors'
+                                                    : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 transition-colors')
+                                                : 'px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-bg-hover text-text-tertiary opacity-60 hover:opacity-100 hover:bg-bg-active transition-all'
+                                        }
+                                    >
+                                        <code className="font-mono">{s.name}</code>
+                                        {isAuto && <span className="text-[10px] uppercase tracking-wider">{isOn ? 'built-in' : 'off'}</span>}
+                                        {!isAuto && isOn && <Check className="w-3 h-3" />}
+                                        {!isAuto && !isOn && <span className="text-[10px] uppercase tracking-wider">off</span>}
+                                    </button>
+                                );
+                            })}
+                            {/* Custom-only entries — servers in the resolved config
+                                that aren't in the registry (added via JSON override). */}
+                            {(() => {
+                                const registryNames = new Set(mcpServers.map((s) => s.name));
+                                const liveNames = mcpConfig ? Object.keys(mcpConfig.mcpServers || {}) : [];
+                                const customOnly = liveNames.filter((n) => !registryNames.has(n));
+                                return customOnly.map((name) => (
+                                    <span
+                                        key={`custom-${name}`}
+                                        className="px-2.5 py-1 rounded-md text-xs flex items-center gap-1.5 bg-accent-subtle/40 text-accent-primary border border-accent-primary/40"
+                                        title="Added via Custom JSON override below"
+                                    >
+                                        <code className="font-mono">{name}</code>
+                                        <span className="text-[10px] uppercase tracking-wider">custom</span>
+                                    </span>
+                                ));
+                            })()}
+                        </div>
+                    </div>
+
+                    {/* Live config preview + edit mode */}
+                    <div className="pt-2 mt-1 border-t border-border-subtle space-y-1.5">
+                        <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-text-secondary inline-flex items-center gap-1.5">
+                                Live config
+                                <InfoTip text="The full resolved MCP config the agent gets at dispatch. Built-ins + opt-ins from Layer 3 + any Custom JSON, with disabled entries stripped. Not a file on disk — Agentira writes a temp file (/tmp/agentira-mcp-*.json) and passes it to the runtime each time, then deletes it." />
+                                {form.mcp_config_override ? (
+                                    <span className="ml-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary">custom</span>
+                                ) : (
+                                    <span className="ml-1 text-[10px] uppercase tracking-wider text-text-tertiary">defaults</span>
+                                )}
+                            </span>
+                            <div className="flex items-center gap-3">
+                                {!editingMcp && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditingMcp(true);
+                                            if (!form.mcp_config_override && mcpConfig) {
+                                                setForm((f) => ({ ...f, mcp_config_override: JSON.stringify(mcpConfig, null, 2) }));
+                                            }
+                                        }}
+                                        className="text-[11px] text-accent-primary hover:underline"
+                                    >
+                                        Edit JSON
+                                    </button>
+                                )}
+                                {editingMcp && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                // Parse-check before saving to give immediate feedback.
+                                                if (form.mcp_config_override.trim()) {
+                                                    try { JSON.parse(form.mcp_config_override); }
+                                                    catch (e) { setMsg('Invalid JSON: ' + e.message); return; }
+                                                }
+                                                await saveAgent();
+                                            }}
+                                            className="text-[11px] text-accent-primary hover:underline font-semibold"
+                                        >
+                                            Save JSON
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditingMcp(false)}
+                                            className="text-[11px] text-text-tertiary hover:text-text-secondary hover:underline"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </>
+                                )}
+                                {form.mcp_config_override && (
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            setEditingMcp(false);
+                                            const next = { ...form, mcp_config_override: '' };
+                                            setForm(next);
+                                            try {
+                                                await api.forge.updateAgent(agent.id, next);
+                                                const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+                                                if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+                                                setMsg('Reset to defaults');
+                                                onSaved();
+                                                setTimeout(() => setMsg(''), 2000);
+                                            } catch (err) {
+                                                setMsg('Error: ' + err.message);
+                                            }
+                                        }}
+                                        className="text-[11px] text-text-tertiary hover:text-text-secondary hover:underline"
+                                    >
+                                        Reset to defaults
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {editingMcp ? (
+                            <textarea
+                                className="input min-h-[180px] font-mono text-xs"
+                                value={form.mcp_config_override}
+                                onChange={(e) => setForm({ ...form, mcp_config_override: e.target.value })}
+                            />
+                        ) : (
+                            <pre className="p-3 rounded-md bg-bg-hover text-xs font-mono overflow-x-auto text-text-secondary whitespace-pre-wrap max-h-[200px]">
+{mcpConfig ? JSON.stringify(mcpConfig, null, 2) : '// loading…'}
+                            </pre>
+                        )}
+
+                    </div>
+                </div>
+            </section>
+
+            {/* Personality */}
+            <section className="card space-y-4">
+                <h3 className="text-sm font-semibold text-text-primary">Personality & Prompts</h3>
+                <div>
+                    <label className="block text-xs text-text-tertiary mb-1">System Prompt</label>
+                    <textarea
+                        className="input min-h-[120px] font-mono text-sm"
+                        value={form.system_prompt}
+                        onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
+                        placeholder="You are a software engineering agent..."
+                    />
+                </div>
+                <div>
+                    <label className="block text-xs text-text-tertiary mb-1">Personality / Behavior Notes</label>
+                    <textarea
+                        className="input min-h-[80px] text-sm"
+                        value={form.personality}
+                        onChange={(e) => setForm({ ...form, personality: e.target.value })}
+                        placeholder="Concise, prefers to ship fast, writes tests..."
+                    />
+                </div>
+            </section>
+
+            {/* Conductor cadence — only for the Conductor system agent */}
+            {isConductor && (
+                <section className="card space-y-4">
+                    <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Conductor Cadence
+                        </h3>
+                        <InfoTip text="How often the Conductor surveys the workspace and dispatches todo work (queue tick), and when it compiles the daily digest/report. Changes apply without a backend restart." />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Queue-tick interval (seconds)</label>
+                            <input
+                                type="number" min="10" className="input"
+                                value={form.conductor_tick_seconds}
+                                onChange={(e) => setForm({ ...form, conductor_tick_seconds: Number(e.target.value) })}
+                            />
+                            <p className="text-xs text-text-tertiary mt-1">
+                                Minimum 10s. How often todo work is auto-dispatched to idle agents.
+                            </p>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Daily report time (UTC, HH:MM)</label>
+                            <input
+                                type="time" className="input"
+                                value={form.conductor_report_time}
+                                onChange={(e) => setForm({ ...form, conductor_report_time: e.target.value })}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Planning interval (minutes)</label>
+                            <input
+                                type="number" min="1" className="input"
+                                value={form.conductor_plan_interval_minutes}
+                                onChange={(e) => setForm({ ...form, conductor_plan_interval_minutes: Number(e.target.value) })}
+                            />
+                            <p className="text-xs text-text-tertiary mt-1">
+                                How often the Conductor takes an LLM turn to assign unassigned todo tasks to the best-fit agent.
+                            </p>
+                        </div>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={form.conductor_report_enabled}
+                            onChange={(e) => setForm({ ...form, conductor_report_enabled: e.target.checked })}
+                        />
+                        Compile a daily digest / report
+                    </label>
+                </section>
+            )}
+
+            {/* Conductor management — for worker agents (not system agents) */}
+            {!agent.is_system && (
+                <section className="card space-y-4">
+                    <div className="flex items-center gap-1.5">
+                        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Conductor
+                        </h3>
+                        <InfoTip text="When enabled, the Conductor auto-dispatches the next unblocked todo task from this agent's project to it whenever it's idle — no manual Run click needed. Off by default." />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={form.conductor_enabled}
+                            onChange={(e) => setForm({ ...form, conductor_enabled: e.target.checked })}
+                        />
+                        Let the Conductor auto-dispatch work to this agent
+                    </label>
+                    <div className="w-48">
+                        <label className="block text-xs text-text-tertiary mb-1">Max concurrent runs</label>
+                        <input
+                            type="number" min="1" className="input"
+                            value={form.max_concurrent_runs}
+                            onChange={(e) => setForm({ ...form, max_concurrent_runs: Number(e.target.value) })}
+                        />
+                    </div>
+                    {!form.default_project_id && (
+                        <p className="text-xs text-yellow-500">
+                            Assign this agent a project (above) — the Conductor only
+                            picks up work from the agent's project.
+                        </p>
+                    )}
+                </section>
+            )}
+
+            {/* AP-155: Containment — per-agent sandbox posture. Project
+                override (Project Settings) wins when set. */}
+            <section className="card space-y-2">
+                <h3 className="text-sm font-semibold text-text-primary">
+                    Containment
+                </h3>
+                <p className="text-xs text-text-tertiary">
+                    How tightly to fence this agent's workdir. Projects may override
+                    per-project. Phase 1 ships the config + dispatch logging;
+                    per-adapter enforcement (claude --add-dir / bwrap / Docker)
+                    lands next.
+                </p>
+                <select className="input"
+                    value={form.sandbox_mode}
+                    onChange={(e) => setForm({ ...form, sandbox_mode: e.target.value })}>
+                    <option value="">(workspace default)</option>
+                    <option value="off">Off — cwd set, nothing enforced</option>
+                    <option value="cwd">cwd — claude --add-dir + --disallowedTools (best-effort)</option>
+                    <option value="strict">strict — OS sandbox (bwrap / sandbox-exec)</option>
+                    <option value="container">container — per-agent Docker (strongest)</option>
+                </select>
+            </section>
+
+            {/* Schedule — placeholder */}
+            <section className="card space-y-2 opacity-60">
+                <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        Work Schedule
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-bg-hover text-text-tertiary">Coming soon</span>
+                </div>
+                <p className="text-xs text-text-tertiary">
+                    Cron-style scheduling will be wired up via the daemon's scheduler. For now, agents only fire on explicit triggers.
+                </p>
+            </section>
+
+            {/* Save */}
+            <div className="flex items-center gap-3">
+                <button onClick={saveAgent} disabled={saving} className="btn btn-primary">
+                    {saving ? 'Saving...' : 'Save Configuration'}
+                </button>
+                {msg && <span className={`text-sm ${msg.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'}`}>{msg}</span>}
+            </div>
+        </div>
+    );
+}
+
+function Info({ label, value, mono, accent }) {
+    return (
+        <div>
+            <div className="text-text-tertiary uppercase tracking-wider text-[10px] mb-0.5">{label}</div>
+            <div
+                className={`text-text-primary ${mono ? 'font-mono break-all' : ''}`}
+                style={accent ? { color: accent } : undefined}
+            >
+                {value}
+            </div>
+        </div>
+    );
+}
+
+
+// ── Projects Tab ───────────────────────────────────────────────────────
+
+function ProjectsTab({ agentId }) {
+    const navigate = useNavigate();
+    const [projects, setProjects] = useState(null);
+
+    useEffect(() => {
+        api.forge.listAgentProjects(agentId)
+            .then(d => setProjects(Array.isArray(d) ? d : []))
+            .catch(() => setProjects([]));
+    }, [agentId]);
+
+    if (projects === null) {
+        return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading projects...</div>;
+    }
+
+    if (projects.length === 0) {
+        return (
+            <div className="p-6">
+                <div className="text-center py-16 text-text-tertiary">
+                    <Folder className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <p>This agent isn't assigned to any project yet.</p>
+                    <p className="text-xs mt-2">Add the agent as a member from a project's settings to give it access.</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-6">
+            <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                    <thead>
+                        <tr className="border-b border-border-subtle text-text-tertiary text-xs uppercase">
+                            <th className="text-left px-4 py-3 font-medium">Project</th>
+                            <th className="text-left px-4 py-3 font-medium">Key</th>
+                            <th className="text-left px-4 py-3 font-medium">Repo Path</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {projects.map(p => (
+                            <tr
+                                key={p.id}
+                                onClick={() => navigate(`/studio/board/${p.id}`)}
+                                className="border-b border-border-subtle hover:bg-bg-hover transition-colors cursor-pointer"
+                            >
+                                <td className="px-4 py-3 text-text-primary font-medium">{p.name}</td>
+                                <td className="px-4 py-3 text-text-tertiary text-xs">
+                                    {p.key_prefix
+                                        ? <span className="px-1.5 py-0.5 rounded bg-bg-hover">{p.key_prefix}</span>
+                                        : '—'}
+                                </td>
+                                <td className="px-4 py-3 text-text-tertiary text-xs font-mono truncate max-w-[400px]">
+                                    {p.repo_path || '—'}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+
+// ── Webhooks Tab ───────────────────────────────────────────────────────
+
+function WebhooksTab({ agentId }) {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const load = async () => {
+            try {
+                const data = await api.forge.listWebhookLogs(agentId);
+                setLogs(data);
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+        const interval = setInterval(load, 10000);
+        return () => clearInterval(interval);
+    }, [agentId]);
+
+    if (loading) return <div className="flex-1 flex items-center justify-center text-text-tertiary p-6">Loading webhook logs...</div>;
+
+    return (
+        <div className="p-6">
+            {logs.length === 0 ? (
+                <div className="text-center py-16 text-text-tertiary">
+                    <Webhook className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <p>No webhook deliveries recorded yet.</p>
+                    <p className="text-xs mt-2">Webhook events will appear here as they are sent and received.</p>
+                </div>
+            ) : (
+                <div className="space-y-2">
+                    {logs.map((log) => (
+                        <div key={log.id} className={`card border-l-4 ${log.success ? 'border-l-emerald-500' : 'border-l-red-500'}`}>
+                            <div className="flex items-center gap-3 mb-2">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                                    log.direction === 'inbound' ? 'bg-blue-500/15 text-blue-400' : 'bg-purple-500/15 text-purple-400'
+                                }`}>
+                                    {log.direction === 'inbound' ? '← IN' : '→ OUT'}
+                                </span>
+                                <span className="text-sm text-text-primary font-medium">{log.event || 'unknown'}</span>
+                                {log.status_code && (
+                                    <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                        log.status_code < 400 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                                    }`}>
+                                        {log.status_code}
+                                    </span>
+                                )}
+                                {log.duration_ms != null && (
+                                    <span className="text-xs text-text-tertiary">{log.duration_ms}ms</span>
+                                )}
+                                <span className="text-xs text-text-tertiary ml-auto">{formatTime(log.created_at)}</span>
+                            </div>
+                            <div className="text-xs text-text-tertiary truncate">{log.url}</div>
+                            {log.payload && (
+                                <details className="mt-2 text-xs">
+                                    <summary className="text-text-tertiary cursor-pointer hover:text-text-secondary">Payload</summary>
+                                    <pre className="mt-1 p-2 bg-bg-hover rounded text-text-secondary overflow-auto max-h-32">{log.payload}</pre>
+                                </details>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+// ── Live Tab ───────────────────────────────────────────────────────────
+
+function LiveTab({ agentId, agent }) {
+    const [messages, setMessages] = useState([]);
+    const [runs, setRuns] = useState([]);
+    const [paused, setPaused] = useState(false);
+    const bottomRef = useRef(null);
+
+    useEffect(() => {
+        if (paused) return;
+        const load = async () => {
+            try {
+                const [msgs, rs] = await Promise.all([
+                    api.forge.listMessages(agentId, { limit: 30 }),
+                    api.forge.listRuns({ agent_id: agentId, limit: 5 }),
+                ]);
+                setMessages(msgs);
+                setRuns(rs);
+            } catch (err) {
+                console.error(err);
+            }
+        };
+        load();
+        const interval = setInterval(load, 2000);
+        return () => clearInterval(interval);
+    }, [agentId, paused]);
+
+    useEffect(() => {
+        if (!paused && bottomRef.current) {
+            bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [messages, paused]);
+
+    const status = STATUS_STYLES[agent.status] || STATUS_STYLES.offline;
+
+    return (
+        <div className="flex flex-col h-full">
+            {/* Live header */}
+            <div className="flex items-center justify-between px-6 py-3 border-b border-border-subtle bg-bg-panel">
+                <div className="flex items-center gap-3">
+                    <div className={`w-2.5 h-2.5 rounded-full ${paused ? 'bg-gray-500' : 'bg-red-500 animate-pulse'}`} />
+                    <span className="text-sm font-medium text-text-primary">{paused ? 'Paused' : 'Live Feed'}</span>
+                    <span className="text-xs text-text-tertiary">Polling every 2s</span>
+                </div>
+                <div className="flex items-center gap-2">
+                    {runs.length > 0 && runs[0].status === 'running' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/15 text-yellow-400 text-xs font-medium animate-pulse">
+                            <Loader className="w-3 h-3" /> Running: {runs[0].task_title || runs[0].trigger_event || 'task'}
+                        </span>
+                    )}
+                    <button onClick={() => setPaused(!paused)} className="btn btn-ghost py-1 px-3 text-xs">
+                        {paused ? <Play className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        {paused ? 'Resume' : 'Pause'}
+                    </button>
+                </div>
+            </div>
+
+            {/* Live feed */}
+            <div className="flex-1 overflow-auto p-4 space-y-2 font-mono text-xs">
+                {messages.length === 0 ? (
+                    <div className="text-center py-16 text-text-tertiary">
+                        <Eye className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                        <p>Waiting for agent activity...</p>
+                    </div>
+                ) : (
+                    messages.map((msg) => {
+                        const roleColors = {
+                            system: '#a855f7', user: '#3b82f6', assistant: '#10b981', tool: '#f97316'
+                        };
+                        const color = roleColors[msg.role] || '#6b7280';
+                        return (
+                            <div key={msg.id} className="flex gap-2 leading-relaxed">
+                                <span className="text-text-tertiary shrink-0 w-[70px] text-right">{formatTimeShort(msg.created_at)}</span>
+                                <span className="shrink-0 font-bold w-[60px]" style={{ color }}>[{msg.role}]</span>
+                                <span className="text-text-secondary flex-1 break-all">
+                                    {msg.content.length > 300 ? msg.content.slice(0, 300) + '...' : msg.content}
+                                    {msg.tool_name && <span className="text-orange-400 ml-1">→ {msg.tool_name}</span>}
+                                </span>
+                            </div>
+                        );
+                    })
+                )}
+                <div ref={bottomRef} />
+            </div>
+        </div>
+    );
+}
+
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+function StatCard({ icon: Icon, label, value, sub, color, onClick, expandable }) {
+    return (
+        <div
+            className={`card flex items-start gap-4 ${onClick ? 'cursor-pointer hover:border-border-active transition-colors' : ''}`}
+            onClick={onClick}
+        >
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
+                <Icon className="w-5 h-5" style={{ color }} />
+            </div>
+            <div className="flex-1">
+                <div className="text-2xl font-bold text-text-primary">{value}</div>
+                <div className="text-sm text-text-secondary">{label}</div>
+                {sub && <div className="text-xs text-text-tertiary mt-1">{sub}</div>}
+            </div>
+            {expandable && <ChevronDown className="w-4 h-4 text-text-tertiary mt-1" />}
+        </div>
+    );
+}
+
+function formatDuration(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+}
+
+function timeAgo(isoString) {
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+}
+
+function formatTime(isoString) {
+    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatTimeShort(isoString) {
+    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}

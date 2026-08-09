@@ -1,0 +1,94 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../api';
+import { useAuth } from '../context/AuthContext';
+
+// My Work — every task assigned to the current user, across all projects
+// (sidebar "My Work"). Data: GET /tasks?assignee=<me>. Task.assignee stores the
+// profile name, which is user.name (see backend services._profile_to_dict).
+// Grouped by status so the page reads like a personal board.
+
+const priorityColor = (p) => ({
+    urgent: '#f87171', high: '#fdd663', medium: '#8ab4f8', low: 'var(--text-muted)',
+}[p] || 'var(--text-muted)');
+
+// Present statuses in pipeline order; anything unknown falls to the end.
+const STATUS_ORDER = ['in_progress', 'review', 'todo', 'backlog', 'blocked', 'done'];
+const statusRank = (s) => {
+    const i = STATUS_ORDER.indexOf(s);
+    return i === -1 ? STATUS_ORDER.length : i;
+};
+const prettyStatus = (s) => (s || 'other').replace(/_/g, ' ');
+
+export function MyWork() {
+    const navigate = useNavigate();
+    const { user } = useAuth();
+    const me = user?.name || user?.username || user?.display_name;
+    const [tasks, setTasks] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const load = useCallback(async () => {
+        if (!me) { setLoading(false); return; }
+        try {
+            const list = await api.listTasks(null, null, me);
+            setTasks(Array.isArray(list) ? list : []);
+            setError(null);
+        } catch (err) {
+            setError(err.message || 'Failed to load your work');
+        } finally {
+            setLoading(false);
+        }
+    }, [me]);
+
+    useEffect(() => { load(); }, [load]);
+
+    // Group by status, then order the groups by pipeline position.
+    const groups = {};
+    for (const t of tasks) {
+        const s = t.status || 'other';
+        (groups[s] = groups[s] || []).push(t);
+    }
+    const orderedStatuses = Object.keys(groups).sort((a, b) => statusRank(a) - statusRank(b));
+
+    return (
+        <div style={{ maxWidth: '820px', margin: '0 auto', padding: '28px 24px', fontFamily: 'var(--font-sans)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px' }}>
+                <h1 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-bright)' }}>My Work</h1>
+                {!loading && !error && (
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{tasks.length} assigned</span>
+                )}
+            </div>
+
+            {loading && <div style={{ color: 'var(--text-muted)', padding: '40px 0', textAlign: 'center' }}>Loading…</div>}
+            {error && <div style={{ color: '#f87171', padding: '40px 0', textAlign: 'center' }}>{error}</div>}
+            {!loading && !error && tasks.length === 0 && (
+                <div style={{ color: 'var(--text-muted)', padding: '48px 0', textAlign: 'center' }}>Nothing assigned to you yet.</div>
+            )}
+
+            {!loading && !error && orderedStatuses.map((status) => (
+                <div key={status} style={{ marginBottom: '22px' }}>
+                    <div style={{ fontSize: '11.5px', fontWeight: 800, letterSpacing: '.08em', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{prettyStatus(status)}</span>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'var(--surface-card)', borderRadius: '999px', padding: '1px 7px' }}>{groups[status].length}</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        {groups[status].map((t) => (
+                            <div
+                                key={t.id}
+                                className="nav"
+                                onClick={() => navigate(`/studio/tasks/${t.id}`)}
+                                style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '11px 12px', borderRadius: '10px', cursor: 'pointer', background: 'var(--surface-nav)', border: '1px solid var(--border-default)' }}
+                            >
+                                <span style={{ width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0, background: priorityColor(t.priority) }} title={t.priority || 'no priority'} />
+                                {t.key && <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'ui-monospace,monospace', flexShrink: 0 }}>{t.key}</span>}
+                                <span style={{ fontSize: '13.5px', color: 'var(--text-bright)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+                                {t.epic_name && <span style={{ fontSize: '11px', color: 'var(--brand-lavender)', flexShrink: 0 }}>{t.epic_name}</span>}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}

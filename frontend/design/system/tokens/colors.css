@@ -1,0 +1,75 @@
+/* ============================================================
+   Agentira — Color tokens
+   A GitHub-dark-dimmed inspired surface system with a
+   lavender + teal brand pairing and a "pulse blue" live accent.
+   ============================================================ */
+
+:root {
+  /* ---- Surfaces (deepest → highest) ---- */
+  --surface-sunken:   #0a0c10;  /* code blocks, deepest wells */
+  --surface-base:     #0e1117;  /* app background, inputs */
+  --surface-raised:   #14161b;  /* highlighted panels (toolset cards) */
+  --surface-nav:      #161b22;  /* sidebar / chrome */
+  --surface-card:     #1c2128;  /* cards, dropdowns, list rows */
+  --surface-hover:    #272d36;  /* nav + row hover */
+
+  /* ---- Borders & lines ---- */
+  --border-default:   #30363d;  /* hairline borders, dividers */
+  --border-strong:    #484f58;  /* hover borders, emphasis */
+
+  /* ---- Text ---- */
+  --text-primary:     #f0f3f6;  /* headings, primary body */
+  --text-bright:      #e8ebf0;  /* list item titles */
+  --text-secondary:   #c8cdd4;  /* long-form body */
+  --text-tertiary:    #b1bac4;  /* supporting labels */
+  --text-muted:       #768390;  /* meta, captions, placeholders */
+  --text-section:     #aeb6c0;  /* uppercase section headers */
+
+  /* ---- Brand ---- */
+  --brand-lavender:   #c9b8ff;  /* primary brand / agent identity */
+  --brand-teal:       #80cbc4;  /* secondary brand */
+  --brand-gradient:   linear-gradient(135deg, #c9b8ff, #80cbc4);
+
+  /* ---- Live / Pulse (running, realtime) ---- */
+  --pulse-blue:       #38bdf8;  /* the single "live/running" accent */
+  --pulse-blue-bright:#7dd3fc;
+
+  /* ---- Functional accents ---- */
+  --accent-cyan:      #00bcd4;  /* agent / activity blue-cyan */
+  --accent-purple:    #7c4dff;  /* tool calls, system */
+  --accent-mono-blue: #7c8db5;  /* monospace keys (ACM-142) */
+
+  /* ---- Semantic ---- */
+  --success:          #2ecc71;  /* done, merged, verified */
+  --warning:          #ff9800;  /* needs attention, blocked */
+  --danger:           #f85149;  /* failed, destructive */
+  --info:             var(--pulse-blue);
+
+  /* ---- Semantic tints (translucent fills behind icons/pills) ---- */
+  --tint-lavender:    rgba(201,184,255,.14);
+  --tint-teal:        rgba(128,203,196,.10);
+  --tint-pulse:       rgba(56,189,248,.10);
+  --tint-cyan:        rgba(0,188,212,.14);
+  --tint-purple:      rgba(124,77,255,.14);
+  --tint-success:     rgba(46,204,113,.14);
+  --tint-warning:     rgba(255,152,0,.14);
+  --tint-danger:      rgba(248,81,73,.14);
+  --tint-selection:   rgba(201,184,255,.30);
+
+  /* ---- Agent identity ----
+     Agents are created by users, so color is never tied to a role.
+     An agent's avatar color is auto-assigned by hashing its id onto
+     this fixed ring. The Conductor is the one system-reserved identity. ---- */
+  --agent-ring-1:     #ffb74d;  /* amber */
+  --agent-ring-2:     #00bcd4;  /* cyan */
+  --agent-ring-3:     #c9b8ff;  /* lavender */
+  --agent-ring-4:     #80cbc4;  /* teal */
+  --agent-ring-5:     #f06292;  /* pink */
+  --agent-conductor:  #7c4dff;  /* purple · system, reserved */
+
+  /* ---- Priority colors ---- */
+  --priority-critical: #f85149;
+  --priority-high:     #ff9800;
+  --priority-medium:   #7c8db5;
+  --priority-low:      #768390;
+}

@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#16181d}
+  body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Inter','Helvetica Neue',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  ::selection{background:rgba(201,184,255,.3)}
+  @property --gla{syntax:'<angle>';initial-value:0deg;inherits:false}
+  @keyframes glaspin{to{--gla:360deg}}
+  @keyframes glapulse{0%,100%{box-shadow:0 0 5px 0 rgba(56,189,248,.30)}50%{box-shadow:0 0 16px 2px rgba(56,189,248,.55)}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes livedot{0%{transform:scale(.7);opacity:.75}70%{transform:scale(2);opacity:0}100%{opacity:0}}
+  @keyframes barwork{0%{transform:translateX(-110%)}100%{transform:translateX(260%)}}
+  .glow{position:relative;animation:glapulse 2.8s ease-in-out infinite}
+  .glow::before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1.5px;background:conic-gradient(from var(--gla),transparent 0deg,rgba(56,189,248,0) 190deg,#38bdf8 280deg,#7dd3fc 320deg,#38bdf8 345deg,transparent 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:glaspin 2.5s linear infinite;pointer-events:none}
+</style>
+</helmet>
+<div style="min-height:100vh;background:#16181d;color:#f0f3f6;padding:60px 40px 120px">
+  <div style="max-width:1340px;margin:0 auto">
+
+    <!-- ===== HERO ===== -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:26px">
+      <span style="width:30px;height:30px;border-radius:8px;background:rgba(201,184,255,.12);display:inline-flex;align-items:center;justify-content:center">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+      </span>
+      <span style="font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:#768390">AgentIRA · Flow &amp; UX redesign</span>
+    </div>
+    <h1 style="font-size:54px;line-height:1.04;font-weight:600;letter-spacing:-.02em;margin:0 0 18px;max-width:18ch">One workflow, not two apps.</h1>
+    <p style="font-size:19px;line-height:1.55;color:#b1bac4;max-width:64ch;margin:0 0 26px">
+      Today Agentira makes you hold two products in your head — <b style="color:#c9b8ff;font-weight:600">Studio</b> (you plan the work) and <b style="color:#80cbc4;font-weight:600">Forge</b> (agents do the work) — joined only by a hidden grid menu. But it's one loop: <i>plan → an agent builds → you review</i>. This redesign collapses the seam, makes <b style="color:#f0f3f6">live agent activity visible everywhere</b>, and keeps your dark Material scheme exactly as-is.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <span style="font-size:12px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:6px 12px">Scheme untouched — same colors &amp; type</span>
+      <span style="font-size:12px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:6px 12px">Static hi-fi · before → after</span>
+      <span style="font-size:12px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:6px 12px">Always-on live runs</span>
+      <span style="font-size:12px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:6px 12px">Consistent inbox &amp; buttons</span>
+    </div>
+
+    <div style="height:1px;background:#30363d;margin:46px 0"></div>
+
+    <!-- ============ SECTION 0 — DIAGNOSIS ============ -->
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px">
+      <span style="font-size:13px;font-weight:700;color:#f87171;letter-spacing:.04em">DIAGNOSIS</span>
+      <span style="font-size:13px;color:#768390">What's cumbersome today</span>
+    </div>
+    <h2 style="font-size:30px;font-weight:600;letter-spacing:-.01em;margin:0 0 8px">The current shell, honestly</h2>
+    <p style="font-size:15px;line-height:1.6;color:#b1bac4;max-width:72ch;margin:0 0 26px">Five controls fight for the top bar, the left rail goes blank the moment you step outside a project, rename/delete throw native browser pop-ups, and following one task's agent means leaving for a different app. Numbers below map to the fixes.</p>
+
+    <!-- frame label -->
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#f87171"></span>
+      <span style="font-size:12px;font-weight:600;color:#e6a5a5;letter-spacing:.02em">BEFORE — Studio dashboard, as it ships today</span>
+    </div>
+
+    <div style="border-radius:14px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);background:#0e1117;position:relative">
+      <!-- NAVBAR -->
+      <div style="height:60px;border-bottom:1px solid #30363d;background:#161b22;display:flex;align-items:center;justify-content:space-between;padding:0 16px">
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="width:34px;height:34px;border-radius:8px;background:rgba(208,188,255,.1);display:flex;align-items:center;justify-content:center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d0bcff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+            </span>
+            <div style="line-height:1.05">
+              <div style="font-size:9px;font-weight:600;letter-spacing:.18em;color:#768390">AGENTIRA</div>
+              <div style="font-size:15px;font-weight:600;color:#f0f3f6">Studio</div>
+            </div>
+          </div>
+          <!-- project switcher pill (1) -->
+          <div style="position:relative">
+            <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;border:1px solid #30363d;color:#b1bac4">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+              <span style="color:#f0f3f6;font-size:13px">Acme Web</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+            </div>
+            <span style="position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.5)">1</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <!-- create (2) -->
+          <div style="position:relative">
+            <div style="display:flex;align-items:center;gap:3px;padding:8px 10px;border-radius:12px;border:1px solid #30363d;color:#b1bac4">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+            </div>
+            <span style="position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.5)">2</span>
+          </div>
+          <!-- search -->
+          <div style="display:flex;align-items:center;gap:8px;background:#0e1117;border:1px solid #30363d;border-radius:12px;padding:8px 12px;width:200px;color:#768390">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+            <span style="font-size:13px">Search…</span>
+          </div>
+          <div style="width:1px;height:24px;background:#30363d;margin:0 4px"></div>
+          <!-- bell (5) -->
+          <div style="position:relative;padding:8px;border-radius:12px;color:#b1bac4">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
+            <span style="position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:2px solid #161b22"></span>
+            <span style="position:absolute;bottom:-9px;right:-9px;width:20px;height:20px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.5)">5</span>
+          </div>
+          <!-- theme -->
+          <div style="padding:8px;border-radius:12px;color:#b1bac4">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+          </div>
+          <!-- app switcher grid (3) -->
+          <div style="position:relative;padding:8px;border-radius:12px;color:#b1bac4;background:rgba(248,113,113,.08)">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/></svg>
+            <span style="position:absolute;top:-9px;right:-9px;width:20px;height:20px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.5)">3</span>
+          </div>
+          <div style="width:34px;height:34px;border-radius:50%;background:rgba(201,184,255,.1);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">A</div>
+        </div>
+      </div>
+      <!-- BODY -->
+      <div style="display:flex;height:560px">
+        <!-- sidebar (4) empty -->
+        <div style="width:220px;border-right:1px solid #30363d;background:#161b22;padding:14px;position:relative">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+            <span style="font-size:13px;font-weight:700;color:#f0f3f6;letter-spacing:.08em">PLANNING</span>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg>
+          </div>
+          <div style="border:1px dashed #3a2030;border-radius:10px;padding:18px 12px;text-align:center;background:rgba(248,113,113,.04)">
+            <div style="font-size:12px;color:#8b7174;line-height:1.5">No nav here.<br>Items only appear<br>once you're inside<br>a project.</div>
+          </div>
+          <span style="position:absolute;top:48px;right:-11px;width:22px;height:22px;border-radius:50%;background:#f87171;color:#160c0c;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.5);z-index:3">4</span>
+        </div>
+        <!-- main -->
+        <div style="flex:1;padding:32px 40px;overflow:hidden">
+          <div style="max-width:760px">
+            <h3 style="font-size:24px;font-weight:700;margin:0 0 4px">Studio</h3>
+            <p style="font-size:13px;color:#768390;margin:0 0 24px">Your projects and tasks. Pick a project to open its board, or start a new one.</p>
+            <div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div style="width:40px;height:40px;border-radius:10px;background:rgba(201,184,255,.1);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg></div>
+                <div><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#768390">Resume where you left off</div><div style="font-size:16px;font-weight:600">Acme Web</div></div>
+              </div>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px"><span style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#f0f3f6">Projects</span><span style="font-size:12px;color:#768390">3</span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+              <div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg><span style="font-size:14px;font-weight:600">Acme Web</span></div><div style="font-size:11px;color:#768390;border-top:1px solid #30363d;padding-top:8px">24 tasks · 4 members</div></div>
+              <div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg><span style="font-size:14px;font-weight:600">Billing API</span></div><div style="font-size:11px;color:#768390;border-top:1px solid #30363d;padding-top:8px">11 tasks · 2 members</div></div>
+              <div style="background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"></path></svg><span style="font-size:14px;font-weight:600">Mobile</span></div><div style="font-size:11px;color:#768390;border-top:1px solid #30363d;padding-top:8px">8 tasks · 3 members</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- legend -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:18px">
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:13px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:18px;height:18px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">1</span><span style="font-size:12px;font-weight:600;color:#f0f3f6">Project switcher</span></div><div style="font-size:11px;line-height:1.5;color:#768390">A header dropdown is the only way to change project. Jumps to a legacy <i>board</i> route.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:13px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:18px;height:18px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">2</span><span style="font-size:12px;font-weight:600;color:#f0f3f6">Create menu</span></div><div style="font-size:11px;line-height:1.5;color:#768390">Contents change by route; fires fragile <span style="font-family:ui-monospace,monospace">window</span> events to open modals.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:13px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:18px;height:18px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">3</span><span style="font-size:12px;font-weight:600;color:#f0f3f6">Hidden app switch</span></div><div style="font-size:11px;line-height:1.5;color:#768390">The only door between Studio &amp; Forge is this unlabeled 9-dot grid. Easy to miss.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:13px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:18px;height:18px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">4</span><span style="font-size:12px;font-weight:600;color:#f0f3f6">Dead left rail</span></div><div style="font-size:11px;line-height:1.5;color:#768390">Nav only renders inside a project. On Home, the whole rail is wasted space.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:13px"><div style="display:flex;align-items:center;gap:7px;margin-bottom:6px"><span style="width:18px;height:18px;border-radius:50%;background:#f87171;color:#160c0c;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">5</span><span style="font-size:12px;font-weight:600;color:#f0f3f6">Flat notifications</span></div><div style="font-size:11px;line-height:1.5;color:#768390">One unsorted list, no tabs. Mentions, agent events &amp; assignments all blur together.</div></div>
+    </div>
+
+    <!-- switching tax -->
+    <div style="margin-top:30px;background:#14161b;border:1px solid #30363d;border-radius:14px;padding:24px 26px">
+      <div style="font-size:13px;font-weight:700;color:#f0f3f6;margin-bottom:4px">The switching tax</div>
+      <div style="font-size:13px;color:#768390;margin-bottom:18px">To watch the agent finish the task you're literally looking at, today you take a 6-hop detour across two apps:</div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:12.5px;color:#d0bcff;background:rgba(208,188,255,.1);border:1px solid rgba(208,188,255,.25);border-radius:8px;padding:7px 12px;white-space:nowrap">Board · task open</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span style="font-size:12.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:7px 12px;white-space:nowrap">Hunt for 9-dot grid</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span style="font-size:12.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:7px 12px;white-space:nowrap">Open app menu</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span style="font-size:12.5px;color:#80cbc4;background:rgba(128,203,196,.1);border:1px solid rgba(128,203,196,.25);border-radius:8px;padding:7px 12px;white-space:nowrap">Forge overview</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span style="font-size:12.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:7px 12px;white-space:nowrap">Runs list</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"></path></svg>
+        <span style="font-size:12.5px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:8px;padding:7px 12px;white-space:nowrap">Find the right run</span>
+        <span style="margin-left:8px;font-size:12px;font-weight:700;color:#f87171;background:rgba(248,113,113,.1);border-radius:8px;padding:7px 12px;white-space:nowrap">…and you've lost the task</span>
+      </div>
+    </div>
+
+    <div style="height:1px;background:#30363d;margin:54px 0"></div>
+
+    <!-- ============ THE FIX — PRINCIPLES ============ -->
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:6px">
+      <span style="font-size:13px;font-weight:700;color:#c9b8ff;letter-spacing:.04em">THE FIX</span>
+      <span style="font-size:13px;color:#768390">Four principles, applied across every screen</span>
+    </div>
+    <h2 style="font-size:30px;font-weight:600;letter-spacing:-.01em;margin:0 0 22px">From two apps to one loop</h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:8px">
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:12px;padding:16px"><div style="width:32px;height:32px;border-radius:9px;background:rgba(201,184,255,.1);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></div><div style="font-size:14px;font-weight:600;margin-bottom:5px">One persistent rail</div><div style="font-size:12px;line-height:1.55;color:#768390">Projects, Plan &amp; Build nested in a single sidebar that's always useful. No more app-switch grid.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:12px;padding:16px"><div style="width:32px;height:32px;border-radius:9px;background:rgba(56,189,248,.1);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg></div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Live, always-on</div><div style="font-size:12px;line-height:1.55;color:#768390">A running-agent dock + a top-bar pulse follow you everywhere. You always know what's executing.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:12px;padding:16px"><div style="width:32px;height:32px;border-radius:9px;background:rgba(128,203,196,.1);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Work in one place</div><div style="font-size:12px;line-height:1.55;color:#768390">A task carries its plan <i>and</i> its agent run as tabs. Following the agent never means leaving the task.</div></div>
+      <div style="background:#1c2128;border:1px solid #30363d;border-radius:12px;padding:16px"><div style="width:32px;height:32px;border-radius:9px;background:rgba(241,196,64,.1);display:flex;align-items:center;justify-content:center;margin-bottom:10px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#f1c40f" stroke-width="2"><path d="M20 6L9 17l-5-5"></path></svg></div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Consistent everywhere</div><div style="font-size:12px;line-height:1.55;color:#768390">One button hierarchy, one inbox with real tabs, no native pop-ups. Same patterns on every surface.</div></div>
+    </div>
+
+    <div style="height:54px"></div>
+
+    <!-- ============ V1 — UNIFIED RAIL (HOME) ============ -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+      <span style="font-size:12px;font-weight:800;color:#0e1117;background:#c9b8ff;border-radius:6px;padding:3px 9px;letter-spacing:.03em">DIRECTION 1</span>
+      <span style="font-size:18px;font-weight:600">The Unified Rail · Home</span>
+      <span style="font-size:12px;color:#81c995;background:rgba(129,201,149,.12);border:1px solid rgba(129,201,149,.3);border-radius:999px;padding:3px 10px">Recommended spine</span>
+    </div>
+    <p style="font-size:14px;line-height:1.6;color:#b1bac4;max-width:78ch;margin:0 0 16px">One sidebar replaces the project dropdown <i>and</i> the app-switch grid. It holds both layers at once: a shared <b style="color:#80cbc4">Build</b> section — agents, runs, runtimes, conductor — which is <b style="color:#f0f3f6">workspace-level and project-independent</b>, and below it your <b style="color:#c9b8ff">Projects</b>, each expanding to its own <b style="color:#c9b8ff">Plan</b> (board, backlog, roadmap). Studio and Forge stay distinct layers — agents just act on any project's tasks. Home becomes a real cross-project cockpit instead of an empty rail.</p>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#81c995"></span>
+      <span style="font-size:12px;font-weight:600;color:#a5d6b0;letter-spacing:.02em">AFTER — Home, the cross-project cockpit</span>
+    </div>
+
+    <div style="border-radius:14px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);background:#0e1117;display:flex;height:660px">
+      <!-- ===== UNIFIED RAIL ===== -->
+      <div style="width:248px;border-right:1px solid #30363d;background:#161b22;display:flex;flex-direction:column;flex-shrink:0">
+        <!-- workspace switcher -->
+        <div style="padding:12px;border-bottom:1px solid #30363d">
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;background:#1c2128;border:1px solid #30363d">
+            <span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">A</span>
+            <div style="flex:1;line-height:1.1"><div style="font-size:13px;font-weight:600">Acme Inc</div><div style="font-size:10px;color:#768390">Workspace</div></div>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M8 9l4-4 4 4"></path><path d="M16 15l-4 4-4-4"></path></svg>
+          </div>
+        </div>
+        <!-- search ⌘K -->
+        <div style="padding:10px 12px 6px">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:#0e1117;border:1px solid #30363d;color:#768390">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+            <span style="font-size:12.5px;flex:1">Search or jump…</span>
+            <span style="font-size:10px;font-family:ui-monospace,monospace;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 5px;color:#b1bac4">⌘K</span>
+          </div>
+        </div>
+        <!-- global nav -->
+        <div style="padding:6px 8px">
+          <div style="display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;color:#b1bac4"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg><span style="font-size:13px;font-weight:500">Home</span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;color:#b1bac4"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="font-size:13px;font-weight:500;flex:1">Inbox</span><span style="font-size:10px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 6px">5</span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;color:#b1bac4"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg><span style="font-size:13px;font-weight:500">My Work</span></div>
+        </div>
+        <!-- GLOBAL BUILD — project-independent shared infrastructure -->
+        <div style="padding:10px 18px 6px;display:flex;align-items:center;gap:7px"><span style="font-size:10px;font-weight:700;letter-spacing:.13em;color:#768390">BUILD</span><span style="font-size:9px;color:#6faea8;background:rgba(128,203,196,.1);border:1px solid rgba(128,203,196,.25);border-radius:999px;padding:1px 6px">shared · all projects</span></div>
+        <div style="padding:0 8px">
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path><line x1="8" y1="16" x2="8" y2="16"></line><line x1="16" y1="16" x2="16" y2="16"></line></svg><span style="font-size:13px;flex:1">Agents</span><span style="font-size:10px;color:#768390">6</span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg><span style="font-size:13px;flex:1">Conductor</span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span style="font-size:13px;flex:1">Runs</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:7px;height:7px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">4</span></span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect></svg><span style="font-size:13px;flex:1">Runtimes</span><span style="font-size:10px;color:#768390">3</span></div>
+        </div>
+        <div style="padding:12px 18px 6px;font-size:10px;font-weight:700;letter-spacing:.13em;color:#768390">PROJECTS</div>
+        <div style="flex:1;overflow:hidden;padding:0 8px">
+          <!-- active project expanded -->
+          <div style="background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:4px;margin-bottom:4px">
+            <div style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px"><span style="width:7px;height:7px;border-radius:2px;background:#c9b8ff"></span><span style="font-size:13px;font-weight:600;flex:1">Acme Web</span><span style="display:flex;align-items:center;gap:4px;margin-right:2px" title="agents running on this project"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">2</span></span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></div>
+            <!-- Plan only (project-specific) -->
+            <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span style="font-size:12.5px;flex:1">Overview</span></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;background:rgba(201,184,255,.1);color:#c9b8ff"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg><span style="font-size:12.5px;font-weight:500;flex:1">Board</span><span style="font-size:10px;color:#9b8fd1">24</span></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span style="font-size:12.5px;flex:1">Backlog</span></div>
+            <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg><span style="font-size:12.5px;flex:1">Roadmap</span></div>
+          </div>
+          <!-- collapsed projects -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#80cbc4"></span><span style="font-size:13px;color:#b1bac4;flex:1">Billing API</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg></div>
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#fdd663"></span><span style="font-size:13px;color:#b1bac4;flex:1">Mobile</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg></div>
+        </div>
+        <!-- bottom -->
+        <div style="border-top:1px solid #30363d;padding:8px">
+          <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px"><div style="width:28px;height:28px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div><div style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder</div></div><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></div>
+        </div>
+      </div>
+
+      <!-- ===== MAIN ===== -->
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <!-- top bar -->
+        <div style="height:54px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;padding:0 18px;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#768390"><span style="color:#f0f3f6;font-weight:600">Home</span></div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <!-- live pulse pill -->
+            <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(241,196,64,.08);border:1px solid rgba(241,196,64,.3)">
+              <span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span>
+              <span style="font-size:12px;font-weight:600;color:#f1c40f">2 agents running</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:10px;background:#c9b8ff;color:#2d1a6e;font-size:13px;font-weight:600"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"></path></svg>New</div>
+            <div style="position:relative;padding:7px;color:#b1bac4"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg><span style="position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#ef4444;border:2px solid #0e1117"></span></div>
+          </div>
+        </div>
+        <!-- home content -->
+        <div style="flex:1;overflow:hidden;padding:24px 26px">
+          <div style="max-width:880px">
+            <h3 style="font-size:22px;font-weight:700;margin:0 0 2px">Good morning, Alex</h3>
+            <p style="font-size:13px;color:#768390;margin:0 0 20px">2 agents are working · 3 things need you · 6 tasks in review across 3 projects.</p>
+            <!-- two columns -->
+            <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px">
+              <!-- LIVE NOW -->
+              <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:14px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:12px;font-weight:700;letter-spacing:.04em;color:#f0f3f6">LIVE NOW</span><span style="font-size:11px;color:#768390;margin-left:auto">across all projects</span></div>
+                <!-- run card 1 -->
+                <div class="glow" style="border-radius:10px;background:#1c2128;border:1px solid #30363d;padding:11px;margin-bottom:9px">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px"><span style="width:22px;height:22px;border-radius:6px;background:rgba(0,188,212,.14);display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg></span><span style="font-size:12.5px;font-weight:600">Implementer</span><span style="font-size:10px;font-weight:600;color:#f1c40f;background:rgba(241,196,64,.12);border-radius:5px;padding:2px 7px;margin-left:auto">RUNNING</span></div>
+                  <div style="font-size:12px;color:#b1bac4;margin-bottom:8px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">ACM-142</span> · Add Stripe webhook retry</div>
+                  <div style="height:4px;border-radius:999px;background:#0e1117;overflow:hidden;position:relative"><span style="position:absolute;top:0;left:0;height:100%;width:40%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,#7dd3fc);animation:barwork 1.6s ease-in-out infinite"></span></div>
+                  <div style="display:flex;gap:12px;margin-top:8px;font-size:10.5px;color:#768390"><span>Acme Web</span><span>4m 12s</span><span>18.2k tok</span><span style="margin-left:auto;color:#80cbc4">$0.42</span></div>
+                </div>
+                <!-- run card 2 -->
+                <div class="glow" style="border-radius:10px;background:#1c2128;border:1px solid #30363d;padding:11px">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px"><span style="width:22px;height:22px;border-radius:6px;background:rgba(124,77,255,.14);display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></span><span style="font-size:12.5px;font-weight:600">Reviewer</span><span style="font-size:10px;font-weight:600;color:#f1c40f;background:rgba(241,196,64,.12);border-radius:5px;padding:2px 7px;margin-left:auto">RUNNING</span></div>
+                  <div style="font-size:12px;color:#b1bac4;margin-bottom:8px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">BIL-31</span> · Reconcile invoice totals</div>
+                  <div style="height:4px;border-radius:999px;background:#0e1117;overflow:hidden;position:relative"><span style="position:absolute;top:0;left:0;height:100%;width:70%;border-radius:999px;background:linear-gradient(90deg,#38bdf8,#7dd3fc);animation:barwork 1.6s ease-in-out infinite .4s"></span></div>
+                  <div style="display:flex;gap:12px;margin-top:8px;font-size:10.5px;color:#768390"><span>Billing API</span><span>1m 02s</span><span>6.1k tok</span><span style="margin-left:auto;color:#80cbc4">$0.13</span></div>
+                </div>
+              </div>
+              <!-- NEEDS YOU -->
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <div style="background:#14161b;border:1px solid #30363d;border-radius:12px;padding:14px">
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg><span style="font-size:12px;font-weight:700;letter-spacing:.04em;color:#f0f3f6">NEEDS YOU</span><span style="font-size:11px;font-weight:700;background:#ff9800;color:#160c0c;border-radius:999px;padding:1px 7px;margin-left:auto">3</span></div>
+                  <div style="display:flex;align-items:start;gap:9px;padding:8px;border-radius:8px;background:#1c2128;margin-bottom:7px"><span style="width:18px;height:18px;border-radius:5px;background:rgba(255,152,0,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2.4"><path d="M9 11l3 3L22 4"></path></svg></span><div><div style="font-size:12px;color:#f0f3f6;line-height:1.4">Researcher needs your answer to continue</div><div style="font-size:10.5px;color:#768390;margin-top:2px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">ACM-138</span> · 3m ago</div></div></div>
+                  <div style="display:flex;align-items:start;gap:9px;padding:8px;border-radius:8px;background:#1c2128;margin-bottom:7px"><span style="width:18px;height:18px;border-radius:5px;background:rgba(124,77,255,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span><div><div style="font-size:12px;color:#f0f3f6;line-height:1.4"><b style="color:#c9b8ff;font-weight:600">@you</b> mentioned by Dana on a PR review</div><div style="font-size:10.5px;color:#768390;margin-top:2px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">ACM-142</span> · 12m ago</div></div></div>
+                  <div style="display:flex;align-items:start;gap:9px;padding:8px;border-radius:8px;background:#1c2128"><span style="width:18px;height:18px;border-radius:5px;background:rgba(46,204,113,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" stroke-width="2.4"><path d="M18 6 7 17l-5-5"></path></svg></span><div><div style="font-size:12px;color:#f0f3f6;line-height:1.4">Run finished — ready to review &amp; merge</div><div style="font-size:10.5px;color:#768390;margin-top:2px"><span style="font-family:ui-monospace,monospace;color:#7c8db5">MOB-09</span> · 20m ago</div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:12.5px;color:#768390;margin:12px 2px 0;line-height:1.6">Every Forge concept survives — agents, runs, runtimes, conductor — as one <i>shared</i> Build section at the top, not duplicated per project. The 9-dot grid is gone; the "mental switch" between planning and execution becomes a glance down one rail.</p>
+
+    <div style="height:26px"></div>
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#81c995"></span>
+      <span style="font-size:12px;font-weight:600;color:#a5d6b0;letter-spacing:.02em">AFTER — The rail with a full workspace · scan every project at a glance</span>
+    </div>
+    <div style="display:flex;gap:20px;align-items:stretch">
+      <!-- rail only -->
+      <div style="width:264px;flex-shrink:0;border-radius:14px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);background:#161b22;display:flex;flex-direction:column;height:620px">
+        <div style="padding:12px;border-bottom:1px solid #30363d">
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;background:#1c2128;border:1px solid #30363d"><span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">A</span><div style="flex:1;line-height:1.1"><div style="font-size:13px;font-weight:600">Acme Inc</div><div style="font-size:10px;color:#768390">6 projects · 4 agents live</div></div><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M8 9l4-4 4 4"></path><path d="M16 15l-4 4-4-4"></path></svg></div>
+        </div>
+        <div style="padding:10px 12px 4px">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:#0e1117;border:1px solid #30363d;color:#768390"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span style="font-size:12.5px;flex:1">Search or jump…</span><span style="font-size:10px;font-family:ui-monospace,monospace;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 5px;color:#b1bac4">⌘K</span></div>
+        </div>
+        <div style="padding:6px 8px">
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span style="font-size:13px;font-weight:500">Home</span></div>
+          <div style="display:flex;align-items:center;gap:11px;padding:7px 10px;border-radius:9px;color:#b1bac4"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="font-size:13px;font-weight:500;flex:1">Inbox</span><span style="font-size:10px;font-weight:700;background:#ef4444;color:#fff;border-radius:999px;padding:1px 6px">5</span></div>
+        </div>
+        <div style="padding:8px 18px 6px;display:flex;align-items:center;justify-content:space-between"><span style="font-size:10px;font-weight:700;letter-spacing:.13em;color:#768390">PROJECTS</span><span style="font-size:10px;color:#768390">6</span></div>
+        <div style="flex:1;overflow:hidden;padding:0 8px">
+          <!-- active -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:rgba(201,184,255,.1)"><span style="width:7px;height:7px;border-radius:2px;background:#c9b8ff"></span><span style="font-size:13px;font-weight:600;color:#c9b8ff;flex:1">Acme Web</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">2</span></span></div>
+          <!-- billing: 1 running -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#80cbc4"></span><span style="font-size:13px;color:#b1bac4;flex:1">Billing API</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">1</span></span></div>
+          <!-- mobile: needs you -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#fdd663"></span><span style="font-size:13px;color:#b1bac4;flex:1">Mobile</span><span title="Needs you" style="display:flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.14);border-radius:5px;padding:1px 6px"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2.6"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>1</span></div>
+          <!-- growth: idle -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#c58af9"></span><span style="font-size:13px;color:#b1bac4;flex:1">Growth Site</span></div>
+          <!-- internal: 3 running -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#8ab4f8"></span><span style="font-size:13px;color:#b1bac4;flex:1">Internal Tools</span><span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">1</span></span></div>
+          <!-- data: idle -->
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px"><span style="width:7px;height:7px;border-radius:2px;background:#81c995"></span><span style="font-size:13px;color:#b1bac4;flex:1">Data Pipeline</span></div>
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;color:#768390"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"></path></svg><span style="font-size:12.5px">New project</span></div>
+        </div>
+        <div style="border-top:1px solid #30363d;padding:8px"><div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px"><div style="width:28px;height:28px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div><div style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder</div></div></div></div>
+      </div>
+      <!-- explanation -->
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;padding:8px 4px">
+        <div style="font-size:15px;font-weight:600;color:#f0f3f6">Six projects, one rail, zero hunting</div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span style="display:flex;align-items:center;gap:4px;flex-shrink:0;margin-top:1px"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="font-size:11px;color:#f1c40f;font-weight:700">2</span></span><div style="font-size:13px;line-height:1.55;color:#b1bac4"><b style="color:#f0f3f6;font-weight:600">Live count</b> — projects with running agents show a pulsing tally. You see "something's executing in Billing API" without opening it.</div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span style="flex-shrink:0;margin-top:2px;display:flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.14);border-radius:5px;padding:1px 6px"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2.6"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>1</span><div style="font-size:13px;line-height:1.55;color:#b1bac4"><b style="color:#f0f3f6;font-weight:600">Needs-you flag</b> — an amber badge means an agent is blocked on a human or you were mentioned. It bubbles up to the project row.</div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span style="width:7px;height:7px;border-radius:2px;background:#c9b8ff;flex-shrink:0;margin-top:6px"></span><div style="font-size:13px;line-height:1.55;color:#b1bac4"><b style="color:#f0f3f6;font-weight:600">Color identity</b> — each project keeps one accent (its dot, its cards, its glow) so you always know which project you're looking at.</div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span style="font-size:10px;font-family:ui-monospace,monospace;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 6px;color:#b1bac4;flex-shrink:0;margin-top:2px">⌘K</span><div style="font-size:13px;line-height:1.55;color:#b1bac4"><b style="color:#f0f3f6;font-weight:600">Jump anywhere</b> — type a project, task key (ACM-142) or agent name to teleport. The rail is for scanning; ⌘K is for speed.</div></div>
+      </div>
+    </div>
+
+    <div style="height:26px"></div>
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#7dd3fc"></span>
+      <span style="font-size:12px;font-weight:600;color:#7dd3fc;letter-spacing:.02em">WORKING — click any project; expanding one collapses the others (single-open accordion)</span>
+    </div>
+    <div style="display:flex;gap:20px;align-items:stretch">
+      <div style="width:264px;flex-shrink:0;border-radius:14px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);background:#161b22;display:flex;flex-direction:column;height:560px">
+        <div style="padding:12px;border-bottom:1px solid #30363d">
+          <div style="display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;background:#1c2128;border:1px solid #30363d"><span style="width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">A</span><div style="flex:1;line-height:1.1"><div style="font-size:13px;font-weight:600">Acme Inc</div><div style="font-size:10px;color:#768390">6 projects · 4 agents live</div></div></div>
+        </div>
+        <div style="padding:8px 18px 6px;font-size:10px;font-weight:700;letter-spacing:.13em;color:#768390">PROJECTS</div>
+        <div style="flex:1;overflow-y:auto;padding:0 8px">
+          <sc-for list="{{ projects }}" as="p" hint-placeholder-count="6">
+            <div style="{{ p.wrapStyle }}">
+              <div onClick="{{ p.toggle }}" style="{{ p.headerStyle }}">
+                <span style="{{ p.dotStyle }}"></span>
+                <span style="{{ p.nameStyle }}">{{ p.name }}</span>
+                <sc-if value="{{ p.hasLive }}" hint-placeholder-val="{{ false }}">
+                  <span style="display:flex;align-items:center;gap:4px"><span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#f1c40f"></span><span style="position:absolute;inset:0;border-radius:50%;background:#f1c40f;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:10px;color:#f1c40f;font-weight:600">{{ p.live }}</span></span>
+                </sc-if>
+                <sc-if value="{{ p.hasNeeds }}" hint-placeholder-val="{{ false }}">
+                  <span style="display:flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#ff9800;background:rgba(255,152,0,.14);border-radius:5px;padding:1px 6px"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#ff9800" stroke-width="2.6"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>{{ p.needs }}</span>
+                </sc-if>
+                <sc-if value="{{ p.open }}" hint-placeholder-val="{{ true }}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2" style="flex-shrink:0"><path d="M6 9l6 6 6-6"></path></svg>
+                </sc-if>
+                <sc-if value="{{ p.closed }}" hint-placeholder-val="{{ false }}">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2" style="flex-shrink:0"><path d="M9 18l6-6-6-6"></path></svg>
+                </sc-if>
+              </div>
+              <sc-if value="{{ p.open }}" hint-placeholder-val="{{ false }}">
+                <div style="overflow:hidden">
+                  <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span style="font-size:12.5px;flex:1">Overview</span></div>
+                  <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;background:rgba(201,184,255,.1);color:#c9b8ff"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg><span style="font-size:12.5px;font-weight:500;flex:1">Board</span><span style="{{ p.boardStyle }}">{{ p.board }}</span></div>
+                  <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span style="font-size:12.5px;flex:1">Backlog</span></div>
+                  <div style="display:flex;align-items:center;gap:9px;padding:6px 10px 6px 22px;border-radius:7px;color:#b1bac4"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg><span style="font-size:12.5px;flex:1">Roadmap</span></div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border-top:1px solid #30363d;padding:8px"><div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px"><div style="width:28px;height:28px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">A</div><div style="flex:1;line-height:1.15"><div style="font-size:12px;font-weight:500">Alex Rivera</div><div style="font-size:10px;color:#768390">Founder</div></div></div></div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:13px;padding:8px 4px">
+        <div style="font-size:15px;font-weight:600;color:#f0f3f6">Try it — this rail is live</div>
+        <div style="font-size:13px;line-height:1.6;color:#b1bac4">Click any project. It expands to its <b style="color:#c9b8ff">Plan</b> (Overview, Board, Backlog, Roadmap), and whichever was open <b style="color:#f0f3f6">collapses back to a single row</b>. One project open at a time, so the rail stays short even with a dozen projects. The shared <b style="color:#80cbc4">Build</b> section above is project-independent — it never moves.</div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2" style="flex-shrink:0;margin-top:2px"><path d="M20 6 9 17l-5-5"></path></svg><div style="font-size:12.5px;line-height:1.55;color:#768390">Collapsed projects still show their live tally / needs-you flag, so closing one never hides what's happening inside it.</div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2" style="flex-shrink:0;margin-top:2px"><path d="M20 6 9 17l-5-5"></path></svg><div style="font-size:12.5px;line-height:1.55;color:#768390">Prefer multiple open at once? It's a one-line change — the accordion is the default because it scales better for a busy workspace.</div></div>
+      </div>
+    </div>
+
+    <div style="height:54px"></div>
+
+    <!-- ============ V2 — THE WORK ITEM ============ -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+      <span style="font-size:12px;font-weight:800;color:#0e1117;background:#80cbc4;border-radius:6px;padding:3px 9px;letter-spacing:.03em">DIRECTION 2</span>
+      <span style="font-size:18px;font-weight:600">The Work Item · Plan + Agent in one place</span>
+    </div>
+    <p style="font-size:14px;line-height:1.6;color:#b1bac4;max-width:78ch;margin:0 0 16px">The deepest cut at the app-switching problem: a task <i>is</i> its agent run. Open a task and the live run streams right there under an <b style="color:#80cbc4">Agent</b> tab — no detour to Forge, no losing your place. Plan on the left, the agent working on the right, the same object throughout.</p>
+
+    <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px">
+      <span style="width:8px;height:8px;border-radius:50%;background:#81c995"></span>
+      <span style="font-size:12px;font-weight:600;color:#a5d6b0;letter-spacing:.02em">AFTER — Task ACM-142, Agent tab live</span>
+    </div>
+
+    <div style="border-radius:14px;border:1px solid #30363d;overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.7);background:#0e1117;display:flex;height:680px">
+      <!-- icon rail (collapsed, persists) -->
+      <div style="width:56px;border-right:1px solid #30363d;background:#161b22;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:8px;flex-shrink:0">
+        <span style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#c9b8ff,#80cbc4);color:#0e1117;font-size:14px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:6px">A</span>
+        <span style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#768390"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></span>
+        <span style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#b1bac4;position:relative"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:#ef4444"></span></span>
+        <span style="width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:rgba(201,184,255,.1);color:#c9b8ff"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"></rect><rect x="14" y="3" width="7" height="9" rx="1"></rect></svg></span>
+      </div>
+
+      <!-- detail surface -->
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <!-- breadcrumb + title -->
+        <div style="padding:14px 22px 0;border-bottom:1px solid #30363d">
+          <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:#768390;margin-bottom:10px"><span>Acme Web</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg><span>Board</span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"></path></svg><span style="color:#b1bac4;font-family:ui-monospace,monospace">ACM-142</span></div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+                <span style="font-size:12px;font-family:ui-monospace,monospace;font-weight:600;color:#7c8db5">ACM-142</span>
+                <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.05em;background:rgba(124,77,255,.18);color:#c58af9">Payments Epic</span>
+              </div>
+              <h3 style="font-size:21px;font-weight:600;margin:0">Add Stripe webhook retry with exponential backoff</h3>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <div style="display:flex;align-items:center;gap:7px;padding:7px 12px;border-radius:999px;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.35)"><span style="position:relative;display:inline-flex"><span style="width:8px;height:8px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span><span style="font-size:12px;font-weight:600;color:#38bdf8">Agent working</span></div>
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:8px;border:1px solid #30363d;font-size:12.5px;color:#fdd663"><span style="width:8px;height:8px;border-radius:50%;background:#fdd663"></span>In Progress</div>
+              <div style="width:30px;height:30px;border-radius:50%;background:rgba(201,184,255,.12);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">DA</div>
+            </div>
+          </div>
+          <!-- tabs -->
+          <div style="display:flex;align-items:center;gap:2px">
+            <div style="padding:9px 14px;font-size:13px;color:#b1bac4;border-bottom:2px solid transparent">Plan</div>
+            <div style="padding:9px 14px;font-size:13px;font-weight:600;color:#80cbc4;border-bottom:2px solid #80cbc4;display:flex;align-items:center;gap:7px">Agent<span style="position:relative;display:inline-flex"><span style="width:6px;height:6px;border-radius:50%;background:#38bdf8"></span><span style="position:absolute;inset:0;border-radius:50%;background:#38bdf8;animation:livedot 1.8s ease-out infinite"></span></span></div>
+            <div style="padding:9px 14px;font-size:13px;color:#b1bac4;border-bottom:2px solid transparent">Activity</div>
+            <div style="padding:9px 14px;font-size:13px;color:#b1bac4;border-bottom:2px solid transparent">Files</div>
+          </div>
+        </div>
+
+        <!-- content split -->
+        <div style="flex:1;display:flex;min-height:0">
+          <!-- left: agent run stream -->
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;border-right:1px solid #30363d">
+            <!-- run header -->
+            <div style="padding:13px 20px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #30363d;background:#14161b">
+              <span style="width:26px;height:26px;border-radius:7px;background:rgba(0,188,212,.14);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle><path d="M12 7v4"></path></svg></span>
+              <div style="flex:1;display:flex;align-items:center;gap:8px;min-width:0">
+                <div style="display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:8px;background:#1c2128;border:1px solid #30363d" title="Switch agent or hand to a teammate"><span style="font-size:12.5px;font-weight:600">Implementer</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></div>
+                <div style="display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:8px;background:#1c2128;border:1px solid #30363d" title="Switch run"><span style="width:7px;height:7px;border-radius:50%;background:#f1c40f"></span><span style="font-size:12px;color:#b1bac4">Run #3 · live</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></div>
+                <span style="font-size:11px;color:#768390;white-space:nowrap;margin-left:2px">4m 12s · 18.2k tok · $0.42</span>
+              </div>
+              <div style="display:flex;gap:6px">
+                <div style="display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:8px;border:1px solid #30363d;font-size:12px;color:#b1bac4"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>Pause</div>
+                <div style="display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:8px;background:rgba(239,68,68,.12);color:#f87171;font-size:12px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"></line></svg>Stop</div>
+              </div>
+            </div>
+            <!-- event stream -->
+            <div style="flex:1;overflow:hidden;padding:16px 20px;font-size:12.5px;line-height:1.6">
+              <div style="display:flex;gap:10px;margin-bottom:13px"><span style="width:20px;height:20px;border-radius:6px;background:rgba(124,77,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span><div style="color:#b1bac4">Read <span style="font-family:ui-monospace,monospace;color:#80cbc4">webhooks/stripe.py</span> — found the handler dispatching on <span style="font-family:ui-monospace,monospace;color:#80cbc4">event.type</span> with no retry wrapper.</div></div>
+              <div style="display:flex;gap:10px;margin-bottom:13px"><span style="width:20px;height:20px;border-radius:6px;background:rgba(0,188,212,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg></span><div style="color:#b1bac4"><span style="color:#768390">Tool</span> · wrote <span style="font-family:ui-monospace,monospace;color:#80cbc4">retry.py</span> with <span style="font-family:ui-monospace,monospace;color:#80cbc4">tenacity</span> backoff (max 5, jitter)</div></div>
+              <div style="display:flex;gap:10px;margin-bottom:13px"><span style="width:20px;height:20px;border-radius:6px;background:rgba(46,204,113,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2ecc71" stroke-width="2"><path d="M18 6 7 17l-5-5"></path></svg></span><div style="color:#b1bac4">Ran <span style="font-family:ui-monospace,monospace;color:#80cbc4">pytest tests/test_webhooks.py</span> — <span style="color:#81c995">14 passed</span></div></div>
+              <div style="display:flex;gap:10px;margin-bottom:13px"><span style="width:20px;height:20px;border-radius:6px;background:rgba(124,77,255,.14);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span><div style="color:#b1bac4">Now wiring the retry wrapper into the dispatcher and adding a dead-letter log<span style="display:inline-block;width:7px;height:14px;background:#38bdf8;margin-left:3px;vertical-align:-2px;animation:blink 1s step-end infinite"></span></div></div>
+            </div>
+            <!-- steer composer (quick-access chat, distinct from comments) -->
+            <div style="border-top:1px solid #30363d;padding:11px 16px;background:#14161b">
+              <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path></svg>
+                <span style="font-size:11.5px;font-weight:600;color:#80cbc4">Steer this run</span>
+                <span style="font-size:10.5px;color:#768390">· talk to the agent live</span>
+                <span style="margin-left:auto;font-size:10px;color:#768390">async comments → <span style="color:#b1bac4">Activity</span> tab</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;display:flex;align-items:center;gap:8px;background:#0e1117;border:1px solid #30363d;border-radius:10px;padding:9px 12px"><span style="font-size:12.5px;color:#768390;flex:1">Add context, redirect, or answer the agent…</span></div>
+                <div style="width:36px;height:36px;border-radius:10px;background:#80cbc4;color:#0e1117;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg></div>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+                <span style="font-size:11px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:4px 10px">Use tenacity, not a manual loop</span>
+                <span style="font-size:11px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:4px 10px">Add a jitter test</span>
+                <span style="font-size:11px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:999px;padding:4px 10px">Open a draft PR when done</span>
+              </div>
+            </div>
+          </div>
+          <!-- right: plan / meta -->
+          <div style="width:330px;flex-shrink:0;overflow-y:auto;padding:16px 18px;background:#14161b">
+            <!-- PROPERTIES -->
+            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:11px">PROPERTIES</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Status</span><span style="display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:6px;border:1px solid #30363d;font-size:11.5px;color:#fdd663"><span style="width:7px;height:7px;border-radius:50%;background:#fdd663"></span>In Progress</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Worked by</span><span style="display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:#1c2128;border:1px solid #30363d;font-size:11.5px"><span style="width:14px;height:14px;border-radius:4px;background:rgba(0,188,212,.16);display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#00bcd4" stroke-width="2.4"><rect x="3" y="11" width="18" height="10" rx="2"></rect><circle cx="12" cy="5" r="2"></circle></svg></span>Implementer<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg></span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Assignee</span><span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#b1bac4"><span style="width:18px;height:18px;border-radius:50%;background:rgba(201,184,255,.14);color:#c9b8ff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">DA</span>Dana K.</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Reviewer</span><span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#b1bac4"><span style="width:18px;height:18px;border-radius:50%;background:rgba(128,203,196,.14);color:#80cbc4;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700">AX</span>Alex R.</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Priority</span><span style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:#f87171"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="9"></line><line x1="18" y1="20" x2="18" y2="5"></line></svg>High</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Epic</span><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.04em;background:rgba(124,77,255,.18);color:#c58af9">Payments</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0">Estimate</span><span style="font-size:12px;color:#b1bac4">3 pts</span></div>
+            <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:16px"><span style="width:82px;font-size:11.5px;color:#768390;flex-shrink:0;margin-top:3px">Labels</span><span style="display:flex;gap:5px;flex-wrap:wrap"><span style="font-size:10px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 7px">backend</span><span style="font-size:10px;color:#b1bac4;background:#1c2128;border:1px solid #30363d;border-radius:5px;padding:2px 7px">reliability</span></span></div>
+
+            <div style="height:1px;background:#30363d;margin:0 0 14px"></div>
+            <!-- DESCRIPTION -->
+            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:8px">DESCRIPTION</div>
+            <p style="font-size:12.5px;line-height:1.55;color:#b1bac4;margin:0 0 16px">Webhook deliveries fail silently on transient 5xx. Add bounded exponential backoff and a dead-letter log so no event is lost.</p>
+            <!-- DOD -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390">DEFINITION OF DONE</span><span style="font-size:10px;color:#768390">2 / 3</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:12px"><span style="width:15px;height:15px;border-radius:4px;background:#2ecc71;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="color:#768390;text-decoration:line-through">Backoff on 5xx</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:12px"><span style="width:15px;height:15px;border-radius:4px;background:#2ecc71;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0e1117" stroke-width="3"><path d="M18 6 7 17l-5-5"></path></svg></span><span style="color:#768390;text-decoration:line-through">Unit tests pass</span></div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:12px"><span style="width:15px;height:15px;border-radius:4px;border:1.5px solid #484f58;flex-shrink:0"></span><span style="color:#b1bac4">Dead-letter log + alert</span></div>
+
+            <div style="height:1px;background:#30363d;margin:0 0 14px"></div>
+            <!-- GIT -->
+            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:9px">GIT</div>
+            <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;background:#1c2128;border:1px solid #30363d;font-size:11.5px;font-family:ui-monospace,monospace;color:#80cbc4;margin-bottom:7px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#768390" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span style="flex:1">acm-142-webhook-retry</span></div>
+            <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;background:#1c2128;border:1px solid #30363d;font-size:11.5px;color:#b1bac4;margin-bottom:16px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#80cbc4" stroke-width="2"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><line x1="6" y1="9" x2="6" y2="21"></line></svg><span style="flex:1;font-family:ui-monospace,monospace">acme-web#318</span><span style="font-size:9px;font-weight:700;color:#fdd663;background:rgba(253,214,99,.14);border-radius:4px;padding:1px 6px">DRAFT</span></div>
+
+            <div style="height:1px;background:#30363d;margin:0 0 14px"></div>
+            <!-- ATTACHMENTS -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390">ATTACHMENTS</span><span style="font-size:10px;color:#768390">2</span></div>
+            <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:7px;background:#1c2128;border:1px solid #30363d;font-size:11px;color:#b1bac4;margin-bottom:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg><span style="flex:1;truncate">stripe-retry-spec.md</span><span style="color:#768390">8 KB</span></div>
+            <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:7px;background:#1c2128;border:1px solid #30363d;font-size:11px;color:#b1bac4;margin-bottom:16px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c9b8ff" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg><span style="flex:1">webhook-flow.png</span><span style="color:#768390">112 KB</span></div>
+
+            <div style="height:1px;background:#30363d;margin:0 0 14px"></div>
+            <!-- RUNS -->
+            <div style="font-size:10px;font-weight:700;letter-spacing:.1em;color:#768390;margin-bottom:9px">RUNS</div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#b1bac4;padding:5px 8px;border-radius:7px;background:rgba(56,189,248,.07);border:1px solid rgba(56,189,248,.25);margin-bottom:6px"><span style="width:7px;height:7px;border-radius:50%;background:#f1c40f"></span><span style="flex:1">Run #3 · running</span><span style="color:#768390">Implementer</span></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#768390;padding:5px 8px;margin-bottom:4px"><span style="width:7px;height:7px;border-radius:50%;background:#e74c3c"></span><span style="flex:1">Run #2 · failed</span><span>1h ago</span></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#768390;padding:5px 8px"><span style="width:7px;height:7px;border-radius:50%;background:#2ecc71"></span><span style="flex:1">Run #1 · scoping</span><span>2h ago</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:12.5px;color:#768390;margin:12px 2px 0;line-height:1.6">This reuses what's already wired up: <span style="font-family:ui-monospace,monospace">TaskDetailPanel</span> already loads Forge agents and task-runs. We surface that link as a first-class tab instead of a buried widget.</p>
+
+    <div id="end"></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { expandedId: 'acme' };
+  renderVals() {
+    const exp = this.state.expandedId;
+    const base = [
+      { id:'acme',     name:'Acme Web',       color:'#c9b8ff', board:24, live:2 },
+      { id:'billing',  name:'Billing API',    color:'#80cbc4', board:11, live:1 },
+      { id:'mobile',   name:'Mobile',         color:'#fdd663', board:8,  needs:1 },
+      { id:'growth',   name:'Growth Site',    color:'#c58af9', board:5 },
+      { id:'internal', name:'Internal Tools', color:'#8ab4f8', board:14, live:1 },
+      { id:'data',     name:'Data Pipeline',  color:'#81c995', board:9 },
+    ];
+    const projects = base.map((p) => {
+      const open = p.id === exp;
+      return {
+        ...p,
+        open,
+        closed: !open,
+        hasLive: !!p.live,
+        hasNeeds: !!p.needs,
+        live: p.live || 0,
+        needs: p.needs || 0,
+        toggle: () => this.setState({ expandedId: open ? null : p.id }),
+        wrapStyle: open
+          ? 'background:#1c2128;border:1px solid #30363d;border-radius:10px;padding:4px;margin-bottom:4px'
+          : 'padding:0;margin-bottom:1px',
+        headerStyle: 'display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;cursor:pointer;transition:background .12s;background:'
+          + (open ? 'rgba(201,184,255,0.10)' : 'transparent'),
+        nameStyle: 'font-size:13px;flex:1;' + (open ? 'font-weight:600;color:' + p.color : 'color:#b1bac4'),
+        dotStyle: 'width:7px;height:7px;border-radius:2px;flex-shrink:0;background:' + p.color,
+        boardStyle: 'font-size:10px;color:' + (open ? '#9b8fd1' : '#768390'),
+      };
+    });
+    return { projects };
+  }
+}
+</script>
+</body>
+</html>

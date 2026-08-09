@@ -1,0 +1,49 @@
+<!-- @dsCard group="Colors" viewport="700x300" subtitle="Lavender + teal brand, one Pulse-blue live accent" name="Brand & accents" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 24px 28px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .sw { display: flex; flex-direction: column; gap: 7px; }
+  .chip { height: 60px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); }
+  .nm  { font: var(--type-meta); font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+  .hex { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+  .wide { grid-column: span 2; }
+  .section { margin-bottom: 22px; }
+</style>
+</head>
+<body>
+  <div class="section">
+    <div class="eyebrow">Brand</div>
+    <div class="grid">
+      <div class="sw"><div class="chip" style="background:var(--brand-lavender)"></div><span class="nm">lavender</span><span class="hex">#c9b8ff</span></div>
+      <div class="sw"><div class="chip" style="background:var(--brand-teal)"></div><span class="nm">teal</span><span class="hex">#80cbc4</span></div>
+      <div class="sw wide"><div class="chip" style="background:var(--brand-gradient)"></div><span class="nm">gradient</span><span class="hex">135° lavender → teal</span></div>
+      <div class="sw"><div class="chip" style="background:var(--surface-base);border-color:var(--border-strong)"></div><span class="nm">on-brand</span><span class="hex">#0e1117</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="eyebrow">Pulse — the single live / running accent</div>
+    <div class="grid">
+      <div class="sw"><div class="chip" style="background:var(--pulse-blue)"></div><span class="nm">pulse-blue</span><span class="hex">#38bdf8</span></div>
+      <div class="sw"><div class="chip" style="background:var(--pulse-blue-bright)"></div><span class="nm">pulse-bright</span><span class="hex">#7dd3fc</span></div>
+      <div class="sw"><div class="chip" style="background:var(--tint-pulse);border-color:var(--pulse-blue)"></div><span class="nm">tint-pulse</span><span class="hex">10% fill</span></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="eyebrow">Functional accents</div>
+    <div class="grid">
+      <div class="sw"><div class="chip" style="background:var(--accent-cyan)"></div><span class="nm">cyan · agent</span><span class="hex">#00bcd4</span></div>
+      <div class="sw"><div class="chip" style="background:var(--accent-purple)"></div><span class="nm">purple · tools</span><span class="hex">#7c4dff</span></div>
+      <div class="sw"><div class="chip" style="background:var(--accent-mono-blue)"></div><span class="nm">mono-blue · keys</span><span class="hex">#7c8db5</span></div>
+    </div>
+  </div>
+</body>
+</html>

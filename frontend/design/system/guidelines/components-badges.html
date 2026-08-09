@@ -1,0 +1,66 @@
+<!-- @dsCard group="Components" viewport="700x250" subtitle="Pills, tags, mono keys & agent avatars" name="Badges & keys" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 26px 28px; display: flex; flex-direction: column; gap: 22px; }
+  .eyebrow { font: var(--type-meta); font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin-bottom: 13px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+            border-radius: var(--radius-pill); font-size: 11px; font-weight: var(--weight-semibold); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .tag { padding: 3px 9px; border-radius: var(--radius-md); font-size: 11px; font-weight: var(--weight-medium);
+         background: var(--surface-card); border: 1px solid var(--border-default); color: var(--text-tertiary); }
+
+  .key { font-family: var(--font-mono); font-size: 11px; font-weight: var(--weight-semibold);
+         color: var(--accent-mono-blue); background: var(--surface-sunken); border: 1px solid var(--border-default);
+         border-radius: var(--radius-sm); padding: 3px 7px; }
+
+  .live { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill);
+          font-size: 11px; font-weight: var(--weight-semibold); color: var(--pulse-blue-bright);
+          background: var(--tint-pulse); border: 1px solid rgba(56,189,248,.35); }
+  .live .pd { width: 7px; height: 7px; border-radius: 50%; background: var(--pulse-blue); box-shadow: 0 0 8px var(--pulse-blue); }
+
+  .av { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center;
+        justify-content: center; font-size: 11px; font-weight: var(--weight-bold); color: var(--surface-base); }
+</style>
+</head>
+<body>
+  <div>
+    <div class="eyebrow">Status pills</div>
+    <div class="row">
+      <span class="status" style="background:var(--tint-success);color:var(--success)"><span class="dot" style="background:var(--success)"></span>Done</span>
+      <span class="status" style="background:var(--tint-warning);color:var(--warning)"><span class="dot" style="background:var(--warning)"></span>In progress</span>
+      <span class="status" style="background:var(--tint-purple);color:var(--accent-purple)"><span class="dot" style="background:var(--accent-purple)"></span>In review</span>
+      <span class="status" style="background:var(--surface-card);color:var(--text-muted);border:1px solid var(--border-default)"><span class="dot" style="background:var(--text-muted)"></span>Backlog</span>
+      <span class="live"><span class="pd"></span>Running</span>
+    </div>
+  </div>
+  <div>
+    <div class="eyebrow">Tags & mono keys</div>
+    <div class="row">
+      <span class="tag">backend</span>
+      <span class="tag">infra</span>
+      <span class="tag">needs-review</span>
+      <span class="key">ACM-142</span>
+      <span class="key">run_7f3a</span>
+      <span class="key">main</span>
+    </div>
+  </div>
+  <div>
+    <div class="eyebrow">Agent avatars</div>
+    <div class="row">
+      <span class="av" style="background:var(--agent-ring-1)">P</span>
+      <span class="av" style="background:var(--agent-ring-2)">B</span>
+      <span class="av" style="background:var(--agent-ring-3)">F</span>
+      <span class="av" style="background:var(--agent-ring-4)">R</span>
+      <span class="av" style="background:var(--agent-conductor)">C</span>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!-- @dsCard group="Components" viewport="700x290" subtitle="Task card — idle & live-running states" name="Task card" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+  body { margin: 0; padding: 26px 28px; display: flex; gap: 18px; align-items: flex-start; }
+  .card { width: 290px; background: var(--surface-card); border: 1px solid var(--border-default);
+          border-radius: var(--radius-xl); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .key { font-family: var(--font-mono); font-size: 11px; font-weight: var(--weight-semibold); color: var(--accent-mono-blue); }
+  .pri { width: 8px; height: 8px; border-radius: 50%; }
+  .title { font-size: 13.5px; font-weight: var(--weight-semibold); color: var(--text-bright); line-height: var(--leading-snug); }
+  .tags { display: flex; gap: 6px; }
+  .tag { padding: 2px 8px; border-radius: var(--radius-md); font-size: 10.5px; font-weight: var(--weight-medium);
+         background: var(--surface-base); border: 1px solid var(--border-default); color: var(--text-muted); }
+  .foot { display: flex; align-items: center; justify-content: space-between; padding-top: 2px; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: var(--weight-semibold); color: var(--pulse-blue-bright); }
+  .pd { width: 7px; height: 7px; border-radius: 50%; background: var(--pulse-blue); box-shadow: 0 0 8px var(--pulse-blue); }
+  .av { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+        font-size: 10px; font-weight: var(--weight-bold); color: var(--surface-base); }
+  .meta { font-size: 11px; color: var(--text-muted); }
+  .lbl { position: absolute; margin-top: -22px; font: var(--type-meta); color: var(--text-muted);
+         text-transform: uppercase; letter-spacing: var(--tracking-eyebrow); }
+</style>
+</head>
+<body>
+  <div style="display:flex;flex-direction:column">
+    <span class="lbl">Idle</span>
+    <div class="card">
+      <div class="top"><span class="key">ACM-138</span><span class="pri" style="background:var(--priority-medium)"></span></div>
+      <div class="title">Add optimistic updates to the board drag handler</div>
+      <div class="tags"><span class="tag">frontend</span><span class="tag">board</span></div>
+      <div class="foot"><span class="meta">Updated 2h ago</span><span class="av" style="background:var(--agent-ring-3)">F</span></div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column">
+    <span class="lbl">Live — agent running</span>
+    <div class="card agentira-glow">
+      <div class="top"><span class="key">ACM-142</span><span class="pri" style="background:var(--priority-high)"></span></div>
+      <div class="title">Refactor auth middleware & add coverage</div>
+      <div class="tags"><span class="tag">backend</span><span class="tag">infra</span></div>
+      <div class="foot"><span class="live"><span class="pd"></span>Backend agent working</span><span class="av" style="background:var(--agent-ring-2)">B</span></div>
+    </div>
+  </div>
+</body>
+</html>

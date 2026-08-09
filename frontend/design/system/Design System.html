@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentira — Design System</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin: 0; }
+  .page { max-width: 1080px; margin: 0 auto; padding: 0 32px 96px; }
+
+  /* ── Hero ── */
+  header.hero { padding: 64px 0 40px; border-bottom: 1px solid var(--border-default); }
+  .brandrow { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  .brandrow .wm { font-size: 28px; font-weight: var(--weight-bold); letter-spacing: -0.015em; color: var(--text-primary); }
+  .ver { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+         border: 1px solid var(--border-default); border-radius: var(--radius-pill); padding: 3px 10px; }
+  .hero h1 { font-size: 40px; line-height: 1.08; letter-spacing: -0.02em; font-weight: var(--weight-bold);
+             color: var(--text-primary); margin: 0 0 16px; max-width: 18ch; }
+  .hero p { font-size: 15px; line-height: var(--leading-relaxed); color: var(--text-tertiary); margin: 0; max-width: 62ch; }
+
+  /* ── Section scaffolding ── */
+  section { padding-top: 56px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px; }
+  .sec-num { font-family: var(--font-mono); font-size: 12px; color: var(--brand-lavender); font-weight: var(--weight-semibold); }
+  .sec-head h2 { font-size: 22px; font-weight: var(--weight-semibold); color: var(--text-primary); margin: 0; letter-spacing: -0.01em; }
+  .sec-head .desc { font-size: 13px; color: var(--text-muted); margin-left: auto; max-width: 40ch; text-align: right; }
+  .eyebrow { font-size: 11px; font-weight: var(--weight-semibold); text-transform: uppercase;
+             letter-spacing: var(--tracking-eyebrow); color: var(--text-section); margin: 0 0 14px; }
+
+  .panel { background: var(--surface-card); border: 1px solid var(--border-default);
+           border-radius: var(--radius-2xl); padding: 24px; margin-bottom: 16px; }
+
+  /* color swatches */
+  .swrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  .sw { display: flex; flex-direction: column; gap: 8px; }
+  .chip { height: 58px; border-radius: var(--radius-lg); border: 1px solid var(--border-default); }
+  .sw .nm { font-size: 11px; font-weight: var(--weight-semibold); color: var(--text-tertiary); }
+  .sw .hex { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+  /* type scale */
+  .tscale { display: flex; flex-direction: column; }
+  .trow { display: flex; align-items: baseline; gap: 18px; padding: 9px 0; border-bottom: 1px solid var(--border-default); }
+  .trow:last-child { border: 0; }
+  .trow .tok { width: 70px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); flex: none; }
+  .trow .smp { color: var(--text-primary); font-weight: var(--weight-medium); }
+
+  /* component bits */
+  .compgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .compgrid .panel { margin: 0; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .btn { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-sans);
+         font-size: 13px; font-weight: var(--weight-semibold); border-radius: var(--radius-lg);
+         border: 1px solid transparent; cursor: pointer; padding: 8px 16px; }
+  .btn-primary { background: var(--brand-lavender); color: var(--surface-base); }
+  .btn-secondary { background: var(--surface-base); color: var(--text-primary); border-color: var(--border-strong); }
+  .btn-ghost { background: transparent; color: var(--brand-lavender); }
+
+  .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+            border-radius: var(--radius-pill); font-size: 11px; font-weight: var(--weight-semibold); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .key { font-family: var(--font-mono); font-size: 11px; font-weight: var(--weight-semibold);
+         color: var(--accent-mono-blue); background: var(--surface-sunken); border: 1px solid var(--border-default);
+         border-radius: var(--radius-sm); padding: 3px 7px; }
+  .input { width: 100%; padding: 9px 12px; font-family: var(--font-sans); font-size: 13px;
+           border-radius: var(--radius-xl); background: var(--surface-base);
+           border: 1px solid var(--border-default); color: var(--text-primary); box-sizing: border-box; }
+  .input:focus { outline: none; border-color: var(--pulse-blue); box-shadow: var(--ring-focus); }
+
+  /* task card demo */
+  .tcard { background: var(--surface-base); border: 1px solid var(--border-default);
+           border-radius: var(--radius-xl); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .tcard .top { display: flex; align-items: center; justify-content: space-between; }
+  .tcard .title { font-size: 13px; font-weight: var(--weight-semibold); color: var(--text-bright); }
+  .live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: var(--weight-semibold); color: var(--pulse-blue-bright); }
+  .pd { width: 7px; height: 7px; border-radius: 50%; background: var(--pulse-blue); box-shadow: 0 0 8px var(--pulse-blue); }
+  .av { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+        font-size: 10px; font-weight: var(--weight-bold); color: var(--surface-base); }
+
+  /* index of files */
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .fcard { display: flex; flex-direction: column; gap: 4px; padding: 13px 15px; text-decoration: none;
+           background: var(--surface-card); border: 1px solid var(--border-default); border-radius: var(--radius-xl);
+           transition: border-color var(--dur-base) var(--ease-standard), background var(--dur-base) var(--ease-standard); }
+  .fcard:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  .fcard .ft { font-size: 13px; font-weight: var(--weight-semibold); color: var(--text-primary); }
+  .fcard .fp { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
+
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border-default);
+           font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header class="hero">
+      <div class="brandrow">
+        <svg width="44" height="44" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Agentira">
+          <defs><linearGradient id="ag" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#c9b8ff"/><stop offset="1" stop-color="#80cbc4"/></linearGradient></defs>
+          <rect width="64" height="64" rx="16" fill="url(#ag)"/>
+          <path d="M22 44 L32 19 L42 44 M26 36 H38" stroke="#0e1117" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <span class="wm">Agentira</span>
+        <span class="ver">Design System · v1</span>
+      </div>
+      <h1>The system behind the agent workspace.</h1>
+      <p>A dark-first, dense product language for orchestrating coding agents. Layered GitHub-dark surfaces, a lavender + teal brand, and a single Pulse-blue accent reserved for one thing only — work that is live and running right now.</p>
+    </header>
+
+    <!-- 01 · COLOR -->
+    <section>
+      <div class="sec-head">
+        <span class="sec-num">01</span>
+        <h2>Color</h2>
+        <span class="desc">Surfaces carry depth; color carries meaning. One accent means “live”.</span>
+      </div>
+
+      <div class="panel">
+        <p class="eyebrow">Surfaces — sunken → hover</p>
+        <div class="swrow">
+          <div class="sw"><div class="chip" style="background:var(--surface-sunken)"></div><span class="nm">sunken</span><span class="hex">#0a0c10</span></div>
+          <div class="sw"><div class="chip" style="background:var(--surface-base)"></div><span class="nm">base</span><span class="hex">#0e1117</span></div>
+          <div class="sw"><div class="chip" style="background:var(--surface-raised)"></div><span class="nm">raised</span><span class="hex">#14161b</span></div>
+          <div class="sw"><div class="chip" style="background:var(--surface-nav)"></div><span class="nm">nav</span><span class="hex">#161b22</span></div>
+          <div class="sw"><div class="chip" style="background:var(--surface-card)"></div><span class="nm">card</span><span class="hex">#1c2128</span></div>
+          <div class="sw"><div class="chip" style="background:var(--surface-hover)"></div><span class="nm">hover</span><span class="hex">#272d36</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="eyebrow">Brand + Pulse</p>
+        <div class="swrow">
+          <div class="sw"><div class="chip" style="background:var(--brand-lavender)"></div><span class="nm">lavender</span><span class="hex">#c9b8ff</span></div>
+          <div class="sw"><div class="chip" style="background:var(--brand-teal)"></div><span class="nm">teal</span><span class="hex">#80cbc4</span></div>
+          <div class="sw"><div class="chip" style="background:var(--brand-gradient)"></div><span class="nm">gradient</span><span class="hex">135°</span></div>
+          <div class="sw"><div class="chip" style="background:var(--pulse-blue)"></div><span class="nm">pulse · live</span><span class="hex">#38bdf8</span></div>
+          <div class="sw"><div class="chip" style="background:var(--success)"></div><span class="nm">success</span><span class="hex">#2ecc71</span></div>
+          <div class="sw"><div class="chip" style="background:var(--danger)"></div><span class="nm">danger</span><span class="hex">#f85149</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 · TYPE -->
+    <section>
+      <div class="sec-head">
+        <span class="sec-num">02</span>
+        <h2>Typography</h2>
+        <span class="desc">System UI for dense chrome, true monospace for keys & config.</span>
+      </div>
+      <div class="panel">
+        <div class="tscale">
+          <div class="trow"><span class="tok">text-28</span><span class="smp" style="font-size:28px;font-weight:600">Dashboard greeting</span></div>
+          <div class="trow"><span class="tok">text-20</span><span class="smp" style="font-size:20px;font-weight:600">Page title</span></div>
+          <div class="trow"><span class="tok">text-16</span><span class="smp" style="font-size:16px;font-weight:600">Card title</span></div>
+          <div class="trow"><span class="tok">text-13</span><span class="smp" style="font-size:13px">Default UI text · nav items</span></div>
+          <div class="trow"><span class="tok">text-11</span><span class="smp" style="font-size:11px;color:var(--text-muted)">Meta rows & captions</span></div>
+          <div class="trow"><span class="tok">mono-key</span><span class="smp" style="font-family:var(--font-mono);font-size:13px;color:var(--accent-mono-blue)">ACM-142 · run_7f3a</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 · COMPONENTS -->
+    <section>
+      <div class="sec-head">
+        <span class="sec-num">03</span>
+        <h2>Components</h2>
+        <span class="desc">Built from tokens — the same vocabulary the product ships with.</span>
+      </div>
+      <div class="compgrid">
+        <div class="panel">
+          <p class="eyebrow">Buttons</p>
+          <div class="row">
+            <button class="btn btn-primary">New task</button>
+            <button class="btn btn-secondary">Assign agent</button>
+            <button class="btn btn-ghost">View runs</button>
+          </div>
+        </div>
+        <div class="panel">
+          <p class="eyebrow">Status & keys</p>
+          <div class="row">
+            <span class="status" style="background:var(--tint-success);color:var(--success)"><span class="dot" style="background:var(--success)"></span>Done</span>
+            <span class="status" style="background:var(--tint-warning);color:var(--warning)"><span class="dot" style="background:var(--warning)"></span>In progress</span>
+            <span class="key">ACM-142</span>
+          </div>
+        </div>
+        <div class="panel">
+          <p class="eyebrow">Input</p>
+          <input class="input" placeholder="Search tasks, agents, runs…">
+        </div>
+        <div class="panel">
+          <p class="eyebrow">Task card — live</p>
+          <div class="tcard agentira-glow">
+            <div class="top"><span class="key">ACM-142</span><span class="dot" style="background:var(--priority-high)"></span></div>
+            <span class="title">Refactor auth middleware</span>
+            <div class="row" style="justify-content:space-between">
+              <span class="live"><span class="pd"></span>Backend agent working</span>
+              <span class="av" style="background:var(--agent-ring-2)">B</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04 · INDEX -->
+    <section>
+      <div class="sec-head">
+        <span class="sec-num">04</span>
+        <h2>The files</h2>
+        <span class="desc">Tokens are the source of truth. Specimen cards live in /guidelines.</span>
+      </div>
+      <div class="panel">
+        <p class="eyebrow">Tokens — link <span class="key">styles.css</span> only</p>
+        <div class="files">
+          <a class="fcard" href="tokens/colors.css"><span class="ft">Colors</span><span class="fp">tokens/colors.css</span></a>
+          <a class="fcard" href="tokens/typography.css"><span class="ft">Typography</span><span class="fp">tokens/typography.css</span></a>
+          <a class="fcard" href="tokens/spacing.css"><span class="ft">Spacing & radius</span><span class="fp">tokens/spacing.css</span></a>
+          <a class="fcard" href="tokens/elevation.css"><span class="ft">Elevation & glow</span><span class="fp">tokens/elevation.css</span></a>
+          <a class="fcard" href="tokens/base.css"><span class="ft">Base reset</span><span class="fp">tokens/base.css</span></a>
+        </div>
+        <p class="eyebrow" style="margin-top:22px">Specimens & guides</p>
+        <div class="files">
+          <a class="fcard" href="guidelines/typography.html"><span class="ft">Typography</span><span class="fp">guidelines/typography.html</span></a>
+          <a class="fcard" href="guidelines/colors-brand.html"><span class="ft">Brand & accents</span><span class="fp">guidelines/colors-brand.html</span></a>
+          <a class="fcard" href="guidelines/colors-semantic.html"><span class="ft">Status & priority</span><span class="fp">guidelines/colors-semantic.html</span></a>
+          <a class="fcard" href="guidelines/colors-agents.html"><span class="ft">Agent identity</span><span class="fp">guidelines/colors-agents.html</span></a>
+          <a class="fcard" href="guidelines/spacing-radius.html"><span class="ft">Spacing & radius</span><span class="fp">guidelines/spacing-radius.html</span></a>
+          <a class="fcard" href="guidelines/elevation-motion.html"><span class="ft">Elevation & glow</span><span class="fp">guidelines/elevation-motion.html</span></a>
+          <a class="fcard" href="guidelines/components-buttons.html"><span class="ft">Buttons</span><span class="fp">guidelines/components-buttons.html</span></a>
+          <a class="fcard" href="guidelines/components-forms.html"><span class="ft">Form fields</span><span class="fp">guidelines/components-forms.html</span></a>
+          <a class="fcard" href="guidelines/components-badges.html"><span class="ft">Badges & keys</span><span class="fp">guidelines/components-badges.html</span></a>
+          <a class="fcard" href="guidelines/components-cards.html"><span class="ft">Task card</span><span class="fp">guidelines/components-cards.html</span></a>
+          <a class="fcard" href="guidelines/brand-logo.html"><span class="ft">Logo</span><span class="fp">guidelines/brand-logo.html</span></a>
+          <a class="fcard" href="Agentira.dc.html"><span class="ft">Product prototype</span><span class="fp">Agentira.dc.html</span></a>
+        </div>
+      </div>
+    </section>
+
+    <footer>Agentira Design System · dark-first · one accent for live · tokens drive everything.</footer>
+  </div>
+</body>
+</html>
