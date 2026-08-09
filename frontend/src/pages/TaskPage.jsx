@@ -853,11 +853,12 @@ function PlanTab(props) {
                     collapsible sections — same shape as the side panel, so a
                     section reads the same wherever you meet it. */}
                 <div className="xl:col-span-2 2xl:col-span-3 min-w-0 xl:h-full bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
-                {/* On a wide screen the sections flow into two columns instead
-                    of one tall stack, so the extra width buys you less scrolling. */}
+                {/* Sections stay a single vertical stack — the extra width goes
+                    into spreading each section's own fields sideways, never into
+                    a horizontal scrollbar. */}
                 <div
                     data-testid="task-info-pane"
-                    className="h-full overflow-y-auto custom-scrollbar p-5 2xl:columns-2 2xl:gap-x-8 [&>section]:break-inside-avoid"
+                    className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar p-5"
                 >
 
                 <CollapsibleSection
@@ -866,7 +867,7 @@ function PlanTab(props) {
                     open={openSections.details}
                     onToggle={() => toggleSection('details')}
                 >
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
                         <div>
                             <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
                             {isEditing ? (
@@ -986,7 +987,7 @@ function PlanTab(props) {
                         </div>
 
                         {projectRepos.length > 0 && (
-                            <div className="col-span-2">
+                            <div className="col-span-full">
                                 <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Repos</label>
                                 <div className="flex flex-wrap gap-1.5">
                                     {(task.repos || []).length > 0
@@ -1008,7 +1009,7 @@ function PlanTab(props) {
                     onToggle={() => toggleSection('relations')}
                     separated
                 >
-                    <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} compact />
+                    <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} compact spread />
                 </CollapsibleSection>
 
                 <CollapsibleSection
@@ -1071,7 +1072,8 @@ function PlanTab(props) {
                     onToggle={() => toggleSection('git')}
                     separated
                 >
-                    <div className="mb-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6">
+                    <div className="mb-4 min-w-0">
                         <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
                         {editingBranch ? (
                             <input
@@ -1107,7 +1109,7 @@ function PlanTab(props) {
                         )}
                     </div>
 
-                    <div className="mb-4">
+                    <div className="mb-4 min-w-0">
                         <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
                         {editingPrUrl ? (
                             <input
@@ -1138,6 +1140,7 @@ function PlanTab(props) {
                                 )}
                             </div>
                         )}
+                    </div>
                     </div>
 
                     {commits.length > 0 && (
@@ -1193,8 +1196,8 @@ function PlanTab(props) {
                     onToggle={() => toggleSection('dates')}
                     separated
                 >
-                    <div className="space-y-3">
-                        <div className="flex items-center gap-2 text-text-secondary">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
                             <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
                             <span className="text-xs flex-1">Due</span>
                             {isEditing ? (
@@ -1213,13 +1216,13 @@ function PlanTab(props) {
                                 </span>
                             )}
                         </div>
-                        <div className="flex items-center gap-2 text-text-secondary">
-                            <Calendar className="w-3.5 h-3.5" />
-                            <span className="text-xs">Created: {new Date(task.created_at).toLocaleDateString()}</span>
+                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
+                            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="text-xs truncate">Created: {new Date(task.created_at).toLocaleDateString()}</span>
                         </div>
-                        <div className="flex items-center gap-2 text-text-secondary">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span className="text-xs">Updated: {new Date(task.updated_at).toLocaleDateString()}</span>
+                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
+                            <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                            <span className="text-xs truncate">Updated: {new Date(task.updated_at).toLocaleDateString()}</span>
                         </div>
                     </div>
                 </CollapsibleSection>

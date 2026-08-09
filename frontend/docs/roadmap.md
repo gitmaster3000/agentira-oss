@@ -80,8 +80,9 @@ scrolls inside its own card. The right half is a single panel of collapsible
 sections — Details, Dependencies, Definition of Done, Branch & PR, Files and
 Timestamps — the same sections, in the same order, as the task side panel, so
 they read the same wherever you meet them. Click a section header to fold it
-away. On a wide screen that panel takes more of the width and lays its sections
-out in two columns, so extra screen buys you less scrolling. Comments sit underneath in the same tab, so the page itself only scrolls
+away. On a wide screen the panel takes more of the width and each section
+spreads its own fields sideways — the sections themselves stay in one vertical
+list, so there is never a sideways scrollbar. Comments sit underneath in the same tab, so the page itself only scrolls
 once, to the discussion.
 
 **Run** holds everything about the agent working on the task: which agent is

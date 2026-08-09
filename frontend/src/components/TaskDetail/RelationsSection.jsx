@@ -62,7 +62,7 @@ function TaskPicker({ options, placeholder, onPick, onCancel }) {
     );
 }
 
-export function RelationsSection({ task, onChanged, isEditing = false, onOpenTask, compact = false }) {
+export function RelationsSection({ task, onChanged, isEditing = false, onOpenTask, compact = false, spread = false }) {
     const navigate = useNavigate();
     const projectId = task?.project_id;
     const [subtasks, setSubtasks] = useState([]);
@@ -143,7 +143,11 @@ export function RelationsSection({ task, onChanged, isEditing = false, onOpenTas
 
     return (
         <div className={compact
-            ? 'space-y-4'
+            ? (spread
+                // Wide hosts lay the links out side by side instead of stacking
+                // them; narrow ones (the side panel) keep the single column.
+                ? 'grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4 [&>*]:min-w-0'
+                : 'space-y-4')
             : 'min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm space-y-4'}>
             {!compact && <h3 className="text-xs font-bold uppercase text-text-tertiary">Dependencies</h3>}
             {error && <p className="text-xs text-red-400">{error}</p>}
