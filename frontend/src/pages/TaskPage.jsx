@@ -388,7 +388,10 @@ export function TaskPage() {
 
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
-            <div className="max-w-[1700px] mx-auto px-6 py-5">
+            <div className="max-w-[1700px] mx-auto px-6 pb-5">
+                {/* Title and tabs stay put while the page scrolls to the
+                    discussion, so you never lose track of which task you're in. */}
+                <div data-testid="task-page-header" className="sticky top-0 z-20 bg-bg-app pt-5 pb-5">
                 {/* Header */}
                 <div className="flex items-start justify-between gap-4 mb-4">
                     {isEditing ? (
@@ -433,7 +436,7 @@ export function TaskPage() {
                 </div>
 
                 {/* Tab bar */}
-                <div className="flex gap-1 border-b border-border-subtle mb-5">
+                <div className="flex gap-1 border-b border-border-subtle">
                     {TABS.map(t => {
                         const Icon = t.icon;
                         const active = t.id === tab;
@@ -451,6 +454,7 @@ export function TaskPage() {
                             </button>
                         );
                     })}
+                </div>
                 </div>
 
                 {tab === 'plan' && (
@@ -803,17 +807,17 @@ function PlanTab(props) {
     } = props;
 
     return (
-        <div className="space-y-8">
-            <section aria-labelledby="task-overview-heading" data-testid="task-overview-section">
-                <h2 id="task-overview-heading" className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-3">
-                    Overview &amp; planning
-                </h2>
-
-                {/* Same 4-across card band as the delivery row below, so the
-                    brief, the details and the dependencies read as one grid
-                    instead of a wide column beside a narrow sidebar. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-                <div className="sm:col-span-2 min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
+        <div className="space-y-6">
+            {/* The top band is height-bounded so a long or short description
+                never decides how much of the page is empty. The brief keeps its
+                own pane; every other card shares one scrolling pane beside it.
+                The page itself then scrolls once, to the discussion. */}
+            <section
+                aria-label="Task overview"
+                data-testid="task-overview-section"
+                className="grid grid-cols-1 xl:grid-cols-3 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
+            >
+                <div className="min-w-0 xl:h-full xl:overflow-y-auto bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Description</h3>
                     {isEditing ? (
                         <textarea
@@ -831,6 +835,14 @@ function PlanTab(props) {
                         </div>
                     )}
                 </div>
+
+                {/* One scroll pane for every other fact about the task, two
+                    columns wide (three on very wide screens). */}
+                <div
+                    data-testid="task-info-pane"
+                    className="xl:col-span-2 min-w-0 xl:h-full xl:overflow-y-auto xl:pr-1"
+                >
+                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4 items-start">
 
                 <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Details</h3>
@@ -969,28 +981,11 @@ function PlanTab(props) {
                     </div>
                 </div>
 
-                {/* Parent, subtasks, dependencies and milestone are planning
-                    context, so keep them above the fold. */}
+                {/* Parent, subtasks, dependencies and milestone. */}
                 <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} />
-                </div>
-            </section>
-
-            <section
-                aria-labelledby="task-collaboration-heading"
-                data-testid="task-collaboration-section"
-                className="border-t border-border-subtle pt-6"
-            >
-                <h2 id="task-collaboration-heading" className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-3">
-                    Collaboration &amp; delivery
-                </h2>
-
-                {/* Keep the delivery cards aligned as a single band. Each card
-                    owns its overflow so long lists do not create uneven
-                    floating panels or push the discussion down the page. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
 
                 {/* Definition of Done */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
+                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
                             <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
@@ -1043,7 +1038,7 @@ function PlanTab(props) {
                 </div>
 
                 {/* Git Integration */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
+                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-4">
                         <GitBranch className="w-3.5 h-3.5" /> Branch &amp; PR
                     </h3>
@@ -1156,11 +1151,11 @@ function PlanTab(props) {
                 {/* Files live in the side column now (no separate tab). The
                     AttachmentsSection brings its own header + top border, so it
                     sits directly in the card. */}
-                <div className="bg-bg-card border border-border-subtle rounded-xl px-6 pb-6 shadow-sm sm:h-80 overflow-y-auto">
+                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl px-5 pb-5 shadow-sm">
                     <AttachmentsSection taskId={taskId} />
                 </div>
 
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm sm:h-80 overflow-y-auto">
+                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
                     <div className="space-y-3">
                         <div className="flex items-center gap-2 text-text-secondary">
@@ -1192,18 +1187,24 @@ function PlanTab(props) {
                         </div>
                     </div>
                 </div>
-                </div>
 
-                <div className="mt-8">
-                    <CommentsSection
-                        user={user}
-                        comment={comment}
-                        setComment={setComment}
-                        handleComment={handleComment}
-                        activities={activities}
-                        projectId={task.project_id}
-                    />
                 </div>
+                </div>
+            </section>
+
+            <section
+                aria-label="Discussion"
+                data-testid="task-collaboration-section"
+                className="border-t border-border-subtle pt-6"
+            >
+                <CommentsSection
+                    user={user}
+                    comment={comment}
+                    setComment={setComment}
+                    handleComment={handleComment}
+                    activities={activities}
+                    projectId={task.project_id}
+                />
             </section>
         </div>
     );

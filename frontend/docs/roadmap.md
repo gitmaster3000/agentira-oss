@@ -71,12 +71,16 @@ Open any task and look at the **Dependencies** panel.
 
 The full task page has three tabs: **Plan**, **Run** and **Activity**.
 
-**Plan** is arranged in two bands of equal-width cards, so nothing floats in
-empty space. **Overview & planning** puts the description, details, subtasks,
-dependencies and milestone in one row. **Collaboration & delivery** puts the
-Definition of Done, Branch & PR, attachments and timestamps
-in one compact row, with comments underneath — so the page only gets long when
-the discussion does, never from the facts themselves.
+The task title and the tab bar stay pinned to the top while you scroll, so you
+never lose track of which task you're reading.
+
+**Plan** has a fixed-height top band, so a long or short description never
+decides how much of the page sits empty. The description keeps the left pane and
+scrolls on its own; everything else about the task — details, dependencies and
+subtasks, Definition of Done, Branch & PR, attachments and timestamps — shares
+the two wider columns to its right (three on very wide screens) and scrolls
+there as one group. Comments sit underneath in the same tab, so the page itself
+only scrolls once, to the discussion.
 
 **Run** holds everything about the agent working on the task: which agent is
 assigned, how to start it, and the latest run's state and summary. **Activity**

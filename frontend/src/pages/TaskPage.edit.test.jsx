@@ -105,26 +105,50 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(screen.queryByTestId('task-overview-section')).toBeNull();
     });
 
-    it('organizes the full page into overview and collaboration bands', async () => {
+    it('bounds the top band and scrolls every non-description card in one pane', async () => {
         renderTaskPage();
         await screen.findByText('My task');
 
         const overview = screen.getByTestId('task-overview-section');
-        const collaboration = screen.getByTestId('task-collaboration-section');
+        const pane = within(overview).getByTestId('task-info-pane');
 
+        // The brief keeps its own pane; everything else shares the scroller.
         expect(within(overview).getByText('Description')).toBeInTheDocument();
-        expect(within(overview).getByText('Details')).toBeInTheDocument();
-        expect(within(overview).getByText('Dependencies')).toBeInTheDocument();
-        // Description, Details and Dependencies are cards in one grid — no
-        // wide column floating next to a narrow sidebar.
-        const cardOf = (label) => within(overview).getByText(label).closest('div');
-        expect(cardOf('Details').parentElement).toBe(cardOf('Description').parentElement);
-        expect(cardOf('Dependencies').parentElement).toBe(cardOf('Description').parentElement);
+        expect(within(pane).queryByText('Description')).toBeNull();
+        for (const label of ['Details', 'Dependencies', 'Definition of Done', 'Branch & PR', 'Attachments', 'Timestamps']) {
+            expect(within(pane).getByText(label)).toBeInTheDocument();
+        }
+
+        // Cards sit in one grid inside the pane, all at the same level.
+        const cardOf = (label) => within(pane).getByText(label).closest('div');
+        expect(cardOf('Dependencies').parentElement).toBe(cardOf('Details').parentElement);
+        expect(cardOf('Timestamps').parentElement).toBe(cardOf('Details').parentElement);
+    });
+
+    it('pins the title and tabs while the page scrolls', async () => {
+        renderTaskPage();
+        await screen.findByText('My task');
+
+        const header = screen.getByTestId('task-page-header');
+        expect(header.className).toMatch(/\bsticky\b/);
+        expect(header.className).toMatch(/\btop-0\b/);
+        expect(within(header).getByRole('heading', { name: 'My task' })).toBeInTheDocument();
+        expect(within(header).getByRole('button', { name: /^plan$/i })).toBeInTheDocument();
+        expect(within(header).getByRole('button', { name: /^activity$/i })).toBeInTheDocument();
+    });
+
+    it('keeps comments in the Plan tab, below the bounded band', async () => {
+        renderTaskPage();
+        await screen.findByText('My task');
+
+        // Not a tab of its own — a section under the overview band.
+        expect(screen.queryByRole('button', { name: /^comments$/i })).toBeNull();
+        const collaboration = screen.getByTestId('task-collaboration-section');
         expect(within(collaboration).getByText('Comments')).toBeInTheDocument();
-        expect(within(collaboration).getByText('Definition of Done')).toBeInTheDocument();
-        expect(within(collaboration).getByText('Branch & PR')).toBeInTheDocument();
-        expect(within(collaboration).getByText('Attachments')).toBeInTheDocument();
-        expect(within(collaboration).getByText('Timestamps')).toBeInTheDocument();
+        expect(
+            screen.getByTestId('task-overview-section')
+                .compareDocumentPosition(collaboration) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
     });
 
     it('exposes an Edit affordance and reveals editable core + detail fields', async () => {
@@ -166,10 +190,10 @@ describe('TaskPage — detail view (AP-353)', () => {
         renderTaskPage();
         await screen.findByText('My task');
 
-        const collaboration = screen.getByTestId('task-collaboration-section');
-        expect(within(collaboration).getByText('Timestamps')).toBeInTheDocument();
+        const pane = screen.getByTestId('task-info-pane');
+        expect(within(pane).getByText('Timestamps')).toBeInTheDocument();
         // Read mode shows the existing due date (locale-formatted).
-        expect(within(collaboration).getByTestId('task-due-date').textContent).toMatch(/9\/15\/2026|15\/9\/2026|2026/);
+        expect(within(pane).getByTestId('task-due-date').textContent).toMatch(/9\/15\/2026|15\/9\/2026|2026/);
 
         fireEvent.click(screen.getByTitle('Edit task'));
         const dueInput = screen.getByLabelText('Due date');
