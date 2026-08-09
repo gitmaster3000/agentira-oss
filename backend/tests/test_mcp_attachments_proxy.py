@@ -2,10 +2,12 @@
 
 MCP and backend are separate Railway services with separate filesystems, so
 MCP must not write/read attachment bytes on its own disk. These tests cover:
-- `upload_attachment` POSTs to the backend when AGENTIRA_API_BASE_URL is set
+- `create_attachment` POSTs to the backend when AGENTIRA_API_BASE_URL is set
   (bytes land via the REST route, no direct in-process write).
-- `read_attachment_text` inlines text it fetches over HTTP when the bytes
+- task, project, and epic scopes select their matching REST route.
+- `read_attachment` inlines text it fetches over HTTP when the bytes
   aren't on the local disk (served_over_http path).
+- `delete_attachment` removes bytes through the backend REST route.
 - `list_for_task` resolves a task key (e.g. 'AP-1') to the internal id.
 """
 
@@ -56,19 +58,23 @@ def _route_httpx_to(client, base="http://test-backend"):
     def fake_get(url, headers=None, timeout=None):
         return client.get(url.replace(base, ""), headers=headers)
 
+    def fake_delete(url, headers=None, timeout=None):
+        return client.delete(url.replace(base, ""), headers=headers)
+
     import httpx
     return patch.dict(os.environ, {"AGENTIRA_API_BASE_URL": base}), \
         patch.object(httpx, "post", fake_post), \
-        patch.object(httpx, "get", fake_get)
+        patch.object(httpx, "get", fake_get), \
+        patch.object(httpx, "delete", fake_delete)
 
 
-def test_upload_attachment_proxies_to_backend(env):
+def test_create_attachment_proxies_to_backend(env):
     client, org_id = env
     task = _make_task(client)
-    env_p, post_p, get_p = _route_httpx_to(client)
+    env_p, post_p, get_p, delete_p = _route_httpx_to(client)
     mcp_server.token_ctx.set("agentira_testkey_abc123")
-    with env_p, post_p, get_p:
-        out = asyncio.run(mcp_server.upload_attachment(
+    with env_p, post_p, get_p, delete_p:
+        out = asyncio.run(mcp_server.create_attachment(
             task_id=task["id"], filename="note.txt", content="hello forge"))
     assert out["filename"] == "note.txt"
     assert out["task_id"] == task["id"]
@@ -78,7 +84,7 @@ def test_upload_attachment_proxies_to_backend(env):
     assert dl.content == b"hello forge"
 
 
-def test_read_attachment_text_inlines_proxied_bytes(env):
+def test_read_attachment_inlines_proxied_bytes(env):
     client, org_id = env
     task = _make_task(client)
     a = att.add(task_id=task["id"], filename="spec.txt",
@@ -87,9 +93,49 @@ def test_read_attachment_text_inlines_proxied_bytes(env):
     # read_text falls into the served_over_http branch.
     os.remove(att.get(a["id"])[1])
     with patch.object(mcp_server, "_proxy_fetch_bytes", lambda _id: b"remote text"):
-        out = asyncio.run(mcp_server.read_attachment_text(a["id"]))
+        out = asyncio.run(mcp_server.read_attachment(attachment_id=a["id"]))
     assert out["content"] == "remote text"
     assert "served_over_http" not in out
+
+
+@pytest.mark.parametrize("owner_kind", ["task", "project", "epic"])
+def test_scoped_crd_uses_backend_routes(env, owner_kind):
+    client, org_id = env
+    project = client.post(
+        "/api/projects", json={"name": "Scoped", "description": ""},
+    ).json()
+    if owner_kind == "task":
+        owner = client.post(
+            "/api/tasks",
+            json={"project_id": project["id"], "title": "Scoped task"},
+        ).json()
+    elif owner_kind == "epic":
+        owner = client.post(
+            f"/api/projects/{project['id']}/epics",
+            json={"title": "Scoped epic"},
+        ).json()
+    else:
+        owner = project
+
+    owner_args = {f"{owner_kind}_id": owner["id"]}
+    env_p, post_p, get_p, delete_p = _route_httpx_to(client)
+    mcp_server.token_ctx.set("agentira_testkey_abc123")
+    with env_p, post_p, get_p, delete_p:
+        created = asyncio.run(mcp_server.create_attachment(
+            filename=f"{owner_kind}.txt",
+            content=f"{owner_kind} content",
+            content_type="text/plain",
+            **owner_args,
+        ))
+        listed = asyncio.run(mcp_server.read_attachment(**owner_args))
+        deleted = asyncio.run(mcp_server.delete_attachment(created["id"]))
+
+    assert created[f"{owner_kind}_id"] == owner["id"]
+    assert [row["id"] for row in listed] == [created["id"]]
+    assert deleted is True
+    assert client.get(
+        f"/api/attachments/{created['id']}/download",
+    ).status_code == 404
 
 
 def test_list_for_task_resolves_task_key(env):

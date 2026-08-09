@@ -1,0 +1,40 @@
+meta {
+  name: "15-Read Task Attachment Scope"
+  type: "http"
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 15,
+    "method": "tools/call",
+    "params": {
+      "name": "read_attachment",
+      "arguments": {
+        "task_id": "{{attachTaskId}}"
+      }
+    }
+  }
+}
+
+tests {
+  test("Task scope lists its attachment", function() {
+    expect(res.status).to.equal(200);
+    const rows = res.body.result.content.map(item => JSON.parse(item.text));
+    expect(rows).to.be.an('array');
+    expect(rows[0].id).to.equal(bru.getVar("taskAttachmentId"));
+    expect(rows[0].task_id).to.equal(bru.getVar("attachTaskId"));
+  });
+}

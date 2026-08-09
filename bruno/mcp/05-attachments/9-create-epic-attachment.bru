@@ -1,0 +1,44 @@
+meta {
+  name: "18-Create Epic Attachment"
+  type: "http"
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 18,
+    "method": "tools/call",
+    "params": {
+      "name": "create_attachment",
+      "arguments": {
+        "epic_id": "{{attachEpicId}}",
+        "filename": "epic-plan.txt",
+        "content": "Epic plan from Bruno",
+        "content_type": "text/plain"
+      }
+    }
+  }
+}
+
+tests {
+  test("Epic attachment uses epic scope", function() {
+    expect(res.status).to.equal(200);
+    const attachment = JSON.parse(res.body.result.content[0].text);
+    bru.setVar("epicAttachmentId", attachment.id);
+    expect(attachment.epic_id).to.equal(bru.getVar("attachEpicId"));
+    expect(attachment.task_id).to.equal(null);
+    expect(attachment.project_id).to.equal(null);
+  });
+}

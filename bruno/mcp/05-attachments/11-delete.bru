@@ -1,7 +1,7 @@
 meta {
-  name: "12-Create Attachment Epic"
+  name: "20-Delete Attachment"
   type: "http"
-  seq: 3
+  seq: 11
 }
 
 post {
@@ -18,23 +18,20 @@ script:pre-request {
 body:json {
   {
     "jsonrpc": "2.0",
-    "id": 12,
+    "id": 20,
     "method": "tools/call",
     "params": {
-      "name": "create_epic",
+      "name": "delete_attachment",
       "arguments": {
-        "project_id": "{{attachProjectId}}",
-        "title": "Epic for attachment testing"
+        "attachment_id": "{{taskAttachmentId}}"
       }
     }
   }
 }
 
 tests {
-  test("Attachment epic created", function() {
+  test("Delete attachment succeeds", function() {
     expect(res.status).to.equal(200);
-    const epic = JSON.parse(res.body.result.content[0].text);
-    bru.setVar("attachEpicId", epic.id);
-    expect(epic.id).to.be.a('string');
+    expect(res.body.result.content[0].text).to.contain("true");
   });
 }

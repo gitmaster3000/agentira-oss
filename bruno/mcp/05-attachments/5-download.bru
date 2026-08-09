@@ -1,5 +1,5 @@
 meta {
-  name: "18-Download Attachment"
+  name: "14-Read Task Attachment"
   type: "http"
   seq: 5
 }
@@ -18,26 +18,27 @@ script:pre-request {
 body:json {
   {
     "jsonrpc": "2.0",
-    "id": 18,
+    "id": 14,
     "method": "tools/call",
     "params": {
-      "name": "download_attachment",
+      "name": "read_attachment",
       "arguments": {
-        "attachment_id": "{{attachmentId}}"
+        "attachment_id": "{{taskAttachmentId}}"
       }
     }
   }
 }
 
 tests {
-  test("Download attachment successful", function() {
+  test("Read attachment successful", function() {
     expect(res.status).to.equal(200);
     expect(res.body.result).to.be.an('object');
   });
 
-  test("Response contains base64 content", function() {
+  test("Response contains text without base64", function() {
     const allText = res.body.result.content.map(c => c.text).join('\n');
-    expect(allText).to.contain('content_base64');
+    expect(allText).to.contain('hello from bruno task test');
+    expect(allText).not.to.contain('content_base64');
   });
 
   test("Filename matches uploaded original", function() {

@@ -1,0 +1,44 @@
+meta {
+  name: "16-Create Project Attachment"
+  type: "http"
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 16,
+    "method": "tools/call",
+    "params": {
+      "name": "create_attachment",
+      "arguments": {
+        "project_id": "{{attachProjectId}}",
+        "filename": "project-brief.md",
+        "content": "# Project brief from Bruno",
+        "content_type": "text/markdown"
+      }
+    }
+  }
+}
+
+tests {
+  test("Project attachment uses project scope", function() {
+    expect(res.status).to.equal(200);
+    const attachment = JSON.parse(res.body.result.content[0].text);
+    bru.setVar("projectAttachmentId", attachment.id);
+    expect(attachment.project_id).to.equal(bru.getVar("attachProjectId"));
+    expect(attachment.task_id).to.equal(null);
+    expect(attachment.epic_id).to.equal(null);
+  });
+}

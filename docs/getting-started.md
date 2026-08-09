@@ -67,7 +67,7 @@ Click **New Project** in the Studio sidebar. You'll get a dialog with:
 
 - **Name** — what you'll call it. The first letters become the prefix for task keys (e.g. "Voice Code App" → `VCA-1`, `VCA-2`).
 - **Description** — a paragraph or two about what you want built. The Conductor reads this; be specific.
-- **Attachments** *(use the attachments dropzone)* — drop in any UI designs, mockups, briefs, requirements docs. PNG, PDF, MD, anything. They land on the project itself (visible later on the project dashboard) — the Conductor reads them via the `list_project_attachments` MCP tool.
+- **Attachments** *(use the attachments dropzone)* — drop in any UI designs, mockups, briefs, requirements docs. PNG, PDF, MD, anything. They land on the project itself (visible later on the project dashboard) — the Conductor reads them via `read_attachment(project_id=...)`.
 
 Hit **Create**.
 
@@ -83,7 +83,7 @@ You did not have to set any of that up.
 
 Prompts are configuration, not code — every agent's system prompt is editable in **Agent Settings → System prompt**. For the Conductor (and any other agent you want browsing project files), append something like:
 
-> When you start work on a task, call `list_project_attachments(AGENTIRA_PROJECT_ID)` first. Text files come back inline. For binary files (PNGs, PDFs), use `read_attachment_text(<id>)` — for binary it returns a `download_url` and `api_key_env`; fetch with `curl -H "Authorization: Bearer $AGENTIRA_API_KEY" http://backend:8000<download_url>`.
+> When you start work on a task, call `read_attachment(project_id=AGENTIRA_PROJECT_ID)` first. Small text files come back inline. For a specific file, call `read_attachment(attachment_id=<id>)`; binary files return a `download_url` and authenticated curl hint. Use `create_attachment` with exactly one of `task_id`, `project_id`, or `epic_id`, and remove a file with `delete_attachment(attachment_id=...)`.
 
 The agent's API key is already injected as `$AGENTIRA_API_KEY` in its environment at dispatch time, so this works without extra setup.
 
@@ -95,7 +95,7 @@ Open **"Plan this project"** and click the **Run** button.
 
 The Conductor will:
 
-1. **Read** the project description + any attachments (via the `list_attachments` and `download_attachment` MCP tools).
+1. **Read** the project description + any attachments (via `read_attachment` with the relevant project, task, epic, or attachment ID).
 2. **Pick the tools and tech stack** with brief justification for each choice.
 3. **Write a one-page plan** covering architecture, milestones, and risks. It registers the plan as a real artifact via `register_run_artifact(kind='report', label='Project plan')` — that's how it shows up on the Run page, not as scrollback text.
 4. **Break the work into 3–8 child tasks** using `create_task`. Each gets a title, description, DoD items, and lands in the board.

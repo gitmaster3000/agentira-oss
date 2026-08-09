@@ -1,0 +1,40 @@
+meta {
+  name: "17-Read Project Attachment Scope"
+  type: "http"
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/mcp
+  body: json
+  auth: bearer
+}
+
+script:pre-request {
+  req.setHeader("Authorization", "Bearer " + bru.getEnvVar("apiKey"));
+  req.setHeader("mcp-session-id", bru.getVar("sessionId"));
+}
+
+body:json {
+  {
+    "jsonrpc": "2.0",
+    "id": 17,
+    "method": "tools/call",
+    "params": {
+      "name": "read_attachment",
+      "arguments": {
+        "project_id": "{{attachProjectId}}"
+      }
+    }
+  }
+}
+
+tests {
+  test("Project scope lists its attachment with inline text", function() {
+    expect(res.status).to.equal(200);
+    const rows = res.body.result.content.map(item => JSON.parse(item.text));
+    const attachment = rows.find(row => row.id === bru.getVar("projectAttachmentId"));
+    expect(attachment.project_id).to.equal(bru.getVar("attachProjectId"));
+    expect(attachment.inline_text).to.contain("Project brief from Bruno");
+  });
+}

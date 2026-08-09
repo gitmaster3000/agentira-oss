@@ -1,7 +1,7 @@
 meta {
-  name: "12-Create Attachment Epic"
+  name: "19-Read Epic Attachment Scope"
   type: "http"
-  seq: 3
+  seq: 10
 }
 
 post {
@@ -18,23 +18,22 @@ script:pre-request {
 body:json {
   {
     "jsonrpc": "2.0",
-    "id": 12,
+    "id": 19,
     "method": "tools/call",
     "params": {
-      "name": "create_epic",
+      "name": "read_attachment",
       "arguments": {
-        "project_id": "{{attachProjectId}}",
-        "title": "Epic for attachment testing"
+        "epic_id": "{{attachEpicId}}"
       }
     }
   }
 }
 
 tests {
-  test("Attachment epic created", function() {
+  test("Epic scope lists its attachment", function() {
     expect(res.status).to.equal(200);
-    const epic = JSON.parse(res.body.result.content[0].text);
-    bru.setVar("attachEpicId", epic.id);
-    expect(epic.id).to.be.a('string');
+    const rows = res.body.result.content.map(item => JSON.parse(item.text));
+    expect(rows[0].id).to.equal(bru.getVar("epicAttachmentId"));
+    expect(rows[0].epic_id).to.equal(bru.getVar("attachEpicId"));
   });
 }

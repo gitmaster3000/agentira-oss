@@ -109,7 +109,7 @@ The full reasoning lives in [docs/architecture_decision_record.md → ADR 009](d
 
 | Feature | Status | Detail |
 |---|---|---|
-| MCP server with ~40 tools | ✅ shipped | `create_task`, `update_task`, `add_comment`, `list_project_attachments`, `read_attachment_text`, `register_run_artifact`, `finish_run`, `get_run`, `list_runs`, etc. |
+| MCP server with ~40 tools | ✅ shipped | `create_task`, `update_task`, `add_comment`, `create_attachment`, `read_attachment`, `register_run_artifact`, `finish_run`, `get_run`, `list_runs`, etc. |
 | Runtime adapter contract (claude, openclaw, …) | ✅ shipped (AP-86 / #86) | Capability flags: `RESUME`, `STREAM_EVENTS`, `STOP`, `PAUSE`, `TOOLS`, `MCP`. |
 | Stable per-(agent, task) cwd for `--resume` | ✅ shipped (ADR 009) | The worktree inside is ephemeral per Run; the cwd persists. |
 | Per-run git worktree + log dir | ✅ shipped | `~/.agentira/runs/<id>/{stdout.log,stderr.log,meta.json}` |
@@ -273,7 +273,7 @@ Roughly forty MCP tools across:
 
 - **Workspace inspection**: `list_projects`, `get_project`, `list_tasks`, `get_task`, `get_activity`, `list_epics`, `get_me`, `get_my_involvement`
 - **Mutation**: `create_project`, `create_task`, `update_task`, `move_task`, `add_comment`, `add_project_member`, `create_epic`, `update_epic`
-- **Attachments**: `list_project_attachments`, `read_attachment_text`, `list_attachments`, `upload_attachment`, `download_attachment`
+- **Attachments**: `create_attachment`, `read_attachment`, `delete_attachment` (task, project, or epic scoped)
 - **Runs (for the agent itself)**: `register_run_artifact`, `finish_run`, `get_run`, `get_run_events`, `get_run_diagnostics`, `list_permissions`, `list_statuses`, `list_roles`
 - **Notifications**: `get_notifications`, `mark_notification_read`
 

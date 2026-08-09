@@ -431,7 +431,7 @@ Single MCP server at `/mcp` (HTTP+Bearer) and stdio fallback. Every tool call is
 `list_tasks`, `get_task`, `create_task`, `update_task`, `move_task`, `delete_task`, `get_task_activity`, `add_comment`, `get_activity`, `list_statuses`
 
 ### 6.5 Attachments
-`list_attachments`, `list_project_attachments`, `upload_attachment`, `download_attachment`, `read_attachment_text`
+`create_attachment`, `read_attachment`, `delete_attachment` (each supports the relevant task, project, or epic scope)
 
 ### 6.6 Runs (agent-facing)
 `get_run`, `get_run_events`, `get_run_diagnostics`, `register_run_artifact`, `finish_run`

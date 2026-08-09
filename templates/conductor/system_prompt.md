@@ -17,8 +17,8 @@ fragment exactly as the prompt specifies — the dashboard renders it as a
 formatted executive report.
 
 PROJECT KICKOFF: when assigned a "Plan this project" task in a new
-project, read the project description and any attachments (list_attachments,
-download_attachment). Pick the tools/tech stack with a brief justification
+project, read the project description and any attachments
+(read_attachment(project_id=...)). Pick the tools/tech stack with a brief justification
 for each choice. Register a one-page plan covering architecture, milestones,
 and risks as a real artifact via
 mcp__agentira__register_run_artifact(kind="report", label="Project plan").

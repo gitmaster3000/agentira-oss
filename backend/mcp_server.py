@@ -483,14 +483,55 @@ def _api_base() -> str:
     return os.getenv("AGENTIRA_API_BASE_URL", "").rstrip("/")
 
 
-def _proxy_upload(task_id: str, filename: str, file_bytes: bytes,
-                  content_type: str) -> dict:
+_ATTACHMENT_OWNER_ROUTES = {
+    "task": "tasks",
+    "project": "projects",
+    "epic": "epics",
+}
+
+
+def _attachment_owner(
+    *,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    epic_id: str | None = None,
+) -> tuple[str, str]:
+    """Return the one explicitly selected attachment owner."""
+    owners = [
+        ("task", task_id),
+        ("project", project_id),
+        ("epic", epic_id),
+    ]
+    selected = [(kind, owner_id) for kind, owner_id in owners if owner_id]
+    if len(selected) != 1:
+        raise ValueError(
+            "Provide exactly one of task_id, project_id, or epic_id",
+        )
+    return selected[0]
+
+
+def _proxy_upload(owner_kind: str, owner_id: str, filename: str,
+                  file_bytes: bytes, content_type: str) -> dict:
     """POST the file to the backend so it lands on the backend's volume."""
     import httpx
     r = httpx.post(
-        f"{_api_base()}/api/tasks/{task_id}/attachments",
+        f"{_api_base()}/api/{_ATTACHMENT_OWNER_ROUTES[owner_kind]}"
+        f"/{owner_id}/attachments",
         headers={"Authorization": f"Bearer {token_ctx.get()}"},
         files={"file": (filename, file_bytes, content_type)},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _proxy_list(owner_kind: str, owner_id: str) -> list[dict]:
+    """List through REST so inline content is read from the backend volume."""
+    import httpx
+    r = httpx.get(
+        f"{_api_base()}/api/{_ATTACHMENT_OWNER_ROUTES[owner_kind]}"
+        f"/{owner_id}/attachments",
+        headers={"Authorization": f"Bearer {token_ctx.get()}"},
         timeout=60,
     )
     r.raise_for_status()
@@ -516,24 +557,41 @@ def _proxy_fetch_bytes(attachment_id: str) -> bytes | None:
         return None
 
 
-@mcp.tool()
-async def list_attachments(task_id: str, ctx: Context = None) -> list[dict]:
-    """List all attachments for a task."""
-    return services.list_attachments(task_id, actor=actor_ctx.get())
+def _proxy_delete(attachment_id: str) -> bool:
+    """Delete through REST so the backend removes its persisted bytes."""
+    import httpx
+    r = httpx.delete(
+        f"{_api_base()}/api/attachments/{attachment_id}",
+        headers={"Authorization": f"Bearer {token_ctx.get()}"},
+        timeout=60,
+    )
+    r.raise_for_status()
+    return bool(r.json().get("ok"))
+
 
 @mcp.tool()
-async def upload_attachment(task_id: str, filename: str, content: str = "", content_base64: str = "", content_type: str = "application/octet-stream") -> dict:
-    """Upload a file attachment to a task.
+async def create_attachment(
+    filename: str,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    epic_id: str | None = None,
+    content: str = "",
+    content_base64: str = "",
+    content_type: str = "application/octet-stream",
+) -> dict:
+    """Create an attachment for exactly one task, project, or epic.
 
-    For text (code, markdown, JSON, ...) pass it straight in `content` — no
-    encoding needed. For binary, prefer uploading the file directly over HTTP
-    (no base64) with your agent key, which is already in your env:
-        curl -H "Authorization: Bearer $AGENTIRA_API_KEY" \\
-             -F "file=@/path/to/file" "<API_BASE_URL>/api/tasks/<task_id>/attachments"
-    `content_base64` is a last-resort fallback for binary over this tool.
+    Use content for text or content_base64 for binary data.
     """
     import base64
+    from backend import attachments as _attachments
+
     actor = actor_ctx.get()
+    owner_kind, owner_id = _attachment_owner(
+        task_id=task_id,
+        project_id=project_id,
+        epic_id=epic_id,
+    )
     if content:
         file_bytes = content.encode("utf-8")
     elif content_base64:
@@ -541,63 +599,62 @@ async def upload_attachment(task_id: str, filename: str, content: str = "", cont
     else:
         return {"error": "Provide content (text) or content_base64 (binary)"}
     if _api_base():
-        return _proxy_upload(task_id, filename, file_bytes, content_type)
-    return services.add_attachment(
-        task_id, filename, file_bytes, content_type,
-        uploaded_by=actor, actor=actor,
+        return _proxy_upload(
+            owner_kind, owner_id, filename, file_bytes, content_type,
+        )
+
+    owner_args = {f"{owner_kind}_id": owner_id}
+    if owner_kind == "task":
+        services.authorize_task_access(owner_id, actor=actor, access="write")
+    elif owner_kind == "project":
+        services.authorize_project_access(owner_id, actor=actor, access="write")
+    else:
+        services.authorize_epic_access(owner_id, actor=actor, access="write")
+    return _attachments.add(
+        **owner_args,
+        filename=filename,
+        file_bytes=file_bytes,
+        content_type=content_type,
+        uploaded_by=actor,
     )
 
-@mcp.tool()
-async def download_attachment(attachment_id: str) -> dict:
-    """Download an attachment by ID. Returns metadata and base64-encoded file content.
 
-    Legacy tool. Prefer `read_attachment_text` — it returns text directly
-    and a download/curl hint for binary, no base64 round-trip.
-    """
-    import base64
+@mcp.tool()
+async def read_attachment(
+    attachment_id: str | None = None,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    epic_id: str | None = None,
+    ctx: Context = None,
+) -> dict | list[dict]:
+    """Read one attachment, or list attachments for one task, project, or epic."""
     from backend import attachments as _attachments
-    result = services.get_attachment_bytes(
-        attachment_id, actor=actor_ctx.get(),
-    )
-    if result:
-        meta, file_bytes = result
-        return {**meta, "content_base64": base64.b64encode(file_bytes).decode()}
-    # Bytes aren't on this container's disk. Metadata lives in the shared DB;
-    # fetch the bytes from the backend's volume over HTTP (AP-280).
-    meta_fp = _attachments.get(attachment_id)
-    if not meta_fp:
-        return {"error": "Attachment not found"}
-    file_bytes = _proxy_fetch_bytes(attachment_id)
-    if file_bytes is not None:
-        return {**meta_fp[0], "content_base64": base64.b64encode(file_bytes).decode()}
-    # Can't proxy (no API base / token): fall back to the curl-hint shape.
-    return _attachments.read_text(attachment_id) or {"error": "Attachment not found"}
 
-# AP-152: project attachments + base64-free reads.
+    selected = [attachment_id, task_id, project_id, epic_id]
+    if sum(bool(value) for value in selected) != 1:
+        raise ValueError(
+            "Provide exactly one of attachment_id, task_id, project_id, or "
+            "epic_id",
+        )
 
-@mcp.tool()
-async def list_project_attachments(project_id: str, ctx: Context = None) -> list[dict]:
-    """List attachments uploaded against a project (briefs, designs, brand
-    guides). Text files under 50KB include an `inline_text` field —
-    everything else exposes a `download_url`. Pair with
-    `read_attachment_text` for larger reads.
-    """
-    return services.list_project_attachments(
-        project_id, actor=actor_ctx.get(),
-    )
+    actor = actor_ctx.get()
+    if not attachment_id:
+        owner_kind, owner_id = _attachment_owner(
+            task_id=task_id,
+            project_id=project_id,
+            epic_id=epic_id,
+        )
+        if _api_base():
+            return _proxy_list(owner_kind, owner_id)
+        if owner_kind == "task":
+            return services.list_attachments(owner_id, actor=actor)
+        if owner_kind == "project":
+            return services.list_project_attachments(owner_id, actor=actor)
+        services.authorize_epic_access(owner_id, actor=actor, access="read")
+        return _attachments.list_for_epic(owner_id)
 
-
-@mcp.tool()
-async def read_attachment_text(attachment_id: str, ctx: Context = None) -> dict:
-    """Read an attachment without base64.
-
-    Text/* returns the file's content inline. Binary returns
-    `download_url` + `api_key_env: "AGENTIRA_API_KEY"` + a curl hint —
-    use `$AGENTIRA_API_KEY` from your env to fetch.
-    """
-    from backend import attachments as _attachments
     services.authorize_attachment_access(
-        attachment_id, actor_ctx.get(), "read",
+        attachment_id, actor=actor, access="read",
     )
     result = _attachments.read_text(attachment_id)
     if not result:
@@ -615,6 +672,14 @@ async def read_attachment_text(attachment_id: str, ctx: Context = None) -> dict:
             except UnicodeDecodeError:
                 pass
     return result
+
+
+@mcp.tool()
+async def delete_attachment(attachment_id: str) -> bool:
+    """Delete an attachment by ID after checking write access to its owner."""
+    if _api_base():
+        return _proxy_delete(attachment_id)
+    return services.delete_attachment(attachment_id, actor=actor_ctx.get())
 
 # ── Project Activity Tools ──────────────────────────────────────────────────────
 
