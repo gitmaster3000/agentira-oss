@@ -75,12 +75,13 @@ The task title and the tab bar stay pinned to the top while you scroll, so you
 never lose track of which task you're reading.
 
 **Plan** has a fixed-height top band, so a long or short description never
-decides how much of the page sits empty. The description keeps the left pane and
-scrolls on its own; everything else about the task — details, dependencies and
-subtasks, Definition of Done, Branch & PR, attachments and timestamps — shares
-the two wider columns to its right (three on very wide screens) and scrolls
-there as one group. Comments sit underneath in the same tab, so the page itself
-only scrolls once, to the discussion.
+decides how much of the page sits empty. The description takes the left half and
+scrolls inside its own card. The right half is a single panel of collapsible
+sections — Details, Dependencies, Definition of Done, Branch & PR, Files and
+Timestamps — the same sections, in the same order, as the task side panel, so
+they read the same wherever you meet them. Click a section header to fold it
+away. Comments sit underneath in the same tab, so the page itself only scrolls
+once, to the discussion.
 
 **Run** holds everything about the agent working on the task: which agent is
 assigned, how to start it, and the latest run's state and summary. **Activity**

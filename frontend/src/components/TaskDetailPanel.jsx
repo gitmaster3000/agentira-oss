@@ -6,6 +6,7 @@ import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
 import { MentionInput } from './MentionInput';
 import { RelationsSection } from './TaskDetail/RelationsSection';
+import { CollapsibleSection } from './TaskDetail/CollapsibleSection';
 import {
     Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
     GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
@@ -898,32 +899,3 @@ function SectionLabel({ children, inline }) {
     );
 }
 
-function CollapsibleSection({ title, icon: Icon, sectionRef, open, onToggle, separated = false, children }) {
-    return (
-        <section
-            ref={sectionRef}
-            style={separated
-                ? { borderTop: '1px solid var(--border-default)', marginTop: 20, paddingTop: 12 }
-                : undefined}
-        >
-            <button
-                type="button"
-                aria-expanded={open}
-                aria-label={`Toggle ${title} section`}
-                onClick={onToggle}
-                className="w-full flex items-center text-text-secondary hover:text-text-primary transition-colors"
-                style={{ gap: 7, marginBottom: open ? 12 : 0, padding: '4px 0', textAlign: 'left' }}
-            >
-                <Icon className="w-3.5 h-3.5" />
-                <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>
-                    {title}
-                </span>
-                <ChevronDown
-                    className="w-3.5 h-3.5 ml-auto transition-transform"
-                    style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
-                />
-            </button>
-            {open && children}
-        </section>
-    );
-}

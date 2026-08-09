@@ -105,7 +105,9 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(screen.queryByTestId('task-overview-section')).toBeNull();
     });
 
-    it('bounds the top band and scrolls every non-description card in one pane', async () => {
+    const INFO_SECTIONS = ['Details', 'Dependencies', 'Definition of Done', 'Branch & PR', 'Files', 'Timestamps'];
+
+    it('bounds the top band and pools every non-description section in one pane', async () => {
         renderTaskPage();
         await screen.findByText('My task');
 
@@ -115,14 +117,28 @@ describe('TaskPage — detail view (AP-353)', () => {
         // The brief keeps its own pane; everything else shares the scroller.
         expect(within(overview).getByText('Description')).toBeInTheDocument();
         expect(within(pane).queryByText('Description')).toBeNull();
-        for (const label of ['Details', 'Dependencies', 'Definition of Done', 'Branch & PR', 'Attachments', 'Timestamps']) {
-            expect(within(pane).getByText(label)).toBeInTheDocument();
-        }
 
-        // Cards sit in one grid inside the pane, all at the same level.
-        const cardOf = (label) => within(pane).getByText(label).closest('div');
-        expect(cardOf('Dependencies').parentElement).toBe(cardOf('Details').parentElement);
-        expect(cardOf('Timestamps').parentElement).toBe(cardOf('Details').parentElement);
+        // One contiguous panel — the sections are siblings, not stacked cards.
+        const sectionOf = (label) => within(pane).getByText(label).closest('section');
+        for (const label of INFO_SECTIONS) {
+            expect(sectionOf(label)).not.toBeNull();
+            expect(sectionOf(label).parentElement).toBe(sectionOf('Details').parentElement);
+        }
+    });
+
+    it('collapses and expands an info section', async () => {
+        renderTaskPage();
+        await screen.findByText('My task');
+
+        const pane = screen.getByTestId('task-info-pane');
+        expect(within(pane).getByText('Timestamps')).toBeInTheDocument();
+        expect(within(pane).getByTestId('task-due-date')).toBeInTheDocument();
+
+        fireEvent.click(within(pane).getByRole('button', { name: /toggle timestamps section/i }));
+        expect(within(pane).queryByTestId('task-due-date')).toBeNull();
+
+        fireEvent.click(within(pane).getByRole('button', { name: /toggle timestamps section/i }));
+        expect(within(pane).getByTestId('task-due-date')).toBeInTheDocument();
     });
 
     it('pins the title and tabs while the page scrolls', async () => {

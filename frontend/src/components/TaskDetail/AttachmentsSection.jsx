@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Paperclip, Download, Trash2, File as FileIcon, Loader2, Image as ImageIcon, FileText } from 'lucide-react';
 import { ConfirmModal } from '../ConfirmModal';
 
-export function AttachmentsSection({ taskId }) {
+export function AttachmentsSection({ taskId, bare = false }) {
     const { user } = useAuth();
     const [attachments, setAttachments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -113,11 +113,15 @@ export function AttachmentsSection({ taskId }) {
     };
 
     return (
-        <div className="mt-6 border-t border-border-subtle pt-6">
-            <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
-                    <Paperclip className="w-4 h-4" /> Attachments
-                </h3>
+        // `bare` drops the heading and separator for hosts that already frame
+        // this as a titled section of their own.
+        <div className={bare ? '' : 'mt-6 border-t border-border-subtle pt-6'}>
+            <div className={`flex items-center mb-4 ${bare ? 'justify-end' : 'justify-between'}`}>
+                {!bare && (
+                    <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                        <Paperclip className="w-4 h-4" /> Attachments
+                    </h3>
+                )}
                 <input
                     type="file"
                     ref={fileInputRef}

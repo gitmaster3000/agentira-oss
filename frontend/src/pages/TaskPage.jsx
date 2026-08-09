@@ -7,6 +7,7 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
 import { RelationsSection } from '../components/TaskDetail/RelationsSection';
+import { CollapsibleSection } from '../components/TaskDetail/CollapsibleSection';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import {
@@ -31,6 +32,9 @@ import {
     ClipboardList,
     Activity as ActivityIcon,
     Play,
+    Info,
+    ListTree,
+    Paperclip,
 } from 'lucide-react';
 
 const TABS = [
@@ -806,6 +810,11 @@ function PlanTab(props) {
         loadTask,
     } = props;
 
+    const [openSections, setOpenSections] = useState({
+        details: true, relations: true, dod: true, git: true, files: false, dates: true,
+    });
+    const toggleSection = (id) => setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
+
     return (
         <div className="space-y-6">
             {/* The top band is height-bounded so a long or short description
@@ -815,14 +824,17 @@ function PlanTab(props) {
             <section
                 aria-label="Task overview"
                 data-testid="task-overview-section"
-                className="grid grid-cols-1 xl:grid-cols-3 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
+                className="grid grid-cols-1 xl:grid-cols-4 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
             >
-                <div className="min-w-0 xl:h-full xl:overflow-y-auto bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Description</h3>
+                {/* The card clips its own corners and the body scrolls inside
+                    it, so long text never runs past the rounded edge. */}
+                <div className="xl:col-span-2 min-w-0 xl:h-full flex flex-col bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
+                    <h3 className="text-xs font-bold uppercase text-text-tertiary px-5 pt-5 pb-3">Description</h3>
+                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 pb-5">
                     {isEditing ? (
                         <textarea
                             aria-label="Description"
-                            className="w-full min-h-[10rem] text-sm text-text-primary leading-relaxed bg-bg-app p-3 rounded-lg border border-border-subtle focus:outline-none focus:border-accent-primary resize-y"
+                            className="w-full min-h-[10rem] h-full text-sm text-text-primary leading-relaxed bg-bg-app p-3 rounded-lg border border-border-subtle focus:outline-none focus:border-accent-primary resize-y"
                             value={formData.description}
                             onChange={e => setFormData({ ...formData, description: e.target.value })}
                             placeholder="Describe this task… (Markdown supported)"
@@ -834,19 +846,24 @@ function PlanTab(props) {
                                 : <span className="italic text-text-tertiary">No description provided.</span>}
                         </div>
                     )}
+                    </div>
                 </div>
 
-                {/* One scroll pane for every other fact about the task, two
-                    columns wide (three on very wide screens). */}
+                {/* Everything else about the task lives in one panel of
+                    collapsible sections — same shape as the side panel, so a
+                    section reads the same wherever you meet it. */}
+                <div className="xl:col-span-2 min-w-0 xl:h-full bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
                 <div
                     data-testid="task-info-pane"
-                    className="xl:col-span-2 min-w-0 xl:h-full xl:overflow-y-auto xl:pr-1"
+                    className="h-full overflow-y-auto custom-scrollbar p-5"
                 >
-                <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4 items-start">
 
-                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Details</h3>
-
+                <CollapsibleSection
+                    title="Details"
+                    icon={Info}
+                    open={openSections.details}
+                    onToggle={() => toggleSection('details')}
+                >
                     <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                         <div>
                             <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
@@ -979,23 +996,31 @@ function PlanTab(props) {
                             </div>
                         )}
                     </div>
-                </div>
+                </CollapsibleSection>
 
                 {/* Parent, subtasks, dependencies and milestone. */}
-                <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} />
+                <CollapsibleSection
+                    title="Dependencies"
+                    icon={ListTree}
+                    open={openSections.relations}
+                    onToggle={() => toggleSection('relations')}
+                    separated
+                >
+                    <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} compact />
+                </CollapsibleSection>
 
-                {/* Definition of Done */}
-                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5">
-                            <CheckSquare className="w-3.5 h-3.5" /> Definition of Done
-                        </h3>
-                        {dodItems.length > 0 && (
-                            <span className="text-xs text-text-secondary">
-                                {dodItems.filter(i => i.checked).length}/{dodItems.length}
-                            </span>
-                        )}
-                    </div>
+                <CollapsibleSection
+                    title="Definition of Done"
+                    icon={CheckSquare}
+                    open={openSections.dod}
+                    onToggle={() => toggleSection('dod')}
+                    separated
+                >
+                    {dodItems.length > 0 && (
+                        <div className="text-xs text-text-secondary mb-2">
+                            {dodItems.filter(i => i.checked).length}/{dodItems.length} done
+                        </div>
+                    )}
 
                     {dodItems.length > 0 && (
                         <div className="w-full bg-bg-app rounded-full h-1.5 mb-3">
@@ -1035,14 +1060,15 @@ function PlanTab(props) {
                             <Plus className="w-4 h-4" />
                         </button>
                     </div>
-                </div>
+                </CollapsibleSection>
 
-                {/* Git Integration */}
-                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-primary flex items-center gap-1.5 mb-4">
-                        <GitBranch className="w-3.5 h-3.5" /> Branch &amp; PR
-                    </h3>
-
+                <CollapsibleSection
+                    title="Branch & PR"
+                    icon={GitBranch}
+                    open={openSections.git}
+                    onToggle={() => toggleSection('git')}
+                    separated
+                >
                     <div className="mb-4">
                         <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
                         {editingBranch ? (
@@ -1146,17 +1172,25 @@ function PlanTab(props) {
                             </div>
                         </>
                     )}
-                </div>
+                </CollapsibleSection>
 
-                {/* Files live in the side column now (no separate tab). The
-                    AttachmentsSection brings its own header + top border, so it
-                    sits directly in the card. */}
-                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl px-5 pb-5 shadow-sm">
-                    <AttachmentsSection taskId={taskId} />
-                </div>
+                <CollapsibleSection
+                    title="Files"
+                    icon={Paperclip}
+                    open={openSections.files}
+                    onToggle={() => toggleSection('files')}
+                    separated
+                >
+                    <AttachmentsSection taskId={taskId} bare />
+                </CollapsibleSection>
 
-                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-secondary mb-4">Timestamps</h3>
+                <CollapsibleSection
+                    title="Timestamps"
+                    icon={Clock}
+                    open={openSections.dates}
+                    onToggle={() => toggleSection('dates')}
+                    separated
+                >
                     <div className="space-y-3">
                         <div className="flex items-center gap-2 text-text-secondary">
                             <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
@@ -1186,7 +1220,7 @@ function PlanTab(props) {
                             <span className="text-xs">Updated: {new Date(task.updated_at).toLocaleDateString()}</span>
                         </div>
                     </div>
-                </div>
+                </CollapsibleSection>
 
                 </div>
                 </div>
