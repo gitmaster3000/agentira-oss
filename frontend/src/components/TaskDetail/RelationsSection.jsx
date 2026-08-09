@@ -143,9 +143,9 @@ export function RelationsSection({ task, onChanged, isEditing = false, onOpenTas
 
     return (
         <div className={compact
-            ? 'space-y-5'
-            : 'bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm space-y-5'}>
-            {!compact && <h3 className="text-xs font-bold uppercase text-text-secondary">How this fits in</h3>}
+            ? 'space-y-4'
+            : 'min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm space-y-4'}>
+            {!compact && <h3 className="text-xs font-bold uppercase text-text-tertiary">Dependencies</h3>}
             {error && <p className="text-xs text-red-400">{error}</p>}
 
             {/* Parent */}

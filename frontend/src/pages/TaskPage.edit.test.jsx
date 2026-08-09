@@ -114,7 +114,12 @@ describe('TaskPage — detail view (AP-353)', () => {
 
         expect(within(overview).getByText('Description')).toBeInTheDocument();
         expect(within(overview).getByText('Details')).toBeInTheDocument();
-        expect(within(overview).getByText('How this fits in')).toBeInTheDocument();
+        expect(within(overview).getByText('Dependencies')).toBeInTheDocument();
+        // Description, Details and Dependencies are cards in one grid — no
+        // wide column floating next to a narrow sidebar.
+        const cardOf = (label) => within(overview).getByText(label).closest('div');
+        expect(cardOf('Details').parentElement).toBe(cardOf('Description').parentElement);
+        expect(cardOf('Dependencies').parentElement).toBe(cardOf('Description').parentElement);
         expect(within(collaboration).getByText('Comments')).toBeInTheDocument();
         expect(within(collaboration).getByText('Definition of Done')).toBeInTheDocument();
         expect(within(collaboration).getByText('Branch & PR')).toBeInTheDocument();

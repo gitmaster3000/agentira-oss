@@ -67,14 +67,14 @@ for the record; it doesn't change the progress number.
 
 ## On a task page
 
-Open any task and look at the **How this fits in** panel.
+Open any task and look at the **Dependencies** panel.
 
 The full task page has three tabs: **Plan**, **Run** and **Activity**.
 
-**Plan** is arranged in two wide sections so the same information is easy to
-scan without a long sidebar. **Overview & planning** keeps the description,
-details, subtasks, dependencies and milestone together. **Collaboration &
-delivery** puts the Definition of Done, Branch & PR, attachments and timestamps
+**Plan** is arranged in two bands of equal-width cards, so nothing floats in
+empty space. **Overview & planning** puts the description, details, subtasks,
+dependencies and milestone in one row. **Collaboration & delivery** puts the
+Definition of Done, Branch & PR, attachments and timestamps
 in one compact row, with comments underneath — so the page only gets long when
 the discussion does, never from the facts themselves.
 

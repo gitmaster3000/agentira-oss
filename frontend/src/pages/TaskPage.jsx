@@ -388,19 +388,19 @@ export function TaskPage() {
 
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
-            <div className="max-w-7xl mx-auto p-8">
+            <div className="max-w-[1700px] mx-auto px-6 py-5">
                 {/* Header */}
-                <div className="flex items-start justify-between gap-4 mb-6">
+                <div className="flex items-start justify-between gap-4 mb-4">
                     {isEditing ? (
                         <input
                             aria-label="Title"
-                            className="flex-1 text-3xl font-bold text-text-primary bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent-primary"
+                            className="flex-1 text-xl font-bold text-text-primary bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent-primary"
                             value={formData.title}
                             onChange={e => setFormData({ ...formData, title: e.target.value })}
                             autoFocus
                         />
                     ) : (
-                        <h1 className="text-3xl font-bold text-text-primary">{task.title}</h1>
+                        <h1 className="text-xl font-bold text-text-primary">{task.title}</h1>
                     )}
                     <div className="flex items-center gap-2 flex-shrink-0">
                         {isEditing ? (
@@ -433,7 +433,7 @@ export function TaskPage() {
                 </div>
 
                 {/* Tab bar */}
-                <div className="flex gap-1 border-b border-border-subtle mb-8">
+                <div className="flex gap-1 border-b border-border-subtle mb-5">
                     {TABS.map(t => {
                         const Icon = t.icon;
                         const active = t.id === tab;
@@ -803,31 +803,28 @@ function PlanTab(props) {
     } = props;
 
     return (
-        <div className="space-y-10">
+        <div className="space-y-8">
             <section aria-labelledby="task-overview-heading" data-testid="task-overview-section">
-                <div className="mb-5">
-                    <h2 id="task-overview-heading" className="text-base font-semibold text-text-primary">
-                        Overview &amp; planning
-                    </h2>
-                    <p className="text-xs text-text-tertiary mt-1">
-                        The task brief, current ownership, and how this work fits the plan.
-                    </p>
-                </div>
+                <h2 id="task-overview-heading" className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-3">
+                    Overview &amp; planning
+                </h2>
 
-                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-                    <div className="xl:col-span-8 min-w-0 space-y-6">
-                <div>
-                    <h2 className="text-sm font-bold uppercase text-text-tertiary mb-3">Description</h2>
+                {/* Same 4-across card band as the delivery row below, so the
+                    brief, the details and the dependencies read as one grid
+                    instead of a wide column beside a narrow sidebar. */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
+                <div className="sm:col-span-2 min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
+                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Description</h3>
                     {isEditing ? (
                         <textarea
                             aria-label="Description"
-                            className="w-full min-h-[12rem] text-base text-text-primary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm focus:outline-none focus:border-accent-primary resize-y"
+                            className="w-full min-h-[10rem] text-sm text-text-primary leading-relaxed bg-bg-app p-3 rounded-lg border border-border-subtle focus:outline-none focus:border-accent-primary resize-y"
                             value={formData.description}
                             onChange={e => setFormData({ ...formData, description: e.target.value })}
                             placeholder="Describe this task… (Markdown supported)"
                         />
                     ) : (
-                        <div className="text-base text-text-secondary leading-relaxed bg-bg-card p-6 rounded-lg border border-border-subtle shadow-sm break-words overflow-x-auto">
+                        <div className="text-sm text-text-secondary leading-relaxed break-words overflow-x-auto">
                             {task.description
                                 ? <Markdown>{task.description}</Markdown>
                                 : <span className="italic text-text-tertiary">No description provided.</span>}
@@ -835,13 +832,10 @@ function PlanTab(props) {
                     )}
                 </div>
 
-                    </div>
+                <div className="min-w-0 bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm">
+                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Details</h3>
 
-                    <div className="xl:col-span-4 min-w-0 space-y-6">
-                <div className="bg-bg-card border border-border-subtle rounded-xl p-6 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-6 pb-2 border-b border-border-subtle/50">Details</h3>
-
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                         <div>
                             <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
                             {isEditing ? (
@@ -975,26 +969,20 @@ function PlanTab(props) {
                     </div>
                 </div>
 
-                        {/* Parent, subtasks, dependencies and milestone are
-                            planning context, so keep them above the fold. */}
-                        <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} />
-                    </div>
+                {/* Parent, subtasks, dependencies and milestone are planning
+                    context, so keep them above the fold. */}
+                <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} />
                 </div>
             </section>
 
             <section
                 aria-labelledby="task-collaboration-heading"
                 data-testid="task-collaboration-section"
-                className="border-t border-border-subtle pt-8"
+                className="border-t border-border-subtle pt-6"
             >
-                <div className="mb-5">
-                    <h2 id="task-collaboration-heading" className="text-base font-semibold text-text-primary">
-                        Collaboration &amp; delivery
-                    </h2>
-                    <p className="text-xs text-text-tertiary mt-1">
-                        Discussion, acceptance criteria, code links, files, and delivery history.
-                    </p>
-                </div>
+                <h2 id="task-collaboration-heading" className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-3">
+                    Collaboration &amp; delivery
+                </h2>
 
                 {/* Keep the delivery cards aligned as a single band. Each card
                     owns its overflow so long lists do not create uneven
