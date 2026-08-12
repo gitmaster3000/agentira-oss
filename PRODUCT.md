@@ -1,6 +1,6 @@
 # Agentira — the product, in plain words
 
-*Written 2026-06-12, before the summer pause. For sharing, talking, reflecting, designing. No code in here — read `docs/PRD.md` for the full feature inventory and `docs/feature-workflow-editor.md` for the next big UI piece.*
+*Written 2026-06-12, before the summer pause. For sharing, talking, reflecting, designing. No code in here — see the [documentation site](https://gitmaster3000.github.io/agentira-oss-docs/) for the full feature inventory.*
 
 ---
 
@@ -87,4 +87,4 @@ The pipeline names a **role** at each step — planner, implementer, reviewer, d
 
 ---
 
-*Deeper reading: `docs/PRD.md` (every feature and setting, for the redesign) · `docs/feature-workflow-editor.md` (the visual pipeline editor) · `docs/run-state-machine.md` (how runs and recovery work) · `docs/mcp_layering.md` (how agent tools are layered).*
+*Deeper reading: the [documentation site](https://gitmaster3000.github.io/agentira-oss-docs/) — [architecture](https://gitmaster3000.github.io/agentira-oss-docs/technical/architecture), [run state machine](https://gitmaster3000.github.io/agentira-oss-docs/technical/run-state-machine), [MCP tools](https://gitmaster3000.github.io/agentira-oss-docs/technical/mcp-tools).*

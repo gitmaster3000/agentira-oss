@@ -1,0 +1,66 @@
+name: Publish documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs-oss/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-publish
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-oss
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs-oss/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fails the build on broken links, per onBrokenLinks: 'throw'.
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs-oss/build
+          retention-days: 1
+
+  publish:
+    name: Publish to docs repository
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish from the canonical repository, never from a fork.
+    if: github.repository == 'gitmaster3000/agentira-oss'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: site
+
+      - name: Push to gitmaster3000/agentira-oss-docs
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          # Fine-grained PAT with Contents: write on agentira-oss-docs.
+          personal_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          external_repository: gitmaster3000/agentira-oss-docs
+          publish_branch: gh-pages
+          publish_dir: ./site
+          # Disables Jekyll, which would otherwise drop _-prefixed asset dirs.
+          enable_jekyll: false
+          commit_message: "docs: publish from ${{ github.sha }}"

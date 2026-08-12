@@ -21,7 +21,7 @@ something.
 
 ## Before you write code
 
-1. **Get it running.** [docs/self-hosting.md](docs/self-hosting.md) boots the stack from
+1. **Get it running.** [the self-hosting guide](https://gitmaster3000.github.io/agentira-oss-docs/technical/self-hosting) boots the stack from
    a clean clone. If it doesn't work for you, that's a bug worth reporting on its own —
    the cold-start path is the one we most want to keep honest.
 2. **Read [CLAUDE.md](CLAUDE.md).** It's the code ruleset, written for AI agents and

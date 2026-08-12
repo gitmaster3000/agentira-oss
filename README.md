@@ -6,7 +6,9 @@
 
 You don't talk to a model — you run a small team of AI agents (Planner, Implementers, Reviewer, DevOps, plus an orchestrator Conductor) against your repos, with traceable runs, verifiable artifacts, and a Kanban board that reflects reality.
 
-[Self-hosting](docs/self-hosting.md) · [Getting Started](docs/getting-started.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [ADRs](docs/architecture_decision_record.md) · [Contributing](CONTRIBUTING.md)
+**[Documentation](https://gitmaster3000.github.io/agentira-oss-docs/)**
+
+[Install](https://gitmaster3000.github.io/agentira-oss-docs/user-guide/install) · [Getting started](https://gitmaster3000.github.io/agentira-oss-docs/user-guide/first-project) · [Deployment](https://gitmaster3000.github.io/agentira-oss-docs/technical/deployment) · [Architecture](https://gitmaster3000.github.io/agentira-oss-docs/technical/architecture) · [Contributing](CONTRIBUTING.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -22,23 +24,12 @@ You sign in. A workspace already has seven agents — Conductor, Planner, Backen
 
 ---
 
-## Two products under one umbrella
-
-| | What | Routes |
-|---|---|---|
-| **Flowty Studio** | Workspace, projects, tasks, board, attachments, comments, activity | `/` |
-| **Flowty Forge** | Agent orchestration: agents, runs, conversations, dispatch | `/forge/*` |
-
-Same login, same workspace, same database. Two products because they're two distinct mental models — running a board vs. running a team of agents — and you only want to think about one at a time.
-
----
-
 ## Architecture, in one picture
 
 ```
               ┌──────────────────────────────────────┐
               │           Browser (React)            │
-              │     Flowty Studio + Flowty Forge     │
+              │         Agentira web interface       │
               └──────────────┬───────────────────────┘
                              │ HTTPS / WebSocket
                              ▼
@@ -68,7 +59,7 @@ Same login, same workspace, same database. Two products because they're two dist
 
 Backend + frontend live in the cloud. **The daemon and the runtime live on the user's own machine** — because that's where the code is. The cloud coordinates; the laptop executes.
 
-See [docs/architecture.md](docs/architecture.md) for the deep dive.
+See the [architecture guide](https://gitmaster3000.github.io/agentira-oss-docs/technical/architecture) for the deep dive.
 
 ---
 
@@ -82,9 +73,9 @@ Every dispatch funnels through three concepts:
 | **Turn** | One dispatch (user message + agent reply, single `trace_id`). The atomic, always-durable, always-stoppable unit. | Per dispatch. |
 | **Run** | An *emergent span* grouping the turns of one work episode. Carries verdict, accounting, diff, artifacts. | Per work episode — may span many turns. |
 
-A turn becomes a Run when it produces work (per the project's [work-signal mode](docs/getting-started.md#7-what-counts-as-a-run)). Free chat that does nothing stays a turn; a turn that touches files becomes a Run automatically.
+A turn becomes a Run when it produces work (per the project's [work-signal mode](https://gitmaster3000.github.io/agentira-oss-docs/technical/concepts#work-signal-modes)). Free chat that does nothing stays a turn; a turn that touches files becomes a Run automatically.
 
-The full reasoning lives in [docs/architecture_decision_record.md → ADR 009](docs/architecture_decision_record.md).
+The full reasoning lives in [Core concepts](https://gitmaster3000.github.io/agentira-oss-docs/technical/concepts).
 
 ---
 
@@ -111,7 +102,7 @@ The full reasoning lives in [docs/architecture_decision_record.md → ADR 009](d
 
 | Feature | Status | Detail |
 |---|---|---|
-| MCP server with ~40 tools | ✅ shipped | `create_task`, `update_task`, `add_comment`, `create_attachment`, `read_attachment`, `register_run_artifact`, `finish_run`, `get_run`, `list_runs`, etc. |
+| MCP server with 49 tools | ✅ shipped | `create_task`, `update_task`, `add_comment`, `create_attachment`, `read_attachment`, `register_run_artifact`, `finish_run`, `get_run`, `list_runs`, etc. |
 | Runtime adapter contract (claude, openclaw, …) | ✅ shipped (AP-86 / #86) | Capability flags: `RESUME`, `STREAM_EVENTS`, `STOP`, `PAUSE`, `TOOLS`, `MCP`. |
 | Stable per-(agent, task) cwd for `--resume` | ✅ shipped (ADR 009) | The worktree inside is ephemeral per Run; the cwd persists. |
 | Per-run git worktree + log dir | ✅ shipped | `~/.agentira/runs/<id>/{stdout.log,stderr.log,meta.json}` |
@@ -152,7 +143,7 @@ See [Project status](#project-status) for where the board lives.
 
 ## Quick start — local development
 
-> **For deploying to Railway**, skip to [docs/deployment.md](docs/deployment.md).
+> **For deploying to Railway**, skip to the [deployment guide](https://gitmaster3000.github.io/agentira-oss-docs/technical/deployment).
 
 ### Prerequisites
 
@@ -210,7 +201,7 @@ AGENTIRA_DAEMON_API_KEY=dev-daemon-key-local-only \
   agentira daemon start
 ```
 
-That shortcut is gated on `AGENTIRA_ENV=dev` in the backend and does nothing in any other environment. See [docs/local-testing.md](docs/local-testing.md).
+That shortcut is gated on `AGENTIRA_ENV=dev` in the backend and does nothing in any other environment. See the [development setup guide](https://gitmaster3000.github.io/agentira-oss-docs/contributing/development-setup).
 
 ### Multi-environment compose
 
@@ -243,7 +234,7 @@ For qa / prod, copy the `.env.{qa,prod}.example` file and fill in `JWT_SECRET` (
 
 ## Deploying to Railway (or anywhere with Postgres + Docker)
 
-Full walkthrough: [docs/deployment.md](docs/deployment.md). The short version:
+Full walkthrough: [deployment guide](https://gitmaster3000.github.io/agentira-oss-docs/technical/deployment). The short version:
 
 1. Provision Railway project + Postgres add-on.
 2. Deploy three services from the same repo with different Dockerfiles: `Dockerfile` (backend), `Dockerfile.mcp` (mcp), and `frontend/Dockerfile` (frontend).
@@ -311,7 +302,7 @@ agentira/
 ├── backend/                       # FastAPI app
 │   ├── rest_api.py                # /api/* router mounting
 │   ├── mcp_server.py              # MCP tool definitions
-│   ├── services.py                # Studio business logic
+│   ├── services.py                # core business logic
 │   ├── attachments.py             # AP-152 attachments domain
 │   ├── agent_templates.py         # AP-157 template loader
 │   ├── gates.py                   # AP-158 transition gates
@@ -321,32 +312,28 @@ agentira/
 │   ├── jwt_auth.py
 │   ├── db.py                      # engine + dialect-aware migrations
 │   ├── models.py                  # core SQLAlchemy models
-│   └── forge/                     # Flowty Forge — self-contained
+│   └── forge/                     # agent orchestration — self-contained
 │       ├── router.py              # /api/forge/* routes
 │       ├── services.py            # dispatch_trigger, complete_trigger, …
 │       ├── models.py              # Agent, Run, AgentMessage, Conversation, …
 │       ├── conductor.py           # orchestrator agent + queue tick
 │       ├── ws_dispatch.py         # daemon WebSocket hub
-│       ├── runtimes/              # adapter contract + claude / openclaw impls
 │       ├── turns.py               # work-signal modes, crystallize
 │       ├── live_inflight.py       # in-memory + on-disk inflight registry
 │       └── mcp_registry.py        # MCP server registry + merge
 ├── agentira-cli/                  # CLI + daemon entry point (`agentira daemon`)
+│   └── agentira_cli/runtimes/     # runtime adapters (claude, codex, grok, …)
 ├── templates/
 │   ├── agents/                    # AP-157 default agent templates (yaml + md)
 │   └── production-readiness.yaml  # project-workflow template (gate engine fodder)
 ├── scripts/
 │   ├── bootstrap_db.py            # called at container start
 │   └── ...
-├── docs/
-│   ├── getting-started.md         # first-user walkthrough
-│   ├── deployment.md              # Railway click-through
-│   ├── architecture.md            # the deep dive
-│   ├── architecture_decision_record.md  # ADRs (ADR 009 is the big one)
-│   ├── conversations.md
-│   ├── git_integration.md
-│   ├── rbac_guide.md
-│   └── ...
+├── docs-oss/                      # documentation site (Docusaurus)
+│   └── docs/
+│       ├── user-guide/            # install, projects, agents, runs, gates
+│       ├── technical/             # architecture, MCP, data model, ops
+│       └── contributing/          # setup, conventions, testing, style
 ├── backend/tests/                 # backend test suite (ephemeral Postgres)
 ├── data/                          # volume-mounted: agentira.db (dev), attachments/
 ├── docker-compose.yml             # base — required env override
@@ -462,6 +449,6 @@ attribution notice.
 
 **Built for the moment you're not watching the screen.**
 
-[Vision](AGENTIRA_VISION.md) · [Getting Started](docs/getting-started.md) · [Deployment](docs/deployment.md) · [Architecture](docs/architecture.md) · [Conventions](CLAUDE.md)
+[Documentation](https://gitmaster3000.github.io/agentira-oss-docs/) · [Getting started](https://gitmaster3000.github.io/agentira-oss-docs/user-guide/first-project) · [Deployment](https://gitmaster3000.github.io/agentira-oss-docs/technical/deployment) · [Architecture](https://gitmaster3000.github.io/agentira-oss-docs/technical/architecture) · [Conventions](CLAUDE.md)
 
 </div>

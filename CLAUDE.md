@@ -34,7 +34,7 @@
 - Profile stays Profile. Agent = runtime executor. Persona = future role template concept.
 - Push+poll hybrid for notifications (ADR-007).
 - New features go in their own `backend/<domain>.py` (or `backend/forge/<domain>.py`), not appended to `services.py`. Functions, not class hierarchies, unless there's a real polymorphism need. See `backend/attachments.py`, `backend/forge/turns.py`, `backend/forge/live_inflight.py`.
-- **Adding a whole new domain? Read `docs/adding-a-feature.md` first.** It walks the gateway → handler → repo → adapter layering end-to-end, using the deploy feature as the worked reference (where the session/commit lives, when a class is warranted, when an adapter is warranted).
+- **Adding a whole new domain? Read `docs-oss/docs/contributing/adding-a-feature.md` first.** It walks the gateway → handler → repo → adapter layering end-to-end, using the deploy feature as the worked reference (where the session/commit lives, when a class is warranted, when an adapter is warranted).
 - **Prompts are configuration, not code.** Agent system prompts live on `Profile.system_prompt` (edited in Agent Settings UI). Task content lives on `Task.description` (edited in Task UI). Don't hardcode prompt text in dispatch code, and never re-apply a code constant on top of a user-edited row (set-if-empty seeds are the only acceptable shape).
 
 ## Plain language for users (product-wide)
@@ -42,7 +42,7 @@
 - Technical internals (branch names, base points, git mechanics, daemon details) hide behind an optional **"Advanced / technical" reveal** — present for those who want it, never in the default view.
 - This is a standing rule for every feature, not a one-off. A non-engineer product owner must see the same honest status an engineer does, in words they understand.
 
-## Products (Flowty umbrella)
-- **Flowty Studio** = existing Agentira workspace/tasks (routes: `/`)
-- **Flowty Forge** = agent orchestration (routes: `/forge/*`)
-- Google-style app switcher between products.
+## Product naming
+- The product is **Agentira**. One product, one name. "Flowty", "Studio", and "Forge" are retired internal names — never use them in user-facing text, docs, or UI copy.
+- `/forge/*` routes and `backend/forge/` module paths keep the name because they are real code paths. Treat it as a namespace, not a product.
+- Workspace/tasks (routes `/`) and agent orchestration (routes `/forge/*`) are **areas of one app**, not separate products.

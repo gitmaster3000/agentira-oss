@@ -1,8 +1,8 @@
-"""Canonical run state machine — the executable form of docs/run-state-machine.md.
+"""Canonical run state machine — the executable form of docs-oss/docs/technical/run-state-machine.md.
 
 Single source of truth for *which transitions are legal*. Both the backend
 lifecycle (runs.py) and tests assert against `can_transition`. If you change the
-state machine, change docs/run-state-machine.md first, then this map, then the
+state machine, change docs-oss/docs/technical/run-state-machine.md first, then this map, then the
 frontend STATUS_CONFIG.
 
 Stateless: a transition map + two helpers. No shared state.
@@ -24,7 +24,7 @@ LIVE: frozenset[RunStatus] = frozenset({
 })
 
 # Every legal transition. from-status -> set(allowed to-status).
-# Mirrors the transition table in docs/run-state-machine.md exactly.
+# Mirrors the transition table in docs-oss/docs/technical/run-state-machine.md exactly.
 _ALLOWED: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.READY: frozenset({RunStatus.PENDING, RunStatus.CANCELLED}),
     RunStatus.PENDING: frozenset({

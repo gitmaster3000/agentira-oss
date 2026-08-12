@@ -76,3 +76,8 @@ backend/static/cli/manifest.json
 bruno/.env
 .env
 .venv312/
+
+# Docusaurus documentation site
+docs-oss/node_modules/
+docs-oss/build/
+docs-oss/.docusaurus/
