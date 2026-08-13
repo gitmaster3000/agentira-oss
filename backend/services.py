@@ -2940,6 +2940,16 @@ def _ensure_system_org(db: Session) -> Org:
     return org
 
 
+def _generate_admin_password() -> str:
+    """Readable-but-strong password for unattended quickstart installs.
+
+    Three 4-character groups from an unambiguous alphabet — no 0/O or 1/l/I,
+    because this gets read off a terminal and retyped into a browser."""
+    alphabet = "abcdefghijkmnpqrstuvwxyzACDEFGHJKLMNPQRSTUVWXYZ23456789"
+    groups = ["".join(secrets.choice(alphabet) for _ in range(4)) for _ in range(3)]
+    return "-".join(groups)
+
+
 def bootstrap():
     """Initialize DB tables and seed defaults.
 
@@ -2956,6 +2966,7 @@ def bootstrap():
         admin_role = db.query(Role).filter(Role.name == "admin").first()
         if not db.query(Profile).filter(Profile.name == "admin").first():
             is_prod = os.getenv("RAILWAY_ENVIRONMENT") is not None
+            is_quickstart = os.getenv("AGENTIRA_QUICKSTART") == "1"
             admin_password = os.getenv("AGENTIRA_ADMIN_PASSWORD")
             if admin_password:
                 sys_org = _ensure_system_org(db)
@@ -2964,6 +2975,14 @@ def bootstrap():
                                password_hash=passwords.hash_password(admin_password)))
                 db.commit()
                 logger.info("Created admin user from AGENTIRA_ADMIN_PASSWORD")
+            elif is_quickstart:
+                generated = _generate_admin_password()
+                sys_org = _ensure_system_org(db)
+                db.add(Profile(name="admin", display_name="Admin User",
+                               org_id=sys_org.id, account_type="human", roles=[admin_role],
+                               password_hash=passwords.hash_password(generated)))
+                db.commit()
+                logger.info("Admin password: %s", generated)
             elif is_prod:
                 logger.error(
                     "No admin user and AGENTIRA_ADMIN_PASSWORD is unset in "
