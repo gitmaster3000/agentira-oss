@@ -1,0 +1,69 @@
+# Agentira quickstart — pinned images, no build, localhost-only.
+#
+#   docker compose -f agentira.yml up -d
+#
+# Every port binds to 127.0.0.1. This instance is not reachable from your
+# network. See the deployment guide before exposing it.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agentira
+      POSTGRES_PASSWORD: agentira-local
+      POSTGRES_DB: agentira
+    volumes:
+      - agentira-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentira"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    image: ghcr.io/gitmaster3000/agentira-backend:v0.1.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8111
+      AGENTIRA_QUICKSTART: "1"
+      AGENTIRA_DB_URL: postgresql://agentira:agentira-local@postgres:5432/agentira
+      FRONTEND_URL: http://localhost:3111
+      APP_BASE_URL: http://localhost:3111
+      AGENTIRA_PUBLIC_URL: http://localhost:8111
+      CORS_ALLOW_ORIGINS: http://localhost:3111
+      JWT_SECRET: ${JWT_SECRET:-quickstart-local-only-change-before-exposing}
+    ports:
+      - "127.0.0.1:8111:8111"
+    volumes:
+      - agentira-data:/app/data
+    command: sh -c "python scripts/bootstrap_db.py && python run.py"
+
+  mcp:
+    image: ghcr.io/gitmaster3000/agentira-mcp:v0.1.0
+    depends_on:
+      - backend
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      AGENTIRA_DB_URL: postgresql://agentira:agentira-local@postgres:5432/agentira
+      JWT_SECRET: ${JWT_SECRET:-quickstart-local-only-change-before-exposing}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - agentira-data:/app/data
+
+  frontend:
+    image: ghcr.io/gitmaster3000/agentira-frontend:v0.1.0
+    depends_on:
+      - backend
+    environment:
+      API_UPSTREAM: http://backend:8111
+      API_HOST: backend
+    ports:
+      - "127.0.0.1:3111:80"
+
+volumes:
+  agentira-data:
+  agentira-db:
