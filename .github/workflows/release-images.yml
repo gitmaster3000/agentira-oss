@@ -1,0 +1,56 @@
+name: Publish images
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to publish (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            dockerfile: Dockerfile
+            context: .
+          - name: mcp
+            dockerfile: Dockerfile.mcp
+            context: .
+          - name: frontend
+            dockerfile: frontend/Dockerfile
+            context: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: echo "value=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/gitmaster3000/agentira-${{ matrix.name }}:${{ steps.version.outputs.value }}
+            ghcr.io/gitmaster3000/agentira-${{ matrix.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
