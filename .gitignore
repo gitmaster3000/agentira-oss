@@ -81,3 +81,6 @@ bruno/.env
 docs-oss/node_modules/
 docs-oss/build/
 docs-oss/.docusaurus/
+
+# Subagent-driven development scratch
+.superpowers/
