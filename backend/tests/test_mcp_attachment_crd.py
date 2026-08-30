@@ -93,6 +93,7 @@ def test_member_can_create_read_and_delete_each_scope(owner_kind):
             filename=f"{owner_kind}.txt",
             content=f"{owner_kind} body",
             content_type="text/plain",
+            kind="screenshot",
             **owner_args,
         ))
         listed = asyncio.run(mcp_server.read_attachment(**owner_args))
@@ -102,6 +103,7 @@ def test_member_can_create_read_and_delete_each_scope(owner_kind):
         deleted = asyncio.run(mcp_server.delete_attachment(created["id"]))
 
     assert created[f"{owner_kind}_id"] == owner["id"]
+    assert created["kind"] == "screenshot"
     assert [row["id"] for row in listed] == [created["id"]]
     assert read["content"] == f"{owner_kind} body"
     assert deleted is True

@@ -113,6 +113,7 @@ function GeneralTab({ projectId }) {
                 env_teardown_cmd: p.env_teardown_cmd || '',
                 env_db_admin_url: p.env_db_admin_url || '',
                 gates_enabled: !!p.gates_enabled,  // AP-158
+                test_evidence_required: !!p.test_evidence_required,
             });
         }).catch(() => setProject(null));
     }, [projectId]);
@@ -148,6 +149,7 @@ function GeneralTab({ projectId }) {
         || form.env_teardown_cmd !== (project.env_teardown_cmd || '')
         || form.env_db_admin_url !== (project.env_db_admin_url || '')
         || form.gates_enabled !== !!project.gates_enabled
+        || form.test_evidence_required !== !!project.test_evidence_required
     );
 
     const save = async () => {
@@ -172,6 +174,7 @@ function GeneralTab({ projectId }) {
                 env_teardown_cmd: form.env_teardown_cmd,
                 env_db_admin_url: form.env_db_admin_url,
                 gates_enabled: form.gates_enabled,
+                test_evidence_required: form.test_evidence_required,
             });
             setProject(updated);
             setMsg('Saved');
@@ -244,6 +247,23 @@ function GeneralTab({ projectId }) {
                         onChange={(e) => setForm({ ...form, gates_enabled: e.target.checked })}
                     />
                     Enforce column-exit gates on this project
+                </label>
+                <label className="flex items-start gap-2 text-sm text-text-secondary cursor-pointer mt-3">
+                    <input
+                        type="checkbox"
+                        checked={form.test_evidence_required}
+                        disabled={!form.gates_enabled}
+                        onChange={(e) => setForm({
+                            ...form,
+                            test_evidence_required: e.target.checked,
+                        })}
+                    />
+                    <span>
+                        Require test evidence before Done
+                        <span className="block text-xs text-text-tertiary mt-0.5">
+                            Review can only finish after a test-report or recording is attached.
+                        </span>
+                    </span>
                 </label>
             </Field>
             <div className="flex items-center gap-3">

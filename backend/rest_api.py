@@ -134,6 +134,8 @@ class ProjectUpdate(BaseModel):
     env_db_admin_url: Optional[str] = None
     # AP-158: column-exit gate enforcement.
     gates_enabled: Optional[bool] = None
+    # AP-475: require a test-report or recording before review -> done.
+    test_evidence_required: Optional[bool] = None
     # AP-184: when on, any comment wakes the assigned agent (legacy). Off
     # (default) = only @mention wakes; a plain comment is recorded as context.
     wake_on_comment: Optional[bool] = None
@@ -678,6 +680,7 @@ def api_update_project(
             env_teardown_cmd=body.env_teardown_cmd,
             env_db_admin_url=body.env_db_admin_url,
             gates_enabled=body.gates_enabled,
+            test_evidence_required=body.test_evidence_required,
             wake_on_comment=body.wake_on_comment,
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
@@ -1073,6 +1076,7 @@ def api_list_project_attachments(
 
 @projects.post("/{project_id}/attachments")
 async def api_upload_project_attachment(project_id: str, file: UploadFile = File(...),
+                                         kind: str = Form("other"),
                                          extract: bool = False,
                                          actor: str = Depends(get_current_user)):
     """Upload a single file. With `?extract=true` a .zip is unpacked and its
@@ -1088,10 +1092,12 @@ async def api_upload_project_attachment(project_id: str, file: UploadFile = File
         return _attachments.add(
             project_id=project_id, filename=file.filename, file_bytes=file_bytes,
             content_type=file.content_type or "application/octet-stream",
+            kind=kind,
             uploaded_by=actor,
         )
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        status_code = 400 if str(e).startswith("Unknown attachment kind") else 404
+        raise HTTPException(status_code, str(e))
 
 
 @projects.post("/{project_id}/attachments/folder")
@@ -1348,6 +1354,7 @@ def api_list_attachments(task_id: str, actor: str = Depends(get_current_user)):
 
 @tasks.post("/{task_id}/attachments")
 async def api_upload_attachment(task_id: str, file: UploadFile = File(...),
+                                kind: str = Form("other"),
                                 extract: bool = False,
                                 actor: str = Depends(get_current_user)):
     """Upload a single file. With `?extract=true` a .zip is unpacked and its
@@ -1360,9 +1367,10 @@ async def api_upload_attachment(task_id: str, file: UploadFile = File(...),
             return _attachments.add_zip(task_id=task_id, zip_bytes=file_bytes, uploaded_by=actor)
         return services.add_attachment(task_id=task_id, filename=file.filename, file_bytes=file_bytes,
                                        content_type=file.content_type or "application/octet-stream",
-                                       uploaded_by=actor, actor=actor)
+                                       kind=kind, uploaded_by=actor, actor=actor)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        status_code = 400 if str(e).startswith("Unknown attachment kind") else 404
+        raise HTTPException(status_code, str(e))
 
 
 @tasks.post("/{task_id}/attachments/folder")
@@ -1575,6 +1583,7 @@ def api_list_epic_attachments(
 
 @epics_router.post("/{epic_id}/attachments")
 async def api_upload_epic_attachment(epic_id: str, file: UploadFile = File(...),
+                                     kind: str = Form("other"),
                                      extract: bool = False,
                                      actor: str = Depends(get_current_user)):
     """Upload a single file. With `?extract=true` a .zip is unpacked and its
@@ -1589,9 +1598,11 @@ async def api_upload_epic_attachment(epic_id: str, file: UploadFile = File(...),
         return _attachments.add(
             epic_id=epic_id, filename=file.filename, file_bytes=file_bytes,
             content_type=file.content_type or "application/octet-stream",
+            kind=kind,
             uploaded_by=actor)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        status_code = 400 if str(e).startswith("Unknown attachment kind") else 404
+        raise HTTPException(status_code, str(e))
 
 
 # ── Workflow Router (roles, permissions) ─────────────────────────────────
