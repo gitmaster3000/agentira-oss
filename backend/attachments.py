@@ -43,6 +43,18 @@ _TEXT_EXTRA = {
     "application/javascript", "application/x-sh",
 }
 
+ATTACHMENT_KINDS = frozenset({
+    "test-report", "recording", "screenshot", "build", "other",
+})
+
+
+def normalize_kind(kind: str | None) -> str:
+    value = (kind or "other").strip().lower()
+    if value not in ATTACHMENT_KINDS:
+        allowed = ", ".join(sorted(ATTACHMENT_KINDS))
+        raise ValueError(f"Unknown attachment kind {value!r}; expected one of: {allowed}")
+    return value
+
 
 def _is_text(content_type: str) -> bool:
     if not content_type:
@@ -59,6 +71,7 @@ def _to_dict(a: Attachment) -> dict:
         "project_id": a.project_id,
         "epic_id": a.epic_id,
         "filename": a.filename,
+        "kind": a.kind or "other",
         "content_type": a.content_type,
         "size_bytes": a.size_bytes,
         "uploaded_by": a.uploaded_by,
@@ -106,6 +119,7 @@ def add(
     filename: str,
     file_bytes: bytes,
     content_type: str = "application/octet-stream",
+    kind: str = "other",
     uploaded_by: str = "system",
     relative_path: str | None = None,
 ) -> dict:
@@ -119,6 +133,7 @@ def add(
     if sum(bool(x) for x in (task_id, project_id, epic_id)) != 1:
         raise ValueError(
             "add() requires exactly one of task_id, project_id or epic_id")
+    kind = normalize_kind(kind)
 
     # Activity rows are project-scoped; an epic attachment logs against the
     # epic's project so it shows in the project activity feed.
@@ -163,6 +178,7 @@ def add(
             project_id=project_id,
             epic_id=epic_id,
             filename=display_name,
+            kind=kind,
             content_type=content_type,
             file_path=file_path,
             size_bytes=len(file_bytes),

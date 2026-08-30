@@ -56,6 +56,30 @@ def test_upload_download_round_trip_is_byte_exact(client):
     assert dl.content == PDF_BYTES  # byte-exact round-trip
 
 
+def test_upload_persists_evidence_kind(client):
+    tid = _make_task(client)
+    up = client.post(
+        f"/api/tasks/{tid}/attachments",
+        files={"file": ("report.md", b"PASS", "text/markdown")},
+        data={"kind": "test-report"},
+    )
+    assert up.status_code == 200, up.text
+    assert up.json()["kind"] == "test-report"
+    listed = client.get(f"/api/tasks/{tid}/attachments")
+    assert listed.json()[0]["kind"] == "test-report"
+
+
+def test_upload_rejects_unknown_evidence_kind(client):
+    tid = _make_task(client)
+    up = client.post(
+        f"/api/tasks/{tid}/attachments",
+        files={"file": ("report.md", b"PASS", "text/markdown")},
+        data={"kind": "trust-me"},
+    )
+    assert up.status_code == 400
+    assert "Unknown attachment kind" in up.text
+
+
 def test_download_requires_auth(client):
     tid = _make_task(client)
     att = client.post(f"/api/tasks/{tid}/attachments",

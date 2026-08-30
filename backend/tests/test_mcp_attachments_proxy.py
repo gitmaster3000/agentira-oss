@@ -52,8 +52,10 @@ def _make_task(client):
 def _route_httpx_to(client, base="http://test-backend"):
     """Patch mcp_server's httpx calls onto the in-process REST TestClient so the
     proxy logic runs for real against the backend, minus the network hop."""
-    def fake_post(url, headers=None, files=None, timeout=None):
-        return client.post(url.replace(base, ""), headers=headers, files=files)
+    def fake_post(url, headers=None, files=None, data=None, timeout=None):
+        return client.post(
+            url.replace(base, ""), headers=headers, files=files, data=data,
+        )
 
     def fake_get(url, headers=None, timeout=None):
         return client.get(url.replace(base, ""), headers=headers)
@@ -75,9 +77,12 @@ def test_create_attachment_proxies_to_backend(env):
     mcp_server.token_ctx.set("agentira_testkey_abc123")
     with env_p, post_p, get_p, delete_p:
         out = asyncio.run(mcp_server.create_attachment(
-            task_id=task["id"], filename="note.txt", content="hello forge"))
+            task_id=task["id"], filename="note.txt", content="hello forge",
+            kind="test-report",
+        ))
     assert out["filename"] == "note.txt"
     assert out["task_id"] == task["id"]
+    assert out["kind"] == "test-report"
     # Bytes went through the REST route → downloadable over REST (no 404).
     dl = client.get(f"/api/attachments/{out['id']}/download")
     assert dl.status_code == 200

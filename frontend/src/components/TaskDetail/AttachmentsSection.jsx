@@ -4,11 +4,24 @@ import { useAuth } from '../../context/AuthContext';
 import { Paperclip, Download, Trash2, File as FileIcon, Loader2, Image as ImageIcon, FileText } from 'lucide-react';
 import { ConfirmModal } from '../ConfirmModal';
 
+const KIND_OPTIONS = [
+    ['other', 'General file'],
+    ['test-report', 'Test report'],
+    ['recording', 'Recording'],
+    ['screenshot', 'Screenshot'],
+    ['build', 'Build'],
+];
+const EVIDENCE_KINDS = new Set(['test-report', 'recording', 'screenshot']);
+const kindLabel = (kind) => (
+    KIND_OPTIONS.find(([value]) => value === kind)?.[1] || 'General file'
+);
+
 export function AttachmentsSection({ taskId, bare = false }) {
     const { user } = useAuth();
     const [attachments, setAttachments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
+    const [uploadKind, setUploadKind] = useState('other');
     const [attachmentToDelete, setAttachmentToDelete] = useState(null);
     const fileInputRef = useRef(null);
     const folderInputRef = useRef(null);
@@ -44,7 +57,7 @@ export function AttachmentsSection({ taskId, bare = false }) {
 
         setIsUploading(true);
         try {
-            await api.uploadAttachment(taskId, file);
+            await api.uploadAttachment(taskId, file, uploadKind);
             await loadAttachments();
         } catch (err) {
             console.error('[AttachmentsSection] Upload failed:', err);
@@ -112,6 +125,17 @@ export function AttachmentsSection({ taskId, bare = false }) {
         return <FileIcon className="w-5 h-5 text-text-secondary" />;
     };
 
+    const groups = [
+        {
+            label: 'Test evidence',
+            items: attachments.filter((item) => EVIDENCE_KINDS.has(item.kind)),
+        },
+        {
+            label: 'Other files',
+            items: attachments.filter((item) => !EVIDENCE_KINDS.has(item.kind)),
+        },
+    ].filter((group) => group.items.length > 0);
+
     return (
         // `bare` drops the heading and separator for hosts that already frame
         // this as a titled section of their own.
@@ -138,6 +162,17 @@ export function AttachmentsSection({ taskId, bare = false }) {
                     className="hidden"
                 />
                 <div className="flex items-center gap-1">
+                    <select
+                        aria-label="Attachment kind"
+                        className="input py-1 px-2 text-xs"
+                        value={uploadKind}
+                        onChange={(event) => setUploadKind(event.target.value)}
+                        disabled={isUploading}
+                    >
+                        {KIND_OPTIONS.map(([value, label]) => (
+                            <option key={value} value={value}>{label}</option>
+                        ))}
+                    </select>
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={isUploading}
@@ -168,8 +203,13 @@ export function AttachmentsSection({ taskId, bare = false }) {
                     </button>
                 </div>
             ) : (
-                <div className="space-y-2">
-                    {attachments.map(attachment => (
+                <div className="space-y-4">
+                    {groups.map((group) => (
+                        <div key={group.label} className="space-y-2">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                                {group.label}
+                            </div>
+                    {group.items.map(attachment => (
                         <div
                             key={attachment.id}
                             className="flex items-center justify-between p-3 bg-bg-app rounded-md border border-border-subtle hover:border-border-active group transition-colors"
@@ -186,6 +226,8 @@ export function AttachmentsSection({ taskId, bare = false }) {
                                         <span>{formatSize(attachment.size_bytes)}</span>
                                         <span>•</span>
                                         <span>{attachment.uploaded_by}</span>
+                                        <span>•</span>
+                                        <span>{kindLabel(attachment.kind)}</span>
                                         <span>•</span>
                                         <span title={new Date(attachment.created_at).toLocaleString()}>
                                             {new Date(attachment.created_at).toLocaleDateString()}
@@ -210,6 +252,8 @@ export function AttachmentsSection({ taskId, bare = false }) {
                                     <Trash2 className="w-4 h-4" />
                                 </button>
                             </div>
+                        </div>
+                    ))}
                         </div>
                     ))}
                 </div>
