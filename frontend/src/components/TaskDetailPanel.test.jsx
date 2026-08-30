@@ -9,6 +9,8 @@ vi.mock('../api', () => ({
     api: {
         getActivity: vi.fn(() => Promise.resolve([])),
         listAttachments: vi.fn(() => Promise.resolve([])),
+        uploadAttachment: vi.fn(() => Promise.resolve({})),
+        deleteAttachment: vi.fn(() => Promise.resolve({})),
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
         getEpics: vi.fn(() => Promise.resolve([])),
@@ -231,6 +233,35 @@ describe('TaskDetailPanel — layout & resizing', () => {
         render(<Harness task={baseTask()} />);
         const panel = await screen.findByRole('complementary');
         expect(panel.style.width).toBe('520px');
+    });
+});
+
+describe('TaskDetailPanel — typed test evidence', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('groups evidence and uploads with the selected kind', async () => {
+        api.listAttachments.mockResolvedValue([
+            { id: 'A1', filename: 'acceptance.md', kind: 'test-report' },
+            { id: 'A2', filename: 'notes.txt', kind: 'other' },
+        ]);
+        const { container } = render(<Harness task={baseTask()} />);
+
+        expect(await screen.findByText('Test evidence')).toBeInTheDocument();
+        expect(screen.getByText('Other files')).toBeInTheDocument();
+        expect(screen.getAllByText('Test report')).toHaveLength(2);
+
+        fireEvent.change(screen.getByLabelText('Attachment kind'), {
+            target: { value: 'recording' },
+        });
+        const input = container.querySelector('input[type="file"]');
+        const file = new File(['video'], 'acceptance.webm', {
+            type: 'video/webm',
+        });
+        fireEvent.change(input, { target: { files: [file] } });
+
+        await waitFor(() => expect(api.uploadAttachment).toHaveBeenCalledWith(
+            'T1', file, 'recording',
+        ));
     });
 });
 

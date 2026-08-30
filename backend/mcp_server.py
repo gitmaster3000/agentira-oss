@@ -511,7 +511,7 @@ def _attachment_owner(
 
 
 def _proxy_upload(owner_kind: str, owner_id: str, filename: str,
-                  file_bytes: bytes, content_type: str) -> dict:
+                  file_bytes: bytes, content_type: str, kind: str) -> dict:
     """POST the file to the backend so it lands on the backend's volume."""
     import httpx
     r = httpx.post(
@@ -519,6 +519,7 @@ def _proxy_upload(owner_kind: str, owner_id: str, filename: str,
         f"/{owner_id}/attachments",
         headers={"Authorization": f"Bearer {token_ctx.get()}"},
         files={"file": (filename, file_bytes, content_type)},
+        data={"kind": kind},
         timeout=60,
     )
     r.raise_for_status()
@@ -578,10 +579,12 @@ async def create_attachment(
     content: str = "",
     content_base64: str = "",
     content_type: str = "application/octet-stream",
+    kind: str = "other",
 ) -> dict:
     """Create an attachment for exactly one task, project, or epic.
 
-    Use content for text or content_base64 for binary data.
+    Use content for text or content_base64 for binary data. `kind` is one of
+    test-report, recording, screenshot, build, or other.
     """
     import base64
     from backend import attachments as _attachments
@@ -600,7 +603,7 @@ async def create_attachment(
         return {"error": "Provide content (text) or content_base64 (binary)"}
     if _api_base():
         return _proxy_upload(
-            owner_kind, owner_id, filename, file_bytes, content_type,
+            owner_kind, owner_id, filename, file_bytes, content_type, kind,
         )
 
     owner_args = {f"{owner_kind}_id": owner_id}
@@ -615,6 +618,7 @@ async def create_attachment(
         filename=filename,
         file_bytes=file_bytes,
         content_type=content_type,
+        kind=kind,
         uploaded_by=actor,
     )
 

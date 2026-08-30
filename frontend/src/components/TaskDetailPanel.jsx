@@ -24,6 +24,17 @@ const STATUS = {
     done:        { color: '#2ecc71', label: 'Done' },
 };
 const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
+const ATTACHMENT_KIND_OPTIONS = [
+    ['other', 'General file'],
+    ['test-report', 'Test report'],
+    ['recording', 'Recording'],
+    ['screenshot', 'Screenshot'],
+    ['build', 'Build'],
+];
+const EVIDENCE_KINDS = new Set(['test-report', 'recording', 'screenshot']);
+const attachmentKindLabel = (kind) => (
+    ATTACHMENT_KIND_OPTIONS.find(([value]) => value === kind)?.[1] || 'General file'
+);
 
 // Panel width: user-draggable, remembered across sessions.
 const WIDTH_KEY = 'taskPanelWidth';
@@ -75,6 +86,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
     const [comment, setComment] = useState('');
     const [attachments, setAttachments] = useState([]);
+    const [attachmentKind, setAttachmentKind] = useState('other');
     const [commits, setCommits] = useState([]);
     const [dodItems, setDodItems] = useState(task.dod_items || []);
     const [newDodText, setNewDodText] = useState('');
@@ -209,7 +221,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const handleUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        try { await api.uploadAttachment(task.id, file); loadAttachments(); loadActivity(); }
+        try {
+            await api.uploadAttachment(task.id, file, attachmentKind);
+            loadAttachments();
+            loadActivity();
+        }
         catch (err) { alert(err.message); }
         finally { e.target.value = ''; }
     };
@@ -321,6 +337,16 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const taskRepos = task.repos || [];
     const gitRepoLabel = task.repo_name || taskRepos[0] || '';
     const isMultiRepo = taskRepos.length > 1;
+    const attachmentGroups = [
+        {
+            label: 'Test evidence',
+            items: attachments.filter((item) => EVIDENCE_KINDS.has(item.kind)),
+        },
+        {
+            label: 'Other files',
+            items: attachments.filter((item) => !EVIDENCE_KINDS.has(item.kind)),
+        },
+    ].filter((group) => group.items.length > 0);
 
     return (
         <aside
@@ -664,7 +690,12 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         separated
                     >
                         <div className="flex flex-col" style={{ gap: 8 }}>
-                            {attachments.map(att => (
+                            {attachmentGroups.map((group) => (
+                                <div key={group.label} className="flex flex-col" style={{ gap: 6 }}>
+                                    <div className="text-text-tertiary uppercase" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em' }}>
+                                        {group.label}
+                                    </div>
+                                    {group.items.map(att => (
                                 <div key={att.id} className="flex items-center group hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
                                     <button type="button"
                                        onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
@@ -672,6 +703,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                                         <FileText className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--brand-teal)' }} />
                                         <div className="flex-1 min-w-0">
                                             <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
+                                            <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{attachmentKindLabel(att.kind)}</div>
                                             {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
                                         </div>
                                     </button>
@@ -682,10 +714,25 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                                         <Trash2 className="w-3.5 h-3.5" />
                                     </button>
                                 </div>
+                                    ))}
+                                </div>
                             ))}
-                            <button onClick={() => fileInputRef.current?.click()} className="flex items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, marginTop: 4, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
+                            <div className="flex items-center" style={{ gap: 6, marginTop: 4 }}>
+                                <select
+                                    aria-label="Attachment kind"
+                                    className="input"
+                                    style={{ fontSize: 11.5, padding: '8px 9px' }}
+                                    value={attachmentKind}
+                                    onChange={(event) => setAttachmentKind(event.target.value)}
+                                >
+                                    {ATTACHMENT_KIND_OPTIONS.map(([value, label]) => (
+                                        <option key={value} value={value}>{label}</option>
+                                    ))}
+                                </select>
+                            <button onClick={() => fileInputRef.current?.click()} className="flex flex-1 items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
                                 <Plus className="w-3 h-3" /> Attach a file
                             </button>
+                            </div>
                             <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
                         </div>
                     </CollapsibleSection>
@@ -898,4 +945,3 @@ function SectionLabel({ children, inline }) {
         </div>
     );
 }
-

@@ -337,6 +337,10 @@ def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
         "env_db_admin_url": getattr(p, "env_db_admin_url", None) or "",
         # AP-158: column-exit gates on/off for this project.
         "gates_enabled": bool(getattr(p, "gates_enabled", False)),
+        # AP-475: stricter completion requires durable test evidence.
+        "test_evidence_required": bool(
+            getattr(p, "test_evidence_required", False)
+        ),
         # AP-184: when on, ANY comment wakes the assigned agent (legacy). Off
         # (default) = only @mention wakes; a plain comment is recorded as context.
         "wake_on_comment": bool(getattr(p, "wake_on_comment", False)),
@@ -729,6 +733,7 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    env_teardown_cmd: Optional[str] = None,
                    env_db_admin_url: Optional[str] = None,
                    gates_enabled: Optional[bool] = None,
+                   test_evidence_required: Optional[bool] = None,
                    wake_on_comment: Optional[bool] = None,
                    repo_url: Optional[str] = None,
                    workspace_kind: Optional[str] = None,
@@ -784,6 +789,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.env_db_admin_url = env_db_admin_url.strip() or None
         if gates_enabled is not None:
             p.gates_enabled = bool(gates_enabled)
+        if test_evidence_required is not None:
+            p.test_evidence_required = bool(test_evidence_required)
         if wake_on_comment is not None:
             p.wake_on_comment = bool(wake_on_comment)
         if workflow_enabled is not None:
@@ -2214,13 +2221,14 @@ def add_attachment(
     filename: str,
     file_bytes: bytes,
     content_type: str = "application/octet-stream",
+    kind: str = "other",
     uploaded_by: str = "system",
     actor: str = "system",
 ) -> dict:
     authorize_task_access(task_id, actor, "write")
     return _attachments.add(
         task_id=task_id, filename=filename, file_bytes=file_bytes,
-        content_type=content_type, uploaded_by=uploaded_by,
+        content_type=content_type, kind=kind, uploaded_by=uploaded_by,
     )
 
 

@@ -109,6 +109,22 @@ def _pr_url_set(task: Task) -> GateResult:
                       "Link the PR URL before marking done.")
 
 
+def _test_evidence_present(task: Task) -> GateResult:
+    evidence_kinds = {"test-report", "recording"}
+    present = sorted({
+        (attachment.kind or "other")
+        for attachment in task.attachments
+        if (attachment.kind or "other") in evidence_kinds
+    })
+    if present:
+        return GateResult("test_evidence_present", True)
+    return GateResult(
+        "test_evidence_present",
+        False,
+        "Attach a test report or recording before marking done.",
+    )
+
+
 # ── Per-transition gate map ─────────────────────────────────────────────
 
 # Key: (from_status, to_status). Value: list of gate functions to run.
@@ -131,7 +147,13 @@ def evaluate(task: Task, *, from_status: str, to_status: str) -> list[GateResult
     "2 of 3 passed" UI if they want. Empty list = no gates registered
     for this transition (always allowed).
     """
-    fns = _TRANSITION_GATES.get((from_status, to_status), [])
+    fns = list(_TRANSITION_GATES.get((from_status, to_status), []))
+    if (
+        (from_status, to_status) == ("review", "done")
+        and task.project
+        and getattr(task.project, "test_evidence_required", False)
+    ):
+        fns.append(_test_evidence_present)
     return [fn(task) for fn in fns]
 
 
@@ -149,15 +171,28 @@ _GATE_META: dict[str, str] = {
     "dod_all_checked": "Every Definition-of-Done item is checked.",
     "has_branch_or_pr": "Task has a branch or a PR URL.",
     "pr_url_set": "Task has a PR URL linked.",
+    "test_evidence_present": "Task has a test-report or recording attachment.",
 }
 
 
-def describe_transition(from_status: str, to_status: str) -> list[dict]:
+def describe_transition(
+    from_status: str,
+    to_status: str,
+    *,
+    project=None,
+) -> list[dict]:
     """Static description of the gates guarding a transition — for the
     read-only workflow UI. Each entry: {name, description}. Empty list when
     the transition registers no gates (always allowed)."""
     out: list[dict] = []
-    for fn in _TRANSITION_GATES.get((from_status, to_status), []):
+    fns = list(_TRANSITION_GATES.get((from_status, to_status), []))
+    if (
+        (from_status, to_status) == ("review", "done")
+        and project is not None
+        and getattr(project, "test_evidence_required", False)
+    ):
+        fns.append(_test_evidence_present)
+    for fn in fns:
         # A checker's name is its function name minus the leading underscore
         # (matches the GateResult.name it produces), resolved without a task.
         name = fn.__name__.lstrip("_")

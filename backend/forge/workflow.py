@@ -162,7 +162,9 @@ def column_ui_details(flow: "Workflow", project=None) -> dict:
         prompt_slug = role_prompt_slug(flow, role) if role else ""
         details[col.name] = {
             "advance_to": to,
-            "gates": gates.describe_transition(col.name, to) if to else [],
+            "gates": gates.describe_transition(
+                col.name, to, project=project,
+            ) if to else [],
             "prompt_role": role,
             "prompt_slug": prompt_slug,
             "prompt": resolve_role_prompt(flow, role, project=project) if role else "",

@@ -438,9 +438,10 @@ export const api = {
 
     // Attachments
     listAttachments: (taskId) => request(`/tasks/${taskId}/attachments`),
-    uploadAttachment: (taskId, file) => {
+    uploadAttachment: (taskId, file, kind = 'other') => {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('kind', kind);
         const token = getToken();
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;

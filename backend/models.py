@@ -372,6 +372,11 @@ class Project(Base):
     # with structured reasons. Defaults to False so existing projects
     # keep working unchanged.
     gates_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # AP-475: when enabled alongside gates_enabled, review -> done additionally
+    # requires durable test evidence on the task (a test report or recording).
+    test_evidence_required: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+    )
     # AP-184: when True, ANY comment on a task wakes the assigned agent (the
     # legacy behavior). Default False — a plain comment is recorded into the
     # task chat as context and the agent reads it when it next starts work; only
@@ -688,6 +693,9 @@ class Attachment(Base):
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    # AP-475: machine-readable evidence classification. Keep "other" as the
+    # back-compatible default for existing and ordinary project files.
+    kind: Mapped[str] = mapped_column(String(32), default="other", nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     size_bytes: Mapped[int] = mapped_column(default=0)
