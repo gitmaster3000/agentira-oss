@@ -91,3 +91,15 @@ Required before merge:
 - An integration smoke test that boots the backend and MCP
 
 Comment `/integration-test` on a pull request to run the full suite with the CLI installed.
+
+## What must pass before Agentira merges
+
+When an approved task is merged, the daemon merges it in a scratch copy, runs the project's **verify command** there, and pushes only if it exits 0. For Agentira itself that command is:
+
+```bash
+scripts/verify.sh
+```
+
+It installs the locked backend dependencies into a cached virtualenv, runs the backend suite, then the frontend tests and build. The daemon machine needs `uv`, Node.js and Docker.
+
+If it fails, nothing is pushed and the task goes back to the implementer with the output. What happens on failure is set in `templates/workflow/default.yaml` (`integrate.verify`, `integrate.on_failure`); the command itself is the project setting "Command that proves the project works".
