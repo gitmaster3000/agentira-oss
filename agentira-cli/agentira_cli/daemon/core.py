@@ -426,7 +426,7 @@ class AgentiraDaemon:
         task. Runs in its own thread; a merge must never stall the WS loop."""
         def _run():
             from agentira_cli.daemon.integrate import integrate_branch
-            ok, reason = False, "unknown"
+            ok, reason, verify = False, "unknown", None
             target = (frame.get("target_branch") or "").strip()
             try:
                 if not target:
@@ -434,11 +434,13 @@ class AgentiraDaemon:
                     # merges pushed to the wrong branch (Loop v1 C5).
                     reason = "target_branch_missing: backend sent no target branch"
                 else:
-                    ok, reason = integrate_branch(
+                    ok, reason, verify = integrate_branch(
                         source_url=frame.get("source_url", "") or "",
                         branch=frame.get("branch", "") or "",
                         target_branch=target,
                         push=bool(frame.get("push", True)),
+                        verify_cmd=frame.get("verify_cmd", "") or "",
+                        verify_timeout_s=int(frame.get("verify_timeout_s") or 1800),
                     )
             except Exception as exc:  # noqa: BLE001 — report, don't die
                 reason = f"integrate_exception: {exc}"
@@ -447,7 +449,7 @@ class AgentiraDaemon:
                     daemon_id=self._daemon_id,
                     task_id=frame.get("task_id", "") or "",
                     run_id=frame.get("run_id", "") or "",
-                    ok=ok, reason=reason,
+                    ok=ok, reason=reason, verify=verify,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("integration result post failed: %s", exc)

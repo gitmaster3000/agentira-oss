@@ -68,7 +68,8 @@ class AgentiraClient:
 
     def post_integration_result(self, *, daemon_id: str, task_id: str,
                                 run_id: str = "", ok: bool,
-                                reason: str = "") -> dict:
+                                reason: str = "",
+                                verify: dict | None = None) -> dict:
         """Report a workflow-integration merge result (slice 2). The backend
         driver advances the task to done (ok) or surfaces the classified
         failure (conflict/push) without advancing."""
@@ -78,6 +79,8 @@ class AgentiraClient:
             "run_id": run_id or None,
             "ok": ok,
             "reason": reason,
+            # Loop v1 C6: the merged-tree check result (None = not run).
+            "verify": verify,
         })
 
     def post_trigger_complete(self, agent_id: str, *, daemon_id: str,
