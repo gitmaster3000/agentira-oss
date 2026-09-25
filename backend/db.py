@@ -770,6 +770,8 @@ def run_migrations():
             # Loop v1 C6: merged-tree verification command + timeout.
             added |= _ensure_column(conn, "projects", "verify_cmd", "TEXT")
             added |= _ensure_column(conn, "projects", "verify_timeout_minutes", "INTEGER")
+            # Loop v1 C7: goals & direction the Conductor plans from.
+            added |= _ensure_column(conn, "projects", "direction_md", "TEXT")
             # Single-repo deploy target. kind picks the adapter; config_json is
             # opaque per-kind (adding a provider = new adapter, not a migration).
             added |= _ensure_column(conn, "projects", "deploy_target_kind",

@@ -143,6 +143,24 @@ export function EpicPage() {
                     <h1 className="text-2xl font-bold text-text-primary truncate flex-1 min-w-0">{epic.title}</h1>
                 )}
 
+                {/* Loop v1: which epics the current sprint works on. The
+                    Conductor sets this too; a human can always override. */}
+                {!editing && (
+                    <select
+                        aria-label="Epic status"
+                        className="input w-auto text-sm"
+                        value={epic.status || 'backlog'}
+                        onChange={async (e) => {
+                            try { setEpic(await api.updateEpic(epicId, { status: e.target.value })); }
+                            catch (err) { alert('Could not change status: ' + (err.message || err)); }
+                        }}
+                    >
+                        <option value="backlog">Parked</option>
+                        <option value="in_progress">In this sprint</option>
+                        <option value="done">Done</option>
+                    </select>
+                )}
+
                 {editing ? (
                     <>
                         <button

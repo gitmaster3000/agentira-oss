@@ -107,6 +107,7 @@ function GeneralTab({ projectId }) {
                 repo_url: p.repo_url || '',
                 conventions_md: p.conventions_md || '',
                 verify_cmd: p.verify_cmd || '',
+                direction_md: p.direction_md || '',
                 verify_timeout_minutes: p.verify_timeout_minutes || 30,
                 work_signal: p.work_signal || 'working_tree',
                 sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
@@ -144,6 +145,7 @@ function GeneralTab({ projectId }) {
         || form.repo_url !== (project.repo_url || '')
         || form.conventions_md !== (project.conventions_md || '')
         || form.verify_cmd !== (project.verify_cmd || '')
+        || form.direction_md !== (project.direction_md || '')
         || Number(form.verify_timeout_minutes) !== (project.verify_timeout_minutes || 30)
         || form.work_signal !== (project.work_signal || 'working_tree')
         || form.sandbox_mode !== (project.sandbox_mode || '')
@@ -167,6 +169,7 @@ function GeneralTab({ projectId }) {
                 repo_url: form.repo_url,
                 conventions_md: form.conventions_md,
                 verify_cmd: form.verify_cmd,
+                direction_md: form.direction_md,
                 verify_timeout_minutes: Number(form.verify_timeout_minutes) || 30,
                 work_signal: form.work_signal || null,
                 // AP-155: send the literal empty string to clear an
@@ -212,6 +215,13 @@ function GeneralTab({ projectId }) {
                 <input className="input" placeholder="https://github.com/org/repo.git"
                     value={form.repo_url}
                     onChange={(e) => setForm({ ...form, repo_url: e.target.value })} />
+            </Field>
+            <Field label="Goals & direction"
+                hint="What this project is for and what matters most right now, in plain words. The Conductor plans each sprint from this — and may draft it if it's empty.">
+                <textarea className="input text-sm" rows="5" aria-label="Goals & direction"
+                    value={form.direction_md}
+                    placeholder="e.g. Make the agent loop run on its own before any UI work."
+                    onChange={(e) => setForm({ ...form, direction_md: e.target.value })} />
             </Field>
             <Field label="Conventions (markdown)"
                 hint="Materialized as .agentira/CONVENTIONS.md in the agent workdir.">

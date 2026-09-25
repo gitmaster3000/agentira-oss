@@ -98,3 +98,21 @@ describe('ProjectSettings — verify command (Loop v1)', () => {
         expect(api.updateProject.mock.calls[0][1].verify_cmd).toBe('scripts/verify.sh');
     });
 });
+
+describe('ProjectSettings — goals & direction (Loop v1)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getProject.mockResolvedValue({ id: 'p1', name: 'P', direction_md: 'old' });
+        api.updateProject.mockImplementation(async (_id, body) => ({ id: 'p1', name: 'P', ...body }));
+    });
+
+    it('saves the direction the Conductor plans from', async () => {
+        render(<ProjectSettings />);
+        const field = await screen.findByLabelText(/goals & direction/i);
+        expect(field.value).toBe('old');
+        fireEvent.change(field, { target: { value: 'Ship Loop v1 first' } });
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+        await waitFor(() => expect(api.updateProject).toHaveBeenCalled());
+        expect(api.updateProject.mock.calls[0][1].direction_md).toBe('Ship Loop v1 first');
+    });
+});
