@@ -194,6 +194,7 @@ def get_conductor_config() -> dict:
             return {"active": True, "tick_seconds": TICK_INTERVAL_S,
                     "report_time": "09:00", "report_enabled": True,
                     "plan_interval_minutes": 10,
+                    "sprint_time": "07:45", "sprint_min_interval_hours": 4,
                     "redispatch_cooldown_minutes": REDISPATCH_COOLDOWN_MINUTES,
                     "redispatch_max_attempts": REDISPATCH_MAX_ATTEMPTS}
         # Clamp the tick to a sane floor — a sub-10s tick would hammer the DB.
@@ -204,11 +205,14 @@ def get_conductor_config() -> dict:
                               or REDISPATCH_COOLDOWN_MINUTES))
         max_attempts = max(1, int(prof.conductor_redispatch_max_attempts
                                   or REDISPATCH_MAX_ATTEMPTS))
+        sprint_interval = max(1, int(prof.conductor_sprint_min_interval_hours or 4))
         return {"active": bool(prof.conductor_active),
                 "tick_seconds": tick,
                 "report_time": prof.conductor_report_time or "09:00",
                 "report_enabled": bool(prof.conductor_report_enabled),
                 "plan_interval_minutes": plan,
+                "sprint_time": prof.conductor_sprint_time or "07:45",
+                "sprint_min_interval_hours": sprint_interval,
                 "redispatch_cooldown_minutes": cooldown,
                 "redispatch_max_attempts": max_attempts}
 
@@ -1039,6 +1043,25 @@ def run_planning_turn() -> dict:
         conductor_id, conductor_model = cond["id"], cond["model"]
         facts = gather_planning_facts(project_id)
         if not facts["unassigned_tasks"] and not facts["backlog"]:
+            # Queue-dry: the project has nothing to plan or dispatch. If it is
+            # genuinely idle (no live tasks/runs) and the sprint interval has
+            # elapsed, hand off to a sprint-planning turn to refill the board
+            # instead of just recording an empty skip (C7b).
+            from backend.forge.repos import tasks as tasks_repo
+            with SessionLocal() as idle_db:
+                idle = not tasks_repo.project_has_live_work(idle_db, project_id)
+            if idle and _sprint_due(project_id):
+                # Record the trigger BEFORE firing so the once-per-interval
+                # gate holds even if the dispatched turn writes nothing.
+                _record_planning_turn(
+                    trigger="queue_dry", status="triggered",
+                    facts={"kind": "sprint_planning", "project_id": project_id,
+                           "project_name": project_name},
+                    duration_ms=int((time.monotonic() - start) * 1000))
+                run_sprint_planning_turn(trigger="queue_dry", project_id=project_id)
+                results.append({"project_id": project_id,
+                                "sprint_planning": "queue_dry"})
+                continue
             _record_planning_turn(
                 trigger="cron", status="skipped", facts=facts,
                 duration_ms=int((time.monotonic() - start) * 1000),
@@ -1506,3 +1529,165 @@ def run_sprint_review_turn() -> dict:
     _LAST_SPRINT_REVIEW = {"at": datetime.now(timezone.utc).isoformat(),
                            "projects": results}
     return _LAST_SPRINT_REVIEW
+
+
+# ── Sprint planning — the Conductor owns direction + epics (C7b) ───────────
+#
+# The planning turn assigns tasks; the sprint-review turn looks back. Neither
+# writes the project's direction or keeps the epic board healthy. The sprint-
+# planning turn does: it writes the direction if empty, keeps 1–3 epics
+# in_progress, and breaks any in-progress epic with no open tasks into fresh
+# backlog tasks. It fires daily at `conductor_sprint_time` (config, UTC) and,
+# opportunistically, when a project's queue runs dry — but no more than once
+# per `conductor_sprint_min_interval_hours` so an idle project isn't replanned
+# every planning tick.
+
+_LAST_SPRINT_PLANNING: dict | None = None
+
+
+def get_last_sprint_planning() -> dict | None:
+    return _LAST_SPRINT_PLANNING
+
+
+def gather_sprint_planning_facts(project_id: str) -> dict:
+    """Token-free snapshot for ONE project's sprint-planning turn: the
+    project's direction, its epic board (with open/done task counts), the
+    in-progress epics that still need breaking down, and the top backlog
+    candidates. No LLM, no mutation."""
+    from backend.forge.repos import tasks as tasks_repo
+    with SessionLocal() as db:
+        project = db.get(Project, project_id)
+        project_name = project.name if project else project_id
+        direction = (getattr(project, "direction_md", "") or "") if project else ""
+
+        from backend.models import Epic
+        epics: list[dict] = []
+        for e in (db.query(Epic)
+                    .filter(Epic.project_id == project_id)
+                    .order_by(Epic.created_at.asc())
+                    .all()):
+            open_count, done_count = tasks_repo.epic_task_counts(db, e.id)
+            epics.append({"id": e.id, "title": e.title, "status": e.status,
+                          "open": open_count, "done": done_count})
+
+        needs_breakdown = [
+            {"id": e.id, "title": e.title, "status": e.status}
+            for e in tasks_repo.epics_needing_breakdown(db, project_id)]
+
+        backlog: list[dict] = []
+        backlog_id = _backlog_status_id(db)
+        if backlog_id:
+            rows = tasks_repo.backlog_candidates(
+                db, project_id=project_id, status_id=backlog_id,
+                limit=FACTS_SCAN_LIMIT)
+            rows.sort(key=lambda t: _PRIORITY_RANK.get(
+                t.priority.value if hasattr(t.priority, "value")
+                else str(t.priority), 2))
+            backlog = [_task_fact(t) for t in rows[:BACKLOG_PROMOTE_LIMIT]]
+
+    return {
+        "project_id": project_id, "project_name": project_name,
+        "direction": direction, "epics": epics,
+        "needs_breakdown": needs_breakdown, "backlog": backlog,
+        "last_summary": "",
+    }
+
+
+def _compose_sprint_planning_prompt(facts: dict) -> str:
+    """Fill the sprint-planning template (config) with the gathered facts.
+    Data rows are fenced (section C) and prefixed with the injection guard."""
+    project_name = facts.get("project_name") or facts.get("project_id") or ""
+    direction = (facts.get("direction") or "").strip() or "(not set)"
+    epics = "\n".join(
+        f"- epic_id={e['id']} [{e['status']}] — {e['title']} "
+        f"({e['open']} open, {e['done']} done)"
+        for e in facts.get("epics") or []) or "- (none)"
+    needs = "\n".join(
+        f"- epic_id={e['id']} — {e['title']}"
+        for e in facts.get("needs_breakdown") or []) or "- (none)"
+    backlog = "\n".join(_fmt_task_row(t) for t in facts.get("backlog") or []) or "- (none)"
+    last_summary = (facts.get("last_summary") or "").strip() or "(none)"
+    body = (_load_prompt("conductor/sprint_planning.md")
+            .replace("{{PROJECT}}", project_name)
+            .replace("{{DIRECTION}}", direction)
+            .replace("{{EPICS}}", _fenced(epics))
+            .replace("{{NEEDS_BREAKDOWN}}", _fenced(needs))
+            .replace("{{BACKLOG}}", _fenced(backlog))
+            .replace("{{LAST_SUMMARY}}", last_summary))
+    return _compose_turn_guard(project_name) + "\n\n" + body
+
+
+def _sprint_due(project_id: str) -> bool:
+    """Has enough time passed since this project's last sprint-planning turn
+    to fire another on queue-dry? (config: sprint_min_interval_hours)."""
+    hours = get_conductor_config()["sprint_min_interval_hours"]
+    from backend.forge.repos import planning_turns as pt_repo
+    with SessionLocal() as db:
+        last = pt_repo.last_turn_at(db, project_id, "sprint_planning")
+    if last is None:
+        return True
+    return datetime.now(timezone.utc) - _aware_utc(last) >= timedelta(hours=hours)
+
+
+def run_sprint_planning_turn(trigger: str = "cron",
+                             project_id: str | None = None) -> dict:
+    """Dispatch one LLM sprint-planning turn per conductor-managed project
+    (or just `project_id` when given — the queue-dry path). Each turn gets
+    its own `turn:{turn_id}` scope and a durable PlanningTurn record tagged
+    `kind=sprint_planning` so the once-per-interval gate can find it."""
+    global _LAST_SPRINT_PLANNING
+    if not _conductor_active():
+        _LAST_SPRINT_PLANNING = {"skipped": "conductor_disabled"}
+        return _LAST_SPRINT_PLANNING
+    with SessionLocal() as db:
+        managed = _managed_projects(db)
+    if project_id is not None:
+        managed = [m for m in managed if m[0] == project_id]
+    if not managed:
+        _LAST_SPRINT_PLANNING = {"skipped": "no_managed_projects"}
+        return _LAST_SPRINT_PLANNING
+
+    from backend.forge import services
+    from backend.forge.repos import planning_turns as pt_repo
+    results: list[dict] = []
+    for pid, pname, org_id in managed:
+        start = time.monotonic()
+        cond, why = _turn_conductor(pid, org_id)
+        if cond is None:
+            results.append(_record_undelivered(trigger, pid, pname)
+                           if why == "runtime_offline"
+                           else {"project_id": pid, "skipped": why})
+            continue
+        conductor_id, conductor_model = cond["id"], cond["model"]
+        facts = gather_sprint_planning_facts(pid)
+        snapshot = {**facts, "kind": "sprint_planning"}
+        turn_id = _record_planning_turn(
+            trigger=trigger, status="dispatched", facts=snapshot,
+            model=conductor_model,
+            duration_ms=int((time.monotonic() - start) * 1000))
+        scope_key = f"turn:{turn_id}"
+        prompt = _compose_sprint_planning_prompt(facts)
+        try:
+            services.send_runtime_message(
+                conductor_id, content=prompt, scope_key=scope_key)
+            with SessionLocal() as scope_db:
+                pt_repo.set_scope_key(scope_db, turn_id, scope_key)
+                scope_db.commit()
+            results.append({"project_id": pid, "ok": True, "turn_id": turn_id,
+                            "scope_key": scope_key, "trigger": trigger,
+                            "needs_breakdown": len(facts["needs_breakdown"])})
+            logger.info("Conductor sprint planning dispatched project=%s "
+                        "(trigger=%s, %d epics need breakdown).", pid, trigger,
+                        len(facts["needs_breakdown"]))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Sprint planning dispatch failed project=%s: %s",
+                             pid, exc)
+            with SessionLocal() as scope_db:
+                pt_repo.update_status(scope_db, turn_id, "error")
+                scope_db.commit()
+            results.append({"project_id": pid, "error": str(exc),
+                            "turn_id": turn_id})
+
+    _LAST_SPRINT_PLANNING = {"at": datetime.now(timezone.utc).isoformat(),
+                             "trigger": trigger, "projects": results}
+    return _LAST_SPRINT_PLANNING

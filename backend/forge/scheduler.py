@@ -171,6 +171,20 @@ class ForgeScheduler:
             coalesce=True,
         )
         logger.info("Conductor sprint review scheduled at 07:30 UTC.")
+
+        # C7b: sprint planning — daily at the configured UTC time (also fires
+        # on queue-dry via the planning turn). Self-skips when nothing needs
+        # planning. Time is config off the Conductor profile, never a constant.
+        sh, sm = _parse_hhmm(cfg.get("sprint_time") or "07:45")
+        self._scheduler.add_job(
+            _conductor.run_sprint_planning_turn,
+            trigger=CronTrigger(hour=sh, minute=sm, timezone="UTC"),
+            id="conductor_sprint_planning",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info("Conductor sprint planning scheduled at %02d:%02d UTC.", sh, sm)
         return tick
 
     def stop(self) -> None:

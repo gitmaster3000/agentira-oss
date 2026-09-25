@@ -186,6 +186,8 @@ def _apply_set_if_empty(prof: Profile, t: dict[str, Any],
         "conductor_plan_interval_minutes",
         "conductor_report_time",
         "conductor_report_enabled",
+        "conductor_sprint_time",
+        "conductor_sprint_min_interval_hours",
         "conductor_enabled",
         "max_concurrent_runs",
     ):

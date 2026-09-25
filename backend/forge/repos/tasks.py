@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Iterable
 
-from backend.models import Task
+from backend.models import Epic, Status, Task
 
 
 def resolve_ref(db, task_ref: str) -> Task | None:
@@ -57,6 +57,55 @@ def backlog_candidates(db, *, project_id: str, status_id: str,
               .order_by(Task.created_at.asc())
               .limit(limit)
               .all())
+
+
+def _done_status_ids(db) -> set[str]:
+    return {s.id for s in db.query(Status).filter(Status.name == "done").all()}
+
+
+def epic_task_counts(db, epic_id: str) -> tuple[int, int]:
+    """(open, done) task counts for an epic — open = any task not in `done`."""
+    done_ids = _done_status_ids(db)
+    rows = db.query(Task.status_id).filter(Task.epic_id == epic_id).all()
+    done = sum(1 for (sid,) in rows if sid in done_ids)
+    return len(rows) - done, done
+
+
+def epics_needing_breakdown(db, project_id: str) -> list[Epic]:
+    """In-progress epics committed to the sprint that have no open tasks —
+    either none at all, or all of them done. These are what the sprint-
+    planning turn breaks down into fresh tasks (C7b)."""
+    done_ids = _done_status_ids(db)
+    out: list[Epic] = []
+    for e in (db.query(Epic)
+                .filter(Epic.project_id == project_id,
+                        Epic.status == "in_progress")
+                .order_by(Epic.created_at.asc())
+                .all()):
+        rows = db.query(Task.status_id).filter(Task.epic_id == e.id).all()
+        if all(sid in done_ids for (sid,) in rows):  # zero open (incl. no tasks)
+            out.append(e)
+    return out
+
+
+def project_has_live_work(db, project_id: str) -> bool:
+    """True if the project has any task in todo/in_progress/review, or any
+    non-terminal run — the "not idle" test for the queue-dry trigger (C7b)."""
+    from backend.forge.models import Run, RunStatus
+
+    live_ids = {s.id for s in db.query(Status)
+                .filter(Status.name.in_(("todo", "in_progress", "review"))).all()}
+    if live_ids and (db.query(Task.id)
+                     .filter(Task.project_id == project_id,
+                             Task.status_id.in_(live_ids))
+                     .first()):
+        return True
+    non_terminal = [RunStatus.PENDING, RunStatus.RUNNING, RunStatus.PAUSED,
+                    RunStatus.READY, RunStatus.INTERRUPTING]
+    return (db.query(Run.id)
+              .filter(Run.project_id == project_id,
+                      Run.status.in_(non_terminal))
+              .first()) is not None
 
 
 def delete_with_children(db, task: Task) -> None:
