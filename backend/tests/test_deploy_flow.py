@@ -116,12 +116,40 @@ def test_verify_key(client, fake_railway):
     assert any(s["id"] == "svc_pg" and not s["deployable"] for s in body["services"])
 
 
-def test_repo_access(client, fake_railway):
+def test_repo_access_granted_when_github_says_yes(client, fake_railway, monkeypatch):
+    from backend import repo_tokens
+    monkeypatch.setattr(repo_tokens, "repo_access",
+                        lambda repo_url, token, **k: (True, "Connected to acme/billing-api."))
     pid = _project(client)
+    _connect(client, pid)
     r = client.get(f"/api/projects/{pid}/deploy/provider/repo-access",
                    params={"provider": "railway"})
     assert r.status_code == 200
-    assert r.json()["granted"] is True
+    body = r.json()
+    assert body["granted"] is True
+    assert body["reason"]  # plain-language, never empty
+
+
+def test_repo_access_denied_says_so_plainly(client, fake_railway, monkeypatch):
+    from backend import repo_tokens
+    called = {}
+
+    def fake_access(repo_url, token, **k):
+        called["repo_url"] = repo_url
+        return False, "Can't see acme/billing-api — the token may not have access to it."
+
+    monkeypatch.setattr(repo_tokens, "repo_access", fake_access)
+    pid = _project(client)
+    _connect(client, pid)
+    r = client.get(f"/api/projects/{pid}/deploy/provider/repo-access",
+                   params={"provider": "railway"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["granted"] is False
+    assert "can't see" in body["reason"].lower()
+    assert body["install_url"]  # somewhere to go when access is missing
+    # it actually probed the linked repo, not an optimistic constant
+    assert called["repo_url"] == "https://github.com/acme/billing-api.git"
 
 
 def test_connect_returns_connection_and_never_leaks_key(client, fake_railway):
@@ -233,6 +261,7 @@ def test_stop_preview_then_main_is_rejected(client, fake_railway):
     main = client.get(f"/api/projects/{pid}/deployments").json()["branches"][0]
     r = client.delete(f"/api/projects/{pid}/deployments/{main['deployment']['id']}")
     assert r.status_code == 409  # main is never stoppable
+    assert "main" in r.json()["detail"].lower()  # plain-language reason
 
 
 def test_missing_deployment_is_404(client, fake_railway):
@@ -240,6 +269,101 @@ def test_missing_deployment_is_404(client, fake_railway):
     _connect(client, pid)
     r = client.get(f"/api/projects/{pid}/deployments/nope/logs")
     assert r.status_code == 404
+
+
+# ── AP-533: silent first deploy, encryption, real branches, GH ledger ──────
+
+class _FailingRailway(_FakeRailway):
+    """Fake whose deploy raises — models a first deploy that blows up."""
+
+    def deploy(self, target, ref) -> DeploymentResult:
+        raise RuntimeError("provider connection refused")
+
+
+@pytest.fixture
+def failing_railway():
+    original = registry.get_adapter(TargetKind.RAILWAY)
+    registry.register(TargetKind.RAILWAY, _FailingRailway())
+    try:
+        yield
+    finally:
+        registry.register(TargetKind.RAILWAY, original)
+
+
+def test_failed_first_deploy_is_recorded_not_swallowed(client, failing_railway):
+    pid = _project(client)
+    _connect(client, pid)  # connect still succeeds even though the deploy fails
+    main = client.get(f"/api/projects/{pid}/deployments").json()["branches"][0]
+    dep = main["deployment"]
+    assert dep is not None  # the failure did NOT vanish
+    assert dep["status"] == "failed"
+    assert "couldn't start" in dep["status_reason"].lower()  # plain language
+
+
+def test_deploy_token_encrypted_at_rest_and_never_returned(client, fake_railway):
+    pid = _project(client)
+    conn = _connect(client, pid)
+    # never returned by the API
+    assert "rw_secret" not in r_text(conn)
+    reverify = client.post(f"/api/projects/{pid}/deploy/provider/reverify").json()
+    assert "rw_secret" not in r_text(reverify)
+
+    # stored ciphertext, not plaintext — but decryptable back to the original
+    from backend import secret_box
+    import backend.db as bdb
+    from backend.models import DeployCredential
+    with bdb.SessionLocal() as db:
+        row = db.query(DeployCredential).filter(
+            DeployCredential.kind == "railway").first()
+    assert row is not None
+    assert row.token != "rw_secret"
+    assert secret_box.decrypt(row.token) == "rw_secret"
+
+
+def test_legacy_plaintext_token_still_readable():
+    """A pre-encryption plaintext value decrypts to itself (migrate-on-write)."""
+    from backend import secret_box
+    assert secret_box.decrypt("legacy_plaintext_token") == "legacy_plaintext_token"
+    assert secret_box.decrypt(secret_box.encrypt("x")) == "x"
+
+
+def test_branch_list_uses_real_repo_branches(client, fake_railway, monkeypatch):
+    from backend import repo_tokens
+    monkeypatch.setattr(repo_tokens, "list_repo_branches",
+                        lambda repo_url, token, **k: ["main", "dev", "feat/pricing"])
+    pid = _project(client)
+    _connect(client, pid)  # deploys main only
+    branches = client.get(f"/api/projects/{pid}/deployments").json()["branches"]
+    names = [b["branch"] for b in branches]
+    assert names[0] == "main"
+    assert names == ["main", "dev", "feat/pricing"]
+    # a real branch with no deployment yet shows deployment: null
+    dev = next(b for b in branches if b["branch"] == "dev")
+    assert dev["deployment"] is None
+
+
+def test_github_deployments_ledger_called_on_deploy(client, fake_railway, monkeypatch):
+    from backend.deploy import flow, github_deployments
+    recorded = {}
+
+    def rec_deploy(*a, **k):
+        recorded["deploy"] = (a, k)
+        return 42
+
+    def rec_status(*a, **k):
+        recorded["status"] = (a, k)
+        return True
+
+    monkeypatch.setattr(flow.deploy_repo, "github_token_for_project",
+                        lambda db, pid: "ghp_token")
+    monkeypatch.setattr(github_deployments, "record_deployment", rec_deploy)
+    monkeypatch.setattr(github_deployments, "record_deployment_status", rec_status)
+    pid = _project(client)
+    _connect(client, pid)  # kicks the main deploy -> ledger
+    assert "deploy" in recorded  # a GitHub deployment was recorded
+    assert "status" in recorded  # and a status update
+    # deployment id from record_deployment flows into the status call
+    assert recorded["status"][0][2] == 42
 
 
 def r_text(obj) -> str:

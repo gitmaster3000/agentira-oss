@@ -17,6 +17,7 @@ shows up.
 
 from __future__ import annotations
 
+import json
 import re
 import urllib.error
 import urllib.request
@@ -72,6 +73,63 @@ def verify_git_token(token: str, repo_url: str | None = None,
         return False, f"github returned {e.code}"
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         return False, f"could not reach github: {e}"
+
+
+def _gh_request(path: str, token: str | None, timeout: float):
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "agentira",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return urllib.request.Request(f"https://api.github.com{path}", headers=headers)
+
+
+def repo_access(repo_url: str | None, token: str | None,
+                timeout: float = 8.0) -> tuple[bool, str]:
+    """Does `token` actually let us build this GitHub repo? Returns
+    (granted, plain_reason). Plain-language reason for the UI — never a stack
+    trace. A non-GitHub / unparsable repo is (False, reason), never a crash."""
+    parsed = parse_github_repo(repo_url)
+    if not parsed:
+        return False, "No GitHub repository is linked to this project yet."
+    if not token:
+        return False, "No access token on file — connect one so we can reach the repository."
+    owner, repo = parsed
+    try:
+        with urllib.request.urlopen(
+                _gh_request(f"/repos/{owner}/{repo}", token, timeout),
+                timeout=timeout) as resp:
+            if 200 <= resp.status < 300:
+                return True, f"Connected to {owner}/{repo}."
+            return False, f"GitHub returned {resp.status} for {owner}/{repo}."
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False, "The access token was rejected — check it hasn't expired or lost access."
+        if e.code == 404:
+            return False, f"Can't see {owner}/{repo} — the token may not have access to it."
+        return False, f"GitHub returned an error ({e.code}) checking access."
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False, "Couldn't reach GitHub to check access — try again in a moment."
+
+
+def list_repo_branches(repo_url: str | None, token: str | None,
+                       timeout: float = 8.0) -> list[str]:
+    """Real branch names for a GitHub repo (first page, up to 100). Returns
+    [] when the repo is unlinked/unreachable — callers fall back gracefully."""
+    parsed = parse_github_repo(repo_url)
+    if not parsed:
+        return []
+    owner, repo = parsed
+    try:
+        with urllib.request.urlopen(
+                _gh_request(f"/repos/{owner}/{repo}/branches?per_page=100",
+                            token, timeout),
+                timeout=timeout) as resp:
+            data = json.loads(resp.read())
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return []
+    return [b["name"] for b in data if isinstance(b, dict) and b.get("name")]
 
 
 if __name__ == "__main__":

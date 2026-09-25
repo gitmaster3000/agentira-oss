@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import json
 
-from backend.models import Deployment, DeployCredential, Project
+from backend import secret_box
+from backend.models import Deployment, DeployCredential, Project, ProjectRepo
 
 # Frontend-facing status pills (frontend/docs/deploy-backend-requirements.md §1).
 ACTIVE_STATUSES = ("queued", "building")
@@ -48,13 +49,14 @@ def set_target(db, project_id: str, *, kind: str, config: dict) -> dict:
 # ── Cloud-provider credentials (one per org + provider kind) ──────────────
 
 def get_credential(db, org_id: str, kind: str) -> str | None:
-    """The org's stored token for provider `kind` (raw). Server-side use
-    only — never serialize this back to a client."""
+    """The org's stored token for provider `kind` (decrypted). Server-side use
+    only — never serialize this back to a client. Stored encrypted at rest
+    (AP-533); legacy plaintext rows decrypt to themselves."""
     row = (db.query(DeployCredential)
              .filter(DeployCredential.org_id == org_id,
                      DeployCredential.kind == kind)
              .first())
-    return row.token if row else None
+    return secret_box.decrypt(row.token) if row else None
 
 
 def get_credential_status(db, org_id: str, kind: str) -> dict:
@@ -104,7 +106,7 @@ def set_credential(db, org_id: str, kind: str, *, token: str | None,
     if row is None:
         row = DeployCredential(org_id=org_id, kind=kind)
         db.add(row)
-    row.token = token
+    row.token = secret_box.encrypt(token)
     row.token_valid = valid
     row.token_checked_at = checked_at
     db.flush()
@@ -174,6 +176,20 @@ def update_deployment(db, deployment_id: str, **fields) -> Deployment | None:
         setattr(row, key, value)
     db.flush()
     return row
+
+
+def github_token_for_project(db, project_id: str) -> str | None:
+    """The git access token the deploy flow should use to talk to GitHub for
+    this project — the primary repo's token (AP-302). None if unset."""
+    row = (db.query(ProjectRepo)
+             .filter(ProjectRepo.project_id == project_id,
+                     ProjectRepo.is_primary == True)  # noqa: E712
+             .first())
+    if row is None:
+        row = (db.query(ProjectRepo)
+                 .filter(ProjectRepo.project_id == project_id)
+                 .first())
+    return row.access_token if row else None
 
 
 def delete_deployments_for_project(db, project_id: str) -> int:

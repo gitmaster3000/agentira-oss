@@ -157,6 +157,12 @@ function RepoStep({ provider, access, onBack, onNext, onRecheck }) {
                     : <span style={{ fontSize: 9, fontWeight: 700, color: C.warn, background: 'rgba(255,152,0,.12)', border: '1px solid rgba(255,152,0,.3)', borderRadius: 5, padding: '2px 7px' }}>NEEDS ACCESS</span>}
             </div>
 
+            {!granted && (access?.reason || access?.error) && (
+                <div style={{ fontSize: 11.5, color: C.warn, marginBottom: 10, lineHeight: 1.5, textTransform: 'none' }}>
+                    {access?.reason || access?.error}
+                </div>
+            )}
+
             {!granted && (
                 <>
                     <a
