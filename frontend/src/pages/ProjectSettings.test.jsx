@@ -15,6 +15,7 @@ vi.mock('../api', () => ({
     api: {
         getProject: vi.fn(),
         deleteProject: vi.fn(),
+        updateProject: vi.fn(),
         listProjectRepos: vi.fn().mockResolvedValue([]),
     },
 }));
@@ -53,5 +54,30 @@ describe('ProjectSettings — delete (danger zone)', () => {
             expect(screen.queryByText(/permanently deletes the project/i)).not.toBeInTheDocument());
         expect(api.deleteProject).not.toHaveBeenCalled();
         expect(navigateSpy).not.toHaveBeenCalled();
+    });
+});
+
+describe('ProjectSettings — clearing fields', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getProject.mockResolvedValue({
+            id: 'p1', name: 'P', repo_path: '/old/path',
+            repo_url: 'https://github.com/o/r', conventions_md: '# c',
+        });
+        api.updateProject.mockImplementation(async (_id, body) => ({ id: 'p1', name: 'P', ...body }));
+    });
+
+    it('sends "" (clear) not null (no change) for emptied text fields', async () => {
+        render(<ProjectSettings />);
+        const path = await screen.findByDisplayValue('/old/path');
+        fireEvent.change(path, { target: { value: '' } });
+        fireEvent.change(screen.getByDisplayValue('https://github.com/o/r'), { target: { value: '' } });
+        fireEvent.change(screen.getByDisplayValue('# c'), { target: { value: '' } });
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+        await waitFor(() => expect(api.updateProject).toHaveBeenCalled());
+        const body = api.updateProject.mock.calls[0][1];
+        expect(body.repo_path).toBe('');
+        expect(body.repo_url).toBe('');
+        expect(body.conventions_md).toBe('');
     });
 });

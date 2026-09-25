@@ -157,9 +157,11 @@ function GeneralTab({ projectId }) {
             const updated = await api.updateProject(projectId, {
                 name: form.name,
                 description: form.description,
-                repo_path: form.repo_path || null,
-                repo_url: form.repo_url || null,
-                conventions_md: form.conventions_md || null,
+                // "" clears; null would mean "don't change" and the field
+                // could never be emptied.
+                repo_path: form.repo_path,
+                repo_url: form.repo_url,
+                conventions_md: form.conventions_md,
                 work_signal: form.work_signal || null,
                 // AP-155: send the literal empty string to clear an
                 // override back to "inherit from agent". null means
