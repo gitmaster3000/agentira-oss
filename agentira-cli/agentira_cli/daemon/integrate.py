@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from agentira_cli.daemon.materializer import CONVENTIONS_REL, COURTESY_NAMES
 from agentira_cli.daemon.sources import (
     _is_bare,
     _lock_for,
@@ -98,6 +99,10 @@ def integrate_branch(*, source_url: str, branch: str,
         if has_branch.returncode != 0:
             return False, f"branch_unavailable: {branch} not found in source clone", None
 
+        injected = _injected_files_added(clone, branch, target_branch)
+        if injected:
+            return False, f"injected_files_committed: {', '.join(injected)}", None
+
         if not _is_bare(Path(clone)):
             # Legacy non-bare path (should be rare after bare migration).
             return _integrate_in_worktree(clone, branch, target_branch, push,
@@ -105,6 +110,19 @@ def integrate_branch(*, source_url: str, branch: str,
 
         return _integrate_via_temp_worktree(clone, branch, target_branch, push,
                                             verify_cmd, verify_timeout_s)
+
+
+def _injected_files_added(clone: str, branch: str, target_branch: str) -> list[str]:
+    """Materializer-injected paths (conventions + courtesy links) the branch
+    adds and the target doesn't track. Those were meant for the agent only;
+    merging them would plant them in the project."""
+    target = f"origin/{target_branch}"
+    if _git(clone, "rev-parse", "--verify", target).returncode != 0:
+        target = target_branch
+    r = _git(clone, "diff", "--name-only", "--diff-filter=A",
+             f"{target}...{branch}", "--", CONVENTIONS_REL, *COURTESY_NAMES)
+    return [p for p in r.stdout.split()
+            if _git(clone, "cat-file", "-e", f"{target}:{p}").returncode != 0]
 
 
 _TAIL_LINES = 200
