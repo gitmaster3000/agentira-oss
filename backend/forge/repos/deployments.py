@@ -138,6 +138,27 @@ def get_deployment(db, deployment_id: str) -> Deployment | None:
     return db.get(Deployment, deployment_id)
 
 
+def get_deployment_by_provider_id(db, provider_deployment_id: str) -> Deployment | None:
+    """Newest deployment carrying this adapter handle (a redeploy reuses it)."""
+    if not provider_deployment_id:
+        return None
+    return (db.query(Deployment)
+              .filter(Deployment.provider_deployment_id == provider_deployment_id)
+              .order_by(Deployment.updated_at.desc())
+              .first())
+
+
+def online_runtime_id(db) -> str | None:
+    """A connected daemon runtime in the current org (freshest heartbeat
+    first) — where a provider that runs on the user's machine gets sent."""
+    from backend.forge.models import ForgeRuntime, RuntimeStatus
+    row = (db.query(ForgeRuntime)
+             .filter(ForgeRuntime.status.in_((RuntimeStatus.ONLINE, RuntimeStatus.BUSY)))
+             .order_by(ForgeRuntime.last_heartbeat.desc().nulls_last())
+             .first())
+    return row.id if row else None
+
+
 def list_deployments(db, project_id: str) -> list[Deployment]:
     """Every deployment for a project, newest first."""
     return (db.query(Deployment)

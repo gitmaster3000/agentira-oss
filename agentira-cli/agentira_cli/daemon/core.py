@@ -333,6 +333,8 @@ class AgentiraDaemon:
                     self._signal_proc(frame, ftype)
                 elif ftype == "integrate":
                     self._integrate(frame)
+                elif ftype == "deploy":
+                    self._deploy(frame)
                 else:
                     self._dispatch_task(frame)
 
@@ -456,6 +458,26 @@ class AgentiraDaemon:
             logger.info("integrate task=%s branch=%s ok=%s reason=%s",
                         frame.get("task_id", ""), frame.get("branch", ""),
                         ok, reason)
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _deploy(self, frame: dict) -> None:
+        """Local Docker deploy / teardown / status / logs (daemon/deploy.py).
+        Each progress report is POSTed back so the deployment row updates.
+        Own thread — a docker build must never stall the WS loop."""
+        def _report(**fields):
+            try:
+                self.client.post_deploy_result(
+                    daemon_id=self._daemon_id,
+                    deployment_id=frame.get("deployment_id", "") or "",
+                    action=frame.get("action", "") or "deploy", **fields)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("deploy result post failed: %s", exc)
+
+        def _run():
+            from agentira_cli.daemon.deploy import handle
+            handle(frame, _report)
+            logger.info("deploy action=%s deployment=%s done",
+                        frame.get("action", ""), frame.get("deployment_id", ""))
         threading.Thread(target=_run, daemon=True).start()
 
     def _dispatch_task(self, frame: dict) -> None:

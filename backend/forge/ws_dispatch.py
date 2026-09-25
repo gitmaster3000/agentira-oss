@@ -261,6 +261,32 @@ class WsHub:
         outbox.mark_delivered(intent_id)
         return True
 
+    async def dispatch_deploy(self, *, runtime_id: str, payload: dict) -> bool:
+        """Local Docker deploy: hand a `deploy` frame (deploy / teardown /
+        status / logs) to the daemon owning runtime_id. The daemon reports back
+        on /daemon/deploy-result. Durable like integrate — queued in the outbox
+        until a process holding the daemon's socket delivers it."""
+        event_id = payload["event_id"]
+        from backend.forge import dispatch_outbox as outbox
+        intent_id = outbox.write_intent(
+            kind="deploy", event_id=event_id, runtime_id=runtime_id,
+            payload=payload)
+        async with self._lock:
+            targets = [c for c in self._conns.values() if runtime_id in c.runtime_ids]
+        if not targets:
+            logger.warning(
+                "Deploy queued in outbox: no daemon online in this process "
+                "for runtime=%s action=%s intent=%s",
+                runtime_id[:8] if runtime_id else "-", payload.get("action"),
+                intent_id or "WRITE-FAILED")
+            return intent_id is not None
+        for conn in targets:
+            await conn.send(event_id, payload)
+            logger.info("Dispatched deploy action=%s → daemon=%s",
+                        payload.get("action"), conn.daemon_id[:8])
+        outbox.mark_delivered(intent_id)
+        return True
+
     async def dispatch_cancel(self, *, runtime_id: str, trace_id: str = "",
                               run_id: str = "", scope_key: str = "") -> None:
         """Send a cancel frame to whatever daemon owns runtime_id.

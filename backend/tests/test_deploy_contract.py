@@ -39,8 +39,12 @@ def test_unsupported_capability_is_a_no_op_not_an_exception():
 
 def test_registry_round_trip():
     adapter = DryRunAdapter()
+    original = get_adapter(TargetKind.DOCKER)
     register(TargetKind.DOCKER, adapter)
-    assert get_adapter(TargetKind.DOCKER) is adapter
+    try:
+        assert get_adapter(TargetKind.DOCKER) is adapter
+    finally:
+        register(TargetKind.DOCKER, original)
 
 
 def test_registry_missing_kind_raises():

@@ -83,6 +83,22 @@ class AgentiraClient:
             "verify": verify,
         })
 
+    def post_deploy_result(self, *, daemon_id: str, deployment_id: str,
+                           action: str, status: str | None = None,
+                           url: str | None = None, detail: str = "",
+                           logs: list[str] | None = None) -> dict:
+        """Report a local Docker deploy's progress / outcome; the backend
+        writes it onto the deployment row."""
+        return self._post("/api/forge/daemon/deploy-result", {
+            "daemon_id": daemon_id,
+            "deployment_id": deployment_id,
+            "action": action,
+            "status": status,
+            "url": url,
+            "detail": detail,
+            "logs": logs,
+        })
+
     def post_trigger_complete(self, agent_id: str, *, daemon_id: str,
                               trace_id: str, run_id: str = "",
                               success: bool, input_tokens: int = 0,

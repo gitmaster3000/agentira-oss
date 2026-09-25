@@ -60,6 +60,8 @@ _REASON = {
     "stopped": "Preview stopped — redeploy to bring it back.",
 }
 
+_MAX_LOG_LINES = 500
+
 _INSTALL_URL = "https://github.com/apps/railway/installations/new"
 
 
@@ -75,6 +77,17 @@ class DeployFlow:
         project = self._require_project(db, project_id)
         target = deploy_repo.get_target(db, project_id)
         config = target["config"]
+        if not self._needs_key(target["kind"]):
+            return {
+                "connected": True,
+                "provider": target["kind"],
+                "repo": config.get("source_url", ""),
+                "service_name": "Your computer",
+                "service_region": None,
+                "key_valid": True,
+                "key_checked_at": None,
+                "connected_at": config.get("connected_at"),
+            }
         cred = deploy_repo.get_credential_status(db, project.org_id, target["kind"])
         connected = bool(cred["has_token"] and config.get("repo")
                          and config.get("service_id"))
@@ -209,7 +222,8 @@ class DeployFlow:
         target = deploy_repo.get_target(db, project_id)
         kind = target["kind"]
         config = target["config"]
-        if not (deploy_repo.get_credential(db, project.org_id, kind)
+        if self._needs_key(kind) and not (
+                deploy_repo.get_credential(db, project.org_id, kind)
                 and config.get("service_id")):
             raise ValueError("connect a deploy provider first")
 
@@ -265,12 +279,43 @@ class DeployFlow:
         done = row.status in ("live", "failed", "crashed", "stopped")
         return {"lines": page, "next_cursor": cursor + len(page), "done": done}
 
+    def apply_daemon_result(self, db, provider_deployment_id: str, *,
+                            status: str | None = None, url: str | None = None,
+                            detail: str = "", logs: list[str] | None = None) -> dict:
+        """A provider that runs on the user's daemon (local Docker) reports
+        progress here. Only the fields it sent are applied. Raises KeyError
+        when no deployment carries that handle."""
+        row = deploy_repo.get_deployment_by_provider_id(db, provider_deployment_id)
+        if row is None:
+            raise KeyError(f"deployment {provider_deployment_id} not found")
+        fields: dict = {}
+        if status is not None:
+            status = status if status in _REASON else "failed"
+            fields["status"] = status
+            fields["status_reason"] = detail or _REASON[status]
+        if url is not None:
+            fields["url"] = url or None
+        if logs is not None:
+            fields["logs_json"] = json.dumps(
+                [{"level": _log_level(t), "text": t} for t in logs[-_MAX_LOG_LINES:]])
+        row = deploy_repo.update_deployment(db, row.id, **fields) if fields else row
+        return _deployment_dict(row)
+
     # ── internals ────────────────────────────────────────────────────────
+
+    def _needs_key(self, kind: str) -> bool:
+        try:
+            return getattr(self._adapter(kind), "requires_credential", True)
+        except ValueError:
+            return True
 
     def _deploy_branch(self, db, project: Project, kind: str, config: dict, *,
                        branch: str, trigger: str, existing=None):
         adapter = self._adapter(kind)
         token = deploy_repo.get_credential(db, project.org_id, kind)
+        prepare = getattr(adapter, "prepare", None)
+        if prepare is not None:
+            config = prepare(db, project, config)
         target = DeployTargetConfig(
             kind=TargetKind(kind), name=config.get("service_name", ""),
             config=config, repo_url=_repo_url(config))
