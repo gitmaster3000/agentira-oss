@@ -184,7 +184,7 @@ def get_conductor_config() -> dict:
     Falls back to module defaults if the Conductor isn't seeded yet.
     """
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        prof = primary_conductor(db)
         if not prof:
             return {"active": True, "tick_seconds": TICK_INTERVAL_S,
                     "report_time": "09:00", "report_enabled": True,
@@ -211,7 +211,7 @@ def get_conductor_config() -> dict:
 def _conductor_active() -> bool:
     """Master on/off, read off the Conductor profile. Default on."""
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        prof = primary_conductor(db)
         return bool(prof.conductor_active) if prof else True
 
 
@@ -232,7 +232,7 @@ def _backlog_status_id(db) -> str | None:
     return row.id if row else None
 
 
-def _managed_projects(db) -> list[tuple[str, str]]:
+def _managed_projects(db) -> list[tuple[str, str, str | None]]:
     """Distinct (project_id, project_name) pairs with at least one
     conductor-enabled, project-bound agent — the set of projects the
     Conductor's turns iterate over, one turn per project (AP-4xx turn-
@@ -245,8 +245,48 @@ def _managed_projects(db) -> list[tuple[str, str]]:
                    .all()}
     if not project_ids:
         return []
-    return [(p.id, p.name)
+    return [(p.id, p.name, p.org_id)
             for p in db.query(Project).filter(Project.id.in_(project_ids)).all()]
+
+
+def conductor_for_org(db, org_id: str | None) -> "Profile | None":
+    """The org's Conductor. There is one per org (seeded by
+    get_or_create_conductor) — never pick 'the first one' across orgs
+    (Loop v1 C2: turns went to a system-org Conductor on a dead runtime)."""
+    q = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME)
+    if org_id:
+        q = q.filter(Profile.org_id == org_id)
+    return q.order_by(Profile.created_at.asc()).first()
+
+
+def primary_conductor(db) -> "Profile | None":
+    """The Conductor whose settings drive the (global) schedule: the one in
+    an org that actually has managed projects; else any."""
+    for _, _, org_id in _managed_projects(db):
+        prof = conductor_for_org(db, org_id) if org_id else None
+        if prof:
+            return prof
+    return conductor_for_org(db, None)
+
+
+def _runtime_live(runtime_id: str | None) -> bool:
+    """Is a daemon connected for this runtime right now? (Loop v1 C4)."""
+    return bool(runtime_id)
+
+
+def _turn_conductor(project_id: str, org_id: str | None) -> tuple[dict | None, str | None]:
+    """Resolve the Conductor that takes a turn for this project.
+
+    Returns ({"id", "model"}, None) or (None, reason) — the reason is recorded
+    on the turn so a skipped/undelivered turn always says why."""
+    with SessionLocal() as db:
+        prof = conductor_for_org(db, org_id)
+        if not prof:
+            return None, "no_conductor_for_org"
+        if not prof.runtime_id:
+            return None, "no_runtime"
+        info = {"id": prof.id, "model": prof.model, "runtime_id": prof.runtime_id}
+    return info, None
 
 
 # Lower rank = dispatched first. Unknown/missing priority sorts as medium.
@@ -673,7 +713,7 @@ def run_daily_report() -> dict:
         _LAST_REPORT = {"skipped": "conductor_disabled"}
         return _LAST_REPORT
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
+        prof = primary_conductor(db)
         if not prof:
             _LAST_REPORT = {"skipped": "no_conductor"}
             return _LAST_REPORT
@@ -945,25 +985,21 @@ def run_planning_turn() -> dict:
         _LAST_PLAN = {"skipped": "conductor_disabled"}
         return _LAST_PLAN
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
-        if not prof:
-            _LAST_PLAN = {"skipped": "no_conductor"}
-            return _LAST_PLAN
         managed = _managed_projects(db)
-        if not managed:
-            _LAST_PLAN = {"skipped": "no_managed_projects"}
-            return _LAST_PLAN
-        if not prof.runtime_id:
-            _LAST_PLAN = {"skipped": "no_runtime"}
-            return _LAST_PLAN
-        conductor_id = prof.id
-        conductor_model = prof.model
+    if not managed:
+        _LAST_PLAN = {"skipped": "no_managed_projects"}
+        return _LAST_PLAN
 
     from backend.forge import services
     from backend.forge.repos import planning_turns as pt_repo
     results: list[dict] = []
-    for project_id, project_name in managed:
+    for project_id, project_name, org_id in managed:
         start = time.monotonic()
+        cond, why = _turn_conductor(project_id, org_id)
+        if cond is None:
+            results.append({"project_id": project_id, "skipped": why})
+            continue
+        conductor_id, conductor_model = cond["id"], cond["model"]
         facts = gather_planning_facts(project_id)
         if not facts["unassigned_tasks"] and not facts["backlog"]:
             _record_planning_turn(
@@ -1221,23 +1257,20 @@ def run_progress_check_turn() -> dict:
         _LAST_PROGRESS_CHECK = {"skipped": "conductor_disabled"}
         return _LAST_PROGRESS_CHECK
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
-        if not prof:
-            _LAST_PROGRESS_CHECK = {"skipped": "no_conductor"}
-            return _LAST_PROGRESS_CHECK
         managed = _managed_projects(db)
-        if not managed:
-            _LAST_PROGRESS_CHECK = {"skipped": "no_managed_projects"}
-            return _LAST_PROGRESS_CHECK
-        if not prof.runtime_id:
-            _LAST_PROGRESS_CHECK = {"skipped": "no_runtime"}
-            return _LAST_PROGRESS_CHECK
-        conductor_id = prof.id
+    if not managed:
+        _LAST_PROGRESS_CHECK = {"skipped": "no_managed_projects"}
+        return _LAST_PROGRESS_CHECK
 
     from backend.forge import services
     from backend.forge.repos import planning_turns as pt_repo
     results: list[dict] = []
-    for project_id, project_name in managed:
+    for project_id, project_name, org_id in managed:
+        cond, why = _turn_conductor(project_id, org_id)
+        if cond is None:
+            results.append({"project_id": project_id, "skipped": why})
+            continue
+        conductor_id = cond["id"]
         facts = gather_progress_facts(project_id)
         if not facts["stalled_tasks"]:
             results.append({"project_id": project_id, "skipped": "nothing_stalled"})
@@ -1379,25 +1412,21 @@ def run_sprint_review_turn() -> dict:
         _LAST_SPRINT_REVIEW = {"skipped": "conductor_disabled"}
         return _LAST_SPRINT_REVIEW
     with SessionLocal() as db:
-        prof = db.query(Profile).filter(Profile.name == CONDUCTOR_NAME).first()
-        if not prof:
-            _LAST_SPRINT_REVIEW = {"skipped": "no_conductor"}
-            return _LAST_SPRINT_REVIEW
         managed = _managed_projects(db)
-        if not managed:
-            _LAST_SPRINT_REVIEW = {"skipped": "no_managed_projects"}
-            return _LAST_SPRINT_REVIEW
-        if not prof.runtime_id:
-            _LAST_SPRINT_REVIEW = {"skipped": "no_runtime"}
-            return _LAST_SPRINT_REVIEW
-        conductor_id = prof.id
-        conductor_model = prof.model
+    if not managed:
+        _LAST_SPRINT_REVIEW = {"skipped": "no_managed_projects"}
+        return _LAST_SPRINT_REVIEW
 
     from backend.forge import services
     from backend.forge.repos import planning_turns as pt_repo
     results: list[dict] = []
-    for project_id, project_name in managed:
+    for project_id, project_name, org_id in managed:
         start = time.monotonic()
+        cond, why = _turn_conductor(project_id, org_id)
+        if cond is None:
+            results.append({"project_id": project_id, "skipped": why})
+            continue
+        conductor_id, conductor_model = cond["id"], cond["model"]
         facts = gather_sprint_review_facts(project_id)
         counts = facts.get("counts") or {}
         if not any(counts.values()) and not facts.get("bounce_escalation_count"):
