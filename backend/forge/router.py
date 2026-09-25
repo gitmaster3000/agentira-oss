@@ -441,11 +441,13 @@ def get_active_runs(actor: str = Depends(get_current_user)):
 @router.get("/runs")
 def list_runs(agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
+              unresolved: bool = False,
               limit: int = 100, offset: int = 0,
               actor: str = Depends(get_current_user)):
     try:
         return services.list_runs(agent_id=agent_id, project_id=project_id,
                                   status=status, outcome=outcome,
+                                  unresolved=unresolved,
                                   limit=limit, offset=offset, actor=actor)
     except ValueError as exc:
         raise HTTPException(400, str(exc))

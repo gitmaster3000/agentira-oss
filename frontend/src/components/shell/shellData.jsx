@@ -65,7 +65,7 @@ export function ShellDataProvider({ children }) {
             try {
                 const [runs, waiting, notifs] = await Promise.all([
                     api.forge.listRuns({ status: 'running' }).catch(() => []),
-                    api.forge.listRuns({ outcome: 'needs_input' }).catch(() => []),
+                    api.forge.listRuns({ outcome: 'needs_input', unresolved: true }).catch(() => []),
                     api.getNotifications(false).catch(() => []),
                 ]);
                 if (cancelled) return;

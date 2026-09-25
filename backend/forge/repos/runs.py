@@ -72,3 +72,40 @@ def outcomes_for_branch(db, *, task_id: str, branch: str) -> list:
                              .filter(Run.task_id == task_id,
                                      Run.worktree_branch == branch)
                              .all())]
+
+
+def list_runs(db, *, scope, project_ids=None, agent_id: str | None = None,
+              project_id: str | None = None, status: str | None = None,
+              outcome: str | None = None, unresolved: bool = False,
+              limit: int = 100, offset: int = 0) -> list[Run]:
+    """The Runs list, newest first. `scope` is the caller's org filter;
+    `project_ids` (None = no restriction) the actor's visible projects.
+
+    `unresolved` (AP-509) drops runs whose verdict was overtaken — the task is
+    done, or another run on the task started after this one finished — so a
+    needs_input question stops showing once it's resolved elsewhere."""
+    from sqlalchemy import exists, func
+    from sqlalchemy.orm import aliased
+    from backend.models import Status, Task
+    q = db.query(Run)
+    if project_ids is not None:
+        q = q.filter(Run.project_id.in_(project_ids))
+    if agent_id:
+        q = q.filter(Run.agent_id == agent_id)
+    if project_id:
+        q = q.filter(Run.project_id == project_id)
+    if status:
+        q = q.filter(Run.status == status)
+    if outcome:
+        q = q.filter(Run.outcome == outcome)
+    if unresolved:
+        later = aliased(Run)
+        q = q.filter(~exists().where(
+            Task.id == Run.task_id, Task.status_id == Status.id,
+            Status.name == "done"))
+        q = q.filter(~exists().where(
+            later.task_id == Run.task_id, later.id != Run.id,
+            later.started_at > func.coalesce(Run.finished_at, Run.created_at)))
+    # AP-190: one row per (agent, task); exclude throwaway shadow rows.
+    q = q.filter(Run.trigger_event != "chat.shadow").filter(scope)
+    return q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()

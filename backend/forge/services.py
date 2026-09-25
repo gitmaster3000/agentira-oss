@@ -1303,39 +1303,29 @@ def get_active_runs(actor: str = "system") -> dict:
 
 def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
+              unresolved: bool = False,
               limit: int = 100, offset: int = 0,
               actor: str = "system") -> list[dict]:
+    from backend.forge.repos import runs as runs_repo
+    if status:
+        try:
+            RunStatus(status)
+        except ValueError:
+            raise ValueError(f"invalid run status: {status!r}")
+    if outcome:
+        try:
+            RunOutcome(outcome)
+        except ValueError:
+            raise ValueError(f"invalid run outcome: {outcome!r}")
     with _session() as db:
         from backend.auth import project_ids_for_actor
-        q = db.query(Run)
-        project_ids = project_ids_for_actor(db, actor)
-        if project_ids is not None:
-            q = q.filter(Run.project_id.in_(project_ids))
-        if agent_id:
-            q = q.filter(Run.agent_id == agent_id)
-        if project_id:
-            q = q.filter(Run.project_id == project_id)
-        if status:
-            try:
-                RunStatus(status)
-            except ValueError:
-                raise ValueError(f"invalid run status: {status!r}")
-            q = q.filter(Run.status == status)
-        if outcome:
-            try:
-                RunOutcome(outcome)
-            except ValueError:
-                raise ValueError(f"invalid run outcome: {outcome!r}")
-            q = q.filter(Run.outcome == outcome)
         # AP-190: the Runs list is one row per (agent, task) — the work-view of
-        # that task's chat — NOT a per-turn is_work-filtered view. `is_work`
-        # used to hide a task run until it committed something, so an agent
-        # actively working a task was invisible everywhere except its own URL.
-        # Dropped. We still exclude throwaway shadow rows (mirrors
-        # get_active_runs). Per-task chat runs are already 1-per-(agent,task)
-        # via get_or_create_task_run, so no per-turn duplication.
-        q = q.filter(Run.trigger_event != "chat.shadow").filter(_run_org_scope())
-        runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
+        # that task's chat — NOT a per-turn is_work-filtered view.
+        runs = runs_repo.list_runs(
+            db, scope=_run_org_scope(),
+            project_ids=project_ids_for_actor(db, actor),
+            agent_id=agent_id, project_id=project_id, status=status,
+            outcome=outcome, unresolved=unresolved, limit=limit, offset=offset)
         return [_run_to_dict(r) for r in runs]
 
 
