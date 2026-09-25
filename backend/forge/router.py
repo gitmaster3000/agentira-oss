@@ -263,6 +263,29 @@ def daemon_integration_result(body: IntegrationResult):
         reason=body.reason, verify=body.verify)
 
 
+class DeployResult(BaseModel):
+    daemon_id: str = ""
+    deployment_id: str  # the provider handle the backend sent in the frame
+    action: str = "deploy"
+    status: Optional[str] = None
+    url: Optional[str] = None
+    detail: str = ""
+    logs: Optional[list[str]] = None
+
+
+@daemon_router.post("/daemon/deploy-result", dependencies=[Depends(require_admin)])
+def daemon_deploy_result(body: DeployResult):
+    """Local Docker deploys run on the daemon; it reports status, preview URL
+    and logs here and the deployment row is updated."""
+    from backend import services as core_services
+    try:
+        return core_services.apply_deploy_result(
+            body.deployment_id, status=body.status, url=body.url,
+            detail=body.detail, logs=body.logs)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
 @daemon_router.post("/agents/{agent_id}/trigger-events", dependencies=[Depends(require_admin)])
 def daemon_append_trigger_events(agent_id: str, body: DaemonTriggerEvents):
     return services.append_trigger_events(

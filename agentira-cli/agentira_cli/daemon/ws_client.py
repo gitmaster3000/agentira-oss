@@ -142,7 +142,7 @@ class DaemonWsClient:
                     if self._task_queue is not None:
                         self._task_queue.put(msg)
                     self._wake.set()
-                elif msg.get("type") in ("cancel", "pause", "resume", "integrate"):
+                elif msg.get("type") in ("cancel", "pause", "resume", "integrate", "deploy"):
                     logger.info(
                         "WS %s received: trace=%s run=%s",
                         msg.get("type"),

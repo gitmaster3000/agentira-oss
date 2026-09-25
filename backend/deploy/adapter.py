@@ -26,6 +26,9 @@ class DeployAdapter(ABC):
     #: capabilities this adapter actually implements — subclasses override.
     capabilities: frozenset[Capability] = frozenset()
 
+    #: False for a provider that needs no stored API key (local Docker).
+    requires_credential: bool = True
+
     def supports(self, capability: Capability) -> bool:
         return capability in self.capabilities
 
@@ -40,6 +43,11 @@ class DeployAdapter(ABC):
         unsupported, so a target kind with no adapter can't falsely report a
         token as valid."""
         return False, "credential verification not supported for this target"
+
+    def prepare(self, db, project, config: dict) -> dict:
+        """Fill in target config only the backend knows (project context)
+        before `deploy()`. Default: the stored config, unchanged."""
+        return config
 
     @abstractmethod
     def deploy(self, target: DeployTargetConfig, ref: str) -> DeploymentResult:
