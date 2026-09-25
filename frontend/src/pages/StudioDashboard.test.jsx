@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { StudioDashboard } from './StudioDashboard';
 import { ShellDataProvider } from '../components/shell/shellData';
 import { api } from '../api';
@@ -23,6 +23,10 @@ vi.mock('../api', () => ({
 vi.mock('../context/AuthContext', () => ({
     useAuth: () => ({ user: { display_name: 'Alex Rivera' } }),
 }));
+
+function ChatSpy() {
+    return <div>chat {useLocation().search}</div>;
+}
 
 function renderHome() {
     return render(
@@ -83,6 +87,26 @@ describe('StudioDashboard (Home cockpit)', () => {
         expect(api.forge.dismissRun).toHaveBeenCalledWith('r9');
         await waitFor(() => expect(screen.queryByText('Question from Reviewer')).not.toBeInTheDocument());
         expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument();
+    });
+
+    it('opens the agent chat for the task when a NEEDS YOU card is clicked', async () => {
+        api.forge.listRuns.mockImplementation(({ outcome }) =>
+            Promise.resolve(outcome === 'needs_input'
+                ? [{ id: 'r9', agent_id: 'a7', task_id: 't3', agent_name: 'Reviewer', task_key: 'ACM-2' }]
+                : []),
+        );
+        render(
+            <MemoryRouter>
+                <ShellDataProvider>
+                    <Routes>
+                        <Route path="/" element={<StudioDashboard />} />
+                        <Route path="/chat" element={<ChatSpy />} />
+                    </Routes>
+                </ShellDataProvider>
+            </MemoryRouter>,
+        );
+        fireEvent.click(await screen.findByText('Question from Reviewer'));
+        expect(await screen.findByText('chat ?agent=a7&scope=task:t3')).toBeInTheDocument();
     });
 
     it('renders project cards with a per-project running pill', async () => {

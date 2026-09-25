@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { Chat } from './Chat';
 import { api } from '../api';
@@ -341,6 +341,45 @@ describe('Chat page', () => {
             // Cap is 176px; past that we allow internal scroll.
             expect(box.style.height).toBe('176px');
             expect(box.style.overflowY).toBe('auto');
+        });
+    });
+
+    // AP-509: a "needs input" notification / Needs-you card deep-links here.
+    describe('agent questions', () => {
+        const QUESTION = {
+            id: 'q1', role: 'tool', tool_name: 'AskUserQuestion',
+            content: 'Which colour?', created_at: '2026-06-19T00:00:03.000Z',
+            tool_input: JSON.stringify({ questions: [{
+                question: 'Which colour?', options: [{ label: 'Blue' }, { label: 'Green' }],
+            }] }),
+        };
+        afterEach(() => window.history.pushState({}, '', '/'));
+
+        it('opens the conversation named in ?agent=&scope= directly', async () => {
+            window.history.pushState({}, '', '/chat?agent=a3&scope=task:t1');
+            render(<Chat />);
+            await waitFor(() => expect(api.forge.listMessages).toHaveBeenCalledWith(
+                'a3', expect.objectContaining({ scope_key: 'task:t1' })));
+            expect((await screen.findAllByText('Reviewer')).length).toBeGreaterThan(0);
+        });
+
+        it('answers a question by clicking an option, in that conversation', async () => {
+            window.history.pushState({}, '', '/chat?agent=a3&scope=task:t1');
+            api.forge.listMessages.mockResolvedValue([QUESTION]);
+            render(<Chat />);
+            fireEvent.click(await screen.findByRole('button', { name: /Blue/ }));
+            await waitFor(() => expect(api.forge.sendRuntimeChat).toHaveBeenCalledWith(
+                'a3', expect.objectContaining({ content: 'Blue', scope_key: 'task:t1' })));
+        });
+
+        it('keeps an already-answered question read-only after reload', async () => {
+            window.history.pushState({}, '', '/chat?agent=a3&scope=task:t1');
+            api.forge.listMessages.mockResolvedValue([QUESTION, {
+                id: 'u1', role: 'user', content: 'Blue', created_at: '2026-06-19T00:00:04.000Z',
+            }]);
+            render(<Chat />);
+            await screen.findByText('Green');
+            expect(screen.queryByRole('button', { name: /Green/ })).toBeNull();
         });
     });
 });

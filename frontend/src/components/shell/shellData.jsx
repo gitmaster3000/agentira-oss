@@ -4,6 +4,14 @@ import { api } from '../../api';
 // Projects have no colour of their own. Every project marker uses the one
 // brand accent (--accent-primary), which flips with the day/night theme.
 
+// AP-509: where a "Needs you" card leads — the agent's task chat, where the
+// question is waiting with its answer options; the run page when no task.
+export function waitingLink(r) {
+    return r.task_id && r.agent_id
+        ? `/chat?agent=${r.agent_id}&scope=task:${r.task_id}`
+        : `/forge/runs/${r.id}`;
+}
+
 export function projectKey(p) {
     if (p?.key) return p.key;
     return (p?.name || '??').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || '??';

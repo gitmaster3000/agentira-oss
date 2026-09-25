@@ -3691,7 +3691,7 @@ def cancel_run(run_id: str) -> dict:
 
 
 def finish_run(run_id: str, *, outcome: str, summary: str = "",
-               run_token: str = "") -> dict:
+               run_token: str = "", options: list[str] | None = None) -> dict:
     """Agent-declared semantic completion (called from finish_run MCP tool).
 
     Sets Run.outcome (the semantic verdict — succeeded / blocked / needs_input
@@ -3707,6 +3707,10 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
     Idempotent: re-calling with the same outcome is a no-op. Calling
     after a run has been cancelled/failed terminally still updates
     outcome/summary so the agent's last-word verdict is preserved.
+
+    AP-509: on needs_input for a task run, `summary` is the question — it is
+    posted into the agent's task chat with `options` as clickable answers, and
+    the needs-input notifications link straight to that chat.
     """
     try:
         outcome_enum = RunOutcome(outcome)
@@ -3756,6 +3760,14 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         r.outcome = outcome_enum
         if summary:
             r.summary = summary
+        chat_link = ""
+        if outcome_enum == RunOutcome.NEEDS_INPUT and r.task_id:
+            from backend.forge.repos import messages as messages_repo
+            messages_repo.add_question(
+                db, agent_id=r.agent_id, run_id=r.id, task_id=r.task_id,
+                question=summary or "I need your input to continue.",
+                options=[str(o) for o in (options or []) if str(o).strip()])
+            chat_link = f"/chat?agent={r.agent_id}&scope=task:{r.task_id}"
         db.commit()
 
         # When the agent declares a run finished, surface it to the humans on
@@ -3803,7 +3815,7 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                         type_=f"forge.run.{outcome_enum.value}",
                         title=f"{icon} {actor_name or 'Agent'} {outcome_enum.value} "
                               f"{task.key or 'task'}: {(summary or '').strip()[:120]}",
-                        link=f"/projects/{task.project_id}/tasks/{task.id}",
+                        link=chat_link or f"/projects/{task.project_id}/tasks/{task.id}",
                     )
                     db.commit()
             except Exception as exc:  # noqa: BLE001 — best-effort
@@ -3825,7 +3837,7 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                     task = db.get(_Task, r.task_id)
                     if task:
                         task_label = f" {task.key}" if task.key else ""
-                        link = f"/projects/{task.project_id}/tasks/{task.id}"
+                        link = chat_link or f"/projects/{task.project_id}/tasks/{task.id}"
                 verb = ("blocked" if outcome_enum is RunOutcome.BLOCKED
                         else "needs input on")
                 title = (f"Agent {verb} task{task_label}: "

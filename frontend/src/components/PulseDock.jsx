@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useShellData } from './shell/shellData';
+import { useShellData, waitingLink } from './shell/shellData';
 
 // The single "live/running" accent — never used for anything that isn't running.
 const PULSE = 'var(--pulse-blue)';
@@ -86,7 +86,7 @@ export function PulseDock() {
                 {waiting.length > 0 && (
                     <>
                         {waiting.map((r) => (
-                            <div key={r.id} className="nav" onClick={() => navigate(`/forge/runs/${r.id}`)} style={{ borderRadius: '9px', background: 'var(--surface-card)', border: '1px solid rgba(255,152,0,.3)', padding: '10px', marginBottom: '8px', cursor: 'pointer' }}>
+                            <div key={r.id} className="nav" onClick={() => navigate(waitingLink(r))} style={{ borderRadius: '9px', background: 'var(--surface-card)', border: '1px solid rgba(255,152,0,.3)', padding: '10px', marginBottom: '8px', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
                                     <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ff9800" strokeWidth="2"><path d="M12 9v4M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
                                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffb74d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.agent_name ? `Question from ${r.agent_name}` : 'Waiting on you'}</span>

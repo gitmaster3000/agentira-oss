@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Folder } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useShellData, projectKey } from '../components/shell/shellData';
+import { useShellData, projectKey, waitingLink } from '../components/shell/shellData';
 
 // The single "live/running" accent — never used for anything that isn't running
 // (COMPONENT_MAP key behavior #5: one accent for run/activity).
@@ -150,7 +150,7 @@ export function StudioDashboard() {
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '4px 2px' }}>Nothing needs you right now.</div>
                     )}
                     {waiting.map((r) => (
-                        <div key={r.id} onClick={() => navigate(`/forge/runs/${r.id}`)} className="nav"
+                        <div key={r.id} onClick={() => navigate(waitingLink(r))} className="nav"
                             style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', padding: '8px', borderRadius: '8px', background: 'var(--surface-card)', marginBottom: '7px', cursor: 'pointer' }}>
                             <span style={{ width: '18px', height: '18px', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px', background: 'rgba(255,152,0,.14)' }}>
                                 <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff9800' }} />
