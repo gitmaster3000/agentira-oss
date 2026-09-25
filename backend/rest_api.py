@@ -146,6 +146,11 @@ class ProjectUpdate(BaseModel):
     # AP-297: TTL (seconds) for cached pre-run checks. null = no change;
     # negative resets to the default (600s); 0 = never expire by age.
     ready_checks_ttl_seconds: Optional[int] = None
+    # Loop v1 C6: merged-tree verification ("" clears → merges refused).
+    verify_cmd: Optional[str] = None
+    verify_timeout_minutes: Optional[int] = None
+    # Loop v1 C7: goals & direction the Conductor plans sprints from.
+    direction_md: Optional[str] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -242,6 +247,7 @@ class EpicUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    status: Optional[str] = None   # backlog | in_progress | done
 
 class EpicPlanRequest(BaseModel):
     agent_id: str
@@ -695,6 +701,9 @@ def api_update_project(
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
             ready_checks_ttl_seconds=body.ready_checks_ttl_seconds,
+            verify_cmd=body.verify_cmd,
+            verify_timeout_minutes=body.verify_timeout_minutes,
+            direction_md=body.direction_md,
             actor=actor,
         )
     except ValueError as e:
@@ -1563,9 +1572,10 @@ def api_list_epic_tasks(epic_id: str, actor: str = Depends(get_current_user)):
 @epics_router.patch("/{epic_id}")
 def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_current_user)):
     try:
-        return services.update_epic(epic_id, title=body.title, description=body.description, color=body.color, actor=actor)
+        return services.update_epic(epic_id, title=body.title, description=body.description,
+                                    color=body.color, status=body.status, actor=actor)
     except ValueError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(400 if "status" in str(e) else 404, str(e))
 
 @epics_router.delete("/{epic_id}")
 def api_delete_epic(epic_id: str, actor: str = Depends(get_current_user)):

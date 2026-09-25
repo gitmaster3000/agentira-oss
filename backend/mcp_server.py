@@ -202,10 +202,13 @@ async def get_project(project_id: str, ctx: Context = None) -> dict:
     return services.get_project(project_id, actor=actor_ctx.get())
 
 @mcp.tool()
-async def update_project(project_id: str, name: str = None, description: str = None, ctx: Context = None) -> dict:
-    """Update project metadata."""
+async def update_project(project_id: str, name: str = None, description: str = None,
+                         direction_md: str = None, ctx: Context = None) -> dict:
+    """Update project metadata. `direction_md` = the project's goals & current
+    priorities in plain language — sprint planning reads it."""
     return services.update_project(
-        project_id, name, description, actor=actor_ctx.get(),
+        project_id, name, description, direction_md=direction_md,
+        actor=actor_ctx.get(),
     )
 
 @mcp.tool()
@@ -241,10 +244,13 @@ async def create_epic(project_id: str, title: str, description: str = "", color:
     return services.create_epic(project_id, title, description=description, color=color, actor=actor)
 
 @mcp.tool()
-async def update_epic(epic_id: str, title: str = None, description: str = None, color: str = None, ctx: Context = None) -> dict:
-    """Update epic metadata."""
+async def update_epic(epic_id: str, title: str = None, description: str = None, color: str = None,
+                      status: str = None, ctx: Context = None) -> dict:
+    """Update epic metadata. `status`: backlog (parked) | in_progress (in the
+    current sprint) | done."""
     actor = actor_ctx.get()
-    return services.update_epic(epic_id, title=title, description=description, color=color, actor=actor)
+    return services.update_epic(epic_id, title=title, description=description, color=color,
+                                status=status, actor=actor)
 
 @mcp.tool()
 async def delete_epic(epic_id: str, ctx: Context = None) -> bool:
@@ -267,15 +273,16 @@ async def create_task(
     dod_items: list[dict] = None,
     parent_id: str = None,
     milestone_id: str = None,
+    epic_id: str = None,
     ctx: Context = None,
 ) -> dict:
-    """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked}). Use parent_id to create it as a subtask of another task, and milestone_id to count it towards a roadmap milestone (see get_roadmap / list_milestones)."""
+    """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked}). Use parent_id to create it as a subtask of another task, milestone_id to count it towards a roadmap milestone (see get_roadmap / list_milestones), and epic_id to put it under an epic."""
     actor = actor_ctx.get()
     try:
         logger.info(f"Tool create_task called for project='{project_id}', title='{title}', actor='{actor}'")
         res = services.create_task(
             project_id, title, description, status, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, actor=actor,
-            parent_id=parent_id, milestone_id=milestone_id,
+            parent_id=parent_id, milestone_id=milestone_id, epic_id=epic_id,
         )
         logger.debug(f"Tool create_task success: {res}")
         return res

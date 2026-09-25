@@ -77,6 +77,22 @@ def to_dict(row: PlanningTurn) -> dict:
     }
 
 
+def last_turn_at(db, project_id: str, kind: str, *, scan: int = 200):
+    """created_at of the most recent turn for `project_id` whose facts
+    snapshot carries `kind` (e.g. "sprint_planning"), or None. Scans recent
+    rows and filters in Python — the facts snapshot is stored as a JSON
+    string, so this stays dialect-agnostic (C7b once-per-interval gate)."""
+    rows = (db.query(PlanningTurn)
+              .order_by(PlanningTurn.created_at.desc())
+              .limit(scan)
+              .all())
+    for r in rows:
+        facts = json.loads(r.facts_snapshot_json or "{}")
+        if facts.get("kind") == kind and facts.get("project_id") == project_id:
+            return r.created_at
+    return None
+
+
 def list_recent(db, *, limit: int = 20) -> list[dict]:
     """Most recent planning turns, newest first, for the Conductor feed."""
     rows = (db.query(PlanningTurn)

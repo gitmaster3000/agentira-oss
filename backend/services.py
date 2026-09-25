@@ -347,6 +347,11 @@ def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
         # AP-297: TTL (seconds) for cached pre-run checks. null = default (600);
         # 0 = never expire by age (re-run only when the environment changes).
         "ready_checks_ttl_seconds": getattr(p, "ready_checks_ttl_seconds", None),
+        # Loop v1 C6: what proves the project works (run on merged code).
+        "verify_cmd": getattr(p, "verify_cmd", None) or "",
+        "verify_timeout_minutes": getattr(p, "verify_timeout_minutes", None) or 30,
+        # Loop v1 C7: goals & direction (Conductor plans sprints from it).
+        "direction_md": getattr(p, "direction_md", None) or "",
         # Where this project deploys (kind picks the adapter). The opaque
         # config blob + credential status are fetched separately via
         # get_project_deploy_settings — not inlined here to keep the token
@@ -735,6 +740,9 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    workflow_enabled: Optional[bool] = None,
                    workflow_roles_json: Optional[str] = None,
                    ready_checks_ttl_seconds: Optional[int] = None,
+                   verify_cmd: Optional[str] = None,
+                   verify_timeout_minutes: Optional[int] = None,
+                   direction_md: Optional[str] = None,
                    actor: str = "system") -> dict:
     with _session() as db:
         require_project_access(db, actor, project_id, "write")
@@ -758,6 +766,11 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                 p.workspace_kind = wk
         if conventions_md is not None:
             p.conventions_md = conventions_md
+        if direction_md is not None and direction_md != (p.direction_md or ""):
+            p.direction_md = direction_md
+            # Direction steers every sprint — who changed it must be visible.
+            _log_activity(db, actor, "project.update", "Goals & direction updated",
+                          project_id=p.id)
         if work_signal is not None:
             # ADR 009: validate against the known modes; ignore junk.
             from backend.forge.turns import WORK_SIGNAL_MODES
@@ -811,6 +824,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             # (function convention), so a negative sentinel reaches "default".
             ttl = int(ready_checks_ttl_seconds)
             p.ready_checks_ttl_seconds = None if ttl < 0 else ttl
+        if verify_cmd is not None:
+            p.verify_cmd = verify_cmd.strip()
+        if verify_timeout_minutes is not None:
+            p.verify_timeout_minutes = max(1, min(240, int(verify_timeout_minutes)))
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)
@@ -1152,7 +1169,11 @@ def list_epic_tasks(epic_id: str, actor: str = "system") -> list[dict]:
         return [_task_to_dict(t) for t in tasks]
 
 
-def update_epic(epic_id: str, title: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None, actor: str = "system") -> dict:
+EPIC_STATUSES = ("backlog", "in_progress", "done")
+
+
+def update_epic(epic_id: str, title: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None, actor: str = "system",
+                status: Optional[str] = None) -> dict:
     with _session() as db:
         epic = db.get(Epic, epic_id)
         if not epic:
@@ -1168,6 +1189,11 @@ def update_epic(epic_id: str, title: Optional[str] = None, description: Optional
         if color is not None and color != epic.color:
             epic.color = color
             changes.append("color updated")
+        if status is not None and status != epic.status:
+            if status not in EPIC_STATUSES:
+                raise ValueError(f"Epic status must be one of {', '.join(EPIC_STATUSES)}")
+            changes.append(f"status {epic.status} -> {status}")
+            epic.status = status
         
         if changes:
             _log_activity(db, actor, "epic.update", "; ".join(changes), project_id=epic.project_id)

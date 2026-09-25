@@ -686,6 +686,9 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_time", "VARCHAR(5) DEFAULT '09:00' NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT TRUE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_plan_interval_minutes", "INTEGER DEFAULT 10 NOT NULL")
+            # C7b: sprint-planning cadence.
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_sprint_time", "VARCHAR(5) DEFAULT '07:45' NOT NULL")
+            runtime_added |= _ensure_column(conn, "profiles", "conductor_sprint_min_interval_hours", "INTEGER DEFAULT 4 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_active", "BOOLEAN DEFAULT TRUE NOT NULL")
             # Runaway-guard recovery policy: cooldown + attempt cap for
             # re-picking a FAILED/CANCELLED task's auto-dispatch.
@@ -767,6 +770,11 @@ def run_migrations():
             # default; 0 = no time expiry, env-change re-runs only).
             added |= _ensure_column(conn, "projects", "ready_checks_ttl_seconds",
                                     "INTEGER")
+            # Loop v1 C6: merged-tree verification command + timeout.
+            added |= _ensure_column(conn, "projects", "verify_cmd", "TEXT")
+            added |= _ensure_column(conn, "projects", "verify_timeout_minutes", "INTEGER")
+            # Loop v1 C7: goals & direction the Conductor plans from.
+            added |= _ensure_column(conn, "projects", "direction_md", "TEXT")
             # Single-repo deploy target. kind picks the adapter; config_json is
             # opaque per-kind (adding a provider = new adapter, not a migration).
             added |= _ensure_column(conn, "projects", "deploy_target_kind",

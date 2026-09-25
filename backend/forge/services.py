@@ -447,6 +447,8 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "conductor_report_time": (a.profile.conductor_report_time if a.profile else "09:00"),
         "conductor_report_enabled": bool(a.profile.conductor_report_enabled) if a.profile else True,
         "conductor_plan_interval_minutes": (a.profile.conductor_plan_interval_minutes if a.profile else 10),
+        "conductor_sprint_time": (a.profile.conductor_sprint_time if a.profile else "07:45"),
+        "conductor_sprint_min_interval_hours": (a.profile.conductor_sprint_min_interval_hours if a.profile else 4),
         "conductor_active": bool(a.profile.conductor_active) if a.profile else True,
         # AP-302: personal git token — presence + cached validity only.
         "has_git_token": bool(a.profile.git_token) if a.profile else False,
@@ -805,11 +807,13 @@ def _has_active_runs(db, agent_id: str) -> bool:
 
 
 def _is_runtime_online(rt: "ForgeRuntime | None") -> bool:
-    """Runtime is online iff its daemon's WS is currently connected."""
+    """Runtime is online iff a connected daemon registered this runtime —
+    not merely because its daemon id is connected (a stale row can share a
+    live daemon's id; dispatches to it are never delivered)."""
     if rt is None:
         return False
     from backend.forge.ws_dispatch import hub
-    return hub.is_connected(rt.daemon_id)
+    return hub.is_runtime_live(rt.id)
 
 
 def _resolve_agent_status(a: Agent, runtime_online: bool, db) -> AgentStatus:
@@ -967,6 +971,7 @@ _AGENT_TO_PROFILE_MIRROR = {
     # Conductor cadence config (only meaningful on the Conductor profile).
     "conductor_tick_seconds", "conductor_report_time",
     "conductor_report_enabled", "conductor_plan_interval_minutes",
+    "conductor_sprint_time", "conductor_sprint_min_interval_hours",
     "conductor_active",
     "conductor_redispatch_cooldown_minutes", "conductor_redispatch_max_attempts",
     # AP-155 sandbox config — lives on Profile.
@@ -3836,10 +3841,14 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         db.refresh(r)
         run_payload = _run_to_dict(r)
 
-    # Workflow auto-advance is disabled: a successful run does NOT auto-hand the
-    # task to the next column. The driver (backend/forge/workflow.advance_after_run)
-    # is not wired into run completion — task progression stays manual until the
-    # workflow engine is reviewed and re-enabled deliberately.
+    # Loop v1 C0: the workflow driver is re-enabled deliberately (it was
+    # unwired in #204 pending review), together with C5 (merges only into the
+    # repo's base branch) and C6 (merges only after the project's checks pass
+    # on the merged code). No-ops unless the project has workflow_enabled;
+    # never raises into finish_run.
+    if outcome_enum == RunOutcome.SUCCEEDED:
+        from backend.forge import workflow as _workflow
+        _workflow.advance_after_run(run_id)
 
     return {"ok": True, "run": run_payload}
 

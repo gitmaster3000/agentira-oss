@@ -424,11 +424,20 @@ function tickSummary(t) {
     if (r) s += `, ${r} reconciled`;
     return s;
 }
-function planSummary(p) {
+export function planSummary(p) {
     if (!p) return 'not run yet';
     if (p.skipped) return `skipped — ${p.skipped}`;
     if (p.error) return `error — ${p.error}`;
-    return `${p.unassigned} task(s) sent to plan`;
+    // One result per managed project (per-project turns). Say what actually
+    // happened — "sent" only when a daemon was there to take it.
+    const rs = p.projects || [];
+    const sent = rs.filter(r => r.ok).length;
+    const undelivered = rs.filter(r => r.undelivered).length;
+    const skipped = rs.filter(r => r.skipped).length;
+    const errors = rs.filter(r => r.error).length;
+    let s = `${rs.length} project(s): ${sent} sent, ${undelivered} undelivered, ${skipped} skipped`;
+    if (errors) s += `, ${errors} error(s)`;
+    return s;
 }
 function reportSummary(r) {
     if (!r) return 'not run yet';

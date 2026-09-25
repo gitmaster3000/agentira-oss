@@ -296,7 +296,10 @@ describe('Chat page', () => {
         );
         render(<Chat />);
         await waitFor(() => expect(api.forge.listChats).toHaveBeenCalled());
-        fireEvent.click(screen.getByTitle('Switch conversation'));
+        // Wait for the resolved list to render, not just for the call — under
+        // load (e.g. right after the backend suite in scripts/verify.sh) the
+        // switcher isn't in the DOM yet when listChats has merely been called.
+        fireEvent.click(await screen.findByTitle('Switch conversation'));
         const menu = await screen.findByTestId('conversations-dropdown');
         expect(menu.style.maxHeight).toMatch(/360px|70vh/);
         expect(menu.className).toMatch(/overflow-hidden/);

@@ -440,6 +440,7 @@ def _setup_review_success(db_session, *, with_approval=True,
         p = db.get(Project, pid)
         p.workflow_enabled = True
         p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"      # Loop v1 C6: required to merge
         db.commit()
         reviewer_id = _mk_agent(db, reviewer_name)
         _bind(db, reviewer_id, pid)
@@ -560,17 +561,19 @@ def test_complete_integration_ok_advances_to_done(db_session):
 
 
 def test_complete_integration_failure_stays_with_reason(db_session):
+    """Infrastructure failures (not in integrate.on_failure.hand_back_on)
+    leave the task in review with the reason on the feed."""
     pid, task_id, run_id = _setup_review_success(db_session)
     out = workflow.complete_integration(
         task_id=task_id, run_id=run_id, ok=False,
-        reason="merge_conflict: same.txt")
+        reason="push_failed: remote rejected")
     assert out["advanced"] is False
     with db_session() as db:
         t = db.get(Task, task_id)
         assert db.get(Status, t.status_id).name == "review"   # stays put
         from backend.models import Activity
         acts = db.query(Activity).filter(Activity.task_id == task_id).all()
-        assert any("merge_conflict" in (a.detail or "") for a in acts)
+        assert any("push_failed" in (a.detail or "") for a in acts)
 
 
 # ── Slice 3: documentation dispatched on arrival in done ─────────────────
@@ -654,6 +657,7 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
         p = db.get(Project, pid)
         p.workflow_enabled = True
         p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"      # Loop v1 C6: required to merge
         db.commit()
         impl_id = _mk_agent(db, "implementer-1")
         _bind(db, impl_id, pid)
@@ -792,3 +796,380 @@ def test_approve_after_prior_manual_bounce_still_merges(db_session):
         out = workflow.advance_after_run(run_id)
     assert out.get("integration_requested") is True
     mock_bounce.assert_not_called()
+
+
+def test_ap383_sticky_reviewer_row_reapproval_integrates(db_session):
+    """AP-383 deadlock regression (sticky runs, AP-281): one run row per
+    agent+task, REUSED across turns — created_at never moves. Sequence:
+    implementer -> reviewer rejects (driver logs a decision for the reviewer
+    row) -> implementer reworks on its own reused row -> the SAME reviewer
+    row starts a new turn and approves. The driver must integrate: the old
+    turn's hand-back event and rejection move belong to a previous turn, not
+    this one."""
+    from datetime import datetime, timedelta, timezone
+    with db_session() as db:
+        proj = core_services.create_project("P")
+        pid = proj["id"]
+        p = db.get(Project, pid)
+        p.workflow_enabled = True
+        p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"
+        db.commit()
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        reviewer_id = _mk_agent(db, "senior reviewer")
+        _bind(db, reviewer_id, pid)
+        t = Task(project_id=pid, title="Build feature",
+                 status_id=_status_id(db, "in_progress"),
+                 priority=TaskPriority.HIGH, assignee="implementer-1",
+                 creator="system", branch="agent/x/task/y",
+                 dod_items=json.dumps([{"text": "d", "checked": True}]))
+        db.add(t); db.commit()
+        task_id = t.id
+        start = datetime.now(timezone.utc) - timedelta(hours=1)
+        impl_run = Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                       status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                       created_at=start, started_at=start)
+        db.add(impl_run); db.commit()
+        impl_run_id = impl_run.id
+
+    # 1) implement -> review
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "rv"}):
+        assert workflow.advance_after_run(impl_run_id)["to"] == "review"
+
+    # 2) reviewer's (sticky) row, first turn: rejects
+    with db_session() as db:
+        rv_start = start + timedelta(minutes=10)
+        rv = Run(agent_id=reviewer_id, task_id=task_id, project_id=pid,
+                 status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                 worktree_branch="agent/x/task/y",
+                 created_at=rv_start, started_at=rv_start)
+        db.add(rv); db.commit()
+        rv_id = rv.id
+        _log_move(db, pid, task_id, "senior reviewer", "review", "in_progress")
+        t = db.get(Task, task_id)
+        with allow_task_write():
+            t.status_id = _status_id(db, "in_progress")
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": impl_run_id}):
+        assert workflow.advance_after_run(rv_id).get("handed_back") is True
+
+    # 3) implementer's SAME row, new turn: rework -> review
+    with db_session() as db:
+        r = db.get(Run, impl_run_id)
+        r.started_at = datetime.now(timezone.utc)
+        r.outcome = RunOutcome.SUCCEEDED
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": rv_id}):
+        out3 = workflow.advance_after_run(impl_run_id)
+    assert out3["advanced"] is True and out3["to"] == "review"
+
+    # 4) reviewer's SAME row, new turn: approves -> must integrate
+    with db_session() as db:
+        r = db.get(Run, rv_id)
+        r.started_at = datetime.now(timezone.utc)
+        r.outcome = RunOutcome.SUCCEEDED
+        db.commit()
+        _approve(db, pid, task_id, "senior reviewer")
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: coro.close()), \
+         patch("backend.forge.services.schedule_task_run") as mock_bounce:
+        out4 = workflow.advance_after_run(rv_id)
+    assert out4.get("integration_requested") is True, out4
+    mock_bounce.assert_not_called()
+
+    # Replaying the same turn is still a no-op (AP-402 intent preserved).
+    assert workflow.advance_after_run(rv_id) == {
+        "advanced": False, "reason": "already_handed_off"}
+
+
+# ── Loop v1 C5: merge into the repo's base branch, never a literal main ──
+
+def _add_primary_repo(db_session, pid, default_branch):
+    from backend.models import ProjectRepo
+    with db_session() as db:
+        db.add(ProjectRepo(project_id=pid, name="app", repo_path="",
+                           repo_url="file:///tmp/fake-remote.git",
+                           default_branch=default_branch, is_primary=True))
+        db.commit()
+
+
+def _capture_integrate():
+    from unittest.mock import MagicMock
+    from backend.forge.ws_dispatch import hub
+    fake = MagicMock(return_value=None)
+    return fake, patch.object(hub, "dispatch_integrate", fake), \
+        patch("backend.forge.services._dispatch_coro", lambda coro: None)
+
+
+def test_integration_targets_repo_default_branch(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    _add_primary_repo(db_session, pid, "main-rsi")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["target_branch"] == "main-rsi"
+
+
+def test_integration_refused_when_task_has_no_repo(db_session):
+    """No repo row and no legacy repo fields → nothing to merge into: refuse
+    with a reason, never guess a branch."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).repo_url = None
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "integration_missing_info"
+    fake.assert_not_called()
+
+
+
+# ── Loop v1 C6: merged-tree verification decides the merge ───────────────
+
+def _setup_reworked_review(db_session):
+    """Implementer ran first, then the reviewer's succeeded run in review —
+    so a hand-back has someone to go to."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        review_run = db.get(Run, run_id)
+        from datetime import timedelta
+        db.add(Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                   created_at=review_run.created_at - timedelta(minutes=5)))
+        db.commit()
+    return pid, task_id, run_id, impl_id
+
+
+def test_merge_refused_without_verify_cmd(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_cmd = ""
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "no_verify_cmd"
+    fake.assert_not_called()
+    with db_session() as db:
+        from backend.models import Activity
+        acts = db.query(Activity).filter(Activity.task_id == task_id).all()
+        assert any("no verify command" in (a.detail or "") for a in acts)
+
+
+def test_integrate_carries_verify_cmd_and_timeout(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_timeout_minutes = 20
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        workflow.advance_after_run(run_id)
+    kw = fake.call_args.kwargs
+    assert kw["verify_cmd"] == "scripts/verify.sh" and kw["verify_timeout_s"] == 1200
+
+
+def test_verify_failure_hands_back_to_implementer_with_output(db_session):
+    pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
+    verify = {"exit_code": 1, "duration_s": 9.0, "timed_out": False,
+              "log_tail": "FAILED test_x - AssertionError: boom"}
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "fix1"}) as sched:
+        workflow.complete_integration(task_id=task_id, run_id=run_id, ok=False,
+                                      reason="verify_failed: exit 1", verify=verify)
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "in_progress"
+        assert t.assignee == "implementer-1"
+        from backend.forge.models import GateEvaluation
+        ev = (db.query(GateEvaluation)
+                .filter(GateEvaluation.task_id == task_id,
+                        GateEvaluation.gate_id == "evidence:tests").all())
+        assert [e.outcome for e in ev] == ["block"]
+    assert sched.call_args.kwargs["agent_id"] == impl_id
+    assert "AssertionError: boom" in sched.call_args.kwargs["extra_context"]
+
+
+def test_verify_pass_records_evidence_and_advances(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    verify = {"exit_code": 0, "duration_s": 3.0, "timed_out": False, "log_tail": "ok"}
+    out = workflow.complete_integration(task_id=task_id, run_id=run_id, ok=True,
+                                        reason="merged", verify=verify)
+    assert out["advanced"] is True
+    with db_session() as db:
+        from backend.forge.models import GateEvaluation
+        ev = (db.query(GateEvaluation)
+                .filter(GateEvaluation.task_id == task_id,
+                        GateEvaluation.gate_id == "evidence:tests").all())
+        assert [e.outcome for e in ev] == ["allow"]
+
+
+# ── Loop v1 C6: the policy above comes from the workflow YAML, not code ──
+
+def _flow_with_integrate(**integrate_overrides):
+    """The system flow with the review column's integrate policy edited —
+    what a different workflow YAML would produce."""
+    flow = workflow.system_workflow().copy(deep=True)
+    col = flow.column("review")
+    col.on_success.integrate = col.on_success.integrate.copy(update=integrate_overrides)
+    return flow
+
+
+def test_system_yaml_declares_integration_policy():
+    spec = workflow.system_workflow().column("review").on_success.integrate
+    assert spec.verify.required is True
+    assert "verify_failed" in spec.on_failure.hand_back_on
+    assert spec.on_failure.to_column == "in_progress"
+
+
+def test_verify_not_required_by_flow_merges_without_command(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_cmd = ""
+        db.commit()
+    flow = _flow_with_integrate(verify=workflow.VerifySpec(required=False))
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2, patch.object(workflow, "system_workflow", return_value=flow):
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["verify_cmd"] == ""
+
+
+def test_failure_kind_not_listed_in_yaml_stays_put(db_session):
+    pid, task_id, run_id, _ = _setup_reworked_review(db_session)
+    flow = _flow_with_integrate(on_failure=workflow.IntegrationFailureSpec(
+        hand_back_on=["verify_failed"], to_column="in_progress"))
+    with patch.object(workflow, "system_workflow", return_value=flow), \
+         patch("backend.forge.services.schedule_task_run") as sched:
+        workflow.complete_integration(task_id=task_id, run_id=run_id, ok=False,
+                                      reason="merge_conflict: a.txt")
+    sched.assert_not_called()
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"
+
+
+def test_on_failure_to_unknown_column_is_rejected_at_parse():
+    import yaml
+    raw = yaml.safe_load(open(workflow._DEFAULT_WORKFLOW_PATH))
+    for c in raw["columns"]:
+        if c["name"] == "review":
+            c["on_success"]["integrate"]["on_failure"]["to_column"] = "nowhere"
+    with pytest.raises(Exception):
+        workflow.Workflow(**raw)
+
+
+def test_integration_hand_back_is_not_worded_as_a_review_rejection(db_session):
+    pid, task_id, run_id, _ = _setup_reworked_review(db_session)
+    with patch("backend.forge.services.schedule_task_run", return_value={"run_id": "x"}):
+        workflow.complete_integration(
+            task_id=task_id, run_id=run_id, ok=False, reason="verify_failed: exit 2",
+            verify={"exit_code": 2, "duration_s": 1, "timed_out": False, "log_tail": "E"})
+    with db_session() as db:
+        from backend.models import Activity
+        details = [a.detail or "" for a in
+                   db.query(Activity).filter(Activity.task_id == task_id).all()]
+    assert any("Merge failed — handed back to implementer-1" in d for d in details)
+    assert not any("Review rejected" in d for d in details)
+
+
+# ── AP-520/521: integrate merges the task's WORK branch ──────────────────
+
+def test_review_approval_integrates_implementer_branch_not_reviewers(db_session):
+    """AP-520: the approving run is the REVIEWER's — its own worktree branch
+    has no work on it. The merge must carry the implementer's branch."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Task, task_id).branch = "agent/impl/task/t1"
+        db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
+        db.commit()
+    _add_primary_repo(db_session, pid, "main")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["branch"] == "agent/impl/task/t1"
+
+
+def test_review_run_branch_never_used_when_task_has_no_branch(db_session):
+    """No work branch on the task and the finishing run is a review hand-off
+    (someone else succeeded before it) → refuse, never merge the reviewer's
+    empty branch."""
+    pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
+    with db_session() as db:
+        db.get(Task, task_id).branch = ""
+        db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
+        db.commit()
+    _add_primary_repo(db_session, pid, "main")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "integration_missing_info"
+    fake.assert_not_called()
+
+
+def test_task_branch_follows_succeeded_run_after_failed_first_run(db_session):
+    """AP-521: the first run (out of credits) pinned task.branch to its own
+    empty branch and failed. Another agent's succeeded run is the real work —
+    task.branch must follow it."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        from datetime import timedelta
+        work = db.get(Run, run_id)
+        work.worktree_branch = "agent/coder2/task/t1"
+        first_id = _mk_agent(db, "best coder")
+        db.add(Run(agent_id=first_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.FAILED,
+                   worktree_branch="agent/coder1/task/t1",
+                   created_at=work.created_at - timedelta(minutes=5)))
+        db.get(Task, task_id).branch = "agent/coder1/task/t1"
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}) as mock_dispatch:
+        workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "agent/coder2/task/t1"
+    # The reviewer is pointed at the real work branch too.
+    assert "agent/coder2/task/t1" in mock_dispatch.call_args.kwargs["extra_context"]
+
+
+def test_human_set_branch_is_not_clobbered_by_run_branch(db_session):
+    """A branch no run produced (human/PR link) is left alone."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        db.get(Run, run_id).worktree_branch = "agent/impl/task/t1"
+        db.get(Task, task_id).branch = "feature/human-work"
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}):
+        workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "feature/human-work"
+
+
+def test_task_branch_follows_succeeded_run_even_when_workflow_disabled(db_session):
+    """Branch bookkeeping is not a workflow-driver feature: a stale pinned
+    branch is corrected regardless of workflow_enabled."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(
+        db_session, enabled=False)
+    with db_session() as db:
+        work = db.get(Run, run_id)
+        work.worktree_branch = "agent/coder2/task/t1"
+        from datetime import timedelta
+        first_id = _mk_agent(db, "best coder")
+        db.add(Run(agent_id=first_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.FAILED,
+                   worktree_branch="agent/coder1/task/t1",
+                   created_at=work.created_at - timedelta(minutes=5)))
+        db.get(Task, task_id).branch = "agent/coder1/task/t1"
+        db.commit()
+    workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "agent/coder2/task/t1"

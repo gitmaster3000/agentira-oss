@@ -238,6 +238,10 @@ class Profile(Base):
     # How often (minutes) the Conductor takes an LLM planning turn —
     # assigning unassigned todo tasks to the best-fit agent.
     conductor_plan_interval_minutes: Mapped[int] = mapped_column(default=10, nullable=False)
+    # Sprint-planning turn (C7b): daily at this UTC time; also fires on
+    # queue-dry, but no more than once per sprint_min_interval_hours.
+    conductor_sprint_time: Mapped[str] = mapped_column(String(5), default="07:45", nullable=False)
+    conductor_sprint_min_interval_hours: Mapped[int] = mapped_column(default=4, nullable=False)
     # Master on/off for the Conductor (on its own profile). When False the
     # queue tick, planning turn, and daily report all no-op.
     conductor_active: Mapped[bool] = mapped_column(default=True, nullable=False)
@@ -397,6 +401,13 @@ class Project(Base):
     # re-validated on the next on-ready fetch. NULL = default (600s / 10 min);
     # 0 = never expire by age (only an operational-env change re-runs them).
     ready_checks_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Loop v1 C6: the command that proves the project works. The daemon runs
+    # it on the merged code before pushing; empty = merges are refused.
+    verify_cmd: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    verify_timeout_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Loop v1 C7: goals & current priorities in plain language. The
+    # Conductor plans sprints from it (and may draft it); humans edit it.
+    direction_md: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     # Single-repo deploy target for this project. `kind` picks the adapter
     # (backend/deploy/registry.get_adapter) — "railway" (default), "docker"
@@ -429,8 +440,9 @@ class DeployCredential(Base):
     (backend/deploy/registry.get_adapter). No provider name appears in this
     schema beyond the `kind` discriminator, so adding a provider is a new
     adapter class, never a migration. `token` is never serialized back to a
-    client — only `has_token` + cached validity are exposed. (Plaintext at
-    rest today; encryption-at-rest is a tracked follow-up before wide rollout.)
+    client — only `has_token` + cached validity are exposed. The token is
+    encrypted at rest (AP-533, `backend.secret_box`); the repo layer
+    encrypts on write and decrypts on read.
     """
     __tablename__ = "deploy_credentials"
     __table_args__ = (UniqueConstraint("org_id", "kind", name="uq_deploy_cred_org_kind"),)
