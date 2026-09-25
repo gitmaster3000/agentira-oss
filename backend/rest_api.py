@@ -146,6 +146,9 @@ class ProjectUpdate(BaseModel):
     # AP-297: TTL (seconds) for cached pre-run checks. null = no change;
     # negative resets to the default (600s); 0 = never expire by age.
     ready_checks_ttl_seconds: Optional[int] = None
+    # Loop v1 C6: merged-tree verification ("" clears → merges refused).
+    verify_cmd: Optional[str] = None
+    verify_timeout_minutes: Optional[int] = None
 
 class TaskCreate(BaseModel):
     project_id: str
@@ -695,6 +698,8 @@ def api_update_project(
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
             ready_checks_ttl_seconds=body.ready_checks_ttl_seconds,
+            verify_cmd=body.verify_cmd,
+            verify_timeout_minutes=body.verify_timeout_minutes,
             actor=actor,
         )
     except ValueError as e:

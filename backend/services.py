@@ -347,6 +347,9 @@ def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
         # AP-297: TTL (seconds) for cached pre-run checks. null = default (600);
         # 0 = never expire by age (re-run only when the environment changes).
         "ready_checks_ttl_seconds": getattr(p, "ready_checks_ttl_seconds", None),
+        # Loop v1 C6: what proves the project works (run on merged code).
+        "verify_cmd": getattr(p, "verify_cmd", None) or "",
+        "verify_timeout_minutes": getattr(p, "verify_timeout_minutes", None) or 30,
         # Where this project deploys (kind picks the adapter). The opaque
         # config blob + credential status are fetched separately via
         # get_project_deploy_settings — not inlined here to keep the token
@@ -735,6 +738,8 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    workflow_enabled: Optional[bool] = None,
                    workflow_roles_json: Optional[str] = None,
                    ready_checks_ttl_seconds: Optional[int] = None,
+                   verify_cmd: Optional[str] = None,
+                   verify_timeout_minutes: Optional[int] = None,
                    actor: str = "system") -> dict:
     with _session() as db:
         require_project_access(db, actor, project_id, "write")
@@ -811,6 +816,10 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             # (function convention), so a negative sentinel reaches "default".
             ttl = int(ready_checks_ttl_seconds)
             p.ready_checks_ttl_seconds = None if ttl < 0 else ttl
+        if verify_cmd is not None:
+            p.verify_cmd = verify_cmd.strip()
+        if verify_timeout_minutes is not None:
+            p.verify_timeout_minutes = max(1, min(240, int(verify_timeout_minutes)))
         db.commit()
         db.refresh(p)
         return _project_to_dict(p)

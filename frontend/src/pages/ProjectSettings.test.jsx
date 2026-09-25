@@ -81,3 +81,20 @@ describe('ProjectSettings — clearing fields', () => {
         expect(body.conventions_md).toBe('');
     });
 });
+
+describe('ProjectSettings — verify command (Loop v1)', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getProject.mockResolvedValue({ id: 'p1', name: 'P', verify_cmd: '', verify_timeout_minutes: 30 });
+        api.updateProject.mockImplementation(async (_id, body) => ({ id: 'p1', name: 'P', ...body }));
+    });
+
+    it('saves the command that proves the project works', async () => {
+        render(<ProjectSettings />);
+        const field = await screen.findByLabelText(/command that proves the project works/i);
+        fireEvent.change(field, { target: { value: 'scripts/verify.sh' } });
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+        await waitFor(() => expect(api.updateProject).toHaveBeenCalled());
+        expect(api.updateProject.mock.calls[0][1].verify_cmd).toBe('scripts/verify.sh');
+    });
+});

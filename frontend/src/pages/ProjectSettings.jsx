@@ -106,6 +106,8 @@ function GeneralTab({ projectId }) {
                 repo_path: p.repo_path || '',
                 repo_url: p.repo_url || '',
                 conventions_md: p.conventions_md || '',
+                verify_cmd: p.verify_cmd || '',
+                verify_timeout_minutes: p.verify_timeout_minutes || 30,
                 work_signal: p.work_signal || 'working_tree',
                 sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
                 env_isolation: p.env_isolation || 'auto',  // AP-308; '' = auto
@@ -141,6 +143,8 @@ function GeneralTab({ projectId }) {
         || form.repo_path !== (project.repo_path || '')
         || form.repo_url !== (project.repo_url || '')
         || form.conventions_md !== (project.conventions_md || '')
+        || form.verify_cmd !== (project.verify_cmd || '')
+        || Number(form.verify_timeout_minutes) !== (project.verify_timeout_minutes || 30)
         || form.work_signal !== (project.work_signal || 'working_tree')
         || form.sandbox_mode !== (project.sandbox_mode || '')
         || form.env_isolation !== (project.env_isolation || 'auto')
@@ -162,6 +166,8 @@ function GeneralTab({ projectId }) {
                 repo_path: form.repo_path,
                 repo_url: form.repo_url,
                 conventions_md: form.conventions_md,
+                verify_cmd: form.verify_cmd,
+                verify_timeout_minutes: Number(form.verify_timeout_minutes) || 30,
                 work_signal: form.work_signal || null,
                 // AP-155: send the literal empty string to clear an
                 // override back to "inherit from agent". null means
@@ -213,6 +219,19 @@ function GeneralTab({ projectId }) {
                     value={form.conventions_md}
                     placeholder={'# Conventions\nUse ruff. All commits on a feature branch.'}
                     onChange={(e) => setForm({ ...form, conventions_md: e.target.value })} />
+            </Field>
+            <Field label="Command that proves the project works"
+                hint="Runs on the merged code before anything is pushed. If it fails, the work goes back to the agent with the output. Leave empty and merges are refused.">
+                <input className="input font-mono text-xs" aria-label="Command that proves the project works"
+                    placeholder="scripts/verify.sh"
+                    value={form.verify_cmd}
+                    onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })} />
+            </Field>
+            <Field label="Time limit for that command (minutes)">
+                <input className="input w-28" type="number" min="1" max="240"
+                    aria-label="Time limit for that command (minutes)"
+                    value={form.verify_timeout_minutes}
+                    onChange={(e) => setForm({ ...form, verify_timeout_minutes: e.target.value })} />
             </Field>
             <Field label="Run detection (work signal)"
                 hint="When a chat turn in a task counts as work and becomes a tracked run. 'Working tree' is the most thorough — nothing the agent touches is lost.">

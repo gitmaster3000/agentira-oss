@@ -767,6 +767,9 @@ def run_migrations():
             # default; 0 = no time expiry, env-change re-runs only).
             added |= _ensure_column(conn, "projects", "ready_checks_ttl_seconds",
                                     "INTEGER")
+            # Loop v1 C6: merged-tree verification command + timeout.
+            added |= _ensure_column(conn, "projects", "verify_cmd", "TEXT")
+            added |= _ensure_column(conn, "projects", "verify_timeout_minutes", "INTEGER")
             # Single-repo deploy target. kind picks the adapter; config_json is
             # opaque per-kind (adding a provider = new adapter, not a migration).
             added |= _ensure_column(conn, "projects", "deploy_target_kind",

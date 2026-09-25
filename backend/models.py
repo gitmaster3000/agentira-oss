@@ -397,6 +397,10 @@ class Project(Base):
     # re-validated on the next on-ready fetch. NULL = default (600s / 10 min);
     # 0 = never expire by age (only an operational-env change re-runs them).
     ready_checks_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Loop v1 C6: the command that proves the project works. The daemon runs
+    # it on the merged code before pushing; empty = merges are refused.
+    verify_cmd: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    verify_timeout_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     # Single-repo deploy target for this project. `kind` picks the adapter
     # (backend/deploy/registry.get_adapter) — "railway" (default), "docker"
