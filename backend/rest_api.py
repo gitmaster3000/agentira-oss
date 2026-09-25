@@ -16,6 +16,7 @@ from google.auth.transport import requests as google_requests
 from backend import services
 from backend import task_graph
 from backend.password_service import password_service
+from backend.dev_mode import is_dev
 from backend.jwt_auth import (create_token, get_current_user, require_admin,
                               get_current_user_payload)
 
@@ -282,9 +283,14 @@ def api_signup(body: ProfileSignup):
 
 @auth.post("/auth/forgot-password")
 def api_forgot_password(body: ForgotPasswordBody):
-    """Always 200 — never reveal whether an email is registered."""
-    password_service.request_reset(body.email)
-    return {"ok": True}
+    """Always 200 — never reveal whether an email is registered. Dev mode
+    (AGENTIRA_ENV=dev) returns the reset link directly so no email is needed."""
+    token = password_service.request_reset(body.email)
+    if not is_dev():
+        return {"ok": True}
+    if not token:
+        return {"ok": True, "reset_url": None, "dev_note": "No account with that email"}
+    return {"ok": True, "reset_url": f"/reset-password?token={token}"}
 
 @auth.post("/auth/reset-password")
 def api_reset_password(body: ResetPasswordBody):
@@ -409,6 +415,7 @@ def api_auth_config():
         "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
         "github": bool(os.getenv("GITHUB_CLIENT_ID")),
         "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+        "dev": is_dev(),  # AGENTIRA_ENV=dev — UI unlocks local-only shortcuts
     }
 
 

@@ -50,6 +50,13 @@ AGENTIRA_DAEMON_API_KEY=dev-daemon-key-local-only \
 
 The static key is gated on `AGENTIRA_ENV=dev` and does nothing elsewhere.
 
+## Dev mode
+
+`AGENTIRA_ENV=dev` (set by `docker-compose.override.yml`) turns on local-only shortcuts. The default is `prod`, so none of these apply anywhere else.
+
+- The daemon static key above.
+- **Forgot password** skips email: the page takes you straight to the reset form. An unknown email says so instead of failing silently.
+
 ## Run the tests
 
 Docker must be running. The suite starts an ephemeral Postgres container.

@@ -155,6 +155,46 @@ def test_forgot_password_unknown_email_is_silent_200(env):
     assert not ctx["mail"].send_password_reset_email.called
 
 
+def test_forgot_password_prod_never_returns_link(env, monkeypatch):
+    c, _ = env
+    monkeypatch.delenv("AGENTIRA_ENV", raising=False)
+    r = c.post("/api/auth/forgot-password", json={"email": "bob@x.io"})
+    assert r.json() == {"ok": True}
+
+
+def test_forgot_password_dev_returns_working_link(env, monkeypatch):
+    c, _ = env
+    monkeypatch.setenv("AGENTIRA_ENV", "dev")
+    url = c.post("/api/auth/forgot-password", json={"email": "bob@x.io"}).json()["reset_url"]
+    assert url.startswith("/reset-password?token=")
+    token = url.split("token=", 1)[1]
+    r = c.post("/api/auth/reset-password", json={"token": token, "new_password": "devlink1"})
+    assert r.status_code == 200
+    assert _login(c, "bob", "devlink1").status_code == 200
+
+
+def test_forgot_password_dev_unknown_email_says_so(env, monkeypatch):
+    c, _ = env
+    monkeypatch.setenv("AGENTIRA_ENV", "dev")
+    body = c.post("/api/auth/forgot-password", json={"email": "nobody@x.io"}).json()
+    assert body["reset_url"] is None and body["dev_note"]
+
+
+def test_migration_converts_naive_reset_expiry_column(env, monkeypatch):
+    """Old installs have reset_token_expires as naive TIMESTAMP — comparing it
+    with tz-aware now() 500'd the reset endpoint. Migration must convert it."""
+    c, _ = env
+    import backend.db as bdb
+    from sqlalchemy import text
+    with bdb.engine.begin() as conn:
+        conn.execute(text("ALTER TABLE profiles ALTER COLUMN reset_token_expires TYPE TIMESTAMP"))
+    bdb.run_migrations()
+    monkeypatch.setenv("AGENTIRA_ENV", "dev")
+    token = c.post("/api/auth/forgot-password", json={"email": "bob@x.io"}).json()["reset_url"].split("token=", 1)[1]
+    r = c.post("/api/auth/reset-password", json={"token": token, "new_password": "afterfix1"})
+    assert r.status_code == 200
+
+
 def test_reset_with_bad_token_rejected(env):
     c, _ = env
     r = c.post("/api/auth/reset-password", json={"token": "garbage", "new_password": "x"})
@@ -190,3 +230,11 @@ def test_admin_can_set_member_email(env):
     assert r.status_code == 200 and r.json()["email"] == "bob2@x.io"
     # duplicate of admin's email → 400
     assert c.patch(f"/api/profiles/{ctx['member_id']}", json={"email": "admin@x.io"}).status_code == 400
+
+
+def test_auth_config_exposes_dev_flag(env, monkeypatch):
+    c, _ = env
+    monkeypatch.setenv("AGENTIRA_ENV", "dev")
+    assert c.get("/api/auth/config").json()["dev"] is True
+    monkeypatch.delenv("AGENTIRA_ENV")
+    assert c.get("/api/auth/config").json()["dev"] is False

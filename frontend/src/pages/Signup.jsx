@@ -5,6 +5,22 @@ import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Pencil } from 'lucide-react';
 
+// Module-level: a component defined inside Signup remounts every render and
+// the inputs lose focus per keystroke.
+const Shell = ({ children }) => (
+    <div className="h-full bg-bg-app flex flex-col items-center justify-center px-4 overflow-y-auto">
+        <div className="w-full max-w-sm space-y-6">
+            <Link to={ROUTES.WELCOME} className="flex items-center gap-2.5 justify-center mb-2">
+                <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201, 184, 255, 0.1)' }}>
+                    <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
+                </span>
+                <span className="text-title-sm font-semibold text-text-primary">AgentIRA</span>
+            </Link>
+            <div className="card space-y-5">{children}</div>
+        </div>
+    </div>
+);
+
 export function Signup() {
     const [searchParams] = useSearchParams();
     const inviteCode = searchParams.get('invite') || '';
@@ -69,20 +85,6 @@ export function Signup() {
             setLoading(false);
         }
     };
-
-    const Shell = ({ children }) => (
-        <div className="h-full bg-bg-app flex flex-col items-center justify-center px-4 overflow-y-auto">
-            <div className="w-full max-w-sm space-y-6">
-                <Link to={ROUTES.WELCOME} className="flex items-center gap-2.5 justify-center mb-2">
-                    <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201, 184, 255, 0.1)' }}>
-                        <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
-                    </span>
-                    <span className="text-title-sm font-semibold text-text-primary">AgentIRA</span>
-                </Link>
-                <div className="card space-y-5">{children}</div>
-            </div>
-        </div>
-    );
 
     // No invite code, or an invalid/expired one → invite-only gate.
     if (inviteError) {

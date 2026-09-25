@@ -651,7 +651,14 @@ def run_migrations():
             # AP-306: password lifecycle + forgot-password tokens
             added |= _ensure_column(conn, "profiles", "must_change_password", "BOOLEAN DEFAULT FALSE NOT NULL")
             added |= _ensure_column(conn, "profiles", "reset_token", "VARCHAR(64)")
-            added |= _ensure_column(conn, "profiles", "reset_token_expires", "TIMESTAMP")
+            added |= _ensure_column(conn, "profiles", "reset_token_expires", "TIMESTAMPTZ")
+            # Older installs created it as naive TIMESTAMP; the model is
+            # tz-aware, so comparing against now(utc) crashed. Values are UTC.
+            if _dialect_name() == "postgresql" and conn.execute(text(
+                    "SELECT data_type FROM information_schema.columns WHERE table_name='profiles' "
+                    "AND column_name='reset_token_expires'")).scalar() == "timestamp without time zone":
+                conn.execute(text("ALTER TABLE profiles ALTER COLUMN reset_token_expires "
+                                  "TYPE TIMESTAMPTZ USING reset_token_expires AT TIME ZONE 'UTC'"))
             # RBAC remodel: stored account type, decoupled from roles.
             added |= _ensure_column(conn, "profiles", "account_type", "VARCHAR(20) DEFAULT 'human' NOT NULL")
             # AP-86: bot/agent merge — runtime config moves onto profile

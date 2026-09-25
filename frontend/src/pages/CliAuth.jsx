@@ -4,13 +4,35 @@ import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
 import { Pencil, Terminal } from 'lucide-react';
 
+// Module-level on purpose: defined inside CliAuth it became a new component
+// type every render, so React remounted the form and inputs lost focus per keystroke.
+const Shell = ({ children }) => (
+    <div className="h-full bg-bg-app flex flex-col items-center justify-center px-4">
+        <div className="w-full max-w-sm space-y-6">
+            <div className="flex items-center gap-2.5 justify-center">
+                <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201,184,255,0.1)' }}>
+                    <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
+                </span>
+                <span className="text-title-sm font-semibold text-text-primary">AgentIRA</span>
+            </div>
+            <div className="card space-y-5">
+                <div className="text-center space-y-1">
+                    <Terminal className="w-6 h-6 mx-auto" style={{ color: 'var(--accent-primary)' }} />
+                    <h2 className="text-headline-sm text-text-primary">Authorize a daemon</h2>
+                </div>
+                {children}
+            </div>
+        </div>
+    </div>
+);
+
 export function CliAuth() {
     const { user, loading, loginWithOAuth, login, logout } = useAuth();
     const [params] = useSearchParams();
     const [code, setCode] = useState(params.get('user_code') || '');
     const [status, setStatus] = useState('idle'); // idle | working | done | error
     const [error, setError] = useState('');
-    const [authConfig, setAuthConfig] = useState({ google: false, github: false });
+    const [authConfig, setAuthConfig] = useState({ google: false, github: false, dev: false });
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const googleBtnRef = useRef(null);
@@ -26,7 +48,7 @@ export function CliAuth() {
     };
 
     useEffect(() => {
-        if (!user) api.getAuthConfig().then(setAuthConfig).catch(() => {});
+        api.getAuthConfig().then(setAuthConfig).catch(() => {});
     }, [user]);
 
     // Render the Google button inline when signed out — no page bounce, so the
@@ -62,25 +84,11 @@ export function CliAuth() {
         }
     };
 
-    const Shell = ({ children }) => (
-        <div className="h-full bg-bg-app flex flex-col items-center justify-center px-4">
-            <div className="w-full max-w-sm space-y-6">
-                <div className="flex items-center gap-2.5 justify-center">
-                    <span className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: 'rgba(201,184,255,0.1)' }}>
-                        <Pencil className="w-5 h-5" style={{ color: 'var(--accent-primary)' }} />
-                    </span>
-                    <span className="text-title-sm font-semibold text-text-primary">AgentIRA</span>
-                </div>
-                <div className="card space-y-5">
-                    <div className="text-center space-y-1">
-                        <Terminal className="w-6 h-6 mx-auto" style={{ color: 'var(--accent-primary)' }} />
-                        <h2 className="text-headline-sm text-text-primary">Authorize a daemon</h2>
-                    </div>
-                    {children}
-                </div>
-            </div>
-        </div>
-    );
+    // Dev mode: signed-in admin + code in the URL → approve without the extra click.
+    useEffect(() => {
+        const admin = user && (user.role === 'admin' || user.role?.name === 'admin');
+        if (authConfig.dev && admin && code.trim() && status === 'idle') approve();
+    }, [authConfig.dev, user]);
 
     if (loading) return <Shell><p className="text-body-sm text-text-tertiary text-center">Loading…</p></Shell>;
 
@@ -104,7 +112,7 @@ export function CliAuth() {
 
                 <form onSubmit={handlePasswordLogin} className="space-y-3">
                     <input value={username} onChange={(e) => setUsername(e.target.value)}
-                        className="input" placeholder="Username" autoComplete="username" autoFocus />
+                        className="input" placeholder="Username or email" autoComplete="username" autoFocus />
                     <input value={password} onChange={(e) => setPassword(e.target.value)}
                         type="password" className="input" placeholder="Password" autoComplete="current-password" />
                     <button type="submit" className="btn btn-primary w-full justify-center text-body-md">Sign in</button>

@@ -91,16 +91,18 @@ class PasswordService:
             self._apply(p, new_password, must_change=False)
             db.commit()
 
-    def request_reset(self, email: str) -> None:
+    def request_reset(self, email: str) -> str | None:
         """Issue a time-limited reset token and email the link. Silent no-op if
-        the email is unknown — never reveal whether an address is registered."""
+        the email is unknown — never reveal whether an address is registered.
+        Returns the token (None if no account) so dev mode can surface it; the
+        REST layer must never expose it outside dev."""
         email = (email or "").strip().lower()
         if "@" not in email:
-            return
+            return None
         with privileged(), SessionLocal() as db:
             p = ProfileRepository(db).by_email(email)
             if not p:
-                return
+                return None
             # ponytail: token stored plaintext — short-lived, single-use.
             token = secrets.token_urlsafe(32)
             p.reset_token = token
@@ -108,6 +110,7 @@ class PasswordService:
             db.commit()
             display_name = p.display_name or p.name
         email_sender.send_password_reset_email(email, display_name, token)
+        return token
 
     def reset_with_token(self, token: str, new_password: str) -> bool:
         """Consume a reset token and set a new password. False if the token is
