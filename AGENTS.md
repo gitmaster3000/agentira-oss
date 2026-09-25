@@ -1,0 +1,1 @@
+.agentira/CONVENTIONS.md

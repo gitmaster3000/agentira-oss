@@ -63,6 +63,8 @@ class AgentUpdate(BaseModel):
     conductor_report_time: Optional[str] = None
     conductor_report_enabled: Optional[bool] = None
     conductor_plan_interval_minutes: Optional[int] = None
+    conductor_sprint_time: Optional[str] = None
+    conductor_sprint_min_interval_hours: Optional[int] = None
     conductor_active: Optional[bool] = None
     # AP-155: agent's default containment posture (off | cwd | strict | container).
     # Empty string clears it back to workspace default.
@@ -384,7 +386,8 @@ def update_agent(agent_id: str, body: AgentUpdate):
     if "conductor_tick_seconds" in fields \
             or "conductor_plan_interval_minutes" in fields \
             or "conductor_report_time" in fields \
-            or "conductor_report_enabled" in fields:
+            or "conductor_report_enabled" in fields \
+            or "conductor_sprint_time" in fields:
         try:
             from backend.forge.scheduler import scheduler
             scheduler.refresh()
@@ -645,6 +648,7 @@ def conductor_status():
         "last_plan": _conductor.get_last_plan(),
         "last_progress_check": _conductor.get_last_progress_check(),
         "last_sprint_review": _conductor.get_last_sprint_review(),
+        "last_sprint_planning": _conductor.get_last_sprint_planning(),
         "survey": _conductor.survey_workspace(),
     }
 
@@ -680,6 +684,15 @@ def conductor_sprint_review_now():
     24h digest is empty."""
     from backend.forge import conductor as _conductor
     return _conductor.run_sprint_review_turn()
+
+
+@router.post("/conductor/sprint-planning")
+def conductor_sprint_planning_now():
+    """Run the Conductor's sprint-planning turn immediately, per project —
+    writes the direction if empty, keeps 1–3 epics in progress, and breaks
+    in-progress epics with no open tasks into fresh backlog tasks (C7b)."""
+    from backend.forge import conductor as _conductor
+    return _conductor.run_sprint_planning_turn()
 
 
 @router.get("/conductor/planning-turns")
