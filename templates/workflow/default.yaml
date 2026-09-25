@@ -41,6 +41,9 @@ columns:
   - name: backlog
   - name: todo
   - name: in_progress
+    # A person dragging a task here starts its assigned agent on it.
+    on_enter:
+      dispatch_assignee: true
     on_success:
       advance_to: review
       assign_role: reviewer
@@ -112,6 +115,15 @@ rejection:
   assign: previous_agent
   dispatch: true
   prompt: rejection_handback
+
+# Moving a task by hand. dispatch: true → when a PERSON moves a task into a
+# column, that column's agent gets the column's prompt — the role entering it
+# (review → reviewer, done → documentation; an assigned agent that fits the
+# role is kept) or, where on_enter.dispatch_assignee is set, the task's
+# assigned agent. Nothing is sent while a run is active, and moves made by
+# agents or by the workflow itself never trigger it.
+manual_move:
+  dispatch: true
 
 roles:
   reviewer:

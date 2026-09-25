@@ -221,6 +221,18 @@ class OnEnter(BaseModel):
     """What happens when a task ARRIVES in a column via the driver (slice 3:
     done -> dispatch the documentation role on the freshly merged task)."""
     dispatch_role: Optional[str] = None
+    # On a HUMAN move into this column (manual_move.dispatch): start the
+    # task's assigned agent on it (the work column has no hand-off role).
+    dispatch_assignee: bool = False
+
+
+class ManualMoveSpec(BaseModel):
+    """What a HUMAN moving a task into a column triggers. dispatch=True →
+    the column's agent is dispatched with the column's prompt: the role that
+    enters the column (on_success.assign_role of the column before it, or
+    on_enter.dispatch_role), else the assignee when on_enter.dispatch_assignee.
+    Agent/workflow moves never trigger it — those paths dispatch themselves."""
+    dispatch: bool = False
 
 
 class ColumnSpec(BaseModel):
@@ -279,6 +291,7 @@ class Workflow(BaseModel):
     roles: dict[str, RoleSpec] = Field(default_factory=dict)
     bounce: BounceSpec = Field(default_factory=BounceSpec)
     rejection: RejectionSpec = Field(default_factory=RejectionSpec)
+    manual_move: ManualMoveSpec = Field(default_factory=ManualMoveSpec)
 
     @validator("columns")
     def columns_not_empty(cls, v):  # noqa: N805
@@ -447,6 +460,85 @@ def pick_role_agent(db, *, project_id: str, role: RoleSpec,
     if role.fallback == "any":
         return min(candidates, key=lambda a: _in_flight(db, a.id))
     return None
+
+
+def _entry_role(flow: "Workflow", column_name: str) -> str | None:
+    """The role dispatched INTO a column: the preceding column's
+    on_success.assign_role, else the column's own on_enter.dispatch_role."""
+    for col in flow.columns:
+        s = col.on_success
+        if s and s.advance_to == column_name and s.assign_role:
+            return s.assign_role
+    col = flow.column(column_name)
+    return col.on_enter.dispatch_role if col and col.on_enter else None
+
+
+def _agent_named(db, name: str | None) -> Agent | None:
+    if not name:
+        return None
+    return db.query(Agent).filter(Agent.name == name).first()
+
+
+def dispatch_on_manual_move(task_id: str, to_status: str, actor: str) -> dict:
+    """A HUMAN moved a task into `to_status`: dispatch that column's agent
+    with the column's prompt, per `manual_move` + `on_enter` in the workflow
+    config. Agent and workflow moves are ignored (they dispatch themselves).
+    Never raises into the move."""
+    try:
+        with SessionLocal() as db:
+            if actor in ("workflow", "system") or _agent_named(db, actor):
+                return {"dispatched": False, "reason": "not_a_human_move"}
+            task = db.get(Task, task_id)
+            if not task:
+                return {"dispatched": False, "reason": "task_gone"}
+            project = db.get(Project, task.project_id) if task.project_id else None
+            if not project or not getattr(project, "workflow_enabled", False):
+                return {"dispatched": False, "reason": "workflow_disabled"}
+            flow = effective_workflow(project)
+            if not flow.manual_move.dispatch:
+                return {"dispatched": False, "reason": "policy_off"}
+            if runs_repo.has_active_run(db, task.id):
+                return {"dispatched": False, "reason": "run_active"}
+            col = flow.column(to_status)
+            assignee = _agent_named(db, task.assignee)
+            role_name = _entry_role(flow, to_status)
+            agent, prompt = None, ""
+            if role_name and role_name in flow.roles:
+                role = flow.roles[role_name]
+                matches = [m.lower() for m in role.match]
+                if assignee and any(m in (assignee.name or "").lower() for m in matches):
+                    agent = assignee
+                else:
+                    agent = pick_role_agent(
+                        db, project_id=task.project_id, role=role,
+                        previous_agent_id=assignee.id if assignee else None)
+                prompt = _role_handoff_prompt(
+                    flow, role_name, overrides=_prompt_overrides(project),
+                    branch=task.branch or "", pr_url=task.pr_url or "")
+            elif col and col.on_enter and col.on_enter.dispatch_assignee:
+                agent = assignee
+            if agent is None:
+                return {"dispatched": False, "reason": "no_agent"}
+            agent_id, agent_name = agent.id, agent.name
+            reassign = agent_name != task.assignee
+        if reassign:
+            from backend import services as core_task_services
+            core_task_services.update_task(task_id, assignee=agent_name,
+                                           actor="workflow")
+        from backend.forge import services
+        d = services.schedule_task_run(task_id=task_id, agent_id=agent_id,
+                                       extra_context=prompt)
+        if isinstance(d, dict) and d.get("error"):
+            logger.warning("workflow: manual-move dispatch failed %s -> %s: %s",
+                           task_id, agent_name, d["error"])
+            return {"dispatched": False, "reason": "dispatch_error",
+                    "error": d["error"]}
+        return {"dispatched": True, "agent": agent_name,
+                "run_id": d.get("run_id") if isinstance(d, dict) else None}
+    except Exception as exc:  # noqa: BLE001 — never break a move
+        logger.exception("workflow.dispatch_on_manual_move failed %s: %s",
+                         task_id, exc)
+        return {"dispatched": False, "reason": "exception"}
 
 
 def _bounce_gate_failure(db, *, task, run, current: str, target: str,

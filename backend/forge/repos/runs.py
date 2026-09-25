@@ -72,3 +72,13 @@ def outcomes_for_branch(db, *, task_id: str, branch: str) -> list:
                              .filter(Run.task_id == task_id,
                                      Run.worktree_branch == branch)
                              .all())]
+
+
+def has_active_run(db, task_id: str) -> bool:
+    """True while the task has a run starting or in flight (not READY — a
+    prepared-but-unstarted run doesn't hold the task)."""
+    from backend.forge.models import RunStatus
+    return (db.query(Run.id)
+              .filter(Run.task_id == task_id,
+                      Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING]))
+              .first()) is not None

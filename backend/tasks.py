@@ -451,6 +451,12 @@ class TaskService:
             db.refresh(task)
             result = services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
 
+        # A human moving a task starts that column's agent with its workflow
+        # prompt (policy in the workflow config; no-op otherwise).
+        if old != new_status:
+            from backend.forge import workflow as _workflow
+            _workflow.dispatch_on_manual_move(task_id, new_status, actor)
+
         # AP-190: a completed task compacts each agent's conversation so a later
         # reopen starts from a summary, not the whole transcript. Best-effort —
         # the move must succeed regardless. Done outside the session above.
