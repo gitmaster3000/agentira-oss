@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Deploy } from './Deploy';
 import { api } from '../api';
@@ -200,11 +200,13 @@ describe('Deploy tab', () => {
             await vi.advanceTimersByTimeAsync(6000);
             expect(api.getDeployments).toHaveBeenCalledTimes(2);
 
-            // Everything settles → the interval is torn down.
+            // Everything settles → the interval is torn down. act() flushes the
+            // re-render + effect cleanup before we snapshot; without it, under
+            // suite load the next tick could fire before React committed.
             api.getDeployments.mockResolvedValue({ branches: [MAIN, NO_PREVIEW] });
-            await vi.advanceTimersByTimeAsync(6000);
+            await act(() => vi.advanceTimersByTimeAsync(6000));
             const settled = api.getDeployments.mock.calls.length;
-            await vi.advanceTimersByTimeAsync(24000);
+            await act(() => vi.advanceTimersByTimeAsync(24000));
             expect(api.getDeployments).toHaveBeenCalledTimes(settled);
         });
 
