@@ -461,6 +461,13 @@ class TaskService:
             except Exception as exc:  # noqa: BLE001 — never fail a move on this
                 logger.warning("compaction on done failed task=%s: %s",
                                task_id, exc)
+            # C7c: closing the last open task closes the epic (deterministic).
+            try:
+                from backend import epic_progress
+                epic_progress.close_epic_if_complete(task_id, actor)
+            except Exception as exc:  # noqa: BLE001 — never fail a move on this
+                logger.warning("epic auto-close failed task=%s: %s",
+                               task_id, exc)
         return result
 
     # ── delete ────────────────────────────────────────────────────────────
