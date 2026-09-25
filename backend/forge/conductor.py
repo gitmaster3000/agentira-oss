@@ -253,7 +253,10 @@ def _managed_projects(db) -> list[tuple[str, str]]:
 _PRIORITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 # A task with a run in one of these statuses is "live" — never double-dispatch.
-_ACTIVE_RUN_STATUSES = {RunStatus.READY, RunStatus.PENDING, RunStatus.RUNNING,
+# READY is deliberately absent: it is a prepared draft awaiting a start (what
+# assignment creates), not work in flight — it must not block the Conductor
+# (AP-478 / Loop v1 C1).
+_ACTIVE_RUN_STATUSES = {RunStatus.PENDING, RunStatus.RUNNING,
                         RunStatus.INTERRUPTING, RunStatus.PAUSED}
 # Terminal statuses eligible for bounded auto-recovery (cooldown + attempt
 # cap). COMPLETED is deliberately excluded — the workflow driver owns
@@ -276,7 +279,8 @@ def _run_status(run: Run) -> RunStatus | None:
 
 
 def _task_run_eligible(db, task_id: str, latest_run: "Run | None", *,
-                       cooldown_minutes: int, max_attempts: int) -> bool:
+                       cooldown_minutes: int, max_attempts: int,
+                       agent_id: str | None = None) -> bool:
     """Is this task's run state one the Conductor may auto-pick right now?
 
     No run at all -> fresh task, always eligible. A live (non-terminal) run
@@ -288,6 +292,9 @@ def _task_run_eligible(db, task_id: str, latest_run: "Run | None", *,
     if latest_run is None:
         return True
     status = _run_status(latest_run)
+    if status == RunStatus.READY:
+        # A prepared draft: schedule_task_run reuses this row and starts it.
+        return agent_id is None or latest_run.agent_id == agent_id
     if status not in _RECOVERABLE_RUN_STATUSES:
         return False
     from backend.forge.repos import runs as runs_repo
@@ -316,6 +323,11 @@ def _recovery_note(db, task_id: str, max_attempts: int) -> str | None:
     return (f"🔁 **Auto-recovered** — the previous run ended `{status.value}`; "
             f"the Conductor re-dispatched this task automatically "
             f"(attempt {attempts + 1}/{max_attempts}).")
+
+
+def _dispatch_note(agent_name: str) -> str:
+    """The task-feed line every Conductor dispatch leaves (transparency)."""
+    return f"▶️ Conductor dispatched this task to **{agent_name}**."
 
 
 def pick_next_unblocked(*, project_id: str, agent_id: str, db=None) -> "Task | None":
@@ -355,7 +367,8 @@ def pick_next_unblocked(*, project_id: str, agent_id: str, db=None) -> "Task | N
         rows = [t for t in rows
                 if _task_run_eligible(db, t.id, latest_by_task.get(t.id),
                                       cooldown_minutes=cooldown_minutes,
-                                      max_attempts=max_attempts)]
+                                      max_attempts=max_attempts,
+                                      agent_id=agent_id)]
         if not rows:
             return None
         # Stable sort by priority; created_at order is preserved within a tier.
@@ -481,8 +494,12 @@ def run_tick() -> dict:
                     db.query(Task).filter(Task.id == task.id).update(
                         {"status_id": in_progress_id})
                     db.commit()
+                from backend.forge.repos import activities as activities_repo
+                activities_repo.add_task_comment(
+                    db, project_id=prof.default_project_id, task_id=task.id,
+                    detail=_dispatch_note(agent.name), actor=CONDUCTOR_NAME)
+                db.commit()
                 if recovery_note:
-                    from backend.forge.repos import activities as activities_repo
                     activities_repo.add_task_comment(
                         db, project_id=prof.default_project_id, task_id=task.id,
                         detail=recovery_note, actor=CONDUCTOR_NAME)
@@ -532,6 +549,7 @@ def tick_agent(agent_id: str) -> dict:
             if not task:
                 return {"dispatched": False, "reason": "no_eligible_task"}
             task_id = task.id
+            agent_name = agent.name
             project_id = prof.default_project_id
             in_progress_id = _in_progress_status_id(db)
             _, max_attempts = _redispatch_policy()
@@ -549,8 +567,12 @@ def tick_agent(agent_id: str) -> dict:
                 db.query(Task).filter(Task.id == task_id).update(
                     {"status_id": in_progress_id})
                 db.commit()
+            from backend.forge.repos import activities as activities_repo
+            activities_repo.add_task_comment(
+                db, project_id=project_id, task_id=task_id,
+                detail=_dispatch_note(agent_name), actor=CONDUCTOR_NAME)
+            db.commit()
             if recovery_note:
-                from backend.forge.repos import activities as activities_repo
                 activities_repo.add_task_comment(
                     db, project_id=project_id, task_id=task_id,
                     detail=recovery_note, actor=CONDUCTOR_NAME)
