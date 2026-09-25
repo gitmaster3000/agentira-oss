@@ -53,6 +53,8 @@ columns:
       advance_to: done
       assign_role: null        # done is terminal for now; docs step = next slice
       dispatch: false
+      # Nothing merges without a pull request: a task with no linked PR is
+      # refused with a comment (the pr_url gate is never waived).
       # Two-phase advance: the reviewer's approval triggers a deterministic
       # daemon-side merge of the task branch into the target; the task only
       # reaches done when the merge (and push) succeed. Conflict -> the task
