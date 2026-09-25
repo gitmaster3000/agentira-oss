@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Sequence
 
-from backend.forge.models import Run
+from backend.forge.models import Run, RunOutcome
 
 
 def prior_run_by_other_agent(db, *, task_id: str, before: datetime,
@@ -49,3 +49,26 @@ def latest_runs_by_task(db, task_ids: Sequence[str]) -> dict[str, Run]:
 def count_runs_for_task(db, task_id: str) -> int:
     """Total runs a task has ever had — the auto-redispatch attempt count."""
     return db.query(Run).filter(Run.task_id == task_id).count()
+
+
+def prior_succeeded_run_by_other_agent(db, *, task_id: str, before: datetime,
+                                       not_agent_id: str) -> Run | None:
+    """The most recent SUCCEEDED run on a task before `before` by a different
+    agent — its presence makes a later run a hand-off (e.g. review), not the
+    run that produced the work."""
+    return (db.query(Run)
+              .filter(Run.task_id == task_id,
+                      Run.agent_id != not_agent_id,
+                      Run.outcome == RunOutcome.SUCCEEDED,
+                      Run.created_at < before)
+              .order_by(Run.created_at.desc())
+              .first())
+
+
+def outcomes_for_branch(db, *, task_id: str, branch: str) -> list:
+    """Outcomes of the task's runs that worked on `branch`. Empty = no run
+    produced that branch (a human/PR-set link)."""
+    return [o for (o,) in (db.query(Run.outcome)
+                             .filter(Run.task_id == task_id,
+                                     Run.worktree_branch == branch)
+                             .all())]

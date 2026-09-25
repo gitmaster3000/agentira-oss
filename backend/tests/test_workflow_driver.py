@@ -990,3 +990,98 @@ def test_integration_hand_back_is_not_worded_as_a_review_rejection(db_session):
                    db.query(Activity).filter(Activity.task_id == task_id).all()]
     assert any("Merge failed — handed back to implementer-1" in d for d in details)
     assert not any("Review rejected" in d for d in details)
+
+
+# ── AP-520/521: integrate merges the task's WORK branch ──────────────────
+
+def test_review_approval_integrates_implementer_branch_not_reviewers(db_session):
+    """AP-520: the approving run is the REVIEWER's — its own worktree branch
+    has no work on it. The merge must carry the implementer's branch."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Task, task_id).branch = "agent/impl/task/t1"
+        db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
+        db.commit()
+    _add_primary_repo(db_session, pid, "main")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["branch"] == "agent/impl/task/t1"
+
+
+def test_review_run_branch_never_used_when_task_has_no_branch(db_session):
+    """No work branch on the task and the finishing run is a review hand-off
+    (someone else succeeded before it) → refuse, never merge the reviewer's
+    empty branch."""
+    pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
+    with db_session() as db:
+        db.get(Task, task_id).branch = ""
+        db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
+        db.commit()
+    _add_primary_repo(db_session, pid, "main")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "integration_missing_info"
+    fake.assert_not_called()
+
+
+def test_task_branch_follows_succeeded_run_after_failed_first_run(db_session):
+    """AP-521: the first run (out of credits) pinned task.branch to its own
+    empty branch and failed. Another agent's succeeded run is the real work —
+    task.branch must follow it."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        from datetime import timedelta
+        work = db.get(Run, run_id)
+        work.worktree_branch = "agent/coder2/task/t1"
+        first_id = _mk_agent(db, "best coder")
+        db.add(Run(agent_id=first_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.FAILED,
+                   worktree_branch="agent/coder1/task/t1",
+                   created_at=work.created_at - timedelta(minutes=5)))
+        db.get(Task, task_id).branch = "agent/coder1/task/t1"
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}) as mock_dispatch:
+        workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "agent/coder2/task/t1"
+    # The reviewer is pointed at the real work branch too.
+    assert "agent/coder2/task/t1" in mock_dispatch.call_args.kwargs["extra_context"]
+
+
+def test_human_set_branch_is_not_clobbered_by_run_branch(db_session):
+    """A branch no run produced (human/PR link) is left alone."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        db.get(Run, run_id).worktree_branch = "agent/impl/task/t1"
+        db.get(Task, task_id).branch = "feature/human-work"
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "next123"}):
+        workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "feature/human-work"
+
+
+def test_task_branch_follows_succeeded_run_even_when_workflow_disabled(db_session):
+    """Branch bookkeeping is not a workflow-driver feature: a stale pinned
+    branch is corrected regardless of workflow_enabled."""
+    pid, task_id, run_id, impl_id, _ = _setup_review_scenario(
+        db_session, enabled=False)
+    with db_session() as db:
+        work = db.get(Run, run_id)
+        work.worktree_branch = "agent/coder2/task/t1"
+        from datetime import timedelta
+        first_id = _mk_agent(db, "best coder")
+        db.add(Run(agent_id=first_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.FAILED,
+                   worktree_branch="agent/coder1/task/t1",
+                   created_at=work.created_at - timedelta(minutes=5)))
+        db.get(Task, task_id).branch = "agent/coder1/task/t1"
+        db.commit()
+    workflow.advance_after_run(run_id)
+    with db_session() as db:
+        assert db.get(Task, task_id).branch == "agent/coder2/task/t1"
