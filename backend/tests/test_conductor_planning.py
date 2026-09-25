@@ -21,6 +21,15 @@ from backend.forge.models import Agent, ForgeRuntime
 
 
 @pytest.fixture(autouse=True)
+def _conductor_runtime_live(monkeypatch):
+    """These tests cover turn content, not delivery: treat the Conductor's
+    (unconnected) test runtime as live. Liveness: test_conductor_liveness.py."""
+    from backend.forge import conductor as _c
+    monkeypatch.setattr(_c, "_runtime_live", lambda runtime_id: True)
+
+
+
+@pytest.fixture(autouse=True)
 def test_db(pg):
     yield pg
 

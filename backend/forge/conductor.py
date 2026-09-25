@@ -140,9 +140,14 @@ def get_or_create_conductor(org_id: str | None = None) -> dict:
         # Bind a Claude runtime if one is registered, so the Conductor can
         # actually take an LLM turn. If none yet, leave it null — the
         # agent still exists and gets a runtime when a daemon registers.
-        claude_rt = (db.query(ForgeRuntime)
-                       .filter(ForgeRuntime.provider == "claude")
-                       .first())
+        # Only a runtime a connected daemon actually serves — the first
+        # claude row may be a leftover from an old daemon (Loop v1 C4).
+        claude_rt = next(
+            (rt for rt in (db.query(ForgeRuntime)
+                             .filter(ForgeRuntime.provider == "claude")
+                             .order_by(ForgeRuntime.created_at.desc())
+                             .all())
+             if _runtime_live(rt.id)), None)
         rt_id = claude_rt.id if claude_rt else None
 
         # AP-152: prompts are configuration, not code. Seed the
@@ -270,8 +275,28 @@ def primary_conductor(db) -> "Profile | None":
 
 
 def _runtime_live(runtime_id: str | None) -> bool:
-    """Is a daemon connected for this runtime right now? (Loop v1 C4)."""
-    return bool(runtime_id)
+    """Is a daemon connected that serves this runtime right now? (Loop v1 C4)."""
+    if not runtime_id:
+        return False
+    from backend.forge.ws_dispatch import hub
+    return hub.is_runtime_live(runtime_id)
+
+
+_OFFLINE_REASON = "Conductor's runtime is offline — no daemon is connected for it"
+
+
+def _record_undelivered(trigger: str, project_id: str, project_name: str) -> dict:
+    """A turn we could not deliver is still a record — never a silent skip
+    and never a fake 'dispatched' (Loop v1 C4)."""
+    turn_id = _record_planning_turn(
+        trigger=trigger, status="undelivered",
+        facts={"project_id": project_id, "project_name": project_name},
+        decisions=[{"action": "undelivered", "task_id": None, "agent": None,
+                    "reason": _OFFLINE_REASON}])
+    logger.warning("Conductor %s turn undelivered project=%s: runtime offline",
+                   trigger, project_id)
+    return {"project_id": project_id, "undelivered": _OFFLINE_REASON,
+            "turn_id": turn_id}
 
 
 def _turn_conductor(project_id: str, org_id: str | None) -> tuple[dict | None, str | None]:
@@ -285,6 +310,8 @@ def _turn_conductor(project_id: str, org_id: str | None) -> tuple[dict | None, s
             return None, "no_conductor_for_org"
         if not prof.runtime_id:
             return None, "no_runtime"
+        if not _runtime_live(prof.runtime_id):
+            return None, "runtime_offline"
         # Loop v1 C3: the Conductor must be able to act on what it manages.
         # New projects get it at creation; older ones join here (visible in
         # the members list, removable by a human).
@@ -1005,7 +1032,9 @@ def run_planning_turn() -> dict:
         start = time.monotonic()
         cond, why = _turn_conductor(project_id, org_id)
         if cond is None:
-            results.append({"project_id": project_id, "skipped": why})
+            results.append(_record_undelivered("cron", project_id, project_name)
+                           if why == "runtime_offline"
+                           else {"project_id": project_id, "skipped": why})
             continue
         conductor_id, conductor_model = cond["id"], cond["model"]
         facts = gather_planning_facts(project_id)
@@ -1276,7 +1305,9 @@ def run_progress_check_turn() -> dict:
     for project_id, project_name, org_id in managed:
         cond, why = _turn_conductor(project_id, org_id)
         if cond is None:
-            results.append({"project_id": project_id, "skipped": why})
+            results.append(_record_undelivered("progress_check", project_id, project_name)
+                           if why == "runtime_offline"
+                           else {"project_id": project_id, "skipped": why})
             continue
         conductor_id = cond["id"]
         facts = gather_progress_facts(project_id)
@@ -1432,7 +1463,9 @@ def run_sprint_review_turn() -> dict:
         start = time.monotonic()
         cond, why = _turn_conductor(project_id, org_id)
         if cond is None:
-            results.append({"project_id": project_id, "skipped": why})
+            results.append(_record_undelivered("sprint_review", project_id, project_name)
+                           if why == "runtime_offline"
+                           else {"project_id": project_id, "skipped": why})
             continue
         conductor_id, conductor_model = cond["id"], cond["model"]
         facts = gather_sprint_review_facts(project_id)

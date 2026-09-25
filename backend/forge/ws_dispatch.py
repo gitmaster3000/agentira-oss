@@ -303,6 +303,11 @@ class WsHub:
     def is_connected(self, daemon_id: str) -> bool:
         return daemon_id in self._conns
 
+    def is_runtime_live(self, runtime_id: str) -> bool:
+        """True only if a connected daemon REGISTERED this runtime. A stale
+        runtime row that shares a live daemon's id is not live (Loop v1 C4)."""
+        return any(runtime_id in (c.runtime_ids or []) for c in self._conns.values())
+
 
 # Singleton hub — shared across the FastAPI process
 hub = WsHub()

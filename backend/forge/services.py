@@ -805,11 +805,13 @@ def _has_active_runs(db, agent_id: str) -> bool:
 
 
 def _is_runtime_online(rt: "ForgeRuntime | None") -> bool:
-    """Runtime is online iff its daemon's WS is currently connected."""
+    """Runtime is online iff a connected daemon registered this runtime —
+    not merely because its daemon id is connected (a stale row can share a
+    live daemon's id; dispatches to it are never delivered)."""
     if rt is None:
         return False
     from backend.forge.ws_dispatch import hub
-    return hub.is_connected(rt.daemon_id)
+    return hub.is_runtime_live(rt.id)
 
 
 def _resolve_agent_status(a: Agent, runtime_online: bool, db) -> AgentStatus:
