@@ -285,6 +285,14 @@ def _turn_conductor(project_id: str, org_id: str | None) -> tuple[dict | None, s
             return None, "no_conductor_for_org"
         if not prof.runtime_id:
             return None, "no_runtime"
+        # Loop v1 C3: the Conductor must be able to act on what it manages.
+        # New projects get it at creation; older ones join here (visible in
+        # the members list, removable by a human).
+        from backend.forge.repos import project_members
+        if project_members.ensure_member(db, project_id=project_id,
+                                         profile_id=prof.id, org_id=org_id):
+            db.commit()
+            logger.info("Conductor %s joined project %s", prof.id, project_id)
         info = {"id": prof.id, "model": prof.model, "runtime_id": prof.runtime_id}
     return info, None
 
