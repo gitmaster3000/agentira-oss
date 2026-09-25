@@ -10,7 +10,6 @@ vi.mock('../../api', () => ({
     api: {
         getRoadmap: vi.fn(),
         getProjectActivity: vi.fn(),
-        removeDependency: vi.fn(),
     },
 }));
 
@@ -107,7 +106,7 @@ describe('RoadmapView navigation', () => {
 
         expect(await screen.findByRole('button', { name: 'Schedule' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Calendar' })).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Dependencies' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Links' })).toBeInTheDocument();
         fireEvent.click(screen.getByTitle('Open AP-496 in full view'));
         expect(screen.getByText('Full task AP-496')).toBeInTheDocument();
     });

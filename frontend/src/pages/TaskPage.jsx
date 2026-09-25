@@ -6,7 +6,7 @@ import { Markdown } from '../components/Markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
-import { RelationsSection } from '../components/TaskDetail/RelationsSection';
+import { LinksSection } from '../components/TaskDetail/LinksSection';
 import { CollapsibleSection } from '../components/TaskDetail/CollapsibleSection';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
@@ -1001,15 +1001,15 @@ function PlanTab(props) {
                     </div>
                 </CollapsibleSection>
 
-                {/* Parent, subtasks, dependencies and milestone. */}
+                {/* Links to other tasks and the milestone this counts towards. */}
                 <CollapsibleSection
-                    title="Dependencies"
+                    title="Links"
                     icon={ListTree}
                     open={openSections.relations}
                     onToggle={() => toggleSection('relations')}
                     separated
                 >
-                    <RelationsSection task={task} onChanged={loadTask} isEditing={isEditing} compact spread />
+                    <LinksSection task={task} onChanged={loadTask} isEditing={isEditing} compact spread />
                 </CollapsibleSection>
 
                 <CollapsibleSection

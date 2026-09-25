@@ -792,6 +792,12 @@ def run_migrations():
             if added:
                 conn.commit()
 
+        # AP-507: dependency edges gain a link type.
+        if "task_dependencies" in tables:
+            if _ensure_column(conn, "task_dependencies", "link_type",
+                              "VARCHAR(20) DEFAULT 'depends_on' NOT NULL"):
+                conn.commit()
+
         # AP-302: project_repos gain a git access token + cached validity.
         if "project_repos" in tables:
             repo_added = False

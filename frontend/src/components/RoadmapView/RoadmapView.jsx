@@ -33,7 +33,7 @@ function ViewLoading() {
 // and calendar are two scales for the same dated work, not separate concepts.
 const VIEWS = [
     { key: 'schedule', label: 'Schedule', icon: CalendarDays },
-    { key: 'dependencies', label: 'Dependencies', icon: Workflow },
+    { key: 'dependencies', label: 'Links', icon: Workflow },
     { key: 'milestones', label: 'Milestones', icon: Flag },
 ];
 

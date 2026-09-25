@@ -8,12 +8,13 @@ here is an N+1 on the hottest read paths in the product.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import selectinload
 
 from backend.models import Milestone, Status, Task, TaskDependency
 
 DONE_STATUS = "done"
+DEPENDS_ON = "depends_on"
 
 
 # ── child tasks ──────────────────────────────────────────────────────────
@@ -69,9 +70,21 @@ def detach_children(db, task_id: str) -> None:
 # ── dependency edges ─────────────────────────────────────────────────────
 
 def list_dependencies(db, project_id: str) -> list[TaskDependency]:
+    """Blocking edges only — other link types never gate scheduling."""
     return (
         db.query(TaskDependency)
-        .filter(TaskDependency.project_id == project_id)
+        .filter(TaskDependency.project_id == project_id,
+                TaskDependency.link_type == DEPENDS_ON)
+        .order_by(TaskDependency.created_at.asc())
+        .all()
+    )
+
+
+def links_for_task(db, task_id: str) -> list[TaskDependency]:
+    return (
+        db.query(TaskDependency)
+        .filter(or_(TaskDependency.task_id == task_id,
+                    TaskDependency.depends_on_id == task_id))
         .order_by(TaskDependency.created_at.asc())
         .all()
     )
@@ -81,19 +94,21 @@ def get_dependency(db, dep_id: str) -> TaskDependency | None:
     return db.get(TaskDependency, dep_id)
 
 
-def find_edge(db, task_id: str, depends_on_id: str) -> TaskDependency | None:
-    return (
-        db.query(TaskDependency)
-        .filter(TaskDependency.task_id == task_id,
-                TaskDependency.depends_on_id == depends_on_id)
-        .first()
-    )
+def find_edge(db, task_id: str, depends_on_id: str,
+              link_type: str | None = None) -> TaskDependency | None:
+    q = db.query(TaskDependency).filter(
+        TaskDependency.task_id == task_id,
+        TaskDependency.depends_on_id == depends_on_id)
+    if link_type is not None:
+        q = q.filter(TaskDependency.link_type == link_type)
+    return q.first()
 
 
 def add_edge(db, project_id: str, task_id: str, depends_on_id: str,
-             creator: str = "") -> TaskDependency:
+             creator: str = "", link_type: str = DEPENDS_ON) -> TaskDependency:
     dep = TaskDependency(project_id=project_id, task_id=task_id,
-                         depends_on_id=depends_on_id, creator=creator)
+                         depends_on_id=depends_on_id, creator=creator,
+                         link_type=link_type)
     db.add(dep)
     db.flush()
     return dep
@@ -116,8 +131,34 @@ def edges_for_project(db, project_id: str) -> list[tuple[str, str]]:
         (task_id, depends_on_id)
         for task_id, depends_on_id in db.query(
             TaskDependency.task_id, TaskDependency.depends_on_id
-        ).filter(TaskDependency.project_id == project_id).all()
+        ).filter(TaskDependency.project_id == project_id,
+                 TaskDependency.link_type == DEPENDS_ON).all()
     ]
+
+
+def task_summaries(db, task_ids: list[str]) -> dict[str, dict]:
+    """{task_id: {id, key, title, status}} — the chip payload the UI renders."""
+    if not task_ids:
+        return {}
+    rows = (
+        db.query(Task.id, Task.key, Task.title, Status.name)
+        .join(Status, Task.status_id == Status.id)
+        .filter(Task.id.in_(task_ids))
+        .all()
+    )
+    return {
+        tid: {"id": tid, "key": key or tid, "title": title, "status": status}
+        for tid, key, title, status in rows
+    }
+
+
+def delete_edges_between(db, task_id: str, other_id: str) -> None:
+    db.query(TaskDependency).filter(
+        or_(and_(TaskDependency.task_id == task_id,
+                 TaskDependency.depends_on_id == other_id),
+            and_(TaskDependency.task_id == other_id,
+                 TaskDependency.depends_on_id == task_id))
+    ).delete(synchronize_session=False)
 
 
 def neighbor_tasks(db, task_ids: list[str]) -> dict[str, dict]:
@@ -130,7 +171,8 @@ def neighbor_tasks(db, task_ids: list[str]) -> dict[str, dict]:
         return {}
     edges = (
         db.query(TaskDependency.task_id, TaskDependency.depends_on_id)
-        .filter(or_(TaskDependency.task_id.in_(task_ids),
+        .filter(TaskDependency.link_type == DEPENDS_ON,
+                or_(TaskDependency.task_id.in_(task_ids),
                     TaskDependency.depends_on_id.in_(task_ids)))
         .all()
     )

@@ -174,14 +174,15 @@ export const api = {
     getBoard: (projectId) => request(`/projects/${projectId}/board`),
     getRoadmap: (projectId, groupBy = 'epic') => request(`/projects/${projectId}/roadmap?group_by=${groupBy}`),
 
-    // Task graph (AP-496): dependencies + milestones live under the project
-    // so one project-access check covers every graph read/write.
-    listDependencies: (projectId) => request(`/projects/${projectId}/dependencies`),
-    addDependency: (projectId, taskId, dependsOnId) => request(
-        `/projects/${projectId}/dependencies`,
-        { method: 'POST', body: JSON.stringify({ task_id: taskId, depends_on_id: dependsOnId }) }),
-    removeDependency: (projectId, depId) => request(
-        `/projects/${projectId}/dependencies/${depId}`, { method: 'DELETE' }),
+    // Task graph (AP-496): milestones live under the project so one
+    // project-access check covers every graph read/write.
+    // AP-507: typed links. One write sets both sides of the pair.
+    listTaskLinks: (taskId) => request(`/tasks/${taskId}/links`),
+    addTaskLink: (taskId, otherTaskId, linkType) => request(
+        `/tasks/${taskId}/links`,
+        { method: 'POST', body: JSON.stringify({ other_task_id: otherTaskId, link_type: linkType }) }),
+    removeTaskLink: (taskId, linkId) => request(
+        `/tasks/${taskId}/links/${linkId}`, { method: 'DELETE' }),
     listMilestones: (projectId) => request(`/projects/${projectId}/milestones`),
     createMilestone: (projectId, data) => request(`/projects/${projectId}/milestones`,
         { method: 'POST', body: JSON.stringify(data) }),

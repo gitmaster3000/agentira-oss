@@ -15,6 +15,7 @@ from google.auth.transport import requests as google_requests
 
 from backend import services
 from backend import task_graph
+from backend import task_links
 from backend.password_service import password_service
 from backend.dev_mode import is_dev
 from backend.jwt_auth import (create_token, get_current_user, require_admin,
@@ -186,6 +187,11 @@ class TaskUpdate(BaseModel):
 class DependencyCreate(BaseModel):
     task_id: str
     depends_on_id: str
+
+
+class LinkCreate(BaseModel):
+    other_task_id: str
+    link_type: str
 
 
 class MilestoneCreate(BaseModel):
@@ -1305,6 +1311,37 @@ def api_list_subtasks(task_id: str, actor: str = Depends(get_current_user)):
         return task_graph.list_subtasks(task_id, actor=actor)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+@tasks.get("/{task_id}/links")
+def api_list_links(task_id: str, actor: str = Depends(get_current_user)):
+    try:
+        return task_links.list_links(task_id, actor=actor)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@tasks.post("/{task_id}/links")
+def api_add_link(task_id: str, body: LinkCreate,
+                 actor: str = Depends(get_current_user)):
+    try:
+        return task_links.add_link(task_id, body.other_task_id, body.link_type,
+                                   actor=actor)
+    except task_links.GraphError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@tasks.delete("/{task_id}/links/{link_id}")
+def api_remove_link(task_id: str, link_id: str,
+                    actor: str = Depends(get_current_user)):
+    try:
+        if not task_links.remove_link(task_id, link_id, actor=actor):
+            raise HTTPException(404, "Link not found")
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
 
 @tasks.delete("/{task_id}")
 def api_delete_task(task_id: str, actor: str = Depends(get_current_user)):

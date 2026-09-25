@@ -16,7 +16,9 @@ vi.mock('../api', () => ({
         listSubtasks: vi.fn(() => Promise.resolve([])),
         listTasks: vi.fn(() => Promise.resolve([])),
         listMilestones: vi.fn(() => Promise.resolve([])),
-        listDependencies: vi.fn(() => Promise.resolve([])),
+        listTaskLinks: vi.fn(() => Promise.resolve([])),
+        addTaskLink: vi.fn(() => Promise.resolve({})),
+        removeTaskLink: vi.fn(() => Promise.resolve({ ok: true })),
         addComment: vi.fn(() => Promise.resolve({})),
         updateTask: vi.fn(() => Promise.resolve({})),
         moveTask: vi.fn(() => Promise.resolve({})),
@@ -105,7 +107,7 @@ describe('TaskPage — detail view (AP-353)', () => {
         expect(screen.queryByTestId('task-overview-section')).toBeNull();
     });
 
-    const INFO_SECTIONS = ['Details', 'Dependencies', 'Definition of Done', 'Branch & PR', 'Files', 'Timestamps'];
+    const INFO_SECTIONS = ['Details', 'Links', 'Definition of Done', 'Branch & PR', 'Files', 'Timestamps'];
 
     it('bounds the top band and pools every non-description section in one pane', async () => {
         renderTaskPage();
