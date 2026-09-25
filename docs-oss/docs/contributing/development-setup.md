@@ -34,6 +34,26 @@ Sign in as `admin` / `admin123`.
 
 Both the backend and the frontend hot-reload in this profile.
 
+## Python dependencies
+
+Backend dependencies are locked. Images and CI install exact versions from `requirements.lock` (runtime) and `requirements-dev.lock` (runtime plus test tools), so a new upstream release can't break a build.
+
+For a local virtualenv:
+
+```bash
+pip install -r requirements-dev.lock
+pip install --no-deps -e .
+```
+
+After changing dependencies in `pyproject.toml`, re-lock with [uv](https://docs.astral.sh/uv/) and commit both files. CI fails if they are stale.
+
+```bash
+uv pip compile pyproject.toml --universal --python-version 3.11 -o requirements.lock
+uv pip compile pyproject.toml --extra dev --universal --python-version 3.11 -o requirements-dev.lock
+```
+
+To pick up newer versions on purpose, add `--upgrade` (or `--upgrade-package <name>`).
+
 ## Install the CLI
 
 ```bash

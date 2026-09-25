@@ -2,10 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY pyproject.toml .
+# Install Python dependencies from the lock (exact, reproducible versions),
+# then the app itself without re-resolving.
+COPY pyproject.toml requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY backend/ backend/
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir --no-deps -e .
 
 # Bake agentira-cli wheel into the image for customer install/update.
 COPY agentira-cli/ agentira-cli/

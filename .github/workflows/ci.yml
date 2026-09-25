@@ -21,9 +21,22 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      # uv keeps existing pins, so this only changes the files when
+      # pyproject.toml changed without re-locking.
+      - name: Lock files match pyproject.toml
+        run: |
+          pip install uv
+          uv pip compile pyproject.toml --universal --python-version 3.11 -q -o requirements.lock
+          uv pip compile pyproject.toml --extra dev --universal --python-version 3.11 -q -o requirements-dev.lock
+          git diff --exit-code -- requirements.lock requirements-dev.lock || \
+            { echo "::error::Lock files are stale. Re-run the uv pip compile commands (see docs) and commit."; exit 1; }
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install -r requirements-dev.lock
+          pip install --no-deps -e .
 
       - name: Run pytest
         run: python -m pytest backend/tests/ -q -n 4 --dist loadscope
