@@ -111,3 +111,27 @@ def test_unresolved_hides_questions_resolved_elsewhere():
 
     still_open = forge_services.list_runs(outcome="needs_input", unresolved=True)
     assert [r["id"] for r in still_open] == [open_q]
+
+
+def test_dismissed_question_hides_until_agent_asks_again():
+    from datetime import datetime, timedelta, timezone
+    from backend.forge.models import Run
+    t0 = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    project = core_services.create_project("Dismiss", actor="system")
+    task = core_services.create_task(project["id"], "asked a question")
+    q = _task_run(task["id"], project["id"], daemon_id="dq", outcome="needs_input",
+                  started_at=t0, finished_at=t0 + timedelta(minutes=1))
+
+    assert forge_services.dismiss_run_question(q)["ok"] is True
+    assert forge_services.list_runs(outcome="needs_input", unresolved=True) == []
+
+    # The same run asks a NEW question on a later turn → it's back.
+    with forge_services._session() as db:
+        db.get(Run, q).finished_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        db.commit()
+    assert [r["id"] for r in forge_services.list_runs(outcome="needs_input",
+                                                      unresolved=True)] == [q]
+
+
+def test_dismiss_unknown_run():
+    assert "error" in forge_services.dismiss_run_question("nope")

@@ -562,6 +562,15 @@ def get_run_events(run_id: str, actor: str = Depends(get_current_user)):
     return services.get_run_events(run_id, actor=actor)
 
 
+@router.post("/runs/{run_id}/dismiss")
+def dismiss_run_question(run_id: str, actor: str = Depends(get_current_user)):
+    """AP-509: dismiss the run's question from the "Needs you" list."""
+    result = services.dismiss_run_question(run_id, actor=actor)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    return result
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str):
     """Cancel a pending/running Run. Marks it cancelled immediately and

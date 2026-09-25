@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { StudioDashboard } from './StudioDashboard';
 import { ShellDataProvider } from '../components/shell/shellData';
@@ -15,6 +15,7 @@ vi.mock('../api', () => ({
         forge: {
             listRuns: vi.fn().mockResolvedValue([]),
             listAgents: vi.fn().mockResolvedValue([]),
+            dismissRun: vi.fn().mockResolvedValue({ ok: true }),
         },
     },
 }));
@@ -68,6 +69,20 @@ describe('StudioDashboard (Home cockpit)', () => {
         await waitFor(() => expect(screen.getByText('Implementer')).toBeInTheDocument());
         expect(screen.getByText('Add retry')).toBeInTheDocument();
         expect(screen.getByText('Question from Reviewer')).toBeInTheDocument();
+    });
+
+    it('dismisses a NEEDS YOU question in one click', async () => {
+        api.forge.listRuns.mockImplementation(({ outcome }) =>
+            Promise.resolve(outcome === 'needs_input'
+                ? [{ id: 'r9', agent_name: 'Reviewer', task_title: 'Approve PR', task_key: 'ACM-2' }]
+                : []),
+        );
+        renderHome();
+        await waitFor(() => expect(screen.getByText('Question from Reviewer')).toBeInTheDocument());
+        fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+        expect(api.forge.dismissRun).toHaveBeenCalledWith('r9');
+        await waitFor(() => expect(screen.queryByText('Question from Reviewer')).not.toBeInTheDocument());
+        expect(screen.getByText('Nothing needs you right now.')).toBeInTheDocument();
     });
 
     it('renders project cards with a per-project running pill', async () => {

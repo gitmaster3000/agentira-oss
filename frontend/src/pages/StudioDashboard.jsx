@@ -60,7 +60,7 @@ export function StudioDashboard() {
     const { user } = useAuth();
     const {
         projects, runningRuns, runningByProject,
-        waitingRuns, recentNotifs, unread,
+        waitingRuns, recentNotifs, unread, dismissWaiting,
     } = useShellData();
 
     const runs = runningRuns || [];
@@ -161,6 +161,7 @@ export function StudioDashboard() {
                                     {(r.task_key || r.task_id) && <span style={{ fontFamily: 'ui-monospace,monospace', color: 'var(--accent-mono-blue)' }}>{r.task_key || r.task_id}</span>} · {r.task_title || timeAgo(r.created_at) || 'needs your input'}
                                 </div>
                             </div>
+                            <button type="button" aria-label="Dismiss" title="Dismiss" onClick={(e) => { e.stopPropagation(); dismissWaiting(r.id); }} style={{ marginLeft: 'auto', flexShrink: 0, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>×</button>
                         </div>
                     ))}
                 </div>

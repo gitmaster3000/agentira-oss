@@ -19,7 +19,7 @@ export function projectKey(p) {
 const ShellDataContext = createContext({
     projects: [], runningRuns: [], runningByProject: {}, runningTotal: 0,
     waitingRuns: [], recentNotifs: [], agentCount: null, unread: 0,
-    pulseOpen: false, togglePulse: () => {},
+    pulseOpen: false, togglePulse: () => {}, dismissWaiting: () => {},
 });
 
 const PULSE_KEY = 'agentira.pulseOpen';
@@ -45,6 +45,13 @@ export function ShellDataProvider({ children }) {
         try { localStorage.setItem(PULSE_KEY, String(next)); } catch { /* ignore */ }
         return next;
     });
+
+    // Drop a "Needs you" question at once; the server keeps it hidden until
+    // the agent asks a new one. A failed call just lets the next poll restore it.
+    const dismissWaiting = (id) => {
+        setWaitingRuns((list) => list.filter((r) => r.id !== id));
+        api.forge.dismissRun(id).catch(() => {});
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -94,7 +101,7 @@ export function ShellDataProvider({ children }) {
     const value = {
         projects, runningRuns, runningByProject, runningTotal,
         waitingRuns, recentNotifs, agentCount, unread,
-        pulseOpen, togglePulse,
+        pulseOpen, togglePulse, dismissWaiting,
     };
     return <ShellDataContext.Provider value={value}>{children}</ShellDataContext.Provider>;
 }

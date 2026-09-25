@@ -1329,6 +1329,18 @@ def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = Non
         return [_run_to_dict(r) for r in runs]
 
 
+def dismiss_run_question(run_id: str, actor: str = "system") -> dict:
+    """AP-509: hide a run's question from "Needs you" (until it asks again)."""
+    from backend.forge.repos import runs as runs_repo
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).filter(_run_org_scope()).first()
+        if not r:
+            return {"error": "Run not found"}
+        _assert_run_access(db, r, actor)
+        runs_repo.dismiss_question(db, run_id)
+        return {"ok": True}
+
+
 def get_run(run_id: str, actor: str = "system") -> dict | None:
     with _session() as db:
         r = db.query(Run).filter(Run.id == run_id).filter(_run_org_scope()).first()

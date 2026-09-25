@@ -82,9 +82,10 @@ def list_runs(db, *, scope, project_ids=None, agent_id: str | None = None,
     `project_ids` (None = no restriction) the actor's visible projects.
 
     `unresolved` (AP-509) drops runs whose verdict was overtaken — the task is
-    done, or another run on the task started after this one finished — so a
-    needs_input question stops showing once it's resolved elsewhere."""
-    from sqlalchemy import exists, func
+    done, another run on the task started after this one finished, or the
+    human dismissed it — so a needs_input question stops showing once it's
+    resolved elsewhere."""
+    from sqlalchemy import exists, func, or_
     from sqlalchemy.orm import aliased
     from backend.models import Status, Task
     q = db.query(Run)
@@ -106,6 +107,19 @@ def list_runs(db, *, scope, project_ids=None, agent_id: str | None = None,
         q = q.filter(~exists().where(
             later.task_id == Run.task_id, later.id != Run.id,
             later.started_at > func.coalesce(Run.finished_at, Run.created_at)))
+        q = q.filter(or_(
+            Run.question_dismissed_at.is_(None),
+            Run.question_dismissed_at < func.coalesce(Run.finished_at, Run.created_at)))
     # AP-190: one row per (agent, task); exclude throwaway shadow rows.
     q = q.filter(Run.trigger_event != "chat.shadow").filter(scope)
     return q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
+
+
+def dismiss_question(db, run_id: str) -> Run | None:
+    """AP-509: stamp the human's dismissal of the run's "Needs you" question."""
+    from datetime import timezone
+    run = db.get(Run, run_id)
+    if run is not None:
+        run.question_dismissed_at = datetime.now(timezone.utc)
+        db.commit()
+    return run
