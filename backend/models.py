@@ -440,8 +440,9 @@ class DeployCredential(Base):
     (backend/deploy/registry.get_adapter). No provider name appears in this
     schema beyond the `kind` discriminator, so adding a provider is a new
     adapter class, never a migration. `token` is never serialized back to a
-    client — only `has_token` + cached validity are exposed. (Plaintext at
-    rest today; encryption-at-rest is a tracked follow-up before wide rollout.)
+    client — only `has_token` + cached validity are exposed. The token is
+    encrypted at rest (AP-533, `backend.secret_box`); the repo layer
+    encrypts on write and decrypts on read.
     """
     __tablename__ = "deploy_credentials"
     __table_args__ = (UniqueConstraint("org_id", "kind", name="uq_deploy_cred_org_kind"),)

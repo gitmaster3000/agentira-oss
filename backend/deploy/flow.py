@@ -14,12 +14,13 @@ page) are the frontend contract in
 `frontend/docs/deploy-backend-requirements.md`.
 
 Honest scope notes (this build):
-  * Branch enumeration is derived from persisted deployments (plus `main`), not
-    from a live GitHub branch listing — a project shows `main` and any branch it
-    has deployed. Full repo-branch/commit enrichment needs the GitHub App and is
-    a follow-up.
-  * `repo_access` reports `granted` optimistically so the wizard is not blocked;
-    a real GitHub App install probe is a follow-up.
+  * Branch enumeration lists the repo's real branches from GitHub (via the
+    project's repo token) merged with per-branch deployment state; it falls
+    back to deployment-derived branches when GitHub is unlinked/unreachable.
+    Per-branch commit metadata (sha/message/author) still comes from
+    deployment rows — full commit enrichment is a follow-up.
+  * `repo_access` really probes the GitHub repo with the project's token and
+    reports access honestly in plain language.
   * The Railway *live* deploy path is wired through the adapter but exercising it
     end-to-end needs a real Railway token + project linkage (see
     `deploy/railway.py`); it is untested against a live account here.
@@ -31,7 +32,8 @@ import json
 import logging
 import os
 
-from backend.deploy import registry
+from backend import repo_tokens
+from backend.deploy import github_deployments, registry
 from backend.deploy.contract import (
     DeploymentStatus, DeployTargetConfig, TargetKind)
 from backend.deploy.railway import TOKEN_ENV_VARS
@@ -58,6 +60,16 @@ _REASON = {
     "failed": "Build failed — open the logs for the error.",
     "crashed": "App crashed after deploy — see runtime logs.",
     "stopped": "Preview stopped — redeploy to bring it back.",
+}
+
+# Frontend status pill -> GitHub Deployments state (ADR-011 §4).
+_GH_STATE = {
+    "queued": "queued",
+    "building": "in_progress",
+    "live": "success",
+    "failed": "failure",
+    "crashed": "failure",
+    "stopped": "inactive",
 }
 
 _INSTALL_URL = "https://github.com/apps/railway/installations/new"
@@ -128,9 +140,20 @@ class DeployFlow:
         _log.info("deploy provider connected: project=%s kind=%s repo=%s",
                   project_id, kind, repo)
 
-        with contextlib.suppress(Exception):
+        try:
             self._deploy_branch(db, project, kind, config,
                                 branch="main", trigger="push")
+        except Exception as exc:
+            # A failed first deploy must never vanish (§4): record it as a
+            # `failed` row so the Deploy tab shows what went wrong.
+            _log.warning("first deploy of main failed: project=%s kind=%s: %s",
+                         project_id, kind, exc)
+            deploy_repo.create_deployment(
+                db, org_id=project.org_id, project_id=project.id, branch="main",
+                is_main=True, provider_kind=kind, trigger="push", status="failed",
+                status_reason=(
+                    "First deploy couldn't start — "
+                    f"{exc}. Fix the issue, then redeploy."))
         return self.get_connection(db, project_id)
 
     def reverify(self, db, project_id: str) -> dict:
@@ -165,18 +188,18 @@ class DeployFlow:
         _log.info("deploy provider disconnected: project=%s", project_id)
 
     def repo_access(self, db, project_id: str, provider: str) -> dict:
-        """Whether the provider's GitHub App can build this project's repo.
-
-        This build does not gate on a live GitHub App install probe, so
-        `granted` is reported optimistically to keep the wizard moving; the
-        real install check is a follow-up. `install_url` is offered when no
-        repo is on file yet so the UI still has somewhere to send the user."""
+        """Whether we can actually build this project's repo — a real GitHub
+        API probe with the project's repo token (AP-533). `reason` is plain
+        language for the UI; `install_url` is offered when access is missing so
+        the user has somewhere to go."""
         self._require_project(db, project_id)
         self._valid_kind(provider)
         target = deploy_repo.get_target(db, project_id)
         repo = target["config"].get("repo", "")
-        result = {"repo": repo, "granted": True}
-        if not repo:
+        token = deploy_repo.github_token_for_project(db, project_id)
+        granted, reason = repo_tokens.repo_access(_repo_url(target["config"]), token)
+        result = {"repo": repo, "granted": granted, "reason": reason}
+        if not granted:
             result["install_url"] = _INSTALL_URL
         return result
 
@@ -184,18 +207,34 @@ class DeployFlow:
 
     def list_deployments(self, db, project_id: str) -> dict:
         """One BranchEntry per branch — `main` first (even if never deployed),
-        then most-recently-updated. A branch with no deployment yet appears
-        with `deployment: null`."""
+        then the repo's real branches (from GitHub), then any branch that has a
+        deployment but no longer exists on the remote. A branch with no
+        deployment yet appears with `deployment: null`. If GitHub is unlinked
+        or unreachable we fall back to the branches we've deployed."""
         self._require_project(db, project_id)
         latest = deploy_repo.latest_deployment_per_branch(db, project_id)
+        target = deploy_repo.get_target(db, project_id)
+        token = deploy_repo.github_token_for_project(db, project_id)
+        real = repo_tokens.list_repo_branches(_repo_url(target["config"]), token)
+
+        # main first, then real branches (repo order), then deployment-only
+        # branches (deployed here but not on the remote), newest first.
+        seen = {"main"}
+        ordered = ["main"]
+        for name in real:
+            if name not in seen:
+                ordered.append(name)
+                seen.add(name)
+        leftover = sorted(
+            (b for b in latest if b not in seen),
+            key=lambda b: latest[b].updated_at, reverse=True)
+        ordered.extend(leftover)
+
         branches = [
-            _branch_entry(latest["main"]) if "main" in latest
-            else _empty_branch("main", is_main=True)
+            _branch_entry(latest[name]) if name in latest
+            else _empty_branch(name, is_main=(name == "main"))
+            for name in ordered
         ]
-        others = sorted(
-            (row for branch, row in latest.items() if branch != "main"),
-            key=lambda r: r.updated_at, reverse=True)
-        branches.extend(_branch_entry(row) for row in others)
         return {"branches": branches}
 
     def create_deployment(self, db, project_id: str, *, branch: str,
@@ -283,10 +322,36 @@ class DeployFlow:
             provider_deployment_id=result.deployment_id or None,
             url=result.url, trigger=trigger)
         if existing is not None:
-            return deploy_repo.update_deployment(db, existing.id, **fields)
-        return deploy_repo.create_deployment(
-            db, org_id=project.org_id, project_id=project.id, branch=branch,
-            is_main=(branch == "main"), provider_kind=kind, **fields)
+            row = deploy_repo.update_deployment(db, existing.id, **fields)
+        else:
+            row = deploy_repo.create_deployment(
+                db, org_id=project.org_id, project_id=project.id, branch=branch,
+                is_main=(branch == "main"), provider_kind=kind, **fields)
+        self._record_github_deployment(db, project, config, branch, status,
+                                        result.url)
+        return row
+
+    def _record_github_deployment(self, db, project: Project, config: dict,
+                                   branch: str, status: str, url: str | None):
+        """Log this deploy on the repo's GitHub Deployments ledger (ADR-011 §4)
+        when the repo is on GitHub. No-op / best-effort otherwise — a ledger
+        hiccup must never fail the deploy."""
+        repo_url = _repo_url(config)
+        token = deploy_repo.github_token_for_project(db, project.id)
+        if not repo_url or not token:
+            return
+        try:
+            deployment_id = github_deployments.record_deployment(
+                repo_url, token, ref=branch, environment="production",
+                description=f"Agentira deploy of {branch}")
+            if deployment_id is not None:
+                github_deployments.record_deployment_status(
+                    repo_url, token, deployment_id,
+                    state=_GH_STATE.get(status, "in_progress"),
+                    deployment_url=url)
+        except Exception as exc:  # never fatal
+            _log.warning("github deployment ledger failed: project=%s: %s",
+                         project.id, exc)
 
     def _require_project(self, db, project_id: str) -> Project:
         project = db.get(Project, project_id)
