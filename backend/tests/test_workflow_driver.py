@@ -424,7 +424,8 @@ def _approve(db, pid, task_id, reviewer_name):
 
 
 def _setup_review_success(db_session, *, with_approval=True,
-                          reviewer_name="senior reviewer"):
+                          reviewer_name="senior reviewer",
+                          pr_url="https://github.com/o/r/pull/1"):
     """A succeeded REVIEWER run on a task sitting in `review`.
 
     Post-incident fix (2026-07-04, PR #167 merged before its verdict): a
@@ -447,7 +448,7 @@ def _setup_review_success(db_session, *, with_approval=True,
         t = Task(project_id=pid, title="Build feature",
                  status_id=_status_id(db, "review"),
                  priority=TaskPriority.HIGH, assignee=reviewer_name,
-                 creator="system", branch="agent/x/task/y",
+                 creator="system", branch="agent/x/task/y", pr_url=pr_url,
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
@@ -667,6 +668,7 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         task_id = t.id
@@ -823,6 +825,7 @@ def test_ap383_sticky_reviewer_row_reapproval_integrates(db_session):
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         task_id = t.id
@@ -1173,3 +1176,23 @@ def test_task_branch_follows_succeeded_run_even_when_workflow_disabled(db_sessio
     workflow.advance_after_run(run_id)
     with db_session() as db:
         assert db.get(Task, task_id).branch == "agent/coder2/task/t1"
+
+
+def test_no_merge_without_a_pull_request(db_session):
+    """User rule (2026-09-25): nothing merges without a PR. An approved task
+    with no linked PR is refused — no integration, no advance, a plain
+    comment — instead of being merged directly."""
+    pid, task_id, run_id = _setup_review_success(db_session, pr_url="")
+    with patch("backend.forge.ws_dispatch.hub.dispatch_integrate") as integ:
+        out = workflow.advance_after_run(run_id)
+    integ.assert_not_called()
+    assert out["advanced"] is False
+    assert out["reason"] == "no_pull_request"
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"
+    from backend.models import Activity
+    with db_session() as db:
+        details = [a.detail or "" for a in
+                   db.query(Activity).filter(Activity.task_id == task_id).all()]
+    assert any("pull request" in d.lower() for d in details)

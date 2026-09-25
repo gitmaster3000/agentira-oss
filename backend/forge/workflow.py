@@ -882,18 +882,28 @@ def advance_after_run(run_id: str) -> dict:
                 return {"advanced": False, "reason": f"no_on_success_for_{current}"}
             target = spec.advance_to
 
-            # The driver respects the same evidence a manual move would —
-            # except the PR-proxy gates when the flow integrates the branch
-            # itself: gates exist to stop FAKED progress, and a system-performed
-            # merge (verified by the daemon, conflict-aborted) is strictly
-            # stronger evidence than a pr_url string. DoD gates still apply.
+            # The driver respects exactly the evidence a manual move would.
+            # Nothing merges without a pull request (user rule, 2026-09-25):
+            # the PR gate is never waived, and an approved task with no PR is
+            # refused with a plain comment rather than bounced or merged.
             import time as _time
             _started = _time.monotonic()
             all_results = gates.evaluate(task, from_status=current, to_status=target)
             fails = gates.failures(all_results)
             if spec.integrate is not None:
-                fails = [f for f in fails
-                         if f.name not in ("pr_url_set", "has_branch_or_pr")]
+                if not (task.pr_url or "").strip():
+                    services_core = __import__("backend.services", fromlist=["add_comment"])
+                    services_core.add_comment(
+                        task.id,
+                        ("⛔ **Merge refused** — there is no pull request for this "
+                         "task. Work is only merged through an approved pull "
+                         "request: open one for the task's branch and link it on "
+                         "the task."),
+                        actor="workflow")
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current,
+                        to_status=target, result="no_op:no_pull_request")
+                    return {"advanced": False, "reason": "no_pull_request"}
                 # Terminal gate (plan v4 §5): merging requires >=1 typed
                 # evidence.* condition. The human-approval fact is fetched from
                 # the review_verdict store and its snapshot is persisted as its
@@ -1256,9 +1266,8 @@ def complete_integration(*, task_id: str, run_id: str | None,
 
         # TaskService, not a raw write: auth (AP-374), activity logging
         # (AP-375), and agent wake come from the one place. skip_gates=True
-        # is the explicit re-entrancy escape hatch — the merge just
-        # completed is stronger evidence than the pr_url/branch gates this
-        # transition would otherwise re-check (see docstring above).
+        # only avoids re-checking: every gate (incl. the linked PR) was
+        # already enforced before the integration was requested.
         from backend import services as core_task_services
         core_task_services.move_task(task_id_, target, actor="workflow",
                                      skip_gates=True, record_transition=False)
