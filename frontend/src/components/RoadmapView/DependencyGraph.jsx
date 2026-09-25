@@ -34,9 +34,10 @@ function layer(taskIds, dependsOn) {
 }
 
 /**
- * Dependency DAG for the project. Only tasks that participate in at least one
- * dependency are drawn — an unconnected task is board work, not graph work,
- * and drawing all of them turns the canvas into confetti.
+ * Planning graph for the project: blocking links plus the child → parent tree.
+ * Other link types (related, duplicates) stay out — they say nothing about
+ * order, and drawing them turns the canvas into confetti. Only tasks with at
+ * least one of these links are drawn.
  */
 export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
     const { nodes, edges, connectedCount } = useMemo(() => {
@@ -46,12 +47,19 @@ export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
         }
         const edgesIn = dependencies.filter(
             d => byId.has(d.task_id) && byId.has(d.depends_on_id));
+        const parentEdges = [...byId.values()]
+            .filter(t => t.parent_id && byId.has(t.parent_id))
+            .map(t => ({ id: `parent-${t.id}`, child_id: t.id, parent_id: t.parent_id }));
         const connected = new Set();
         const dependsOn = new Map();
         for (const d of edgesIn) {
             connected.add(d.task_id);
             connected.add(d.depends_on_id);
             dependsOn.set(d.task_id, [...(dependsOn.get(d.task_id) || []), d.depends_on_id]);
+        }
+        for (const p of parentEdges) {
+            connected.add(p.child_id);
+            connected.add(p.parent_id);
         }
 
         const ids = [...connected];
@@ -106,7 +114,18 @@ export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
             };
         });
 
-        return { nodes, edges, connectedCount: connected.size };
+        // Child → parent reads as "part of", so it gets its own dashed, open
+        // arrow instead of the solid blocking one.
+        const treeEdges = parentEdges.map(p => ({
+            id: p.id,
+            source: p.child_id,
+            target: p.parent_id,
+            animated: false,
+            style: { stroke: '#8ab4f8', strokeWidth: 1.5, strokeDasharray: '4 3' },
+            markerEnd: { type: MarkerType.Arrow, color: '#8ab4f8' },
+        }));
+
+        return { nodes, edges: [...edges, ...treeEdges], connectedCount: connected.size };
     }, [epics, dependencies]);
 
     if (!nodes.length) {
@@ -114,10 +133,10 @@ export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
             <div className="card p-6 text-sm text-text-tertiary">
                 <div className="flex items-center gap-2 text-text-primary font-medium mb-1">
                     <Workflow className="w-4 h-4" />
-                    Nothing depends on anything yet
+                    Nothing is linked yet
                 </div>
-                Open a task and add a “waits on” link to say which work has to finish first.
-                Anything you link shows up here as a chart.
+                Open a task and add a “waits on” or “part of” link to say what has to finish
+                first and what belongs together. Anything you link shows up here as a chart.
             </div>
         );
     }
@@ -127,10 +146,11 @@ export function DependencyGraph({ epics = [], dependencies = [], onOpenTask }) {
             <div className="px-4 py-3 border-b border-border-subtle/40 flex items-center gap-2">
                 <Workflow className="w-4 h-4 text-text-tertiary" />
                 <span className="text-xs font-medium text-text-primary uppercase tracking-wider">
-                    Dependency flow
+                    Work flow
                 </span>
                 <span className="text-xs text-text-tertiary ml-auto">
-                    blocker → dependent · {connectedCount} tasks · {edges.length} links · red = still waiting
+                    blocker → dependent · dashed = part of · {connectedCount} tasks
+                    · {edges.length} links · red = still waiting
                 </span>
             </div>
             <div style={{ height: 560 }}>

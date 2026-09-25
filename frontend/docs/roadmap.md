@@ -39,19 +39,21 @@ range picker to focus every mode on a specific planning window.
 Tasks with no dates aren't shown — the count of them is printed under the
 calendar, so you can see what's still unscheduled instead of it quietly missing.
 
-### Dependencies
-A chart of your dependencies, read left to right: everything on the left has to
-finish before the things it points to can start. Each arrow reads
-**blocker → dependent task**.
+### Links
+A chart of the links that affect order, read left to right: everything on the
+left has to finish before the things it points to can start. Each solid arrow
+reads **blocker → dependent task**.
 
 - Red arrow = the earlier task isn't done, so the later one is still waiting.
 - Green arrow = that link is satisfied.
+- Dashed blue arrow = the task is **part of** the one it points at.
 - A red outline on a task means something it needs isn't finished.
 
-Click a task to open its full page. Click an arrow to remove that link.
+Other link types (related to, duplicates) aren't drawn here — they say nothing
+about order. Click a task to open its full page.
 
-If the chart is empty, nothing has been linked yet — see "Saying one task waits on
-another" below.
+If the chart is empty, nothing has been linked yet — see "Linking tasks together"
+below.
 
 ### Milestones
 Your list of dated things you're aiming at: a launch, a demo, a client deadline.
@@ -67,7 +69,7 @@ for the record; it doesn't change the progress number.
 
 ## On a task page
 
-Open any task and look at the **Dependencies** panel.
+Open any task and look at the **Links** panel.
 
 The full task page has three tabs: **Plan**, **Run** and **Activity**.
 
@@ -77,7 +79,7 @@ never lose track of which task you're reading.
 **Plan** has a fixed-height top band, so a long or short description never
 decides how much of the page sits empty. The description takes the left half and
 scrolls inside its own card. The right half is a single panel of collapsible
-sections — Details, Dependencies, Definition of Done, Branch & PR, Files and
+sections — Details, Links, Definition of Done, Branch & PR, Files and
 Timestamps — the same sections, in the same order, as the task side panel, so
 they read the same wherever you meet them. Click a section header to fold it
 away. On a wide screen the panel takes more of the width and each section
@@ -90,27 +92,34 @@ assigned, how to start it, and the latest run's state and summary. **Activity**
 keeps the complete read-only event history available without mixing it into the
 working view.
 
-### Breaking a task into subtasks
-Under **Subtasks**, press **+** and pick an existing task in the project. It
-becomes a subtask of the one you're looking at, and the parent shows a `2/5`-style
-count as the children get done.
+### Linking tasks together
+Press **+** in the **Links** panel, choose what kind of link it is and pick the
+task. You don't have to be in Edit mode to add one; removing a link does need
+Edit.
+
+Every link has two sides, and you only ever set one of them — the other task gets
+the matching half automatically:
+
+| You say | The other task shows |
+|---|---|
+| Waits on | Blocks |
+| Part of | Subtasks |
+| Related to | Related to |
+| Duplicates | Duplicated by |
+
+**Waits on** / **Blocks** decide order: a task that's waiting gets a *waiting*
+badge on the roadmap and shows up in the Links chart. **Part of** / **Subtasks**
+build the tree, and the parent shows a `2/5`-style count as the children get
+done. **Related to** and **Duplicates** are just context — they never hold work
+up.
 
 Deleting a parent task does **not** delete its subtasks — they just stop being
 nested. Work never disappears because you reorganised.
 
-Under **Part of**, you can nest the current task under a bigger one instead.
-
-### Saying one task waits on another
-- **Waits on** — things that must finish before this task can start.
-- **Blocks** — things that are waiting on this task.
-
-Add either with **+** and pick a task. Anything you add shows up in the
-**Dependencies** chart, and a task that's waiting gets a *waiting* badge on the
-roadmap.
-
 You can't create a loop (A waits on B waits on A) — if you try, the panel tells
 you instead of saving something impossible. Same for making a task its own
-parent, or linking to a task in another project.
+parent, or linking to a task in another project. Two tasks hold one link at a
+time: pick a different kind for the same pair and it replaces the old one.
 
 ### Counting a task towards a milestone
 Under **Counts towards**, pick a milestone. That's what feeds the milestone's

@@ -740,5 +740,8 @@ class TaskDependency(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
     depends_on_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), nullable=False, index=True)
+    # AP-507: typed links. "depends_on" keeps the original blocking meaning.
+    link_type: Mapped[str] = mapped_column(String(20), default="depends_on",
+                                           nullable=False, index=True)
     creator: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

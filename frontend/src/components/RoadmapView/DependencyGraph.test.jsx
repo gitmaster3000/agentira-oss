@@ -6,7 +6,7 @@ import { DependencyGraph } from './DependencyGraph';
 const mocks = vi.hoisted(() => ({ reactFlowProps: vi.fn() }));
 
 vi.mock('@xyflow/react', () => ({
-    MarkerType: { ArrowClosed: 'arrow-closed' },
+    MarkerType: { ArrowClosed: 'arrow-closed', Arrow: 'arrow' },
     ReactFlow: (props) => {
         mocks.reactFlowProps(props);
         return (
@@ -52,5 +52,23 @@ describe('DependencyGraph', () => {
         }));
         fireEvent.click(screen.getByRole('button', { name: /AP-42 Ship feature/ }));
         expect(onOpenTask).toHaveBeenCalledWith('AP-42');
+    });
+
+    it('draws child → parent links dashed, alongside blocking links', () => {
+        const epics = [{
+            name: 'Launch',
+            tasks: [
+                { id: 't1', key: 'AP-41', title: 'Parent', status: 'todo' },
+                { id: 't2', key: 'AP-42', title: 'Child', status: 'todo', parent_id: 't1' },
+            ],
+        }];
+        render(<DependencyGraph epics={epics} dependencies={[]} />);
+
+        expect(mocks.reactFlowProps).toHaveBeenCalledWith(expect.objectContaining({
+            edges: [expect.objectContaining({
+                id: 'parent-t2', source: 't2', target: 't1',
+                style: expect.objectContaining({ strokeDasharray: '4 3' }),
+            })],
+        }));
     });
 });

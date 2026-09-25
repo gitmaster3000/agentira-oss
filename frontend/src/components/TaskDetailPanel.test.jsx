@@ -13,6 +13,9 @@ vi.mock('../api', () => ({
         getProjectMembers: vi.fn(() => Promise.resolve([])),
         getEpics: vi.fn(() => Promise.resolve([])),
         listSubtasks: vi.fn(() => Promise.resolve([])),
+        listTaskLinks: vi.fn(() => Promise.resolve([])),
+        addTaskLink: vi.fn(() => Promise.resolve({})),
+        removeTaskLink: vi.fn(() => Promise.resolve({ ok: true })),
         listTasks: vi.fn(() => Promise.resolve([])),
         listMilestones: vi.fn(() => Promise.resolve([])),
         moveTask: vi.fn(() => Promise.resolve({})),
@@ -185,20 +188,21 @@ describe('TaskDetailPanel — layout & resizing', () => {
         expect(screen.queryByText('Attach a file')).not.toBeInTheDocument();
     });
 
-    it('shows planning relationships and only exposes their controls in edit mode', async () => {
+    it('shows links, and only exposes removal in edit mode', async () => {
         const onSelectTask = vi.fn();
-        api.listSubtasks.mockResolvedValueOnce([
-            { id: 'T2', key: 'AP-2', title: 'Child work', status: 'todo' },
+        api.listTaskLinks.mockResolvedValueOnce([
+            { id: 'parent:T2', type: 'parent_of',
+              task: { id: 'T2', key: 'AP-2', title: 'Child work', status: 'todo' } },
         ]);
         render(<Harness task={baseTask()} onSelectTask={onSelectTask} />);
 
         expect(await screen.findByText('Child work')).toBeInTheDocument();
-        expect(screen.queryByTitle('Add a subtask')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Remove this link')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'AP-2' }));
         expect(onSelectTask).toHaveBeenCalledWith('T2');
 
         fireEvent.click(screen.getByTitle('Edit'));
-        expect(screen.getByTitle('Add a subtask')).toBeInTheDocument();
+        expect(screen.getByTitle('Remove this link')).toBeInTheDocument();
     });
 
     it('resizes by dragging the divider and remembers the width', async () => {

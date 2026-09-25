@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
 import { MentionInput } from './MentionInput';
-import { RelationsSection } from './TaskDetail/RelationsSection';
+import { LinksSection } from './TaskDetail/LinksSection';
 import { CollapsibleSection } from './TaskDetail/CollapsibleSection';
 import {
     Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
@@ -34,7 +34,7 @@ const clampWidth = (w) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(w))
 
 const RAIL = [
     { id: 'info', label: 'Details', icon: Info },
-    { id: 'relations', label: 'How this fits', icon: ListTree },
+    { id: 'relations', label: 'Links', icon: ListTree },
     { id: 'files', label: 'Files', icon: FileText },
     { id: 'git', label: 'Branch & PR', icon: GitBranch },
     { id: 'comments', label: 'Comments', icon: MessageSquare },
@@ -635,17 +635,17 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
 
                     </CollapsibleSection>
 
-                    {/* Planning relationships share the full-page component.
-                        In both surfaces they are read-only until Edit is active. */}
+                    {/* Links share the full-page component. Adding one works
+                        anywhere; removing one needs Edit. */}
                     <CollapsibleSection
-                        title="How this fits"
+                        title="Links"
                         icon={ListTree}
                         sectionRef={el => (sectionRefs.current.relations = el)}
                         open={openSections.relations}
                         onToggle={() => toggleSection('relations')}
                         separated
                     >
-                        <RelationsSection
+                        <LinksSection
                             task={task}
                             onChanged={onUpdate}
                             onOpenTask={onSelectTask}
@@ -898,4 +898,3 @@ function SectionLabel({ children, inline }) {
         </div>
     );
 }
-
