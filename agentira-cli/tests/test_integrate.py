@@ -43,6 +43,7 @@ def _make_task_branch(url, branch, filename, content="x\n"):
     clone, _ = sources.ensure_source_clone(url)
     wt = Path(clone).parent / f"wt-{branch.replace('/', '-')}"
     _git(clone, "worktree", "add", "-b", branch, str(wt))
+    (wt / filename).parent.mkdir(parents=True, exist_ok=True)
     (wt / filename).write_text(content)
     _git(wt, "add", "-A")
     _git(wt, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", f"work on {branch}")
@@ -90,6 +91,33 @@ def test_conflict_aborts_and_reports(remote_and_sources):
     assert "agentira-integrate-" not in wt_list
     # First integrate's content still on main (version A).
     assert _git(clone, "show", "main:same.txt") == "version A\n"
+
+
+def test_refuses_branch_that_committed_injected_files(remote_and_sources):
+    url = remote_and_sources
+    clone = _make_task_branch(url, "agent/a/task/1", ".agentira/CONVENTIONS.md")
+    before = _git(clone, "rev-parse", "main").strip()
+    ok, reason, verify = integrate_branch(source_url=url, branch="agent/a/task/1",
+                                          verify_cmd="true")
+    assert not ok
+    assert reason == "injected_files_committed: .agentira/CONVENTIONS.md"
+    assert verify is None
+    assert _git(clone, "rev-parse", "main").strip() == before
+
+
+def test_injected_name_the_target_tracks_is_fine(remote_and_sources, tmp_path):
+    """A repo that ships its own CLAUDE.md: editing it is normal work."""
+    url = remote_and_sources
+    team = tmp_path / "team"
+    subprocess.run(["git", "clone", "-q", url, str(team)], check=True)
+    (team / "CLAUDE.md").write_text("team rules\n")
+    _git(team, "add", "-A")
+    _git(team, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "rules")
+    _git(team, "push", "-q", "origin", "main")
+    clone = _make_task_branch(url, "agent/b/task/2", "CLAUDE.md", "team rules v2\n")
+    ok, reason, _ = integrate_branch(source_url=url, branch="agent/b/task/2")
+    assert ok, reason
+    assert _git(clone, "show", "main:CLAUDE.md") == "team rules v2\n"
 
 
 def test_missing_inputs_fail_cleanly():

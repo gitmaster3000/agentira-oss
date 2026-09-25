@@ -70,7 +70,7 @@ columns:
         # infrastructure — the task stays put and admins are notified.
         # Shares the bounce budget below.
         on_failure:
-          hand_back_on: [verify_failed, verify_timeout, merge_conflict, merge_failed]
+          hand_back_on: [verify_failed, verify_timeout, merge_conflict, merge_failed, injected_files_committed]
           to_column: in_progress
           assign: previous_agent      # or a role name from `roles`
           dispatch: true
