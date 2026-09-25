@@ -63,11 +63,22 @@ merging into `main-rsi`, on the local stack.
 | B4 | No platform-run verification. Gates off; `github_pr`/`ci` providers need GitHub App creds → unknown. "Verified" = an LLM said approve. | gates-and-evidence.md; project `gates_enabled=false`. |
 | B5 | Status lies: turn "dispatched" when undelivered, stale runtime row "online", planning card "undefined task(s)". | Conductor page. |
 | B6 | Conductor is not a member of Agentira Platform → its MCP writes are refused. | members list; prior Conductor chat "access denied". |
+| B7 | The workflow driver is unwired: since 2026-07-09 (#204) `finish_run` no longer calls `advance_after_run`, and `/daemon/integration-result` ignores results. No run advances any task. | services.py finish_run comment; router.py `daemon_integration_result`. |
 
 ## 4. Design
 
-Eight small components. Each is independently testable; none adds a new
+Nine small components. Each is independently testable; none adds a new
 subsystem.
+
+### C0 — Re-enable the workflow driver deliberately (B7)
+
+- `finish_run`: on outcome `succeeded`, call `workflow.advance_after_run`
+  (never raises; still no-ops unless the project has `workflow_enabled`).
+- `/daemon/integration-result` calls `workflow.complete_integration`.
+- This is the "reviewed and re-enabled deliberately" condition from #204: it
+  lands together with C5 (merge only into the repo's base branch) and C6
+  (merge only after the project's tests pass on the merged tree).
+
 
 ### C1 — Dispatch: READY is startable for conductor-managed agents (B1)
 
@@ -231,6 +242,9 @@ done. The Conductor page shows turn delivery states (C4).
 ## 7. Testing
 
 TDD per component, Postgres fixtures (`pg`, `seed_admin`):
+
+- C0: `finish_run(succeeded)` on a workflow-enabled project advances the
+  task; integration-result `ok` moves review → done.
 
 - C1: agent with a READY run on an assigned todo task is picked; manual
   (non-managed) agent is not auto-started.
