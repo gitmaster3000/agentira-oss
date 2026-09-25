@@ -233,7 +233,7 @@ function GeneralTab({ projectId }) {
             <Field label="Command that proves the project works"
                 hint="Runs on the merged code before anything is pushed. If it fails, the work goes back to the agent with the output. Leave empty and merges are refused.">
                 <input className="input font-mono text-xs" aria-label="Command that proves the project works"
-                    placeholder="scripts/verify.sh"
+                    placeholder="e.g. make test"
                     value={form.verify_cmd}
                     onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })} />
             </Field>
