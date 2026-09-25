@@ -54,8 +54,9 @@ columns:
       # daemon-side merge of the task branch into the target; the task only
       # reaches done when the merge (and push) succeed. Conflict -> the task
       # stays in review with a classified reason for the implementer.
+      # target_branch omitted = the task repo's default_branch (never a
+      # hardcoded main — Loop v1 C5).
       integrate:
-        target_branch: main
         push: true
   - name: done
     # Slice 3: a task arriving in done (branch merged) gets the documentation

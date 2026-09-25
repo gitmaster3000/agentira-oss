@@ -427,13 +427,19 @@ class AgentiraDaemon:
         def _run():
             from agentira_cli.daemon.integrate import integrate_branch
             ok, reason = False, "unknown"
+            target = (frame.get("target_branch") or "").strip()
             try:
-                ok, reason = integrate_branch(
-                    source_url=frame.get("source_url", "") or "",
-                    branch=frame.get("branch", "") or "",
-                    target_branch=frame.get("target_branch", "") or "main",
-                    push=bool(frame.get("push", True)),
-                )
+                if not target:
+                    # Never guess `main`: a branch-based project would get
+                    # merges pushed to the wrong branch (Loop v1 C5).
+                    reason = "target_branch_missing: backend sent no target branch"
+                else:
+                    ok, reason = integrate_branch(
+                        source_url=frame.get("source_url", "") or "",
+                        branch=frame.get("branch", "") or "",
+                        target_branch=target,
+                        push=bool(frame.get("push", True)),
+                    )
             except Exception as exc:  # noqa: BLE001 — report, don't die
                 reason = f"integrate_exception: {exc}"
             try:

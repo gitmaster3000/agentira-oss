@@ -97,3 +97,28 @@ def test_missing_inputs_fail_cleanly():
     assert not ok and "source url" in reason
     ok, reason = integrate_branch(source_url="file:///nope", branch="")
     assert not ok
+
+
+# ── Loop v1 C5: no silent `main` fallback on the daemon side ──────────────
+
+def test_integrate_frame_without_target_is_refused(monkeypatch):
+    from unittest.mock import MagicMock
+    from agentira_cli.daemon import core, integrate as integrate_mod
+    d = core.AgentiraDaemon.__new__(core.AgentiraDaemon)
+    d.client, d._daemon_id = MagicMock(), "d1"
+    merged = MagicMock()
+    monkeypatch.setattr(integrate_mod, "integrate_branch", merged)
+
+    class _SyncThread:
+        def __init__(self, target, daemon=None):
+            self._t = target
+
+        def start(self):
+            self._t()
+    monkeypatch.setattr(core.threading, "Thread", _SyncThread)
+
+    d._integrate({"task_id": "t1", "run_id": "r1", "source_url": "file:///x",
+                  "branch": "agent/t1"})
+    merged.assert_not_called()
+    kw = d.client.post_integration_result.call_args.kwargs
+    assert kw["ok"] is False and kw["reason"].startswith("target_branch_missing")

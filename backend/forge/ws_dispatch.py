@@ -214,7 +214,7 @@ class WsHub:
 
     async def dispatch_integrate(self, *, runtime_id: str, task_id: str,
                                  run_id: str = "", source_url: str,
-                                 branch: str, target_branch: str = "main",
+                                 branch: str, target_branch: str,
                                  push: bool = True) -> bool:
         """Workflow slice 2: ask the daemon owning runtime_id to merge an
         approved task branch into the target branch in its shared clone.

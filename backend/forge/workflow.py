@@ -177,7 +177,9 @@ class IntegrateSpec(BaseModel):
     """Branch-integration policy (workflow slice 2). POLICY lives here in
     config; the ACTION is deterministic daemon code (daemon/integrate.py —
     merge --no-ff in the shared clone, push origin)."""
-    target_branch: str = "main"
+    # "" = the task's repo default_branch (Loop v1 C5). Never a literal main:
+    # a fork/branch-based project (e.g. main-rsi) must not merge into main.
+    target_branch: str = ""
     push: bool = True
 
 
@@ -805,14 +807,16 @@ def advance_after_run(run_id: str) -> dict:
                 agent = db.get(Agent, run.agent_id) if run.agent_id else None
                 runtime_id = agent.runtime_id if agent else None
                 source_url = _task_source_url(db, task)
-                if not branch or not runtime_id or not source_url:
+                ispec = spec.integrate
+                target_branch = ispec.target_branch or _integration_target(db, task)
+                if not branch or not runtime_id or not source_url or not target_branch:
                     _log_driver_decision(
                         db, task=task, run=run, from_status=current, to_status=target,
                         result="no_op:integration_missing_info")
                     return {"advanced": False, "reason": "integration_missing_info",
                             "branch": branch, "runtime": bool(runtime_id),
-                            "source_url": bool(source_url)}
-                ispec = spec.integrate
+                            "source_url": bool(source_url),
+                            "target": bool(target_branch)}
                 task_id_, run_id_ = task.id, run.id
                 _log_driver_decision(
                     db, task=task, run=run, from_status=current, to_status=target,
@@ -823,12 +827,12 @@ def advance_after_run(run_id: str) -> dict:
                 _dispatch_coro(hub.dispatch_integrate(
                     runtime_id=runtime_id, task_id=task_id_, run_id=run_id_,
                     source_url=source_url, branch=branch,
-                    target_branch=ispec.target_branch, push=ispec.push,
+                    target_branch=target_branch, push=ispec.push,
                 ))
                 logger.info("workflow: %s integration requested (%s -> %s)",
-                            task.key or task.id, branch, ispec.target_branch)
+                            task.key or task.id, branch, target_branch)
                 return {"advanced": False, "integration_requested": True,
-                        "branch": branch, "target": ispec.target_branch}
+                        "branch": branch, "target": target_branch}
 
             next_agent = None
             if spec.assign_role:
@@ -918,6 +922,19 @@ def _task_source_url(db, task) -> str:
     return (getattr(project, "repo_url", None) or "") if project else ""
 
 
+def _integration_target(db, task) -> str:
+    """The branch an approved task merges into: its repo's default_branch
+    (task.repo_name → project repo row → legacy project fields). "" when
+    unknown — the caller refuses rather than guessing."""
+    from backend import services as core_services
+    try:
+        chosen = core_services.resolve_project_repo(
+            task.project_id, getattr(task, "repo_name", None))
+    except Exception:  # noqa: BLE001
+        chosen = None
+    return ((chosen or {}).get("default_branch") or "").strip()
+
+
 def complete_integration(*, task_id: str, run_id: str | None,
                          ok: bool, reason: str = "") -> dict:
     """Finish a two-phase advance after the daemon reports the merge result.
@@ -980,6 +997,8 @@ def complete_integration(*, task_id: str, run_id: str | None,
         db.commit()
         task_id_, task_key = task.id, (task.key or task.id)
         project_id_ = task.project_id
+        merged_into = ((spec.integrate.target_branch if spec and spec.integrate else "")
+                       or _integration_target(db, task))
 
         # TaskService, not a raw write: auth (AP-374), activity logging
         # (AP-375), and agent wake come from the one place. skip_gates=True
@@ -992,7 +1011,7 @@ def complete_integration(*, task_id: str, run_id: str | None,
         core_task_services.add_comment(
             task_id_,
             (f"✅ **Integrated** — branch merged into "
-             f"{(spec.integrate.target_branch if spec and spec.integrate else 'main')} "
+             f"{merged_into or 'the base branch'} "
              f"and pushed. Task advanced to **{target}**."),
             actor="workflow",
         )

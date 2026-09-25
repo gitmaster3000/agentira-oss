@@ -792,3 +792,46 @@ def test_approve_after_prior_manual_bounce_still_merges(db_session):
         out = workflow.advance_after_run(run_id)
     assert out.get("integration_requested") is True
     mock_bounce.assert_not_called()
+
+
+# ── Loop v1 C5: merge into the repo's base branch, never a literal main ──
+
+def _add_primary_repo(db_session, pid, default_branch):
+    from backend.models import ProjectRepo
+    with db_session() as db:
+        db.add(ProjectRepo(project_id=pid, name="app", repo_path="",
+                           repo_url="file:///tmp/fake-remote.git",
+                           default_branch=default_branch, is_primary=True))
+        db.commit()
+
+
+def _capture_integrate():
+    from unittest.mock import MagicMock
+    from backend.forge.ws_dispatch import hub
+    fake = MagicMock(return_value=None)
+    return fake, patch.object(hub, "dispatch_integrate", fake), \
+        patch("backend.forge.services._dispatch_coro", lambda coro: None)
+
+
+def test_integration_targets_repo_default_branch(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    _add_primary_repo(db_session, pid, "main-rsi")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["target_branch"] == "main-rsi"
+
+
+def test_integration_refused_when_task_has_no_repo(db_session):
+    """No repo row and no legacy repo fields → nothing to merge into: refuse
+    with a reason, never guess a branch."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).repo_url = None
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "integration_missing_info"
+    fake.assert_not_called()
