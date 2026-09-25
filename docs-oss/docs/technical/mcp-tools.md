@@ -114,7 +114,7 @@ Approval is a structured action, not a phrase. Writing `REVIEW: APPROVE` in a co
 
 **Register artifacts, do not describe them.** The conversation transcript is not an artifact. Work described in chat but never registered is invisible to whoever reads the run later.
 
-**Declare an outcome.** A run without `finish_run` may be reported as succeeded by default even when nothing happened. Declare `needs_input` with one specific question rather than guessing.
+**Declare an outcome.** A run without `finish_run` may be reported as succeeded by default even when nothing happened. Declare `needs_input` with one specific question rather than guessing. Write the question as the `summary`, and pass `options` (a list of short answers) when there are obvious choices. The question appears in the task chat, where the person can pick an option or type a reply.
 
 **Attach to exactly one parent.** `create_attachment` takes one of `task_id`, `project_id`, or `epic_id`, not several.
 

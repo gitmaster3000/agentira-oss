@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useShellData } from './shell/shellData';
+import { useShellData, waitingLink } from './shell/shellData';
 
 // The single "live/running" accent — never used for anything that isn't running.
 const PULSE = 'var(--pulse-blue)';
@@ -29,7 +29,7 @@ const secLabel = { fontSize: '10px', fontWeight: 700, letterSpacing: '.1em', col
  * backdrop. Pulse blue appears ONLY for actually-running work.
  */
 export function PulseDock() {
-    const { pulseOpen, togglePulse, runningRuns, waitingRuns, recentNotifs } = useShellData();
+    const { pulseOpen, togglePulse, runningRuns, waitingRuns, recentNotifs, dismissWaiting } = useShellData();
     const navigate = useNavigate();
 
     if (!pulseOpen) return null;
@@ -86,10 +86,11 @@ export function PulseDock() {
                 {waiting.length > 0 && (
                     <>
                         {waiting.map((r) => (
-                            <div key={r.id} className="nav" onClick={() => navigate(`/forge/runs/${r.id}`)} style={{ borderRadius: '9px', background: 'var(--surface-card)', border: '1px solid rgba(255,152,0,.3)', padding: '10px', marginBottom: '8px', cursor: 'pointer' }}>
+                            <div key={r.id} className="nav" onClick={() => navigate(waitingLink(r))} style={{ borderRadius: '9px', background: 'var(--surface-card)', border: '1px solid rgba(255,152,0,.3)', padding: '10px', marginBottom: '8px', cursor: 'pointer' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
                                     <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ff9800" strokeWidth="2"><path d="M12 9v4M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /></svg>
                                     <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffb74d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.agent_name ? `Question from ${r.agent_name}` : 'Waiting on you'}</span>
+                                    <button type="button" aria-label="Dismiss" title="Dismiss" onClick={(e) => { e.stopPropagation(); dismissWaiting(r.id); }} style={{ marginLeft: 'auto', flexShrink: 0, background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>×</button>
                                 </div>
                                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {(r.task_key || r.task_id) && <span style={{ fontFamily: 'ui-monospace,monospace', color: 'var(--accent-mono-blue)' }}>{r.task_key || r.task_id}</span>} {r.task_title || 'Needs your input'}

@@ -956,6 +956,9 @@ def run_migrations():
                                     "VARCHAR(64)")
             added |= _ensure_column(conn, "forge_runs", "ready_checks_at",
                                     "TIMESTAMP")
+            # AP-509: "Needs you" question dismissed by the human.
+            added |= _ensure_column(conn, "forge_runs", "question_dismissed_at",
+                                    "TIMESTAMP")
             if added:
                 conn.commit()
 

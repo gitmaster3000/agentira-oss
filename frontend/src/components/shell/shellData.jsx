@@ -4,6 +4,14 @@ import { api } from '../../api';
 // Projects have no colour of their own. Every project marker uses the one
 // brand accent (--accent-primary), which flips with the day/night theme.
 
+// AP-509: where a "Needs you" card leads — the agent's task chat, where the
+// question is waiting with its answer options; the run page when no task.
+export function waitingLink(r) {
+    return r.task_id && r.agent_id
+        ? `/chat?agent=${r.agent_id}&scope=task:${r.task_id}`
+        : `/forge/runs/${r.id}`;
+}
+
 export function projectKey(p) {
     if (p?.key) return p.key;
     return (p?.name || '??').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || '??';
@@ -19,7 +27,7 @@ export function projectKey(p) {
 const ShellDataContext = createContext({
     projects: [], runningRuns: [], runningByProject: {}, runningTotal: 0,
     waitingRuns: [], recentNotifs: [], agentCount: null, unread: 0,
-    pulseOpen: false, togglePulse: () => {},
+    pulseOpen: false, togglePulse: () => {}, dismissWaiting: () => {},
 });
 
 const PULSE_KEY = 'agentira.pulseOpen';
@@ -46,6 +54,13 @@ export function ShellDataProvider({ children }) {
         return next;
     });
 
+    // Drop a "Needs you" question at once; the server keeps it hidden until
+    // the agent asks a new one. A failed call just lets the next poll restore it.
+    const dismissWaiting = (id) => {
+        setWaitingRuns((list) => list.filter((r) => r.id !== id));
+        api.forge.dismissRun(id).catch(() => {});
+    };
+
     useEffect(() => {
         let cancelled = false;
 
@@ -65,7 +80,7 @@ export function ShellDataProvider({ children }) {
             try {
                 const [runs, waiting, notifs] = await Promise.all([
                     api.forge.listRuns({ status: 'running' }).catch(() => []),
-                    api.forge.listRuns({ outcome: 'needs_input' }).catch(() => []),
+                    api.forge.listRuns({ outcome: 'needs_input', unresolved: true }).catch(() => []),
                     api.getNotifications(false).catch(() => []),
                 ]);
                 if (cancelled) return;
@@ -94,7 +109,7 @@ export function ShellDataProvider({ children }) {
     const value = {
         projects, runningRuns, runningByProject, runningTotal,
         waitingRuns, recentNotifs, agentCount, unread,
-        pulseOpen, togglePulse,
+        pulseOpen, togglePulse, dismissWaiting,
     };
     return <ShellDataContext.Provider value={value}>{children}</ShellDataContext.Provider>;
 }

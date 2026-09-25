@@ -1303,40 +1303,42 @@ def get_active_runs(actor: str = "system") -> dict:
 
 def list_runs(*, agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
+              unresolved: bool = False,
               limit: int = 100, offset: int = 0,
               actor: str = "system") -> list[dict]:
+    from backend.forge.repos import runs as runs_repo
+    if status:
+        try:
+            RunStatus(status)
+        except ValueError:
+            raise ValueError(f"invalid run status: {status!r}")
+    if outcome:
+        try:
+            RunOutcome(outcome)
+        except ValueError:
+            raise ValueError(f"invalid run outcome: {outcome!r}")
     with _session() as db:
         from backend.auth import project_ids_for_actor
-        q = db.query(Run)
-        project_ids = project_ids_for_actor(db, actor)
-        if project_ids is not None:
-            q = q.filter(Run.project_id.in_(project_ids))
-        if agent_id:
-            q = q.filter(Run.agent_id == agent_id)
-        if project_id:
-            q = q.filter(Run.project_id == project_id)
-        if status:
-            try:
-                RunStatus(status)
-            except ValueError:
-                raise ValueError(f"invalid run status: {status!r}")
-            q = q.filter(Run.status == status)
-        if outcome:
-            try:
-                RunOutcome(outcome)
-            except ValueError:
-                raise ValueError(f"invalid run outcome: {outcome!r}")
-            q = q.filter(Run.outcome == outcome)
         # AP-190: the Runs list is one row per (agent, task) — the work-view of
-        # that task's chat — NOT a per-turn is_work-filtered view. `is_work`
-        # used to hide a task run until it committed something, so an agent
-        # actively working a task was invisible everywhere except its own URL.
-        # Dropped. We still exclude throwaway shadow rows (mirrors
-        # get_active_runs). Per-task chat runs are already 1-per-(agent,task)
-        # via get_or_create_task_run, so no per-turn duplication.
-        q = q.filter(Run.trigger_event != "chat.shadow").filter(_run_org_scope())
-        runs = q.order_by(Run.created_at.desc()).offset(offset).limit(limit).all()
+        # that task's chat — NOT a per-turn is_work-filtered view.
+        runs = runs_repo.list_runs(
+            db, scope=_run_org_scope(),
+            project_ids=project_ids_for_actor(db, actor),
+            agent_id=agent_id, project_id=project_id, status=status,
+            outcome=outcome, unresolved=unresolved, limit=limit, offset=offset)
         return [_run_to_dict(r) for r in runs]
+
+
+def dismiss_run_question(run_id: str, actor: str = "system") -> dict:
+    """AP-509: hide a run's question from "Needs you" (until it asks again)."""
+    from backend.forge.repos import runs as runs_repo
+    with _session() as db:
+        r = db.query(Run).filter(Run.id == run_id).filter(_run_org_scope()).first()
+        if not r:
+            return {"error": "Run not found"}
+        _assert_run_access(db, r, actor)
+        runs_repo.dismiss_question(db, run_id)
+        return {"ok": True}
 
 
 def get_run(run_id: str, actor: str = "system") -> dict | None:
@@ -3689,7 +3691,7 @@ def cancel_run(run_id: str) -> dict:
 
 
 def finish_run(run_id: str, *, outcome: str, summary: str = "",
-               run_token: str = "") -> dict:
+               run_token: str = "", options: list[str] | None = None) -> dict:
     """Agent-declared semantic completion (called from finish_run MCP tool).
 
     Sets Run.outcome (the semantic verdict — succeeded / blocked / needs_input
@@ -3705,6 +3707,10 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
     Idempotent: re-calling with the same outcome is a no-op. Calling
     after a run has been cancelled/failed terminally still updates
     outcome/summary so the agent's last-word verdict is preserved.
+
+    AP-509: on needs_input for a task run, `summary` is the question — it is
+    posted into the agent's task chat with `options` as clickable answers, and
+    the needs-input notifications link straight to that chat.
     """
     try:
         outcome_enum = RunOutcome(outcome)
@@ -3754,6 +3760,14 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         r.outcome = outcome_enum
         if summary:
             r.summary = summary
+        chat_link = ""
+        if outcome_enum == RunOutcome.NEEDS_INPUT and r.task_id:
+            from backend.forge.repos import messages as messages_repo
+            messages_repo.add_question(
+                db, agent_id=r.agent_id, run_id=r.id, task_id=r.task_id,
+                question=summary or "I need your input to continue.",
+                options=[str(o) for o in (options or []) if str(o).strip()])
+            chat_link = f"/chat?agent={r.agent_id}&scope=task:{r.task_id}"
         db.commit()
 
         # When the agent declares a run finished, surface it to the humans on
@@ -3801,7 +3815,7 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                         type_=f"forge.run.{outcome_enum.value}",
                         title=f"{icon} {actor_name or 'Agent'} {outcome_enum.value} "
                               f"{task.key or 'task'}: {(summary or '').strip()[:120]}",
-                        link=f"/projects/{task.project_id}/tasks/{task.id}",
+                        link=chat_link or f"/projects/{task.project_id}/tasks/{task.id}",
                     )
                     db.commit()
             except Exception as exc:  # noqa: BLE001 — best-effort
@@ -3823,7 +3837,7 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
                     task = db.get(_Task, r.task_id)
                     if task:
                         task_label = f" {task.key}" if task.key else ""
-                        link = f"/projects/{task.project_id}/tasks/{task.id}"
+                        link = chat_link or f"/projects/{task.project_id}/tasks/{task.id}"
                 verb = ("blocked" if outcome_enum is RunOutcome.BLOCKED
                         else "needs input on")
                 title = (f"Agent {verb} task{task_label}: "

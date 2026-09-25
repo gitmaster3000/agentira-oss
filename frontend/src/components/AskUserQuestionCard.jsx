@@ -103,7 +103,7 @@ function QuestionBlock({ q, onAnswer }) {
                         className={`${optionBase} border-dashed border-border-subtle text-text-tertiary hover:text-text-secondary hover:border-accent-primary/60`}
                     >
                         <span className="text-xs mt-0.5 shrink-0">+</span>
-                        <div className="text-sm">Something else…</div>
+                        <div className="text-sm">{options.length ? 'Something else…' : 'Type your answer…'}</div>
                     </button>
                 )}
                 {interactive && otherOpen && (
