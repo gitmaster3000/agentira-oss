@@ -154,6 +154,14 @@ decides what happens to the **task**. In order:
    comment and admins are notified. The Conductor's progress watchdog is the
    recovery layer above that.
 
+**Everything is scoped to the run's current turn.** Run rows are sticky — one
+row per agent + task, reused for every turn, so `created_at` never moves. The
+driver therefore measures from `started_at` (re-stamped each turn): the
+"already decided for this run" guard, the rejection check, and the reviewer
+approval all look only at what happened since the current turn began. Using
+`created_at` made a reviewer's re-approval after a rework cycle get skipped
+forever (AP-383).
+
 ---
 
 ## Liveness

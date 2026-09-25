@@ -365,9 +365,17 @@ def _already_handed_off(db, run: Run, task: Task) -> bool:
     task?") — a race between two finish_run calls landing close together
     could misjudge that ordering and deadlock the pipeline. Now it's an
     explicit fact: has a transition_events row with cause="run:<run.id>"
-    already been written? That is unambiguous regardless of timing."""
+    already been written THIS turn? Scoped to the turn because sticky run rows
+    are reused (AP-383 deadlock: a decision from the row's earlier turn
+    skipped every later finish)."""
     return transitions_repo.has_driver_event_for_run(
-        db, task_id=task.id, run_id=run.id)
+        db, task_id=task.id, run_id=run.id, since=_turn_started_at(run))
+
+
+def _turn_started_at(run: Run):
+    """When the run's CURRENT turn began. Sticky rows (AP-281) keep their
+    created_at forever; started_at is re-stamped on every turn."""
+    return run.started_at or run.created_at
 
 
 def _in_flight(db, agent_id: str) -> int:
@@ -517,7 +525,7 @@ def _rejection_demotion(db, *, run: Run, task: Task,
         (i for i, c in enumerate(flow.columns)
          if c.on_success and c.on_success.integrate is not None), None)
     moves = activities_repo.task_moves_since(
-        db, task_id=task.id, since=run.created_at)
+        db, task_id=task.id, since=_turn_started_at(run))
     for m in moves:
         try:
             diff = json.loads(m.diff or "{}").get("status") or {}
@@ -556,7 +564,8 @@ def _human_approval_evidence(db, *, run: Run, task: Task):
     from backend.forge import evidence
     return evidence.evaluate(
         "human_approval", task, db,
-        ctx={"reviewer": _reviewer_name(db, run), "since": run.created_at})
+        ctx={"reviewer": _reviewer_name(db, run),
+             "since": _turn_started_at(run)})
 
 
 def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
