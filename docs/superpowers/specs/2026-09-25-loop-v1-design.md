@@ -4,28 +4,41 @@ Date: 2026-09-25 · Branch: `main-rsi` · Target: local stack only
 
 ## 1. Goal
 
-A human steers **epics**. Agentira does the rest, continuously: breaks epics into
-tasks, queues them, dispatches agents, reviews, **verifies by running the
-project's tests itself**, merges into the repo's base branch, and picks the
-next task — with every step visible in Agentira.
+Agents run the **whole** scrum cycle, continuously: the Conductor keeps the
+project's direction, creates and prioritises epics, plans sprints, breaks
+epics into tasks, dispatches agents, reviews, **verifies by running the
+project's tests itself**, merges into the repo's base branch, runs the sprint
+review, and starts the next sprint — every step visible in Agentira.
+
+The human never has to act for the loop to proceed. They steer when they want
+to: ask the Conductor questions in chat, edit anything (direction, epics,
+tasks, priorities), or intervene on a task. They read an **executive
+summary** of the work.
 
 First proving ground: the **Agentira Platform** project building itself,
 merging into `main-rsi`, on the local stack.
 
 ### Success criteria (acceptance test)
 
-1. Human creates an epic in Agentira Platform and sets it to `in_progress`
-   (epic statuses are `backlog | in_progress | done`; `in_progress` = "work on this").
-2. With no further human clicks, within a few planning cycles:
-   - the Conductor (Opus 5.5) creates tasks under it with DoD and links;
-   - tasks are assigned, dispatched, implemented, reviewed;
-   - the daemon merges each approved branch, runs the project's verify
-     command on the merged tree, and pushes to `origin/main-rsi` only if it
-     passes; a failure goes back to the implementer with the test output;
-   - tasks reach `done`; the next task starts without a human.
-3. Every decision above appears on the task/epic activity or the Conductor
-   page with its reason. Nothing reports "dispatched"/"online" unless it is.
-4. Nothing is ever pushed to any branch other than the repo's base branch
+1. Starting from the project's current state and no human action, the
+   Conductor (Opus 5.5) writes or refreshes the project's **direction**, picks
+   or creates 1–3 epics for the sprint, and breaks them into tasks with DoD
+   and links.
+2. Tasks are assigned, dispatched, implemented, reviewed; the daemon merges
+   each approved branch, runs the project's verify command on the merged
+   tree, and pushes to `origin/main-rsi` only if it passes; a failure goes
+   back to the implementer with the test output.
+3. Tasks reach `done`, the next task starts, and when the sprint's work runs
+   dry the Conductor plans the next sprint — no human click anywhere.
+4. An executive summary is published per sprint and shown on the Conductor
+   page: shipped (verified), in progress, blocked/risks, decisions the human
+   may want to make, next sprint plan.
+5. A human edit (e.g. reprioritising an epic, editing direction) is honoured
+   by the next planning turn; a human question in the Conductor chat is
+   answered from Agentira's data.
+6. Every decision appears on the task/epic activity or the Conductor page
+   with its reason. Nothing reports "dispatched"/"online" unless it is.
+7. Nothing is ever pushed to any branch other than the repo's base branch
    (`main-rsi`) or task branches.
 
 ## 2. What exists (kept)
@@ -53,7 +66,7 @@ merging into `main-rsi`, on the local stack.
 
 ## 4. Design
 
-Seven small components. Each is independently testable; none adds a new
+Eight small components. Each is independently testable; none adds a new
 subsystem.
 
 ### C1 — Dispatch: READY is startable for conductor-managed agents (B1)
@@ -92,13 +105,18 @@ subsystem.
 
 ### C4 — Honest delivery and liveness (B2, B5)
 
-- `PlanningTurn.status`: `queued` at creation → `delivered` when a daemon
-  accepts the frame → `completed` when the Conductor's turn finishes;
-  `undelivered` (with reason) if the outbox expires it. UI shows these words.
-- A runtime row reads `online` only while the WS hub holds a live
-  registration for it; otherwise `offline` (derived at read time from the hub,
-  not a stored flag).
-- Fix the planning card's "undefined task(s)" text.
+- A runtime is **live** only while the WS hub holds a connected daemon that
+  registered it (`hub.is_runtime_live(runtime_id)`); API responses derive
+  `online`/`offline` from that, not from the stored `status` column.
+- Before sending any Conductor turn (planning, sprint planning, progress
+  check, sprint review, daily report), preflight: the Conductor's runtime is
+  live. If not, the PlanningTurn is recorded `undelivered` with reason
+  "Conductor's runtime is offline" and nothing is queued.
+- If a queued Conductor dispatch later expires in the outbox, its PlanningTurn
+  (matched by `turn:{id}` scope key) flips to `undelivered` with reason
+  "no daemon picked it up".
+- UI shows `dispatched` / `undelivered` / `skipped` / `error` literally; fix
+  the planning card's "undefined task(s)" text.
 
 ### C5 — Merge into the repo's base branch (B3)
 
@@ -136,28 +154,53 @@ subsystem.
   `pytest backend/tests -q -n 4`, then `npm ci` + `vitest run` + `vite build`
   in `frontend/`. Docker must be available on the daemon host (testcontainers).
 
-### C7 — Epic intake: humans steer epics, the Conductor breaks them down
+### C7 — Direction + sprint planning: the Conductor owns epics
 
-- Planning facts gain **"Epics to break down"**: epics in a managed project
-  whose status is `in_progress` and that have **no open tasks** (none, or all
-  done — a human re-activating a finished epic with new scope in its
-  description gets a fresh breakdown).
-- Planning prompt (config, `templates/conductor/planning_turn.md`) gains a
-  step: for each such epic, create 3–8 tasks under it (`create_task` with
-  `epic_id`, DoD with ≥1 product-level check, priority), link order with
-  `add_dependency` where one must precede another, then comment on the epic
-  with the breakdown rationale.
+- New project field **`direction_md`** (Project Settings → General, label
+  "Goals & direction"): what the project is for and its current priorities,
+  in plain language. Human-editable; the Conductor may update it via MCP
+  `update_project` (which gains `direction_md`), and every change is an
+  activity entry.
+- New LLM turn **sprint planning** (`run_sprint_planning_turn`, prompt
+  `templates/conductor/sprint_planning.md`), one per managed project. Facts:
+  direction, epics (status, open/done counts), top backlog, last executive
+  summary, recent failures. The Conductor:
+  1. drafts `direction_md` if empty, from the repo's README/vision docs and
+     the project description (writes it, says so in the summary);
+  2. creates epics the direction calls for (`create_epic`) and closes epics
+     whose tasks are all done;
+  3. commits 1–3 epics to the sprint by setting them `in_progress` (epics in
+     `backlog` are the parking lot; a human may move them either way);
+  4. breaks every `in_progress` epic with no open tasks into 3–8 tasks
+     (`create_task` with `epic_id`, DoD with ≥1 product-level check,
+     priority; `add_dependency` for order).
+- Triggers: daily after the sprint review, **and** when the queue runs dry —
+  the regular planning turn finds no unassigned/backlog/todo work and no live
+  runs in the project → it fires sprint planning (at most once per
+  `sprint_min_interval_hours`, default 4, recorded as a PlanningTurn with
+  trigger `queue_dry`).
 - Epic → `done` when all its tasks are done (deterministic, in the driver's
-  done-handler), with an epic comment listing what shipped. Epics in
-  `backlog` are never touched — that is the human's parking lot.
+  done-handler), with an epic comment listing what shipped.
 - New work also enters from agents: implementer/reviewer prompts (config)
   allow `create_task` into **backlog** for discovered follow-ups, linked
-  `relates_to` the source task. The planning turn already promotes backlog.
+  `relates_to` the source task. The planning turn promotes backlog as today.
+
+### C8 — Executive summary and human steering
+
+- The sprint review prompt (config) becomes an **executive summary** with
+  fixed sections: Shipped (verified), In progress, Blocked / risks, Decisions
+  you may want to make, Next sprint. Still published as a `sprint-review`
+  task (existing) and additionally stored on the PlanningTurn so the
+  Conductor page shows the latest one at the top.
+- Human steering needs no new mechanism: edits are facts the next turn reads;
+  the Conductor's project chat (`chat:project:<id>`) answers questions — its
+  system prompt (config) tells it to answer from Agentira via MCP and to
+  record any decision it makes as a comment on the affected epic/task.
 
 ### Transparency (cross-cutting)
 
 Every loop action leaves a line a non-engineer can read, on the task or epic:
-dispatched (C1), planning decisions (existing), breakdown (C7), hand-off /
+dispatched (C1), planning decisions (existing), direction/epic changes and breakdown (C7), hand-off /
 bounce / hand-back (existing), merge target (C5), verification verdict (C6),
 done. The Conductor page shows turn delivery states (C4).
 
@@ -169,7 +212,8 @@ done. The Conductor page shows turn delivery states (C4).
   agents (qwen/openclaw) not conductor-enabled for v1.
 - Repo `agentira`: remote `gitmaster3000/agentira-oss`, `default_branch
   main-rsi` (done). Pushes use the daemon machine's git login.
-- Project: `workflow_enabled` on, `verify_cmd = scripts/verify.sh`.
+- Project: `workflow_enabled` on, `verify_cmd = scripts/verify.sh`,
+  `direction_md` left empty so the Conductor drafts it (acceptance step 1).
 - Daemon: editable install from this repo (done), so daemon fixes apply on
   restart.
 
@@ -193,14 +237,18 @@ TDD per component, Postgres fixtures (`pg`, `seed_admin`):
 - C2: two orgs each with a Conductor; planning turn for org B's project goes
   to org B's Conductor; config read per org.
 - C3: preflight adds membership once; removed membership → skip with reason.
-- C4: planning turn state transitions on ack / outbox expiry; runtime online
-  only with live hub registration.
+- C4: offline Conductor runtime → turn `undelivered`, send not called;
+  outbox expiry of a `turn:` scope flips it `undelivered`; runtime reads
+  online only with a live hub registration.
 - C5: target resolves to repo `default_branch`; empty target refused by daemon.
 - C6 (daemon, pytest with temp git repos): pass → pushed; fail → not pushed,
   log tail returned; timeout → not pushed. Backend: failing verify → hand-back
   with log tail; missing verify_cmd → refused.
-- C7: epic with no open tasks appears in planning facts; epic done when all
-  tasks done.
+- C7: in_progress epic with no open tasks appears in sprint facts; queue-dry
+  planning fires sprint planning once per interval; epic done when all tasks
+  done; `update_project(direction_md=…)` via MCP writes an activity entry.
+- C8: sprint review stores the summary on its PlanningTurn; latest summary
+  returned by the conductor status endpoint.
 - Acceptance: §1 run live on the local stack, recorded in the spec's
   follow-up notes.
 
