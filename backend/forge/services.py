@@ -3838,10 +3838,14 @@ def finish_run(run_id: str, *, outcome: str, summary: str = "",
         db.refresh(r)
         run_payload = _run_to_dict(r)
 
-    # Workflow auto-advance is disabled: a successful run does NOT auto-hand the
-    # task to the next column. The driver (backend/forge/workflow.advance_after_run)
-    # is not wired into run completion — task progression stays manual until the
-    # workflow engine is reviewed and re-enabled deliberately.
+    # Loop v1 C0: the workflow driver is re-enabled deliberately (it was
+    # unwired in #204 pending review), together with C5 (merges only into the
+    # repo's base branch) and C6 (merges only after the project's checks pass
+    # on the merged code). No-ops unless the project has workflow_enabled;
+    # never raises into finish_run.
+    if outcome_enum == RunOutcome.SUCCEEDED:
+        from backend.forge import workflow as _workflow
+        _workflow.advance_after_run(run_id)
 
     return {"ok": True, "run": run_payload}
 

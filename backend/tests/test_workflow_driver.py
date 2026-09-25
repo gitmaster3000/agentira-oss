@@ -440,6 +440,7 @@ def _setup_review_success(db_session, *, with_approval=True,
         p = db.get(Project, pid)
         p.workflow_enabled = True
         p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"      # Loop v1 C6: required to merge
         db.commit()
         reviewer_id = _mk_agent(db, reviewer_name)
         _bind(db, reviewer_id, pid)
@@ -560,17 +561,19 @@ def test_complete_integration_ok_advances_to_done(db_session):
 
 
 def test_complete_integration_failure_stays_with_reason(db_session):
+    """Infrastructure failures (not in integrate.on_failure.hand_back_on)
+    leave the task in review with the reason on the feed."""
     pid, task_id, run_id = _setup_review_success(db_session)
     out = workflow.complete_integration(
         task_id=task_id, run_id=run_id, ok=False,
-        reason="merge_conflict: same.txt")
+        reason="push_failed: remote rejected")
     assert out["advanced"] is False
     with db_session() as db:
         t = db.get(Task, task_id)
         assert db.get(Status, t.status_id).name == "review"   # stays put
         from backend.models import Activity
         acts = db.query(Activity).filter(Activity.task_id == task_id).all()
-        assert any("merge_conflict" in (a.detail or "") for a in acts)
+        assert any("push_failed" in (a.detail or "") for a in acts)
 
 
 # ── Slice 3: documentation dispatched on arrival in done ─────────────────
@@ -654,6 +657,7 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
         p = db.get(Project, pid)
         p.workflow_enabled = True
         p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"      # Loop v1 C6: required to merge
         db.commit()
         impl_id = _mk_agent(db, "implementer-1")
         _bind(db, impl_id, pid)
@@ -835,3 +839,154 @@ def test_integration_refused_when_task_has_no_repo(db_session):
         out = workflow.advance_after_run(run_id)
     assert out["reason"] == "integration_missing_info"
     fake.assert_not_called()
+
+
+
+# ── Loop v1 C6: merged-tree verification decides the merge ───────────────
+
+def _setup_reworked_review(db_session):
+    """Implementer ran first, then the reviewer's succeeded run in review —
+    so a hand-back has someone to go to."""
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        review_run = db.get(Run, run_id)
+        from datetime import timedelta
+        db.add(Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                   created_at=review_run.created_at - timedelta(minutes=5)))
+        db.commit()
+    return pid, task_id, run_id, impl_id
+
+
+def test_merge_refused_without_verify_cmd(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_cmd = ""
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["reason"] == "no_verify_cmd"
+    fake.assert_not_called()
+    with db_session() as db:
+        from backend.models import Activity
+        acts = db.query(Activity).filter(Activity.task_id == task_id).all()
+        assert any("no verify command" in (a.detail or "") for a in acts)
+
+
+def test_integrate_carries_verify_cmd_and_timeout(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_timeout_minutes = 20
+        db.commit()
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        workflow.advance_after_run(run_id)
+    kw = fake.call_args.kwargs
+    assert kw["verify_cmd"] == "scripts/verify.sh" and kw["verify_timeout_s"] == 1200
+
+
+def test_verify_failure_hands_back_to_implementer_with_output(db_session):
+    pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
+    verify = {"exit_code": 1, "duration_s": 9.0, "timed_out": False,
+              "log_tail": "FAILED test_x - AssertionError: boom"}
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "fix1"}) as sched:
+        workflow.complete_integration(task_id=task_id, run_id=run_id, ok=False,
+                                      reason="verify_failed: exit 1", verify=verify)
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "in_progress"
+        assert t.assignee == "implementer-1"
+        from backend.forge.models import GateEvaluation
+        ev = (db.query(GateEvaluation)
+                .filter(GateEvaluation.task_id == task_id,
+                        GateEvaluation.gate_id == "evidence:tests").all())
+        assert [e.outcome for e in ev] == ["block"]
+    assert sched.call_args.kwargs["agent_id"] == impl_id
+    assert "AssertionError: boom" in sched.call_args.kwargs["extra_context"]
+
+
+def test_verify_pass_records_evidence_and_advances(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    verify = {"exit_code": 0, "duration_s": 3.0, "timed_out": False, "log_tail": "ok"}
+    out = workflow.complete_integration(task_id=task_id, run_id=run_id, ok=True,
+                                        reason="merged", verify=verify)
+    assert out["advanced"] is True
+    with db_session() as db:
+        from backend.forge.models import GateEvaluation
+        ev = (db.query(GateEvaluation)
+                .filter(GateEvaluation.task_id == task_id,
+                        GateEvaluation.gate_id == "evidence:tests").all())
+        assert [e.outcome for e in ev] == ["allow"]
+
+
+# ── Loop v1 C6: the policy above comes from the workflow YAML, not code ──
+
+def _flow_with_integrate(**integrate_overrides):
+    """The system flow with the review column's integrate policy edited —
+    what a different workflow YAML would produce."""
+    flow = workflow.system_workflow().copy(deep=True)
+    col = flow.column("review")
+    col.on_success.integrate = col.on_success.integrate.copy(update=integrate_overrides)
+    return flow
+
+
+def test_system_yaml_declares_integration_policy():
+    spec = workflow.system_workflow().column("review").on_success.integrate
+    assert spec.verify.required is True
+    assert "verify_failed" in spec.on_failure.hand_back_on
+    assert spec.on_failure.to_column == "in_progress"
+
+
+def test_verify_not_required_by_flow_merges_without_command(db_session):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    with db_session() as db:
+        db.get(Project, pid).verify_cmd = ""
+        db.commit()
+    flow = _flow_with_integrate(verify=workflow.VerifySpec(required=False))
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2, patch.object(workflow, "system_workflow", return_value=flow):
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["verify_cmd"] == ""
+
+
+def test_failure_kind_not_listed_in_yaml_stays_put(db_session):
+    pid, task_id, run_id, _ = _setup_reworked_review(db_session)
+    flow = _flow_with_integrate(on_failure=workflow.IntegrationFailureSpec(
+        hand_back_on=["verify_failed"], to_column="in_progress"))
+    with patch.object(workflow, "system_workflow", return_value=flow), \
+         patch("backend.forge.services.schedule_task_run") as sched:
+        workflow.complete_integration(task_id=task_id, run_id=run_id, ok=False,
+                                      reason="merge_conflict: a.txt")
+    sched.assert_not_called()
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"
+
+
+def test_on_failure_to_unknown_column_is_rejected_at_parse():
+    import yaml
+    raw = yaml.safe_load(open(workflow._DEFAULT_WORKFLOW_PATH))
+    for c in raw["columns"]:
+        if c["name"] == "review":
+            c["on_success"]["integrate"]["on_failure"]["to_column"] = "nowhere"
+    with pytest.raises(Exception):
+        workflow.Workflow(**raw)
+
+
+def test_integration_hand_back_is_not_worded_as_a_review_rejection(db_session):
+    pid, task_id, run_id, _ = _setup_reworked_review(db_session)
+    with patch("backend.forge.services.schedule_task_run", return_value={"run_id": "x"}):
+        workflow.complete_integration(
+            task_id=task_id, run_id=run_id, ok=False, reason="verify_failed: exit 2",
+            verify={"exit_code": 2, "duration_s": 1, "timed_out": False, "log_tail": "E"})
+    with db_session() as db:
+        from backend.models import Activity
+        details = [a.detail or "" for a in
+                   db.query(Activity).filter(Activity.task_id == task_id).all()]
+    assert any("Merge failed — handed back to implementer-1" in d for d in details)
+    assert not any("Review rejected" in d for d in details)

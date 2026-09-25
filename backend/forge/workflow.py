@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator, validator
 
 from backend.db import SessionLocal
 from backend.models import Task, Project, Profile, Status
@@ -173,6 +173,27 @@ def column_ui_details(flow: "Workflow", project=None) -> dict:
 
 # ── Schema (standard parser + safety: yaml.safe_load → Pydantic) ─────────
 
+class VerifySpec(BaseModel):
+    """Loop v1 C6 — merged-tree verification POLICY. The command itself is
+    per-project (`Project.verify_cmd`); this says whether a merge may happen
+    without one, and the fallback time limit."""
+    required: bool = True             # no verify_cmd → merge refused
+    default_timeout_minutes: int = 30  # when the project sets none
+
+
+class IntegrationFailureSpec(BaseModel):
+    """Loop v1 C6 — what happens when the daemon's merge (+ checks) fails.
+    Failure kinds are the daemon's classified reason prefixes
+    (daemon/integrate.py). Listed kinds go back to whoever owes the fix;
+    anything else (push rejected, clone unavailable…) is infrastructure: the
+    task stays put and humans are notified. Shares the bounce budget."""
+    hand_back_on: list[str] = Field(default_factory=list)
+    to_column: str = ""               # must name a column (validated)
+    assign: str = "previous_agent"    # or a role name from `roles`
+    dispatch: bool = True
+    prompt: str = "integration_failed"
+
+
 class IntegrateSpec(BaseModel):
     """Branch-integration policy (workflow slice 2). POLICY lives here in
     config; the ACTION is deterministic daemon code (daemon/integrate.py —
@@ -181,6 +202,8 @@ class IntegrateSpec(BaseModel):
     # a fork/branch-based project (e.g. main-rsi) must not merge into main.
     target_branch: str = ""
     push: bool = True
+    verify: VerifySpec = Field(default_factory=VerifySpec)
+    on_failure: IntegrationFailureSpec = Field(default_factory=IntegrationFailureSpec)
 
 
 class OnSuccess(BaseModel):
@@ -261,6 +284,20 @@ class Workflow(BaseModel):
         if not v:
             raise ValueError("workflow must define at least one column")
         return v
+
+    @model_validator(mode="after")
+    def integration_failure_targets_exist(self):
+        """A hand-back column named in config must be a real column — a typo
+        would otherwise strand tasks at runtime."""
+        names = {c.name for c in self.columns}
+        for c in self.columns:
+            ispec = c.on_success.integrate if c.on_success else None
+            if ispec and ispec.on_failure.hand_back_on \
+                    and ispec.on_failure.to_column not in names:
+                raise ValueError(
+                    f"integrate.on_failure.to_column "
+                    f"'{ispec.on_failure.to_column}' is not a column")
+        return self
 
     def column(self, name: str) -> Optional[ColumnSpec]:
         return next((c for c in self.columns if c.name == name), None)
@@ -523,7 +560,10 @@ def _human_approval_evidence(db, *, run: Run, task: Task):
 
 
 def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
-                               demotion: dict) -> dict:
+                               demotion: dict, feedback: str | None = None,
+                               policy: "RejectionSpec | IntegrationFailureSpec | None" = None,
+                               headline: str = "Review rejected",
+                               ) -> dict:
     """AP-252: route a rejected task to whoever owes the fix.
 
     POLICY lives in config (`rejection:` in the workflow YAML): who gets the
@@ -535,11 +575,13 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
     """
     from backend.forge.repos import activities as activities_repo
     from backend.forge.repos import runs as runs_repo
-    policy = flow.rejection
+    # Review rejections use `rejection:`; integration failures pass their own
+    # `integrate.on_failure:` policy (same fields: assign / dispatch / prompt).
+    policy = policy or flow.rejection
     budget = flow.bounce
     task_key = task.key or task.id
 
-    if not policy.enabled:
+    if not getattr(policy, "enabled", True):
         logger.info("workflow: %s demoted during run — rejection handling "
                     "disabled; leaving to the watchdog", task_key)
         return {"advanced": False, "reason": "review_rejected",
@@ -587,10 +629,11 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
                 "escalated": True}
 
     # The reviewer's most recent comment is the corrective context.
-    review_note = activities_repo.latest_comment_by(
-        db, task_id=task.id, actor=demotion["actor"], since=run.created_at)
-    feedback = (review_note.detail if review_note
-                else "(no review comment found — re-read the task feed)")
+    if feedback is None:
+        review_note = activities_repo.latest_comment_by(
+            db, task_id=task.id, actor=demotion["actor"], since=run.created_at)
+        feedback = (review_note.detail if review_note
+                    else "(no review comment found — re-read the task feed)")
 
     task_id, impl_id, impl_name = task.id, impl.id, impl.name
     from backend import services as core_task_services
@@ -615,9 +658,9 @@ def _hand_back_after_rejection(db, *, task: Task, run: Run, flow: Workflow,
                 "escalated": True}
     activities_repo.add_task_comment(
         db, project_id=task.project_id, task_id=task.id,
-        detail=(f"↩️ **Review rejected — handed back to {impl.name}** "
+        detail=(f"↩️ **{headline} — handed back to {impl.name}** "
                 f"({demotion['from']}→{demotion['to']} by {demotion['actor']}). "
-                f"Corrective run dispatched with the reviewer's feedback."))
+                f"Corrective run dispatched with the feedback."))
     db.commit()
 
     if not policy.dispatch:
@@ -809,6 +852,22 @@ def advance_after_run(run_id: str) -> dict:
                 source_url = _task_source_url(db, task)
                 ispec = spec.integrate
                 target_branch = ispec.target_branch or _integration_target(db, task)
+                verify_cmd = (getattr(project, "verify_cmd", None) or "").strip()
+                if ispec.verify.required and not verify_cmd:
+                    from backend.forge.repos import activities as activities_repo
+                    activities_repo.add_task_comment(
+                        db, project_id=task.project_id, task_id=task.id,
+                        detail=("⛔ **Merge refused** — this project has no verify "
+                                "command, so nothing proves the merged code works. "
+                                "Set one in Project Settings → \"Command that "
+                                "proves the project works\"."))
+                    db.commit()
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current, to_status=target,
+                        result="no_op:no_verify_cmd")
+                    return {"advanced": False, "reason": "no_verify_cmd"}
+                timeout_min = (getattr(project, "verify_timeout_minutes", None)
+                               or ispec.verify.default_timeout_minutes)
                 if not branch or not runtime_id or not source_url or not target_branch:
                     _log_driver_decision(
                         db, task=task, run=run, from_status=current, to_status=target,
@@ -828,6 +887,7 @@ def advance_after_run(run_id: str) -> dict:
                     runtime_id=runtime_id, task_id=task_id_, run_id=run_id_,
                     source_url=source_url, branch=branch,
                     target_branch=target_branch, push=ispec.push,
+                    verify_cmd=verify_cmd, verify_timeout_s=60 * int(timeout_min),
                 ))
                 logger.info("workflow: %s integration requested (%s -> %s)",
                             task.key or task.id, branch, target_branch)
@@ -935,8 +995,36 @@ def _integration_target(db, task) -> str:
     return ((chosen or {}).get("default_branch") or "").strip()
 
 
+def _record_tests_evidence(db, *, task, current: str | None, ok: bool,
+                           reason: str, verify: dict) -> None:
+    """The merged-tree check is evidence like any other: a gate_evaluations
+    row + a plain-language line on the task (Loop v1 C6)."""
+    transitions_repo.record_gate_evaluation(
+        db, task_id=task.id, from_status=current, to_status=current,
+        gate_id="evidence:tests", evidence_snapshot={"tests": verify},
+        outcome="allow" if ok else "block", reason="" if ok else reason,
+        duration_ms=int(float(verify.get("duration_s") or 0) * 1000))
+    from backend.forge.repos import activities as activities_repo
+    secs = verify.get("duration_s")
+    if ok:
+        line = f"🧪 Project checks passed on the merged code ({secs}s)."
+    else:
+        tail = "\n".join((verify.get("log_tail") or "").splitlines()[-40:])
+        line = (f"🧪 Project checks **failed** on the merged code ({reason}). "
+                f"Nothing was pushed.\n\n```\n{tail}\n```")
+    activities_repo.add_task_comment(
+        db, project_id=task.project_id, task_id=task.id, detail=line)
+    db.commit()
+
+
+def _failure_kind(reason: str) -> str:
+    """The daemon's classified reason prefix, e.g. 'verify_failed: exit 1'."""
+    return (reason or "").split(":", 1)[0].strip()
+
+
 def complete_integration(*, task_id: str, run_id: str | None,
-                         ok: bool, reason: str = "") -> dict:
+                         ok: bool, reason: str = "",
+                         verify: dict | None = None) -> dict:
     """Finish a two-phase advance after the daemon reports the merge result.
 
     ok    -> advance the task to the column configured by its current
@@ -956,6 +1044,37 @@ def complete_integration(*, task_id: str, run_id: str | None,
         current = _status_name(db, task.status_id)
         col = flow.column(current) if current else None
         spec = col.on_success if col else None
+
+        if verify is not None:
+            _record_tests_evidence(db, task=task, current=current, ok=ok,
+                                   reason=reason, verify=verify)
+
+        on_fail = spec.integrate.on_failure if spec and spec.integrate else None
+        run = db.get(Run, run_id) if run_id else None
+        if (not ok and on_fail is not None and run is not None
+                and _failure_kind(reason) in on_fail.hand_back_on):
+            # Config says this failure is the implementer's to fix: move the
+            # task back and hand it over with the failure output.
+            from backend import services as core_task_services
+            core_task_services.move_task(task.id, on_fail.to_column, actor="workflow",
+                                         skip_gates=True, record_transition=False)
+            db.expire_all()
+            task = db.get(Task, task_id)
+            detail = (verify or {}).get("log_tail") or ""
+            result = _hand_back_after_rejection(
+                db, task=task, run=run, flow=flow,
+                demotion={"actor": "workflow", "from": current,
+                          "to": on_fail.to_column},
+                feedback=f"{reason}\n\n{detail}".strip(), policy=on_fail,
+                headline="Merge failed")
+            transitions_repo.record_transition(
+                db, task_id=task.id, from_status=current, to_status=on_fail.to_column,
+                actor_type="workflow", actor_id="driver",
+                cause=f"run:{run_id}", result="integration_handed_back")
+            db.commit()
+            logger.warning("workflow: integration failed task=%s (%s) — handed back",
+                           task.key or task.id, reason)
+            return {"ok": True, "advanced": False, "reason": reason, **result}
 
         if not ok:
             db.add(Activity(

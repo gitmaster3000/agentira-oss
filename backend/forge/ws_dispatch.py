@@ -215,7 +215,8 @@ class WsHub:
     async def dispatch_integrate(self, *, runtime_id: str, task_id: str,
                                  run_id: str = "", source_url: str,
                                  branch: str, target_branch: str,
-                                 push: bool = True) -> bool:
+                                 push: bool = True, verify_cmd: str = "",
+                                 verify_timeout_s: int = 1800) -> bool:
         """Workflow slice 2: ask the daemon owning runtime_id to merge an
         approved task branch into the target branch in its shared clone.
         Returns False when no daemon is online (caller surfaces the miss
@@ -231,6 +232,9 @@ class WsHub:
             "branch": branch,
             "target_branch": target_branch,
             "push": push,
+            # Loop v1 C6: run on the merged code before pushing.
+            "verify_cmd": verify_cmd,
+            "verify_timeout_s": verify_timeout_s,
         }
         # AP-390: durable outbox — an integrate triggered from finish_run
         # lands in the flowty-mcp process, whose hub never has the daemon.
