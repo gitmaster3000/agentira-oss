@@ -138,6 +138,12 @@ subsystem.
   so the activity says "merging AP-123 into main-rsi".
 - Daemon refuses an integrate frame whose target is empty (no silent `main`
   fallback in `core.py`).
+- The **source** branch is the task's work branch (`task.branch`), never the
+  approving reviewer run's own worktree branch (AP-520). The run's branch is a
+  fallback only when no other agent succeeded on the task before it.
+- `task.branch` follows the succeeded work run when it was pinned to the
+  branch of an earlier run that never succeeded (AP-521). Branches no run
+  produced (human/PR links) are never overwritten.
 
 ### C6 — Platform verification on the merged tree (B4)
 

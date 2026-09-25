@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field, model_validator, validator
 from backend.db import SessionLocal
 from backend.models import Task, Project, Profile, Status
 from backend.forge.models import Agent, Run, RunOutcome, RunStatus
+from backend.forge.repos import runs as runs_repo
 from backend.forge.repos import transitions as transitions_repo
 from backend import gates
 
@@ -368,6 +369,34 @@ def _already_handed_off(db, run: Run, task: Task) -> bool:
     already been written? That is unambiguous regardless of timing."""
     return transitions_repo.has_driver_event_for_run(
         db, task_id=task.id, run_id=run.id)
+
+
+def _is_handoff_run(db, run: Run, task: Task) -> bool:
+    """AP-520: a run that follows ANOTHER agent's succeeded run on the task
+    (e.g. the reviewer's) is a hand-off — the work lives on that earlier
+    agent's branch, not on this run's own worktree branch."""
+    return runs_repo.prior_succeeded_run_by_other_agent(
+        db, task_id=task.id, before=run.created_at,
+        not_agent_id=run.agent_id) is not None
+
+
+def _adopt_work_branch(db, run: Run, task: Task) -> None:
+    """AP-521: task.branch is set-if-empty from the FIRST run's worktree
+    branch. If that run never succeeded (e.g. out of credits), the task stays
+    pinned to an empty branch — repoint it to this succeeded work run's
+    branch. A branch no run produced (human/PR link) or one a run succeeded
+    on is never touched."""
+    new = (run.worktree_branch or "").strip()
+    cur = (task.branch or "").strip()
+    if not new or not cur or new == cur or _is_handoff_run(db, run, task):
+        return
+    outcomes = runs_repo.outcomes_for_branch(db, task_id=task.id, branch=cur)
+    if not outcomes or RunOutcome.SUCCEEDED in outcomes:
+        return
+    logger.info("workflow: %s branch %s -> %s (earlier run on it never "
+                "succeeded)", task.key or task.id, cur, new)
+    task.branch = new
+    db.commit()
 
 
 def _in_flight(db, agent_id: str) -> int:
@@ -718,6 +747,7 @@ def advance_after_run(run_id: str) -> dict:
             task = db.get(Task, run.task_id)
             if not task:
                 return {"advanced": False, "reason": "task_gone"}
+            _adopt_work_branch(db, run, task)
             project = db.get(Project, task.project_id) if task.project_id else None
             if not project or not getattr(project, "workflow_enabled", False):
                 return {"advanced": False, "reason": "workflow_disabled"}
@@ -846,7 +876,11 @@ def advance_after_run(run_id: str) -> dict:
             # daemon reports back. Conflict/push failure -> the task stays put
             # with a classified reason.
             if spec.integrate is not None:
-                branch = (run.worktree_branch or task.branch or "").strip()
+                # AP-520: merge the task's WORK branch. The finishing run is
+                # usually the reviewer's — its own worktree branch is empty.
+                branch = (task.branch or "").strip()
+                if not branch and not _is_handoff_run(db, run, task):
+                    branch = (run.worktree_branch or "").strip()
                 agent = db.get(Agent, run.agent_id) if run.agent_id else None
                 runtime_id = agent.runtime_id if agent else None
                 source_url = _task_source_url(db, task)
