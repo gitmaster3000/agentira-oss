@@ -40,13 +40,20 @@ def record_gate_evaluation(db, *, task_id: str, from_status: str | None,
     return row
 
 
-def has_driver_event_for_run(db, *, task_id: str, run_id: str) -> bool:
+def has_driver_event_for_run(db, *, task_id: str, run_id: str,
+                             since=None) -> bool:
     """AP-402: explicit hand-off check. True iff the workflow driver already
     wrote a transition_events row for THIS run (cause == "run:<run_id>") —
     idempotency by recorded fact, not by comparing Run.created_at timestamps
-    (the timestamp inference could race and deadlock the pipeline)."""
-    return (db.query(TransitionEvent)
-              .filter(TransitionEvent.task_id == task_id,
-                      TransitionEvent.actor_type == "workflow",
-                      TransitionEvent.cause == f"run:{run_id}")
-              .first()) is not None
+    (the timestamp inference could race and deadlock the pipeline).
+
+    `since` scopes the check to the run's current turn: sticky run rows
+    (AP-281) are reused across turns, so a decision logged for an earlier
+    turn must not swallow this one."""
+    q = (db.query(TransitionEvent)
+           .filter(TransitionEvent.task_id == task_id,
+                   TransitionEvent.actor_type == "workflow",
+                   TransitionEvent.cause == f"run:{run_id}"))
+    if since is not None:
+        q = q.filter(TransitionEvent.created_at >= since)
+    return q.first() is not None

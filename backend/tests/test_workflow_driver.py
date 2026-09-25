@@ -798,6 +798,94 @@ def test_approve_after_prior_manual_bounce_still_merges(db_session):
     mock_bounce.assert_not_called()
 
 
+def test_ap383_sticky_reviewer_row_reapproval_integrates(db_session):
+    """AP-383 deadlock regression (sticky runs, AP-281): one run row per
+    agent+task, REUSED across turns — created_at never moves. Sequence:
+    implementer -> reviewer rejects (driver logs a decision for the reviewer
+    row) -> implementer reworks on its own reused row -> the SAME reviewer
+    row starts a new turn and approves. The driver must integrate: the old
+    turn's hand-back event and rejection move belong to a previous turn, not
+    this one."""
+    from datetime import datetime, timedelta, timezone
+    with db_session() as db:
+        proj = core_services.create_project("P")
+        pid = proj["id"]
+        p = db.get(Project, pid)
+        p.workflow_enabled = True
+        p.repo_url = "file:///tmp/fake-remote.git"
+        p.verify_cmd = "scripts/verify.sh"
+        db.commit()
+        impl_id = _mk_agent(db, "implementer-1")
+        _bind(db, impl_id, pid)
+        reviewer_id = _mk_agent(db, "senior reviewer")
+        _bind(db, reviewer_id, pid)
+        t = Task(project_id=pid, title="Build feature",
+                 status_id=_status_id(db, "in_progress"),
+                 priority=TaskPriority.HIGH, assignee="implementer-1",
+                 creator="system", branch="agent/x/task/y",
+                 dod_items=json.dumps([{"text": "d", "checked": True}]))
+        db.add(t); db.commit()
+        task_id = t.id
+        start = datetime.now(timezone.utc) - timedelta(hours=1)
+        impl_run = Run(agent_id=impl_id, task_id=task_id, project_id=pid,
+                       status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                       created_at=start, started_at=start)
+        db.add(impl_run); db.commit()
+        impl_run_id = impl_run.id
+
+    # 1) implement -> review
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "rv"}):
+        assert workflow.advance_after_run(impl_run_id)["to"] == "review"
+
+    # 2) reviewer's (sticky) row, first turn: rejects
+    with db_session() as db:
+        rv_start = start + timedelta(minutes=10)
+        rv = Run(agent_id=reviewer_id, task_id=task_id, project_id=pid,
+                 status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
+                 worktree_branch="agent/x/task/y",
+                 created_at=rv_start, started_at=rv_start)
+        db.add(rv); db.commit()
+        rv_id = rv.id
+        _log_move(db, pid, task_id, "senior reviewer", "review", "in_progress")
+        t = db.get(Task, task_id)
+        with allow_task_write():
+            t.status_id = _status_id(db, "in_progress")
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": impl_run_id}):
+        assert workflow.advance_after_run(rv_id).get("handed_back") is True
+
+    # 3) implementer's SAME row, new turn: rework -> review
+    with db_session() as db:
+        r = db.get(Run, impl_run_id)
+        r.started_at = datetime.now(timezone.utc)
+        r.outcome = RunOutcome.SUCCEEDED
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": rv_id}):
+        out3 = workflow.advance_after_run(impl_run_id)
+    assert out3["advanced"] is True and out3["to"] == "review"
+
+    # 4) reviewer's SAME row, new turn: approves -> must integrate
+    with db_session() as db:
+        r = db.get(Run, rv_id)
+        r.started_at = datetime.now(timezone.utc)
+        r.outcome = RunOutcome.SUCCEEDED
+        db.commit()
+        _approve(db, pid, task_id, "senior reviewer")
+    with patch("backend.forge.services._dispatch_coro",
+               side_effect=lambda coro: coro.close()), \
+         patch("backend.forge.services.schedule_task_run") as mock_bounce:
+        out4 = workflow.advance_after_run(rv_id)
+    assert out4.get("integration_requested") is True, out4
+    mock_bounce.assert_not_called()
+
+    # Replaying the same turn is still a no-op (AP-402 intent preserved).
+    assert workflow.advance_after_run(rv_id) == {
+        "advanced": False, "reason": "already_handed_off"}
+
+
 # ── Loop v1 C5: merge into the repo's base branch, never a literal main ──
 
 def _add_primary_repo(db_session, pid, default_branch):
