@@ -54,7 +54,7 @@ Typical column-exit checks:
 | Transition | Required evidence |
 |---|---|
 | Into `todo` | The task has a definition of done |
-| Into `review` | A branch or pull request exists |
+| Into `review` | A pull request is linked (work is only merged through a pull request) |
 | Into `done` | Every definition-of-done item is checked, and a pull request is linked |
 
 When a move fails, the interface names which gates failed and why. The API returns a structured error listing them.

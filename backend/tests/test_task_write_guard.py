@@ -118,6 +118,7 @@ def _setup_review_scenario(db_session):
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps(dod))
         db.add(t); db.commit()
         run = Run(agent_id=impl_id, task_id=t.id, project_id=pid,

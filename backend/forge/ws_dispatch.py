@@ -214,11 +214,13 @@ class WsHub:
 
     async def dispatch_integrate(self, *, runtime_id: str, task_id: str,
                                  run_id: str = "", source_url: str,
-                                 branch: str, target_branch: str,
-                                 push: bool = True, verify_cmd: str = "",
+                                 target_branch: str, pr_number: int,
+                                 pr_url: str = "", merge_method: str = "merge",
+                                 verify_cmd: str = "",
                                  verify_timeout_s: int = 1800) -> bool:
-        """Workflow slice 2: ask the daemon owning runtime_id to merge an
-        approved task branch into the target branch in its shared clone.
+        """Workflow slice 2: ask the daemon owning runtime_id to check an
+        approved task's pull request (project verify command on its merge
+        result) and then merge that PR through GitHub.
         Returns False when no daemon is online (caller surfaces the miss
         instead of letting the integration vanish silently)."""
         import uuid
@@ -229,9 +231,10 @@ class WsHub:
             "run_id": run_id,
             "runtime_id": runtime_id,
             "source_url": source_url,
-            "branch": branch,
             "target_branch": target_branch,
-            "push": push,
+            "pr_number": pr_number,
+            "pr_url": pr_url,
+            "merge_method": merge_method,
             # Loop v1 C6: run on the merged code before pushing.
             "verify_cmd": verify_cmd,
             "verify_timeout_s": verify_timeout_s,
@@ -256,8 +259,8 @@ class WsHub:
             return intent_id is not None
         for conn in targets:
             await conn.send(event_id, payload)
-            logger.info("Dispatched integrate task=%s branch=%s → daemon=%s",
-                        task_id, branch, conn.daemon_id[:8])
+            logger.info("Dispatched integrate task=%s pr=%s → daemon=%s",
+                        task_id, pr_number, conn.daemon_id[:8])
         outbox.mark_delivered(intent_id)
         return True
 

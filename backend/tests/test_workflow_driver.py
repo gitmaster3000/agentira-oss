@@ -58,7 +58,7 @@ def test_column_ui_details_exposes_real_gates_and_prompts():
     ip = ui["in_progress"]
     assert ip["advance_to"] == "review"
     gate_names = {g["name"] for g in ip["gates"]}
-    assert gate_names == {"dod_all_checked", "has_branch_or_pr"}
+    assert gate_names == {"dod_all_checked", "pr_url_set"}
     assert all(g["description"] for g in ip["gates"])
 
     # review is entered by the reviewer role — its prompt template must surface.
@@ -150,6 +150,7 @@ def _setup_review_scenario(db_session, *, with_reviewer=True, enabled=True,
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps(dod))
         db.add(t); db.commit()
         run = Run(agent_id=impl_id, task_id=t.id, project_id=pid,
@@ -424,7 +425,8 @@ def _approve(db, pid, task_id, reviewer_name):
 
 
 def _setup_review_success(db_session, *, with_approval=True,
-                          reviewer_name="senior reviewer"):
+                          reviewer_name="senior reviewer",
+                          pr_url="https://github.com/o/r/pull/1"):
     """A succeeded REVIEWER run on a task sitting in `review`.
 
     Post-incident fix (2026-07-04, PR #167 merged before its verdict): a
@@ -447,7 +449,7 @@ def _setup_review_success(db_session, *, with_approval=True,
         t = Task(project_id=pid, title="Build feature",
                  status_id=_status_id(db, "review"),
                  priority=TaskPriority.HIGH, assignee=reviewer_name,
-                 creator="system", branch="agent/x/task/y",
+                 creator="system", branch="agent/x/task/y", pr_url=pr_url,
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
@@ -667,6 +669,7 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         task_id = t.id
@@ -823,6 +826,7 @@ def test_ap383_sticky_reviewer_row_reapproval_integrates(db_session):
                  status_id=_status_id(db, "in_progress"),
                  priority=TaskPriority.HIGH, assignee="implementer-1",
                  creator="system", branch="agent/x/task/y",
+                 pr_url="https://github.com/o/r/pull/1",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
         task_id = t.id
@@ -1082,10 +1086,12 @@ def test_integration_hand_back_is_not_worded_as_a_review_rejection(db_session):
 
 # ── AP-520/521: integrate merges the task's WORK branch ──────────────────
 
-def test_review_approval_integrates_implementer_branch_not_reviewers(db_session):
-    """AP-520: the approving run is the REVIEWER's — its own worktree branch
-    has no work on it. The merge must carry the implementer's branch."""
-    pid, task_id, run_id = _setup_review_success(db_session)
+def test_review_approval_merges_the_pr_not_the_reviewers_branch(db_session):
+    """AP-520 (now PR-based): the approving run is the REVIEWER's — its own
+    worktree branch has no work on it. The merge is the task's pull request,
+    whatever branches the runs used."""
+    pid, task_id, run_id = _setup_review_success(
+        db_session, pr_url="https://github.com/o/r/pull/9")
     with db_session() as db:
         db.get(Task, task_id).branch = "agent/impl/task/t1"
         db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
@@ -1095,24 +1101,22 @@ def test_review_approval_integrates_implementer_branch_not_reviewers(db_session)
     with p1, p2:
         out = workflow.advance_after_run(run_id)
     assert out.get("integration_requested") is True
-    assert fake.call_args.kwargs["branch"] == "agent/impl/task/t1"
+    assert fake.call_args.kwargs["pr_number"] == 9
+    assert "branch" not in fake.call_args.kwargs
 
 
-def test_review_run_branch_never_used_when_task_has_no_branch(db_session):
-    """No work branch on the task and the finishing run is a review hand-off
-    (someone else succeeded before it) → refuse, never merge the reviewer's
-    empty branch."""
+def test_pr_without_a_task_branch_still_integrates(db_session):
+    """The pull request is the unit of merge; task.branch is not required."""
     pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
     with db_session() as db:
         db.get(Task, task_id).branch = ""
-        db.get(Run, run_id).worktree_branch = "agent/reviewer/task/t1"
         db.commit()
     _add_primary_repo(db_session, pid, "main")
     fake, p1, p2 = _capture_integrate()
     with p1, p2:
         out = workflow.advance_after_run(run_id)
-    assert out["reason"] == "integration_missing_info"
-    fake.assert_not_called()
+    assert out.get("integration_requested") is True
+    assert fake.call_args.kwargs["pr_number"] == 1
 
 
 def test_task_branch_follows_succeeded_run_after_failed_first_run(db_session):
@@ -1173,3 +1177,102 @@ def test_task_branch_follows_succeeded_run_even_when_workflow_disabled(db_sessio
     workflow.advance_after_run(run_id)
     with db_session() as db:
         assert db.get(Task, task_id).branch == "agent/coder2/task/t1"
+
+
+def test_no_merge_without_a_pull_request(db_session):
+    """User rule (2026-09-25): nothing merges without a PR. An approved task
+    with no linked PR is refused — no integration, no advance, a plain
+    comment — instead of being merged directly."""
+    pid, task_id, run_id = _setup_review_success(db_session, pr_url="")
+    with patch("backend.forge.ws_dispatch.hub.dispatch_integrate") as integ:
+        out = workflow.advance_after_run(run_id)
+    integ.assert_not_called()
+    assert out["advanced"] is False
+    assert out["reason"] == "no_pull_request"
+    with db_session() as db:
+        t = db.get(Task, task_id)
+        assert db.get(Status, t.status_id).name == "review"
+    from backend.models import Activity
+    with db_session() as db:
+        details = [a.detail or "" for a in
+                   db.query(Activity).filter(Activity.task_id == task_id).all()]
+    assert any("pull request" in d.lower() for d in details)
+
+
+# ── Merge only through the PR (Task 506b6046) ─────────────────────────────
+
+def test_integrate_frame_carries_the_pr_and_merge_method(db_session):
+    pid, task_id, run_id = _setup_review_success(
+        db_session, pr_url="https://github.com/o/r/pull/42")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out.get("integration_requested") is True
+    kw = fake.call_args.kwargs
+    assert kw["pr_number"] == 42
+    assert kw["pr_url"] == "https://github.com/o/r/pull/42"
+    assert kw["merge_method"] == "merge"          # workflow YAML default
+    assert "push" not in kw                        # merging is GitHub's job now
+
+
+def test_integrate_frame_uses_the_yaml_merge_method(db_session, monkeypatch):
+    pid, task_id, run_id = _setup_review_success(db_session)
+    flow = workflow.system_workflow()
+    flow.column("review").on_success.integrate.merge_method = "squash"
+    monkeypatch.setattr(workflow, "effective_workflow", lambda project: flow)
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        workflow.advance_after_run(run_id)
+    assert fake.call_args.kwargs["merge_method"] == "squash"
+
+
+def test_pr_link_without_a_pull_number_is_refused(db_session):
+    """A pr_url that isn't a pull-request link can't be merged through."""
+    pid, task_id, run_id = _setup_review_success(
+        db_session, pr_url="https://github.com/o/r")
+    fake, p1, p2 = _capture_integrate()
+    with p1, p2:
+        out = workflow.advance_after_run(run_id)
+    assert out["advanced"] is False and out["reason"] == "no_pull_request"
+    fake.assert_not_called()
+
+
+@pytest.mark.parametrize("url,number", [
+    ("https://github.com/o/r/pull/7", 7),
+    ("https://github.com/o/r/pull/7/files", 7),
+    ("https://github.com/o/r/pull/7#issuecomment-1", 7),
+    ("github.com/o/r/pull/12", 12),
+    ("https://github.com/o/r/issues/7", None),
+    ("", None),
+])
+def test_pr_number_from_url(url, number):
+    assert workflow._pr_number(url) == number
+
+
+def test_default_workflow_merges_through_pull_requests():
+    spec = workflow.system_workflow().column("review").on_success.integrate
+    assert spec.via == "pull_request"
+    assert spec.merge_method in ("merge", "squash", "rebase")
+    assert {"merge_conflict", "pr_not_mergeable"} <= set(spec.on_failure.hand_back_on)
+
+
+def test_workflow_rejects_unknown_merge_method_or_via():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        workflow.IntegrateSpec(merge_method="fast-forward")
+    with pytest.raises(ValidationError):
+        workflow.IntegrateSpec(via="direct_push")
+
+
+def test_unmergeable_pr_is_handed_back_to_implementer(db_session):
+    pid, task_id, run_id, impl_id = _setup_reworked_review(db_session)
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "fix1"}) as sched:
+        out = workflow.complete_integration(
+            task_id=task_id, run_id=run_id, ok=False,
+            reason="pr_not_mergeable: Required status check is failing")
+    assert out["ok"] is True and out["advanced"] is False
+    with db_session() as db:
+        assert db.get(Status, db.get(Task, task_id).status_id).name == "in_progress"
+    assert sched.call_args.kwargs["agent_id"] == impl_id
+    assert "Required status check is failing" in sched.call_args.kwargs["extra_context"]

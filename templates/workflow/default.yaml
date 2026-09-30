@@ -53,27 +53,33 @@ columns:
       advance_to: done
       assign_role: null        # done is terminal for now; docs step = next slice
       dispatch: false
+      # Nothing merges without a pull request: a task with no linked PR is
+      # refused with a comment (the pr_url gate is never waived).
       # Two-phase advance: the reviewer's approval triggers a deterministic
-      # daemon-side merge of the task branch into the target; the task only
-      # reaches done when the merge (and push) succeed. Conflict -> the task
-      # stays in review with a classified reason for the implementer.
+      # daemon-side merge of the task's PULL REQUEST; the task only reaches
+      # done when GitHub has merged it. Nothing is ever merged without a
+      # pull request (the implementer opens it and links it on the task), and
+      # the daemon never pushes to the target branch itself. Conflict / not
+      # mergeable -> the task goes back to whoever owes the fix.
       # target_branch omitted = the task repo's default_branch (never a
-      # hardcoded main — Loop v1 C5).
+      # hardcoded main — Loop v1 C5); the PR must be aimed at it.
       integrate:
-        push: true
+        via: pull_request        # the only way in
+        merge_method: merge      # merge | squash | rebase — how GitHub merges the PR
         # Loop v1 C6: the daemon runs the project's verify command
         # (Project Settings → "Command that proves the project works") on the
-        # MERGED code and pushes only if it passes.
+        # PR's merge result and merges the PR only if it passes.
         verify:
           required: true              # no command set → merge refused
           default_timeout_minutes: 30 # when the project sets no limit
         # When the merge or the checks fail. Kinds are the daemon's classified
         # reasons. Listed kinds go back to whoever owes the fix, with the
-        # failure output; anything else (push rejected, clone unavailable) is
-        # infrastructure — the task stays put and admins are notified.
+        # failure output; anything else (GitHub unreachable, PR closed, PR
+        # head moved, clone unavailable) is infrastructure — the task stays
+        # put and admins are notified.
         # Shares the bounce budget below.
         on_failure:
-          hand_back_on: [verify_failed, verify_timeout, merge_conflict, merge_failed, injected_files_committed]
+          hand_back_on: [verify_failed, verify_timeout, merge_conflict, pr_not_mergeable, injected_files_committed]
           to_column: in_progress
           assign: previous_agent      # or a role name from `roles`
           dispatch: true
