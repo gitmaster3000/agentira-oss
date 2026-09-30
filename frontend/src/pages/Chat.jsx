@@ -74,10 +74,19 @@ function scopeLabel(scopeKey) {
     return 'Conversation';
 }
 
+// AP-509: `/chat?agent=<id>&scope=<scope_key>` opens that conversation directly
+// (a "needs input" notification / Needs-you card lands on the agent's question).
+function selFromUrl() {
+    const q = new URLSearchParams(window.location.search);
+    const agent_id = q.get('agent');
+    const scope_key = q.get('scope');
+    return agent_id && scope_key ? { agent_id, scope_key, agent_name: '', label: '' } : null;
+}
+
 export function Chat() {
     const [convos, setConvos] = useState([]);
     const [convosLoading, setConvosLoading] = useState(true);
-    const [sel, setSel] = useState(null);          // {agent_id, scope_key, agent_name, label}
+    const [sel, setSel] = useState(selFromUrl);    // {agent_id, scope_key, agent_name, label}
     const [scopeOpen, setScopeOpen] = useState(false);
     const [newChatOpen, setNewChatOpen] = useState(false);
     const [roster, setRoster] = useState([]);       // agents for New chat picker
@@ -124,6 +133,15 @@ export function Chat() {
             .catch(() => {});
     }, []);
 
+    // A deep-linked conversation arrives without a name — fill it from the
+    // conversation list or the roster once either has loaded.
+    useEffect(() => {
+        if (!sel || sel.agent_name) return;
+        const c = convos.find((x) => x.agent_id === sel.agent_id && x.scope_key === sel.scope_key);
+        const name = c?.agent_name || roster.find((a) => a.id === sel.agent_id)?.name;
+        if (name) setSel((cur) => (cur && !cur.agent_name ? { ...cur, agent_name: name, label: c?.label || cur.label } : cur));
+    }, [sel, convos, roster]);
+
     useEffect(() => { messagesRef.current = messages; }, [messages]);
 
     const loadMessages = useCallback(async () => {
@@ -156,6 +174,7 @@ export function Chat() {
     }, [sel]);
 
     const selKey = sel ? `${sel.agent_id}|${sel.scope_key}` : null;
+    const lastUserIdx = messages.map((m) => m.role).lastIndexOf('user');
     useEffect(() => {
         if (!sel) return;
         setMessages([]);
@@ -605,7 +624,10 @@ export function Chat() {
                                     No messages yet. Say hello — or type / for commands.
                                 </div>
                             )}
-                            {messages.map((m) => <ChatBubble key={m.id} m={m} onAnswer={postMessage} />)}
+                            {messages.map((m, i) => (
+                                // A question stays clickable only until the human replies after it.
+                                <ChatBubble key={m.id} m={m} onAnswer={i > lastUserIdx ? postMessage : undefined} />
+                            ))}
                             {working && (
                                 <div className="flex items-center gap-1.5 px-2 text-xs text-text-tertiary">
                                     <Loader className="w-3 h-3 animate-spin" />

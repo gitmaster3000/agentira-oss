@@ -34,6 +34,8 @@ A run ends in one of three ways.
 
 **The agent declares an outcome** by calling `finish_run` with `succeeded`, `failed`, `blocked`, or `needs_input`.
 
+**Questions (`needs_input`).** The `summary` is the question. For a task run it is posted into the agent's task chat as a question card, with optional one-click answers from `finish_run`'s `options` list. The person can always type their own reply. The "needs input" notification and the **Needs you** card open that chat directly (`/chat?agent=<id>&scope=task:<id>`). A reply there resumes the same run and clears the question. A question also leaves **Needs you** once the task is done, once another run on the task has started after it, or when the person dismisses it with ×.
+
 **The process exits without declaring.** The daemon reports the exit. A clean exit with no declared outcome is a known false-green source — the run can appear successful while nothing was produced. Check the diff and artifacts.
 
 **Something interrupts.** A pause captures the session for resume. A crash triggers automatic retry. A vanished daemon is caught by the reconciler.
