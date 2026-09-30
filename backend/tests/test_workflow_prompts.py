@@ -174,3 +174,14 @@ def test_system_template_files_are_not_mutated_by_override(client):
     client.put(f"/api/projects/{pid}/workflow/prompts/reviewer",
                json={"text": "Custom."})
     assert reviewer_path.read_bytes() == before
+
+
+def test_reviewer_prompt_reviews_the_pull_request():
+    flow = workflow.system_workflow()
+    text = workflow._role_handoff_prompt(
+        flow, "reviewer", branch="agent/x/task/y",
+        pr_url="https://github.com/o/r/pull/42")
+    assert "https://github.com/o/r/pull/42" in text
+    assert "gh pr diff" in text or "gh pr view" in text   # reviews the PR itself
+    assert "merges the pull request" in text               # platform merges via PR
+    assert "git merge" not in text.lower()

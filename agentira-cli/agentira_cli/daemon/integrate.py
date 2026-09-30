@@ -1,21 +1,24 @@
-"""Branch integration — deterministic merge of an approved task branch.
+"""Branch integration — merge an approved task through its pull request.
 
 When a reviewer's run succeeds, the backend workflow driver sends an
-`integrate` frame; this module merges the task's branch into the target
-branch (main) **via the shared bare clone** (`~/.agentira/sources/<slug>`)
-and pushes to origin. The bare clone is where every per-task worktree
-branched from, so its refs already carry the task branches.
+`integrate` frame naming the task's pull request. Nothing is merged without
+a PR, and nothing is pushed by this module: it proves the PR's merge result
+works, then asks GitHub to merge the PR.
 
-Merges run in a short-lived worktree off the bare master (bare repos have
-no index / work tree, so `git checkout` + `git merge` cannot run in-place).
+  1. read the PR's state from GitHub (open? aimed at the right branch?
+     mergeable?);
+  2. fetch GitHub's own test-merge of the PR (`refs/pull/N/merge`) into the
+     shared bare clone (`~/.agentira/sources/<slug>`) and run the project's
+     verify command on it in a short-lived worktree;
+  3. only if that passed, merge the PR through the GitHub API, pinned to the
+     head that was checked.
 
 This is CODE doing a deterministic action with integrity guarantees (the
-config decides *whether/where* to integrate; this module decides *nothing*):
-- per-clone locking (no two merges race the same repo);
-- merge --no-ff so each task lands as one auditable merge commit;
-- any failure → merge abort + worktree cleanup, classified reason;
-- push failure surfaces too (the remote is the source of truth other
-  worktrees clone from).
+config decides *whether/where/how* to integrate; this module decides
+*nothing*):
+- per-clone locking (no two integrations race the same repo);
+- every failure → worktree + temp refs cleaned up, classified reason
+  ("merge_conflict", "verify_failed", "pr_not_mergeable", …).
 """
 
 from __future__ import annotations
@@ -24,11 +27,12 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
+from agentira_cli.daemon.github_pr import GhCli, GitHubError
 from agentira_cli.daemon.materializer import CONVENTIONS_REL, COURTESY_NAMES
 from agentira_cli.daemon.sources import (
-    _is_bare,
     _lock_for,
     _git_env,
     ensure_source_clone,
@@ -46,70 +50,137 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def integrate_branch(*, source_url: str, branch: str,
-                     target_branch: str = "main",
-                     push: bool = True, verify_cmd: str = "",
-                     verify_timeout_s: int = 1800,
-                     ) -> tuple[bool, str, dict | None]:
-    """Merge `branch` into `target_branch`, run `verify_cmd` on the merged
-    tree (Loop v1 C6), and push to origin only if it passed.
+_MERGEABLE_POLLS = 5
+_MERGEABLE_POLL_S = 2
+_sleep = time.sleep
 
-    Shared clones are bare masters. Integration uses a temporary worktree
-    checked out to `target_branch`, merges there, pushes, then removes the
-    worktree.
 
-    Returns (ok, reason, verify). On failure the bare clone is left clean;
-    `reason` is a classified cause ("merge_conflict: …", "verify_failed: …",
-    "verify_timeout: …", "push_failed: …", …). `verify` is the check's result
-    ({exit_code, duration_s, log_tail, timed_out}) or None when not run.
+def _pr_refs(number: int) -> tuple[str, str]:
+    base = f"refs/agentira/pr/{number}"
+    return f"{base}/head", f"{base}/merge"
+
+
+def integrate_pull_request(*, source_url: str, pr_number: int,
+                           target_branch: str = "main",
+                           verify_cmd: str = "",
+                           verify_timeout_s: int = 1800,
+                           merge_method: str = "merge",
+                           github=None,
+                           ) -> tuple[bool, str, dict | None]:
+    """Run `verify_cmd` on PR #`pr_number`'s merge result, then merge the PR
+    through GitHub. Never pushes to `target_branch` itself.
+
+    Returns (ok, reason, verify). Failures carry a classified reason prefix:
+    "merge_conflict", "pr_not_mergeable", "pr_head_moved", "pr_closed",
+    "pr_base_mismatch", "verify_failed", "verify_timeout",
+    "injected_files_committed", "github_unavailable", "clone_unavailable".
+    `verify` is the check's result ({exit_code, duration_s, log_tail,
+    timed_out}) or None when it did not run.
     """
-    if not source_url or not branch:
-        return False, "integration needs both a source url and a branch", None
+    if not source_url:
+        return False, "integration needs a source url", None
+    if not pr_number:
+        return False, "integration needs a pull request number", None
+    github = github or GhCli()
     try:
         clone, _ = ensure_source_clone(source_url)
     except Exception as exc:  # noqa: BLE001 — classified upstream patterns
         return False, f"clone_unavailable: {exc}", None
 
     with _lock_for(clone):
-        # Refresh remote-tracking refs so origin/<target> is current.
-        _git(clone, "fetch", "--prune", "origin")
+        try:
+            return _integrate_pr_locked(
+                clone, source_url, pr_number, target_branch, verify_cmd,
+                verify_timeout_s, merge_method, github)
+        except GitHubError as exc:
+            return False, f"github_unavailable: {exc}", None
 
-        # Resolve target ref: prefer local heads, else origin/<target>.
-        has_local = _git(clone, "rev-parse", "--verify", f"refs/heads/{target_branch}")
-        if has_local.returncode != 0:
-            has_remote = _git(
-                clone, "rev-parse", "--verify", f"refs/remotes/origin/{target_branch}",
-            )
-            if has_remote.returncode != 0:
-                return False, (
-                    f"target_branch_unavailable: neither refs/heads/{target_branch} "
-                    f"nor origin/{target_branch} exists"
-                ), None
-            # Create local target from remote-tracking so worktree can check it out.
-            r = _git(
-                clone, "branch", target_branch, f"origin/{target_branch}",
-            )
-            if r.returncode != 0:
-                return False, f"target_branch_unavailable: {r.stderr.strip()[:300]}", None
 
-        # Task branch must exist as a ref we can merge (local head or worktree).
-        has_branch = _git(clone, "rev-parse", "--verify", branch)
-        if has_branch.returncode != 0:
-            has_branch = _git(clone, "rev-parse", "--verify", f"refs/heads/{branch}")
-        if has_branch.returncode != 0:
-            return False, f"branch_unavailable: {branch} not found in source clone", None
+def _pr_state_failure(pr: dict, target_branch: str) -> str | None:
+    """Why the PR cannot be merged right now, or None if it can go on."""
+    if pr["state"] != "open":
+        return "pr_closed: the pull request was closed without being merged"
+    if pr["base_ref"] != target_branch:
+        return (f"pr_base_mismatch: the pull request targets '{pr['base_ref']}' "
+                f"but the workflow merges into '{target_branch}'")
+    if pr["mergeable"] is False or pr["mergeable_state"] == "dirty":
+        return "merge_conflict: the pull request conflicts with the target branch"
+    if pr["mergeable_state"] in ("blocked", "draft"):
+        return (f"pr_not_mergeable: GitHub reports the pull request as "
+                f"{pr['mergeable_state']}")
+    return None
 
-        injected = _injected_files_added(clone, branch, target_branch)
+
+def _settled_pr_status(github, source_url: str, number: int) -> dict:
+    """PR state once GitHub has finished computing mergeability (it answers
+    `mergeable: null` for a moment after every push)."""
+    for attempt in range(_MERGEABLE_POLLS):
+        pr = github.pr_status(source_url, number)
+        if pr["merged"] or pr["state"] != "open" or pr["mergeable"] is not None:
+            return pr
+        if attempt < _MERGEABLE_POLLS - 1:
+            _sleep(_MERGEABLE_POLL_S)
+    return pr
+
+
+def _integrate_pr_locked(clone, source_url, number, target_branch, verify_cmd,
+                         verify_timeout_s, merge_method, github):
+    pr = _settled_pr_status(github, source_url, number)
+    if pr["merged"]:
+        return True, "merged", None
+    if pr["mergeable"] is None and pr["state"] == "open":
+        return False, ("pr_not_mergeable: GitHub has not finished checking "
+                       "whether the pull request can be merged"), None
+    failed = _pr_state_failure(pr, target_branch)
+    if failed:
+        return False, failed, None
+
+    head_ref, merge_ref = _pr_refs(number)
+    wt = Path(tempfile.mkdtemp(prefix="agentira-integrate-"))
+    try:
+        r = _git(clone, "fetch", "origin",
+                 f"+refs/heads/{target_branch}:refs/remotes/origin/{target_branch}",
+                 f"+refs/pull/{number}/head:{head_ref}",
+                 f"+refs/pull/{number}/merge:{merge_ref}")
+        if r.returncode != 0:
+            return False, ("pr_not_mergeable: GitHub has no merge result for the "
+                           f"pull request ({r.stderr.strip()[:200]})"), None
+
+        # The merge result GitHub prepared must be built from the head that
+        # will be merged; otherwise the check would prove different code.
+        merge_parents = _git(clone, "rev-parse", f"{merge_ref}^2").stdout.strip()
+        if pr["head_sha"] and merge_parents != pr["head_sha"]:
+            return False, ("pr_head_moved: the pull request changed while it was "
+                           "being checked"), None
+
+        injected = _injected_files_added(clone, head_ref, target_branch)
         if injected:
             return False, f"injected_files_committed: {', '.join(injected)}", None
 
-        if not _is_bare(Path(clone)):
-            # Legacy non-bare path (should be rare after bare migration).
-            return _integrate_in_worktree(clone, branch, target_branch, push,
-                                          verify_cmd, verify_timeout_s)
+        r = _git(clone, "worktree", "add", "--detach", "--force", str(wt), merge_ref)
+        if r.returncode != 0:
+            return False, f"pr_not_mergeable: {r.stderr.strip()[:300]}", None
 
-        return _integrate_via_temp_worktree(clone, branch, target_branch, push,
-                                            verify_cmd, verify_timeout_s)
+        verify = None
+        if verify_cmd:
+            verify = _run_verify(str(wt), verify_cmd, verify_timeout_s)
+            failed = _verify_verdict(verify, verify_timeout_s)
+            if failed:
+                return False, failed, verify
+
+        ok, kind, message = github.merge_pr(
+            source_url, number, method=merge_method, sha=pr["head_sha"])
+        if not ok:
+            return False, f"{kind}: {message}", verify
+        _git(clone, "fetch", "origin", f"{target_branch}:{target_branch}")
+        logger.info("merged PR #%s into %s in %s (method=%s)",
+                    number, target_branch, clone, merge_method)
+        return True, "merged", verify
+    finally:
+        _git(clone, "worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt, ignore_errors=True)
+        for ref in (head_ref, merge_ref):
+            _git(clone, "update-ref", "-d", ref)
 
 
 def _injected_files_added(clone: str, branch: str, target_branch: str) -> list[str]:
@@ -155,99 +226,3 @@ def _verify_verdict(verify: dict, timeout_s: int) -> str | None:
     if verify["exit_code"] != 0:
         return f"verify_failed: exit {verify['exit_code']}"
     return None
-
-
-def _integrate_in_worktree(
-    clone: str, branch: str, target_branch: str, push: bool,
-    verify_cmd: str = "", verify_timeout_s: int = 1800,
-) -> tuple[bool, str, dict | None]:
-    for prep in (("checkout", target_branch), ("pull", "--ff-only", "origin", target_branch)):
-        r = _git(clone, *prep)
-        if r.returncode != 0 and prep[0] == "checkout":
-            return False, f"target_branch_unavailable: {r.stderr.strip()[:300]}", None
-    r = _git(
-        clone,
-        "-c", "user.name=Agentira", "-c", "user.email=bot@agentira.local",
-        "merge", "--no-ff", "--no-edit", branch,
-    )
-    if r.returncode != 0:
-        _git(clone, "merge", "--abort")
-        err = (r.stdout + r.stderr).strip()[:300]
-        if "CONFLICT" in r.stdout or "conflict" in err.lower():
-            return False, f"merge_conflict: {err}", None
-        return False, f"merge_failed: {err}", None
-    verify = None
-    if verify_cmd:
-        verify = _run_verify(clone, verify_cmd, verify_timeout_s)
-        failed = _verify_verdict(verify, verify_timeout_s)
-        if failed:
-            _git(clone, "reset", "--hard", "ORIG_HEAD")   # undo the merge
-            return False, failed, verify
-    if push:
-        r = _git(clone, "push", "origin", target_branch)
-        if r.returncode != 0:
-            return False, f"push_failed: {r.stderr.strip()[:300]}", verify
-    logger.info("integrated %s -> %s in %s (push=%s)",
-                branch, target_branch, clone, push)
-    return True, "merged", verify
-
-
-def _integrate_via_temp_worktree(
-    clone: str, branch: str, target_branch: str, push: bool,
-    verify_cmd: str = "", verify_timeout_s: int = 1800,
-) -> tuple[bool, str, dict | None]:
-    """Merge on a temp worktree of the bare master, then push and remove it."""
-    wt = Path(tempfile.mkdtemp(prefix="agentira-integrate-"))
-    try:
-        r = _git(
-            clone, "worktree", "add", "--force", str(wt), target_branch,
-        )
-        if r.returncode != 0:
-            return False, f"target_branch_unavailable: {r.stderr.strip()[:300]}", None
-
-        # Fast-forward worktree target if origin moved ahead.
-        _git(str(wt), "pull", "--ff-only", "origin", target_branch)
-        # The worktree has the clone's real target branch checked out, so a
-        # merge moves that ref. Remember where it was to undo a failed check.
-        pre_merge = _git(str(wt), "rev-parse", "HEAD").stdout.strip()
-
-        r = _git(
-            str(wt),
-            "-c", "user.name=Agentira", "-c", "user.email=bot@agentira.local",
-            "merge", "--no-ff", "--no-edit", branch,
-        )
-        if r.returncode != 0:
-            _git(str(wt), "merge", "--abort")
-            err = (r.stdout + r.stderr).strip()[:300]
-            if "CONFLICT" in r.stdout or "conflict" in err.lower():
-                return False, f"merge_conflict: {err}", None
-            return False, f"merge_failed: {err}", None
-
-        # Loop v1 C6: prove the MERGED code works before anything leaves
-        # this machine. Failure/timeout → nothing is pushed; the temp
-        # worktree (and its merge commit) is discarded below.
-        verify = None
-        if verify_cmd:
-            verify = _run_verify(str(wt), verify_cmd, verify_timeout_s)
-            failed = _verify_verdict(verify, verify_timeout_s)
-            if failed:
-                # Undo the merge on the target ref — otherwise the next
-                # integration would build on (and push) the failed merge.
-                _git(str(wt), "reset", "--hard", pre_merge)
-                return False, failed, verify
-
-        if push:
-            r = _git(str(wt), "push", "origin", f"HEAD:{target_branch}")
-            if r.returncode != 0:
-                return False, f"push_failed: {r.stderr.strip()[:300]}", verify
-
-        # Keep bare clone's local target ref in sync with the merge.
-        _git(clone, "fetch", "origin", f"{target_branch}:{target_branch}")
-
-        logger.info("integrated %s -> %s in bare %s (push=%s)",
-                    branch, target_branch, clone, push)
-        return True, "merged", verify
-    finally:
-        # Always drop the temp worktree so the bare master stays clean.
-        _git(clone, "worktree", "remove", "--force", str(wt))
-        shutil.rmtree(wt, ignore_errors=True)

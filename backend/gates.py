@@ -11,7 +11,7 @@ shortcuts impossible:
 
   backlog → todo         needs `has_dod`, `has_assignee`
   todo → in_progress     needs `has_assignee`
-  in_progress → review   needs `dod_all_checked` + `has_branch_or_pr`
+  in_progress → review   needs `dod_all_checked` + `pr_url_set`
   review → done          needs `pr_url_set` + `dod_all_checked`
 
 Phase 2 (separate ticket) wires the remote-state gates: `pr_merged`,
@@ -106,7 +106,8 @@ def _pr_url_set(task: Task) -> GateResult:
     if (task.pr_url or "").strip():
         return GateResult("pr_url_set", True)
     return GateResult("pr_url_set", False,
-                      "Link the PR URL before marking done.")
+                      "Open a pull request and link its URL on the task — work is "
+                      "only merged through a pull request.")
 
 
 # ── Per-transition gate map ─────────────────────────────────────────────
@@ -117,7 +118,7 @@ def _pr_url_set(task: Task) -> GateResult:
 _TRANSITION_GATES: dict[tuple[str, str], list[Callable[[Task], GateResult]]] = {
     ("backlog", "todo"):        [_has_dod, _has_assignee],
     ("todo", "in_progress"):    [_has_assignee],
-    ("in_progress", "review"):  [_dod_all_checked, _has_branch_or_pr],
+    ("in_progress", "review"):  [_dod_all_checked, _pr_url_set],
     ("review", "done"):         [_pr_url_set, _dod_all_checked],
 }
 
