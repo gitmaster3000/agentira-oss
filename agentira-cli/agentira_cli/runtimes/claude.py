@@ -11,6 +11,21 @@ from .base import Runtime
 logger = logging.getLogger("agentira.runtime.claude")
 
 
+BACKGROUND_TASK_CONTRACT = (
+    "This is a non-interactive Claude run. Never run commands in the "
+    "background or end your turn while a command is still running. Run "
+    "tests and other commands in the foreground and wait for their output "
+    "before finishing the run."
+)
+
+BACKGROUND_TASK_RESUME_NUDGE = (
+    "Your background task was killed when your turn ended. Non-interactive "
+    "runs exit at end of turn. Never run commands in the background. Run the "
+    "command again in the foreground, wait for it to finish, then complete "
+    "the task and call finish_run with an honest verdict."
+)
+
+
 class ClaudeRuntime(Runtime):
     provider = "claude"
     default_binary = "claude"
@@ -95,8 +110,10 @@ class ClaudeRuntime(Runtime):
             args.append("--strict-mcp-config")
         if model:
             args += ["--model", model]
-        if system_prompt:
-            args += ["--append-system-prompt", system_prompt]
+        effective_system_prompt = "\n\n".join(
+            part for part in (system_prompt, BACKGROUND_TASK_CONTRACT) if part
+        )
+        args += ["--append-system-prompt", effective_system_prompt]
         if mcp_config_path:
             args += ["--mcp-config", mcp_config_path]
         if resume_session_id:
@@ -107,6 +124,57 @@ class ClaudeRuntime(Runtime):
             # `mcp__<server>__<tool>` pins one specific tool.
             args += ["--allowedTools", " ".join(allowed_tools)]
         return args
+
+    @classmethod
+    async def execute_turn(cls, req):
+        """Run Claude, recovering once from an abandoned background task.
+
+        ``claude -p`` exits at end-turn and kills its process group. If Claude
+        backgrounds a command and then waits for an asynchronous notice, that
+        notice can never arrive. Resume the captured session once with an
+        explicit foreground-only nudge; a repeated violation becomes a visible
+        failed turn instead of a clean process exit with no verdict.
+        """
+        from dataclasses import replace
+
+        first = await super().execute_turn(req)
+        if not (first.success and first.background_tasks_live):
+            return first
+
+        resume_id = first.session_id or req.resume_session_id
+        if not resume_id:
+            first.success = False
+            first.error = (
+                "Claude ended its turn with a live background task, which was "
+                "killed, and no session id was available to resume it."
+            )
+            return first
+
+        logger.warning(
+            "live background task at end-turn trace=%s; resuming once",
+            req.trace_id,
+        )
+        resumed = await super().execute_turn(replace(
+            req,
+            prompt=BACKGROUND_TASK_RESUME_NUDGE,
+            resume_session_id=resume_id,
+        ))
+        resumed.input_tokens += first.input_tokens
+        resumed.output_tokens += first.output_tokens
+        resumed.session_lost = resumed.session_lost or first.session_lost
+        if resumed.background_tasks_live:
+            resumed.success = False
+            resumed.error = (
+                "Claude ended the recovery turn with another live background "
+                "task; refusing to record a silent completion."
+            )
+        elif resumed.success and not resumed.finish_run_called:
+            resumed.success = False
+            resumed.error = (
+                "Claude's recovery turn ended without calling finish_run; "
+                "refusing to record another completion with no verdict."
+            )
+        return resumed
 
     @classmethod
     def parse_event(cls, line: str):
@@ -152,11 +220,13 @@ class TextEvent:
 class ToolUseEvent:
     tool_name: str
     tool_input: Any = None
+    tool_use_id: str = ""
 
 @dataclass
 class ToolResultEvent:
     tool_name: str
     output: str = ""
+    tool_use_id: str = ""
 
 @dataclass
 class SessionEvent:
@@ -205,6 +275,7 @@ def parse_stream_line(line: str):
                 return ToolUseEvent(
                     tool_name=block.get("name", ""),
                     tool_input=block.get("input"),
+                    tool_use_id=block.get("id", ""),
                 )
 
     elif msg_type == "user":
@@ -213,6 +284,7 @@ def parse_stream_line(line: str):
                 return ToolResultEvent(
                     tool_name=block.get("tool_use_id", ""),
                     output=str(block.get("content", "")),
+                    tool_use_id=block.get("tool_use_id", ""),
                 )
 
     elif msg_type == "system":

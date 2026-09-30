@@ -86,11 +86,17 @@ def test_ollama_execute_turn_is_not_base_default():
 
 
 def test_cli_adapters_use_base_execute_turn():
-    """Claude etc. keep the default CLI stream path via MRO, not a string gate."""
-    for rt in (ClaudeRuntime, CodexRuntime, GeminiRuntime, GrokRuntime, OpenCodeRuntime):
+    """Ordinary CLI adapters use the shared stream path via MRO."""
+    for rt in (CodexRuntime, GeminiRuntime, GrokRuntime, OpenCodeRuntime):
         assert rt.execute_turn is Runtime.execute_turn or (
             rt.execute_turn.__func__ is Runtime.execute_turn.__func__  # type: ignore[attr-defined]
         )
+
+
+def test_claude_owns_noninteractive_background_recovery():
+    """Claude wraps the shared stream path to recover its killed background task."""
+    assert ClaudeRuntime.execute_turn is not Runtime.execute_turn
+    assert ClaudeRuntime.execute_turn.__qualname__.startswith("ClaudeRuntime")
 
 
 def test_daemon_core_has_no_openclaw_string_dispatch():
