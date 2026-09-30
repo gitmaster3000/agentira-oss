@@ -25,10 +25,14 @@ def test_db(pg):
 
 
 def _seed_task(TestSession, *, dod=None, assignee="", branch="", pr_url="",
-                gates_enabled=False) -> str:
+                gates_enabled=False, test_evidence_required=False) -> str:
     p = core_services.create_project("G", actor="system")
     if gates_enabled:
-        core_services.update_project(p["id"], gates_enabled=True)
+        core_services.update_project(
+            p["id"],
+            gates_enabled=True,
+            test_evidence_required=test_evidence_required,
+        )
     t = core_services.create_task(
         p["id"], "T", actor="system", assignee=assignee or "",
     )
@@ -119,6 +123,29 @@ def test_pr_url_set_requires_pr(test_db):
         assert gates._pr_url_set(db.get(Task, t2)).ok is False
 
 
+def test_test_evidence_gate_accepts_report_or_recording_only(test_db):
+    from backend import attachments
+
+    tid = _seed_task(test_db)
+    attachments.add(
+        task_id=tid,
+        filename="screenshot.png",
+        file_bytes=b"png",
+        kind="screenshot",
+    )
+    with test_db() as db:
+        assert gates._test_evidence_present(db.get(Task, tid)).ok is False
+
+    attachments.add(
+        task_id=tid,
+        filename="report.md",
+        file_bytes=b"PASS",
+        kind="test-report",
+    )
+    with test_db() as db:
+        assert gates._test_evidence_present(db.get(Task, tid)).ok is True
+
+
 # ── Engine ─────────────────────────────────────────────────────────────
 
 def test_evaluate_returns_empty_for_unknown_transition(test_db):
@@ -204,6 +231,36 @@ def test_move_to_done_requires_pr_and_all_dod_checked(test_db):
     assert "pr_url_set" in names
 
 
+def test_move_to_done_requires_test_evidence_when_project_opts_in(test_db):
+    from backend import attachments
+
+    tid = _seed_task(
+        test_db,
+        dod=[{"text": "ship", "checked": True}],
+        assignee="A",
+        branch="feat/x",
+        pr_url="https://github.com/o/r/pull/1",
+        gates_enabled=True,
+        test_evidence_required=True,
+    )
+    core_services.move_task(tid, "todo", actor="system")
+    core_services.move_task(tid, "in_progress", actor="system")
+    core_services.move_task(tid, "review", actor="system")
+    with pytest.raises(gates.GateFailure) as exc:
+        core_services.move_task(tid, "done", actor="system")
+    assert {g.name for g in exc.value.failed_gates} == {
+        "test_evidence_present",
+    }
+
+    attachments.add(
+        task_id=tid,
+        filename="acceptance.md",
+        file_bytes=b"PASS",
+        kind="test-report",
+    )
+    assert core_services.move_task(tid, "done", actor="system")["status"] == "done"
+
+
 # ── Project Settings round-trip ───────────────────────────────────────
 
 def test_project_gates_enabled_persists_via_update_project(test_db):
@@ -214,3 +271,12 @@ def test_project_gates_enabled_persists_via_update_project(test_db):
     assert again["gates_enabled"] is True
     cleared = core_services.update_project(p["id"], gates_enabled=False)
     assert cleared["gates_enabled"] is False
+
+
+def test_project_test_evidence_setting_round_trips(test_db):
+    project = core_services.create_project("Evidence", actor="system")
+    enabled = core_services.update_project(
+        project["id"], gates_enabled=True, test_evidence_required=True,
+    )
+    assert enabled["test_evidence_required"] is True
+    assert core_services.get_project(project["id"])["test_evidence_required"] is True
