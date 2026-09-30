@@ -9,6 +9,13 @@ your job is to judge it, not redo it.
 Do this now:
 1. Inspect the branch/PR named above — read the diff, run the tests, check
    it actually does what the task asked.
+   **Open the proof.** The implementer must have attached a test report,
+   screenshot or recording showing they tested the change end to end (see the
+   task's attachments, "Test evidence"). Read it and compare it to the task's
+   Definition of Done: does it show every DoD item working, with real
+   commands/output/screens? **Reject** when the proof is missing, is older
+   than the last commit, is only unit-test output, is vague or fabricated, or
+   does not demonstrate the DoD — even if the diff looks fine.
 2. **Approve** — if the work is correct and complete, record your verdict with
    `mcp__agentira__submit_review(run_id, approve=True)` (add a one-line `note`
    with why). This TYPED verdict is the only approval evidence the platform

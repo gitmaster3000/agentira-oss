@@ -741,11 +741,6 @@ def run_migrations():
             added |= _ensure_column(conn, "projects", "env_db_admin_url", "VARCHAR(500)")
             # AP-158: per-project gate-engine toggle.
             added |= _ensure_column(conn, "projects", "gates_enabled", "BOOLEAN DEFAULT FALSE NOT NULL")
-            # AP-475: optional review -> done test-evidence gate.
-            added |= _ensure_column(
-                conn, "projects", "test_evidence_required",
-                "BOOLEAN DEFAULT FALSE NOT NULL",
-            )
             # AP-197: workspace kind (git | sandbox | local_folder). NULL =
             # inferred at dispatch. Backfilled below from existing repo fields.
             if _ensure_column(conn, "projects", "workspace_kind", "VARCHAR(20)"):

@@ -337,10 +337,6 @@ def _project_to_dict(p: Project, task_count: Optional[int] = None) -> dict:
         "env_db_admin_url": getattr(p, "env_db_admin_url", None) or "",
         # AP-158: column-exit gates on/off for this project.
         "gates_enabled": bool(getattr(p, "gates_enabled", False)),
-        # AP-475: stricter completion requires durable test evidence.
-        "test_evidence_required": bool(
-            getattr(p, "test_evidence_required", False)
-        ),
         # AP-184: when on, ANY comment wakes the assigned agent (legacy). Off
         # (default) = only @mention wakes; a plain comment is recorded as context.
         "wake_on_comment": bool(getattr(p, "wake_on_comment", False)),
@@ -738,7 +734,6 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
                    env_teardown_cmd: Optional[str] = None,
                    env_db_admin_url: Optional[str] = None,
                    gates_enabled: Optional[bool] = None,
-                   test_evidence_required: Optional[bool] = None,
                    wake_on_comment: Optional[bool] = None,
                    repo_url: Optional[str] = None,
                    workspace_kind: Optional[str] = None,
@@ -802,8 +797,6 @@ def update_project(project_id: str, name: Optional[str] = None, description: Opt
             p.env_db_admin_url = env_db_admin_url.strip() or None
         if gates_enabled is not None:
             p.gates_enabled = bool(gates_enabled)
-        if test_evidence_required is not None:
-            p.test_evidence_required = bool(test_evidence_required)
         if wake_on_comment is not None:
             p.wake_on_comment = bool(wake_on_comment)
         if workflow_enabled is not None:
@@ -2272,6 +2265,17 @@ def add_attachment(
 def list_attachments(task_id: str, actor: str = "system") -> list[dict]:
     authorize_task_access(task_id, actor, "read")
     return _attachments.list_for_task(task_id)
+
+
+def get_task_proof(task_id: str, actor: str = "system") -> dict:
+    """Who tested the task end to end, and the proof to open (see gates.proof)."""
+    from backend import gates
+    authorize_task_access(task_id, actor, "read")
+    with _session() as db:
+        task = _resolve_task(db, task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        return gates.proof_summary(task)
 
 
 def list_project_attachments(

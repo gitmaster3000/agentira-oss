@@ -16,7 +16,7 @@ const kindLabel = (kind) => (
     KIND_OPTIONS.find(([value]) => value === kind)?.[1] || 'General file'
 );
 
-export function AttachmentsSection({ taskId, bare = false }) {
+export function AttachmentsSection({ taskId, bare = false, onChanged }) {
     const { user } = useAuth();
     const [attachments, setAttachments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -31,6 +31,7 @@ export function AttachmentsSection({ taskId, bare = false }) {
         try {
             const data = await api.listAttachments(taskId);
             setAttachments(data || []);
+            onChanged?.();
         } catch (err) {
             console.error('[AttachmentsSection] Error loading attachments:', err);
         } finally {
@@ -93,6 +94,7 @@ export function AttachmentsSection({ taskId, bare = false }) {
         try {
             await api.deleteAttachment(attachmentToDelete.id);
             setAttachments(prev => prev.filter(a => a.id !== attachmentToDelete.id));
+            onChanged?.();
         } catch (err) {
             console.error('[AttachmentsSection] Delete failed:', err);
             alert('Failed to delete attachment: ' + err.message);

@@ -4,15 +4,15 @@ A gate is a small check that runs against a task row at the moment its
 status would change. Failed gates block the move with structured
 reasons ("you said review → done but the PR isn't linked yet").
 
-Phase 1 (this module) — **local gates only**. Every checker reads
-fields already on the Task row (or the Run row for run-existence).
-No GitHub API calls, no webhooks. The point is to make obvious
-shortcuts impossible:
+Which checks guard which transition is workflow CONFIG, not code: the
+`checks:` map in `templates/workflow/default.yaml` (`"from->to": [kind, ...]`,
+read through `backend.forge.workflow.effective_workflow`). This module is
+the registry of check kinds those lists can name:
 
-  backlog → todo         needs `has_dod`, `has_assignee`
-  todo → in_progress     needs `has_assignee`
-  in_progress → review   needs `dod_all_checked` + `has_branch_or_pr`
-  review → done          needs `pr_url_set` + `dod_all_checked`
+  has_dod, has_assignee, dod_all_checked, has_branch_or_pr, pr_url_set, proof
+
+Phase 1 kinds are **local** — each reads fields already on the Task row (its
+attachments and linked commits included). No GitHub API calls, no webhooks.
 
 Phase 2 (separate ticket) wires the remote-state gates: `pr_merged`,
 `ci_passing(required=[…])`, `reviewer_approved`. Those need GitHub
@@ -22,15 +22,15 @@ Per-project opt-in: `Project.gates_enabled`. False/NULL = today's
 behavior (move_task is RBAC-only). True = the engine evaluates each
 transition.
 
-Convention: functions, not classes. Each gate is a small pure-ish
-function taking `(task)` and returning `(ok, reason)`.
+Convention: functions, not classes. Each check is a small pure-ish
+function taking `(task)` and returning a `GateResult`.
 """
 
 from __future__ import annotations
 
 import json as _json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Iterable
 
 from backend.models import Task
@@ -109,52 +109,90 @@ def _pr_url_set(task: Task) -> GateResult:
                       "Link the PR URL before marking done.")
 
 
-def _test_evidence_present(task: Task) -> GateResult:
-    evidence_kinds = {"test-report", "recording"}
-    present = sorted({
-        (attachment.kind or "other")
-        for attachment in task.attachments
-        if (attachment.kind or "other") in evidence_kinds
-    })
-    if present:
-        return GateResult("test_evidence_present", True)
-    return GateResult(
-        "test_evidence_present",
-        False,
-        "Attach a test report or recording before marking done.",
-    )
+# Attachment kinds that count as proof of manual, end-to-end testing.
+_PROOF_KINDS = frozenset({"test-report", "recording", "screenshot"})
+_PROOF_MISSING = ("Test it yourself end to end and attach the proof "
+                  "(test report or screenshot).")
+_PROOF_STALE = ("Your proof is older than your last change. Test it again "
+                "after your last change and attach fresh proof "
+                "(test report or screenshot).")
 
 
-# ── Per-transition gate map ─────────────────────────────────────────────
+def _latest_commit_at(task: Task):
+    """When the task's newest linked commit was made (None = none linked)."""
+    stamps = [(c.committed_at or c.created_at) for c in task.commits
+              if (c.kind or "commit") == "commit"]
+    stamps = [t for t in stamps if t is not None]
+    return max(stamps) if stamps else None
 
-# Key: (from_status, to_status). Value: list of gate functions to run.
-# Reverse transitions (review → in_progress, etc.) intentionally have no
-# gates — un-shipping is always allowed.
-_TRANSITION_GATES: dict[tuple[str, str], list[Callable[[Task], GateResult]]] = {
-    ("backlog", "todo"):        [_has_dod, _has_assignee],
-    ("todo", "in_progress"):    [_has_assignee],
-    ("in_progress", "review"):  [_dod_all_checked, _has_branch_or_pr],
-    ("review", "done"):         [_pr_url_set, _dod_all_checked],
+
+def proof_attachments(task: Task) -> list:
+    """The task's proof attachments (test report / recording / screenshot)
+    added after its latest commit, newest first."""
+    latest = _latest_commit_at(task)
+    proofs = [a for a in task.attachments
+              if (a.kind or "other") in _PROOF_KINDS
+              and (latest is None or a.created_at is None
+                   or a.created_at > latest)]
+    return sorted(proofs, key=lambda a: a.created_at, reverse=True)
+
+
+def proof_summary(task: Task) -> dict:
+    """What the task page shows: who tested it and which proof to open.
+    `stale` = proof exists but predates the latest commit."""
+    proofs = proof_attachments(task)
+    if proofs:
+        a = proofs[0]
+        return {"present": True, "tested_by": a.uploaded_by,
+                "attachment_id": a.id, "filename": a.filename,
+                "kind": a.kind, "at": a.created_at.isoformat()}
+    stale = any((a.kind or "other") in _PROOF_KINDS for a in task.attachments)
+    return {"present": False, "stale": stale}
+
+
+def _proof(task: Task) -> GateResult:
+    if proof_attachments(task):
+        return GateResult("proof", True)
+    any_proof = any((a.kind or "other") in _PROOF_KINDS
+                    for a in task.attachments)
+    return GateResult("proof", False,
+                      _PROOF_STALE if any_proof else _PROOF_MISSING)
+
+
+# ── Registry of check kinds ─────────────────────────────────────────────
+
+# The kinds a workflow's `checks:` list may name. Which transition runs which
+# kinds lives in templates/workflow/default.yaml — not here.
+CHECKS: dict[str, Callable[[Task], GateResult]] = {
+    "has_dod": _has_dod,
+    "has_assignee": _has_assignee,
+    "dod_all_checked": _dod_all_checked,
+    "has_branch_or_pr": _has_branch_or_pr,
+    "pr_url_set": _pr_url_set,
+    "proof": _proof,
 }
+
+
+def checks_for(project, from_status: str, to_status: str) -> list[str]:
+    """The check kinds the effective workflow declares for a transition.
+    Empty = no checks (always allowed). Reverse moves are never listed:
+    un-shipping is always allowed."""
+    from backend.forge.workflow import effective_workflow
+    return list(effective_workflow(project).checks.get(
+        f"{from_status}->{to_status}", []))
 
 
 # ── Engine ─────────────────────────────────────────────────────────────
 
 def evaluate(task: Task, *, from_status: str, to_status: str) -> list[GateResult]:
-    """Run every gate registered for (from_status → to_status).
+    """Run every check the workflow declares for (from_status → to_status).
 
     Returns the full list, ok and failed alike, so callers can show a
-    "2 of 3 passed" UI if they want. Empty list = no gates registered
+    "2 of 3 passed" UI if they want. Empty list = no checks declared
     for this transition (always allowed).
     """
-    fns = list(_TRANSITION_GATES.get((from_status, to_status), []))
-    if (
-        (from_status, to_status) == ("review", "done")
-        and task.project
-        and getattr(task.project, "test_evidence_required", False)
-    ):
-        fns.append(_test_evidence_present)
-    return [fn(task) for fn in fns]
+    kinds = checks_for(task.project, from_status, to_status)
+    return [CHECKS[k](task) for k in kinds]
 
 
 def failures(results: Iterable[GateResult]) -> list[GateResult]:
@@ -171,33 +209,18 @@ _GATE_META: dict[str, str] = {
     "dod_all_checked": "Every Definition-of-Done item is checked.",
     "has_branch_or_pr": "Task has a branch or a PR URL.",
     "pr_url_set": "Task has a PR URL linked.",
-    "test_evidence_present": "Task has a test-report or recording attachment.",
+    "proof": "Tested end to end by the agent — a test report, recording or "
+             "screenshot attached after the last change.",
 }
 
 
-def describe_transition(
-    from_status: str,
-    to_status: str,
-    *,
-    project=None,
-) -> list[dict]:
-    """Static description of the gates guarding a transition — for the
+def describe_transition(from_status: str, to_status: str, *,
+                        project=None) -> list[dict]:
+    """Static description of the checks guarding a transition — for the
     read-only workflow UI. Each entry: {name, description}. Empty list when
-    the transition registers no gates (always allowed)."""
-    out: list[dict] = []
-    fns = list(_TRANSITION_GATES.get((from_status, to_status), []))
-    if (
-        (from_status, to_status) == ("review", "done")
-        and project is not None
-        and getattr(project, "test_evidence_required", False)
-    ):
-        fns.append(_test_evidence_present)
-    for fn in fns:
-        # A checker's name is its function name minus the leading underscore
-        # (matches the GateResult.name it produces), resolved without a task.
-        name = fn.__name__.lstrip("_")
-        out.append({"name": name, "description": _GATE_META.get(name, name)})
-    return out
+    the workflow declares no checks for it (always allowed)."""
+    return [{"name": k, "description": _GATE_META.get(k, k)}
+            for k in checks_for(project, from_status, to_status)]
 
 
 def enforce(task: Task, *, from_status: str, to_status: str) -> None:

@@ -136,8 +136,6 @@ class ProjectUpdate(BaseModel):
     env_db_admin_url: Optional[str] = None
     # AP-158: column-exit gate enforcement.
     gates_enabled: Optional[bool] = None
-    # AP-475: require a test-report or recording before review -> done.
-    test_evidence_required: Optional[bool] = None
     # AP-184: when on, any comment wakes the assigned agent (legacy). Off
     # (default) = only @mention wakes; a plain comment is recorded as context.
     wake_on_comment: Optional[bool] = None
@@ -699,7 +697,6 @@ def api_update_project(
             env_teardown_cmd=body.env_teardown_cmd,
             env_db_admin_url=body.env_db_admin_url,
             gates_enabled=body.gates_enabled,
-            test_evidence_required=body.test_evidence_required,
             wake_on_comment=body.wake_on_comment,
             workflow_enabled=body.workflow_enabled,
             workflow_roles_json=body.workflow_roles_json,
@@ -1404,6 +1401,13 @@ def api_get_changes(
 @tasks.get("/{task_id}/attachments")
 def api_list_attachments(task_id: str, actor: str = Depends(get_current_user)):
     return services.list_attachments(task_id, actor=actor)
+
+@tasks.get("/{task_id}/proof")
+def api_task_proof(task_id: str, actor: str = Depends(get_current_user)):
+    try:
+        return services.get_task_proof(task_id, actor=actor)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 @tasks.post("/{task_id}/attachments")
 async def api_upload_attachment(task_id: str, file: UploadFile = File(...),

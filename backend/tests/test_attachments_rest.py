@@ -80,6 +80,34 @@ def test_upload_rejects_unknown_evidence_kind(client):
     assert "Unknown attachment kind" in up.text
 
 
+def test_task_proof_endpoint_reports_who_tested(client):
+    tid = _make_task(client)
+    empty = client.get(f"/api/tasks/{tid}/proof")
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {"present": False, "stale": False}
+
+    client.post(f"/api/tasks/{tid}/attachments",
+                files={"file": ("shot.png", b"png", "image/png")},
+                data={"kind": "screenshot"})
+    got = client.get(f"/api/tasks/{tid}/proof").json()
+    assert got["present"] is True
+    assert got["tested_by"] == "admin"
+    assert got["filename"] == "shot.png"
+    assert got["kind"] == "screenshot"
+    assert got["attachment_id"]
+
+
+def test_task_proof_endpoint_flags_stale_proof(client):
+    tid = _make_task(client)
+    client.post(f"/api/tasks/{tid}/attachments",
+                files={"file": ("r.md", b"PASS", "text/markdown")},
+                data={"kind": "test-report"})
+    client.post(f"/api/tasks/{tid}/commits", json={
+        "sha": "a" * 40, "message": "later", "committed_at": "2999-01-01T00:00:00+00:00"})
+    got = client.get(f"/api/tasks/{tid}/proof").json()
+    assert got == {"present": False, "stale": True}
+
+
 def test_download_requires_auth(client):
     tid = _make_task(client)
     att = client.post(f"/api/tasks/{tid}/attachments",

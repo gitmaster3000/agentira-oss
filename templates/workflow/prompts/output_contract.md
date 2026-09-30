@@ -21,7 +21,13 @@ with outcome="succeeded":
    can advance to review — leave unfinished items unchecked and say so
    in your summary. Do NOT check an item you didn't truly complete; a
    reviewer verifies your work next.
-5. **Register at least one artifact** via
+5. **Attach proof you tested it yourself.** Run the real app, API, CLI or
+   container the way a user would — not only unit tests — then attach the
+   evidence with mcp__agentira__create_attachment (`kind`: "test-report" with
+   the exact commands and real output, or "screenshot"/"recording"). It must
+   be added AFTER your last commit, or the board will not accept it and the
+   task cannot go to review.
+6. **Register at least one artifact** via
    mcp__agentira__register_run_artifact for the deliverable —
    the PR URL (kind="pr"), a generated report (kind="report"),
    a deployed preview (kind="url"), or a key file (kind="file").

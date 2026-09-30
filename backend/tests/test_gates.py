@@ -9,13 +9,15 @@ opted in via `gates_enabled`.
 from __future__ import annotations
 
 import json as _json
+import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import backend.db as bdb
 from backend import services as core_services
 from backend.forge import services as forge_services  # noqa: F401 — mappers
-from backend.models import Project, Task
+from backend.models import Task
 from backend import gates
 
 
@@ -25,14 +27,10 @@ def test_db(pg):
 
 
 def _seed_task(TestSession, *, dod=None, assignee="", branch="", pr_url="",
-                gates_enabled=False, test_evidence_required=False) -> str:
+                gates_enabled=False) -> str:
     p = core_services.create_project("G", actor="system")
     if gates_enabled:
-        core_services.update_project(
-            p["id"],
-            gates_enabled=True,
-            test_evidence_required=test_evidence_required,
-        )
+        core_services.update_project(p["id"], gates_enabled=True)
     t = core_services.create_task(
         p["id"], "T", actor="system", assignee=assignee or "",
     )
@@ -123,27 +121,65 @@ def test_pr_url_set_requires_pr(test_db):
         assert gates._pr_url_set(db.get(Task, t2)).ok is False
 
 
-def test_test_evidence_gate_accepts_report_or_recording_only(test_db):
+def _attach(tid, kind, name=None):
     from backend import attachments
 
-    tid = _seed_task(test_db)
-    attachments.add(
-        task_id=tid,
-        filename="screenshot.png",
-        file_bytes=b"png",
-        kind="screenshot",
-    )
-    with test_db() as db:
-        assert gates._test_evidence_present(db.get(Task, tid)).ok is False
+    attachments.add(task_id=tid, filename=name or f"{kind}.md",
+                    file_bytes=b"PASS", kind=kind, uploaded_by="Frontend Dev")
 
-    attachments.add(
-        task_id=tid,
-        filename="report.md",
-        file_bytes=b"PASS",
-        kind="test-report",
+
+def _commit(tid, *, committed_at):
+    core_services.link_commit(
+        tid, sha=uuid.uuid4().hex[:40], message="work", branch="feat/x",
+        committed_at=committed_at.isoformat(),
     )
+
+
+def _proof(test_db, tid):
     with test_db() as db:
-        assert gates._test_evidence_present(db.get(Task, tid)).ok is True
+        return gates.CHECKS["proof"](db.get(Task, tid))
+
+
+def test_proof_fails_without_evidence_attachment(test_db):
+    tid = _seed_task(test_db)
+    _attach(tid, "build")
+    _attach(tid, "other")
+    res = _proof(test_db, tid)
+    assert res.ok is False
+    assert res.name == "proof"
+    assert res.reason == ("Test it yourself end to end and attach the proof "
+                          "(test report or screenshot).")
+
+
+@pytest.mark.parametrize("kind", ["test-report", "recording", "screenshot"])
+def test_proof_accepts_each_evidence_kind(test_db, kind):
+    tid = _seed_task(test_db)
+    _attach(tid, kind)
+    assert _proof(test_db, tid).ok is True
+
+
+def test_proof_older_than_latest_commit_fails(test_db):
+    tid = _seed_task(test_db)
+    _attach(tid, "test-report")
+    _commit(tid, committed_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    res = _proof(test_db, tid)
+    assert res.ok is False
+    assert "after your last change" in res.reason
+
+
+def test_proof_newer_than_latest_commit_passes(test_db):
+    tid = _seed_task(test_db)
+    _commit(tid, committed_at=datetime.now(timezone.utc) - timedelta(hours=1))
+    _attach(tid, "screenshot")
+    assert _proof(test_db, tid).ok is True
+
+
+def test_proof_uses_the_latest_of_several_commits(test_db):
+    tid = _seed_task(test_db)
+    _commit(tid, committed_at=datetime.now(timezone.utc) - timedelta(hours=2))
+    _attach(tid, "test-report")
+    _commit(tid, committed_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    assert _proof(test_db, tid).ok is False
 
 
 # ── Engine ─────────────────────────────────────────────────────────────
@@ -215,50 +251,134 @@ def test_move_task_allowed_when_gates_enabled_and_all_pass(test_db):
     assert out["status"] == "todo"
 
 
+def _to_review(tid):
+    core_services.move_task(tid, "todo", actor="system")
+    core_services.move_task(tid, "in_progress", actor="system")
+    _attach(tid, "test-report")
+    core_services.move_task(tid, "review", actor="system")
+
+
 def test_move_to_done_requires_pr_and_all_dod_checked(test_db):
     t = _seed_task(test_db,
                     dod=[{"text": "ship", "checked": True}],
                     assignee="A", branch="feat/x", pr_url="",
                     gates_enabled=True)
-    # First move it through to review.
-    core_services.move_task(t, "todo", actor="system")
-    core_services.move_task(t, "in_progress", actor="system")
-    core_services.move_task(t, "review", actor="system")
-    # Now blocked at review→done because no PR URL.
+    _to_review(t)
     with pytest.raises(gates.GateFailure) as exc:
         core_services.move_task(t, "done", actor="system")
     names = {g.name for g in exc.value.failed_gates}
     assert "pr_url_set" in names
 
 
-def test_move_to_done_requires_test_evidence_when_project_opts_in(test_db):
-    from backend import attachments
-
-    tid = _seed_task(
-        test_db,
-        dod=[{"text": "ship", "checked": True}],
-        assignee="A",
-        branch="feat/x",
-        pr_url="https://github.com/o/r/pull/1",
-        gates_enabled=True,
-        test_evidence_required=True,
-    )
+def test_move_to_review_blocked_without_proof_with_plain_reason(test_db):
+    tid = _seed_task(test_db, dod=[{"text": "ship", "checked": True}],
+                     assignee="A", branch="feat/x", gates_enabled=True)
     core_services.move_task(tid, "todo", actor="system")
     core_services.move_task(tid, "in_progress", actor="system")
-    core_services.move_task(tid, "review", actor="system")
+    with pytest.raises(gates.GateFailure) as exc:
+        core_services.move_task(tid, "review", actor="system")
+    failed = exc.value.failed_gates
+    assert [g.name for g in failed] == ["proof"]
+    assert failed[0].reason.startswith("Test it yourself end to end")
+
+    _attach(tid, "test-report")
+    assert core_services.move_task(tid, "review", actor="system")["status"] == "review"
+
+
+def test_move_to_review_blocked_when_proof_predates_last_commit(test_db):
+    tid = _seed_task(test_db, dod=[{"text": "ship", "checked": True}],
+                     assignee="A", branch="feat/x", gates_enabled=True)
+    core_services.move_task(tid, "todo", actor="system")
+    core_services.move_task(tid, "in_progress", actor="system")
+    _attach(tid, "test-report")
+    _commit(tid, committed_at=datetime.now(timezone.utc) + timedelta(hours=1))
+    with pytest.raises(gates.GateFailure) as exc:
+        core_services.move_task(tid, "review", actor="system")
+    assert [g.name for g in exc.value.failed_gates] == ["proof"]
+
+
+def test_move_to_done_requires_proof(test_db):
+    tid = _seed_task(test_db, dod=[{"text": "ship", "checked": True}],
+                     assignee="A", branch="feat/x",
+                     pr_url="https://github.com/o/r/pull/1", gates_enabled=True)
+    _to_review(tid)
+    with test_db() as db:
+        for a in db.get(Task, tid).attachments:
+            a.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        db.commit()
+    _commit(tid, committed_at=datetime.now(timezone.utc) - timedelta(hours=1))
     with pytest.raises(gates.GateFailure) as exc:
         core_services.move_task(tid, "done", actor="system")
-    assert {g.name for g in exc.value.failed_gates} == {
-        "test_evidence_present",
-    }
-
-    attachments.add(
-        task_id=tid,
-        filename="acceptance.md",
-        file_bytes=b"PASS",
-        kind="test-report",
-    )
+    assert [g.name for g in exc.value.failed_gates] == ["proof"]
+    _attach(tid, "recording")
     assert core_services.move_task(tid, "done", actor="system")["status"] == "done"
+
+
+# ── The workflow YAML drives the checks ────────────────────────────────
+
+def _patched_flow(monkeypatch, checks):
+    from backend.forge import workflow
+
+    real = workflow.system_workflow()
+    real.checks = checks
+    monkeypatch.setattr(workflow, "system_workflow", lambda: real)
+
+
+def test_default_yaml_declares_the_transition_checks():
+    from backend.forge import workflow
+
+    checks = workflow.system_workflow().checks
+    assert checks["in_progress->review"] == [
+        "dod_all_checked", "has_branch_or_pr", "proof"]
+    assert checks["review->done"] == ["pr_url_set", "dod_all_checked", "proof"]
+
+
+def test_python_gate_table_is_gone():
+    assert not hasattr(gates, "_TRANSITION_GATES")
+
+
+def test_yaml_list_drives_which_checks_run(test_db, monkeypatch):
+    _patched_flow(monkeypatch, {"in_progress->review": ["has_assignee"]})
+    tid = _seed_task(test_db, assignee="A")
+    with test_db() as db:
+        results = gates.evaluate(db.get(Task, tid), from_status="in_progress",
+                                 to_status="review")
+    assert [r.name for r in results] == ["has_assignee"]
+
+
+def test_yaml_can_drop_proof(test_db, monkeypatch):
+    _patched_flow(monkeypatch, {"in_progress->review": ["has_branch_or_pr"]})
+    tid = _seed_task(test_db, branch="feat/x", assignee="A", gates_enabled=True,
+                     dod=[{"text": "x", "checked": True}])
+    core_services.move_task(tid, "todo", actor="system")
+    core_services.move_task(tid, "in_progress", actor="system")
+    assert core_services.move_task(tid, "review", actor="system")["status"] == "review"
+
+
+def test_unknown_check_kind_in_yaml_is_rejected():
+    from backend.forge.workflow import Workflow, system_workflow
+
+    data = system_workflow().model_dump()
+    data["checks"] = {"in_progress->review": ["telepathy"]}
+    with pytest.raises(ValueError, match="telepathy"):
+        Workflow(**data)
+
+
+def test_malformed_transition_key_is_rejected():
+    from backend.forge.workflow import Workflow, system_workflow
+
+    data = system_workflow().model_dump()
+    data["checks"] = {"review-done": ["proof"]}
+    with pytest.raises(ValueError, match="from->to"):
+        Workflow(**data)
+
+
+def test_describe_transition_reads_yaml_and_explains_proof():
+    out = gates.describe_transition("in_progress", "review")
+    assert [g["name"] for g in out] == [
+        "dod_all_checked", "has_branch_or_pr", "proof"]
+    proof = out[-1]
+    assert "test report" in proof["description"].lower()
 
 
 # ── Project Settings round-trip ───────────────────────────────────────
@@ -271,12 +391,3 @@ def test_project_gates_enabled_persists_via_update_project(test_db):
     assert again["gates_enabled"] is True
     cleared = core_services.update_project(p["id"], gates_enabled=False)
     assert cleared["gates_enabled"] is False
-
-
-def test_project_test_evidence_setting_round_trips(test_db):
-    project = core_services.create_project("Evidence", actor="system")
-    enabled = core_services.update_project(
-        project["id"], gates_enabled=True, test_evidence_required=True,
-    )
-    assert enabled["test_evidence_required"] is True
-    assert core_services.get_project(project["id"])["test_evidence_required"] is True

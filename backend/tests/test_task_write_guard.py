@@ -28,6 +28,7 @@ import backend.models  # noqa: F401
 import backend.forge.models  # noqa: F401
 from backend import services as core_services
 from backend.forge import workflow
+from backend.tests._proof import add_proof
 from backend.models import Task, TaskPriority, Profile, Role, Status, Project, Activity
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus, RunOutcome, RuntimeStatus
 
@@ -120,6 +121,7 @@ def _setup_review_scenario(db_session):
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps(dod))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         run = Run(agent_id=impl_id, task_id=t.id, project_id=pid,
                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
         db.add(run); db.commit()
@@ -180,6 +182,7 @@ def _setup_rejection_scenario(db_session):
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": False}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         now = datetime.now(timezone.utc)
         db.add(Run(agent_id=impl_id, task_id=t.id, project_id=pid,
                    status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
@@ -259,6 +262,7 @@ def test_complete_integration_advances_even_with_gates_enabled_and_no_pr_url(db_
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
                   worktree_branch="agent/x/task/y")

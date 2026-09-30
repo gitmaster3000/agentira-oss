@@ -294,11 +294,28 @@ class Workflow(BaseModel):
     bounce: BounceSpec = Field(default_factory=BounceSpec)
     rejection: RejectionSpec = Field(default_factory=RejectionSpec)
     manual_move: ManualMoveSpec = Field(default_factory=ManualMoveSpec)
+    # Transition checks: "from->to" -> check kinds (registry: backend/gates.py).
+    checks: dict[str, list[str]] = Field(default_factory=dict)
 
     @validator("columns")
     def columns_not_empty(cls, v):  # noqa: N805
         if not v:
             raise ValueError("workflow must define at least one column")
+        return v
+
+    @validator("checks")
+    def checks_are_known(cls, v):  # noqa: N805
+        """A typo'd transition or check kind would silently disable a gate —
+        refuse it loudly instead."""
+        for key, kinds in v.items():
+            parts = key.split("->")
+            if len(parts) != 2 or not all(p.strip() for p in parts):
+                raise ValueError(f"check key '{key}' must look like from->to")
+            unknown = [k for k in kinds if k not in gates.CHECKS]
+            if unknown:
+                raise ValueError(
+                    f"unknown check kind(s) {unknown} for '{key}'; "
+                    f"known: {sorted(gates.CHECKS)}")
         return v
 
     @model_validator(mode="after")

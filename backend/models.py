@@ -376,11 +376,6 @@ class Project(Base):
     # with structured reasons. Defaults to False so existing projects
     # keep working unchanged.
     gates_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # AP-475: when enabled alongside gates_enabled, review -> done additionally
-    # requires durable test evidence on the task (a test report or recording).
-    test_evidence_required: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False,
-    )
     # AP-184: when True, ANY comment on a task wakes the assigned agent (the
     # legacy behavior). Default False — a plain comment is recorded into the
     # task chat as context and the agent reads it when it next starts work; only

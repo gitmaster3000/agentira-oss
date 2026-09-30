@@ -7,6 +7,7 @@ import { Markdown } from './Markdown';
 import { MentionInput } from './MentionInput';
 import { LinksSection } from './TaskDetail/LinksSection';
 import { CollapsibleSection } from './TaskDetail/CollapsibleSection';
+import { TestedBy } from './TaskDetail/TestedBy';
 import {
     Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
     GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
@@ -657,6 +658,9 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                                 onKeyDown={e => e.key === 'Enter' && addDodItem()}
                             />
                             <button onClick={addDodItem} className="text-text-tertiary hover:text-accent-primary"><Plus className="w-4 h-4" /></button>
+                        </div>
+                        <div style={{ marginBottom: 18 }}>
+                            <TestedBy taskId={task.id} refreshKey={attachments} />
                         </div>
 
                     </CollapsibleSection>

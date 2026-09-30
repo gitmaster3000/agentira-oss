@@ -21,6 +21,7 @@ import backend.models  # noqa: F401
 import backend.forge.models  # noqa: F401
 from backend import services as core_services
 from backend.forge import workflow
+from backend.tests._proof import add_proof
 from backend.models import Task, TaskPriority, Profile, Role, Status, Project, allow_task_write
 from backend.forge.models import (
     Agent, ForgeRuntime, Run, RunStatus, RunOutcome, RuntimeStatus,
@@ -58,7 +59,7 @@ def test_column_ui_details_exposes_real_gates_and_prompts():
     ip = ui["in_progress"]
     assert ip["advance_to"] == "review"
     gate_names = {g["name"] for g in ip["gates"]}
-    assert gate_names == {"dod_all_checked", "has_branch_or_pr"}
+    assert gate_names == {"dod_all_checked", "has_branch_or_pr", "proof"}
     assert all(g["description"] for g in ip["gates"])
 
     # review is entered by the reviewer role — its prompt template must surface.
@@ -152,6 +153,7 @@ def _setup_review_scenario(db_session, *, with_reviewer=True, enabled=True,
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps(dod))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         run = Run(agent_id=impl_id, task_id=t.id, project_id=pid,
                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED)
         db.add(run); db.commit()
@@ -252,6 +254,25 @@ def test_gate_blocks_advance_when_dod_unchecked(db_session):
     mock_dispatch.assert_called_once()
 
 
+def test_missing_proof_bounces_agent_with_plain_reason(db_session):
+    """No proof attachment -> the advance is refused and the agent is sent
+    back with the plain-language reason, not a bare check name."""
+    from backend.models import Attachment
+    _, task_id, run_id, *_ = _setup_review_scenario(db_session)
+    with db_session() as db:
+        db.query(Attachment).filter(Attachment.task_id == task_id).delete()
+        db.commit()
+    with patch("backend.forge.services.schedule_task_run",
+               return_value={"run_id": "bounce1"}) as mock_dispatch:
+        out = workflow.advance_after_run(run_id)
+    assert out["advanced"] is False
+    assert out["reason"] == "gate_failed"
+    assert out["failures"] == ["proof"]
+    assert out.get("bounced") is True
+    sent = mock_dispatch.call_args.kwargs["extra_context"]
+    assert "Test it yourself end to end and attach the proof" in sent
+
+
 def test_bounce_exhausted_escalates_to_needs_attention(db_session):
     """After the configured bounce budget (default 2 runs in window), the
     task escalates to needs-attention instead of bouncing forever."""
@@ -324,6 +345,7 @@ def _setup_rejection_scenario(db_session, *, with_prior_impl_run=True):
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": False}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         now = datetime.now(timezone.utc)
         if with_prior_impl_run:
             # The implementer's run — outside the bounce window so the
@@ -450,6 +472,7 @@ def _setup_review_success(db_session, *, with_approval=True,
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         run = Run(agent_id=reviewer_id, task_id=t.id, project_id=pid,
                   status=RunStatus.COMPLETED, outcome=RunOutcome.SUCCEEDED,
                   worktree_branch="agent/x/task/y")
@@ -669,6 +692,7 @@ def test_ap383_full_sequence_fires_and_is_fully_logged(db_session):
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         task_id = t.id
 
     # 1) implement -> review
@@ -825,6 +849,7 @@ def test_ap383_sticky_reviewer_row_reapproval_integrates(db_session):
                  creator="system", branch="agent/x/task/y",
                  dod_items=json.dumps([{"text": "d", "checked": True}]))
         db.add(t); db.commit()
+        add_proof(db, t.id)
         task_id = t.id
         start = datetime.now(timezone.utc) - timedelta(hours=1)
         impl_run = Run(agent_id=impl_id, task_id=task_id, project_id=pid,

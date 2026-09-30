@@ -439,6 +439,7 @@ export const api = {
 
     // Attachments
     listAttachments: (taskId) => request(`/tasks/${taskId}/attachments`),
+    getTaskProof: (taskId) => request(`/tasks/${taskId}/proof`),
     uploadAttachment: (taskId, file, kind = 'other') => {
         const formData = new FormData();
         formData.append('file', file);
