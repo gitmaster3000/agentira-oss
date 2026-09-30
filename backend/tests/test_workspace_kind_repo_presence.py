@@ -14,6 +14,7 @@ from sqlalchemy import text
 from backend import services
 from backend import db as _db
 from backend.db import SessionLocal, backfill_workspace_kind
+from backend.tests._board import join_project
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, RuntimeStatus
 from backend.forge.services import _resolve_workspace_kind
@@ -119,6 +120,7 @@ def test_dispatch_frame_provisions_a_worktree_for_a_repo_only_project(pg):
     task = services.create_task(pid, "Ship it")
     agent = forge_services.create_agent(name="A", executor_type="cli",
                                         runtime_id=rt_id)
+    join_project(pid, agent["id"])
     prepared = _drive(lambda: forge_services.prepare_task_run(
         task_id=task["id"], agent_id=agent["id"]))
 

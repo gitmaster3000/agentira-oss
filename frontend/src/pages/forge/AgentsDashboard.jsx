@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus } from 'lucide-react';
+import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus, AlertTriangle } from 'lucide-react';
 import { api } from '../../api';
 import { CreateAgentModal } from '../../components/CreateAgentModal';
 
@@ -212,6 +212,17 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                     </span>
                 )}
             </div>
+
+            {/* Board access — a run for this agent would start blind */}
+            {agent.board_access && !agent.board_access.ok && (
+                <div
+                    className="flex items-start gap-1.5 mb-3 px-2 py-1.5 rounded bg-yellow-500/10 text-xs text-yellow-400"
+                    data-testid="board-access-warning"
+                >
+                    <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                    <span>{agent.board_access.problems.join(' ')}</span>
+                </div>
+            )}
 
             {/* Webhook */}
             {agent.webhook_url && (
