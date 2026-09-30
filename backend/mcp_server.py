@@ -722,6 +722,7 @@ async def finish_run(
     run_id: str,
     outcome: str,
     summary: str = "",
+    options: list[str] | None = None,
     ctx: Context = None,
 ) -> dict:
     """Declare the semantic verdict of a Forge run you're working.
@@ -740,6 +741,10 @@ async def finish_run(
         - "failed"      — something is wrong; not recoverable mid-run
       summary: one paragraph describing what changed or what's blocking
                you. This is the line humans read first — be specific.
+               For "needs_input", write it as the question itself: it is
+               posted into the task chat, where the human answers.
+      options: optional, "needs_input" only — short suggested answers the
+               human can pick with one click (they can always type their own).
 
     The run's process status (running/completed/failed/cancelled) is
     tracked separately by the daemon. A run can be status=completed +
@@ -749,7 +754,8 @@ async def finish_run(
     from backend.forge import services as forge_services
     try:
         logger.info(f"Tool finish_run called: run={run_id} outcome={outcome}")
-        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary)
+        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary,
+                                        options=options)
         if not res.get("ok"):
             logger.warning(f"Tool finish_run rejected: {res.get('error')}")
         return res

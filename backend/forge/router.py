@@ -441,11 +441,13 @@ def get_active_runs(actor: str = Depends(get_current_user)):
 @router.get("/runs")
 def list_runs(agent_id: Optional[str] = None, project_id: Optional[str] = None,
               status: Optional[str] = None, outcome: Optional[str] = None,
+              unresolved: bool = False,
               limit: int = 100, offset: int = 0,
               actor: str = Depends(get_current_user)):
     try:
         return services.list_runs(agent_id=agent_id, project_id=project_id,
                                   status=status, outcome=outcome,
+                                  unresolved=unresolved,
                                   limit=limit, offset=offset, actor=actor)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -558,6 +560,15 @@ def get_trigger_events(trace_id: str):
 def get_run_events(run_id: str, actor: str = Depends(get_current_user)):
     """Messages tagged with this run_id (across all of its triggers)."""
     return services.get_run_events(run_id, actor=actor)
+
+
+@router.post("/runs/{run_id}/dismiss")
+def dismiss_run_question(run_id: str, actor: str = Depends(get_current_user)):
+    """AP-509: dismiss the run's question from the "Needs you" list."""
+    result = services.dismiss_run_question(run_id, actor=actor)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    return result
 
 
 @router.post("/runs/{run_id}/cancel")
