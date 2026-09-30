@@ -27,6 +27,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from backend import services
+from backend import task_batch
 
 # ── Global Actor Context ──────────────────────────────────────────────────────
 # Set per-request by the auth middleware; read by tool handlers.
@@ -289,6 +290,12 @@ async def create_task(
     except Exception as e:
         logger.error(f"Tool create_task failed: {e}\n{traceback.format_exc()}")
         raise
+
+@mcp.tool()
+async def create_tasks(project_id: str, tasks: list[dict], ctx: Context = None) -> list[dict]:
+    """Create a whole plan in ONE atomic call (all-or-nothing) instead of many create_task + add_dependency calls. Each entry takes the create_task fields (title required; description, status, priority, assignee, tags, start_date, due_date, dod_items, parent_id, milestone_id, epic_id) plus a client-chosen unique `ref` and optional `depends_on_refs` (refs of other entries in this batch that must finish first; forward references are fine). Unknown refs, duplicate refs, self-dependencies and cycles are rejected and nothing is written. Max 200 entries. Returns [{ref, id, key}] in input order."""
+    return task_batch.create_tasks(project_id, tasks, actor=actor_ctx.get())
+
 
 @mcp.tool()
 async def list_tasks(
