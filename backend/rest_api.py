@@ -1001,11 +1001,24 @@ def api_create_epic(project_id: str, body: EpicCreate, actor: str = Depends(get_
 def api_get_roadmap(
     project_id: str,
     group_by: str = "epic",
+    epic_ids: list[str] | None = Query(default=None),
+    tag: str | None = None,
+    milestone_id: str | None = None,
+    status: str | None = None,
+    fields: str | None = None,
     actor: str = Depends(get_current_user),
 ):
     try:
         services.authorize_project_access(project_id, actor, "read")
-        return services.get_roadmap(project_id, group_by=group_by)
+        return services.get_roadmap(
+            project_id,
+            group_by=group_by,
+            epic_ids=epic_ids,
+            tag=tag,
+            milestone_id=milestone_id,
+            status=status,
+            fields=fields,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 

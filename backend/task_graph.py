@@ -68,18 +68,19 @@ def _parse_date(value: str | None) -> datetime | None:
 
 # ── child tasks ──────────────────────────────────────────────────────────
 
-def validate_parent(db, task: Task, parent_id: str) -> None:
-    """Raise GraphError unless `task` may be parented under `parent_id`."""
-    if parent_id == task.id:
-        raise GraphError("a task cannot be its own parent")
-    parent = db.get(Task, parent_id)
+def validate_parent(db, task: Task, parent_ref: str) -> str:
+    """Return the parent ID, or raise unless `task` may use that task ref."""
+    parent = services._resolve_task(db, parent_ref)
     if not parent:
-        raise GraphError(f"parent task {parent_id} not found")
+        raise GraphError(f"parent task {parent_ref} not found")
+    if parent.id == task.id:
+        raise GraphError("a task cannot be its own parent")
     if parent.project_id != task.project_id:
         raise GraphError("parent task must be in the same project")
     # Walking up from the proposed parent must never reach `task` itself.
-    if task.id in graph_repo.ancestor_ids(db, parent_id, limit=MAX_DEPTH):
+    if task.id in graph_repo.ancestor_ids(db, parent.id, limit=MAX_DEPTH):
         raise GraphError("that parent would create a cycle in the task tree")
+    return parent.id
 
 
 def list_subtasks(task_id: str, actor: str = "system") -> list[dict]:
@@ -289,6 +290,6 @@ def set_parent(db, task: Task, parent_id: str | None) -> str | None:
     """Validate + apply a parent change. Returns the stored value."""
     value = (parent_id or "").strip() or None
     if value:
-        validate_parent(db, task, value)
+        value = validate_parent(db, task, value)
     task.parent_id = value
     return value

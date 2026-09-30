@@ -6,6 +6,7 @@ Both REST API and MCP server call into this layer.
 from __future__ import annotations
 from datetime import datetime as _dt, timezone as _tz
 from typing import Optional
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from backend.db import SessionLocal, init_db, privileged, set_current_org, _derive_account_type
@@ -1947,22 +1948,47 @@ def get_board(project_id: str) -> dict:
             "columns": board,
         }
 
-def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
-    """Return roadmap data: tasks grouped by epic or tag, with milestones and date range."""
+def get_roadmap(
+    project_id: str,
+    group_by: str = "epic",
+    *,
+    epic_ids: list[str] | None = None,
+    tag: str | None = None,
+    milestone_id: str | None = None,
+    status: str | None = None,
+    fields: str | None = None,
+) -> dict:
+    """Return filtered roadmap data, excluding done work by default."""
     with _session() as db:
         project = db.get(Project, project_id)
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
+        if fields not in (None, "compact"):
+            raise ValueError("fields must be 'compact'")
+
         from backend.repos import tasks as core_tasks_repo
         from backend.repos import task_graph as graph_repo
 
-        tasks = (
-            core_tasks_repo.with_list_relations(db.query(Task))
-            .filter(Task.project_id == project_id)
-            .order_by(Task.created_at.asc())
-            .all()
+        query = core_tasks_repo.with_list_relations(db.query(Task)).filter(
+            Task.project_id == project_id,
         )
+        if epic_ids:
+            query = query.filter(Task.epic_id.in_(epic_ids))
+        if tag and tag.strip():
+            exact_tag = f",{tag.strip()},"
+            query = query.filter(
+                func.concat(",", Task.tags, ",").contains(
+                    exact_tag, autoescape=True,
+                ),
+            )
+        if milestone_id:
+            query = query.filter(Task.milestone_id == milestone_id)
+        if status:
+            query = query.filter(Task.status_id == _get_status_id(db, status))
+        else:
+            query = query.filter(Task.status_id != _get_status_id(db, "done"))
+        tasks = query.order_by(Task.created_at.asc()).all()
 
         STATUS_PROGRESS = {"done": 100, "review": 75, "in_progress": 50, "todo": 25, "backlog": 0}
 
@@ -1975,11 +2001,13 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         # AP-496: dependency edges + blocked flags for the whole project, so
         # the roadmap can draw the graph without a request per task.
         task_ids = [t.id for t in tasks]
+        task_id_set = set(task_ids)
         neighbors = graph_repo.neighbor_tasks(db, task_ids)
         sub_counts = graph_repo.subtask_counts(db, task_ids)
         dependencies = [
             {"id": d.id, "task_id": d.task_id, "depends_on_id": d.depends_on_id}
             for d in graph_repo.list_dependencies(db, project_id)
+            if d.task_id in task_id_set or d.depends_on_id in task_id_set
         ]
 
         for t in tasks:
@@ -1997,7 +2025,7 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
             progress = STATUS_PROGRESS.get(status_name, 0)
 
             blocked_by = neighbors.get(t.id, {}).get("blocked_by", [])
-            task_data = {
+            full_task_data = {
                 "id": t.id,
                 "key": t.key or t.id,
                 "title": t.title,
@@ -2015,6 +2043,19 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 "blocks": neighbors.get(t.id, {}).get("blocks", []),
                 "is_blocked": any(b["status"] != "done" for b in blocked_by),
             }
+            task_data = (
+                {
+                    "id": full_task_data["id"],
+                    "key": full_task_data["key"],
+                    "title": full_task_data["title"],
+                    "status": full_task_data["status"],
+                    "start": full_task_data["start"],
+                    "due": full_task_data["end"],
+                    "blocked_by": full_task_data["blocked_by"],
+                }
+                if fields == "compact"
+                else full_task_data
+            )
 
             groups.setdefault(group_key, []).append(task_data)
             all_dates.append(start)
@@ -2025,8 +2066,14 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         group_list = []
         for name, tasks_in_group in groups.items():
             total = len(tasks_in_group)
-            done = sum(1 for t in tasks_in_group if t["progress"] == 100)
-            in_flight = sum(1 for t in tasks_in_group if 0 < t["progress"] < 100)
+            done = sum(1 for t in tasks_in_group if t["status"] == "done")
+            in_flight = sum(
+                1 for t in tasks_in_group
+                if 0 < STATUS_PROGRESS.get(t["status"], 0) < 100
+            )
+            total_progress = sum(
+                STATUS_PROGRESS.get(t["status"], 0) for t in tasks_in_group
+            )
             meta = group_meta.get(name, {})
             group_list.append({
                 "id": meta.get("id"),
@@ -2036,7 +2083,7 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 "total": total,
                 "done": done,
                 "in_progress": in_flight,
-                "progress": round(sum(t["progress"] for t in tasks_in_group) / total) if total else 0,
+                "progress": round(total_progress / total) if total else 0,
             })
 
         # Sort: groups with in-progress work first, then by progress desc
@@ -2047,6 +2094,8 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
         from backend import task_graph as graph_service
 
         ms_rows = graph_repo.list_milestones(db, project_id)
+        if milestone_id:
+            ms_rows = [m for m in ms_rows if m.id == milestone_id]
         ms_counts = graph_repo.milestone_counts(db, [m.id for m in ms_rows])
         milestones = [graph_service._milestone_to_dict(m, ms_counts.get(m.id))
                       for m in ms_rows]
@@ -2068,7 +2117,9 @@ def get_roadmap(project_id: str, group_by: str = "epic") -> dict:
                 "total_epics": len(group_list),
                 "total_milestones": len(milestones),
                 "blocked_tasks": sum(
-                    1 for e in group_list for t in e["tasks"] if t["is_blocked"]),
+                    1 for e in group_list for t in e["tasks"]
+                    if any(b["status"] != "done" for b in t["blocked_by"])
+                ),
             },
         }
 

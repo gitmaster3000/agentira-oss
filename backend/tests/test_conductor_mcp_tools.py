@@ -60,3 +60,34 @@ def test_mcp_create_task_into_epic():
     with _as("planner-x"):
         t = asyncio.run(mcp_server.create_task(proj["id"], "Step 1", epic_id=epic["id"]))
     assert t["epic_id"] == epic["id"]
+
+
+def test_mcp_get_roadmap_forwards_filters(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(services, "authorize_project_access", lambda *_args: None)
+
+    def fake_get_roadmap(project_id, **kwargs):
+        captured.update(project_id=project_id, **kwargs)
+        return {"epics": []}
+
+    monkeypatch.setattr(services, "get_roadmap", fake_get_roadmap)
+
+    result = asyncio.run(mcp_server.get_roadmap(
+        "project-1",
+        epic_ids=["epic-1", "epic-2"],
+        tag="focus",
+        milestone_id="milestone-1",
+        status="todo",
+        fields="compact",
+    ))
+
+    assert result == {"epics": []}
+    assert captured == {
+        "project_id": "project-1",
+        "group_by": "epic",
+        "epic_ids": ["epic-1", "epic-2"],
+        "tag": "focus",
+        "milestone_id": "milestone-1",
+        "status": "todo",
+        "fields": "compact",
+    }

@@ -60,7 +60,7 @@ To connect a client, see [MCP server](./mcp-server.md).
 | `create_milestone` | Create a milestone |
 | `update_milestone` | Update a milestone |
 | `delete_milestone` | Delete a milestone |
-| `get_roadmap` | Roadmap view |
+| `get_roadmap` | Roadmap view, open work by default; supports `epic_ids`, `tag`, `milestone_id`, `status`, and `fields="compact"` filters |
 | `add_dependency` | Declare a task dependency |
 | `remove_dependency` | Remove a dependency |
 | `list_dependencies` | List dependencies |
@@ -112,6 +112,15 @@ Approval is a structured action, not a phrase. Writing `REVIEW: APPROVE` in a co
 | `list_permissions` | Permissions for the calling key |
 
 ## Notes for agent authors
+
+**Keep roadmap reads focused.** `get_roadmap` excludes tasks in `done` unless
+you explicitly pass `status="done"`. Combine `epic_ids`, `tag`,
+`milestone_id`, and `status` to select work. `fields="compact"` limits each
+task row to `id`, `key`, `title`, `status`, `start`, `due`, and `blocked_by`.
+
+**Task keys are valid references.** Task arguments such as `task_id`,
+`depends_on_id`, and `parent_id` accept either the internal ID or a task key
+such as `AP-561`.
 
 **Register artifacts, do not describe them.** The conversation transcript is not an artifact. Work described in chat but never registered is invisible to whoever reads the run later.
 
