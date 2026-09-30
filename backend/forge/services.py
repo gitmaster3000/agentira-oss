@@ -222,12 +222,18 @@ def get_conversation_info(*, agent_id: str, project_id: str | None = None,
                        .filter(AgentMessage.agent_id == agent_id,
                                AgentMessage.scope_key == scope)
                        .scalar() or 0)
+        # Copy scalars while the ORM row is still attached. Keeping the session
+        # boundary explicit prevents future commits here from introducing the
+        # detached-row failure that previously affected submit_review.
+        has_session = bool(conv and conv.runtime_session_id)
+        session_id = (conv.runtime_session_id if conv else "") or ""
+        last_used_at = _iso(conv.last_used_at) if conv else None
     return {
         "scope_key": scope,
-        "has_session": bool(conv and conv.runtime_session_id),
-        "session_id": (conv.runtime_session_id if conv else "") or "",
+        "has_session": has_session,
+        "session_id": session_id,
         "message_count": int(msg_count),
-        "last_used_at": _iso(conv.last_used_at) if conv else None,
+        "last_used_at": last_used_at,
     }
 
 
@@ -3876,15 +3882,17 @@ def submit_review(run_id: str, *, approve: bool, actor: str,
             return {"ok": False, "error": "Run not found"}
         if not r.task_id:
             return {"ok": False, "error": "Run is not tied to a task"}
-        task = db.get(Task, r.task_id)
+        # Copy the scalar before commit expires the Run and the session closes.
+        task_id = r.task_id
+        task = db.get(Task, task_id)
         if not task:
             return {"ok": False, "error": "Task not found"}
         require_project_access(db, actor, task.project_id, "write")
         activities_repo.record_review_verdict(
             db, project_id=task.project_id, task_id=task.id, actor=actor,
-            verdict=verdict, note=note)
+            verdict=verdict, note=note, run_id=run_id)
         db.commit()
-    return {"ok": True, "verdict": verdict, "task_id": r.task_id}
+    return {"ok": True, "verdict": verdict, "task_id": task_id}
 
 
 def list_runs_for_task(task_id: str, actor: str = "system") -> list[dict]:
