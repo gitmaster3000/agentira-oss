@@ -75,7 +75,9 @@ def test_create_attachment_proxies_to_backend(env):
     mcp_server.token_ctx.set("agentira_testkey_abc123")
     with env_p, post_p, get_p, delete_p:
         out = asyncio.run(mcp_server.create_attachment(
-            task_id=task["id"], filename="note.txt", content="hello forge"))
+            task_id=task["id"], filename="note.txt", content="hello forge",
+            verbose=True,
+        ))
     assert out["filename"] == "note.txt"
     assert out["task_id"] == task["id"]
     # Bytes went through the REST route → downloadable over REST (no 404).
@@ -125,6 +127,7 @@ def test_scoped_crd_uses_backend_routes(env, owner_kind):
             filename=f"{owner_kind}.txt",
             content=f"{owner_kind} content",
             content_type="text/plain",
+            verbose=True,
             **owner_args,
         ))
         listed = asyncio.run(mcp_server.read_attachment(**owner_args))
