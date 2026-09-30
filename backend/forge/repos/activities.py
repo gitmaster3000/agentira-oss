@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
+
 from backend.models import Activity
 
 
@@ -54,19 +56,50 @@ def add_task_comment(db, *, project_id: str, task_id: str,
 
 
 def record_review_verdict(db, *, project_id: str, task_id: str, actor: str,
-                          verdict: str, note: str = "") -> None:
+                          verdict: str, note: str = "",
+                          run_id: str | None = None) -> bool:
     """Record a reviewer's STRUCTURED verdict (WFE Phase 2).
 
     The verdict lives in a dedicated `action == "review_verdict"` row with the
     machine-readable value as its own JSON `diff` field — NOT prose in `detail`
     that a gate would string-match. `actor` is the server-injected reviewer
-    profile name, so the verdict can't be spoofed by run content. Caller owns
-    the commit."""
+    profile name, so the verdict can't be spoofed by run content. When
+    ``run_id`` is supplied, retries are idempotent for that (run, verdict)
+    pair. Caller owns the commit. Returns whether a row was added."""
     import json as _json
-    db.add(Activity(project_id=project_id, task_id=task_id, actor=actor,
-                    action="review_verdict",
-                    detail=(note or f"Review verdict: {verdict}"),
-                    diff=_json.dumps({"verdict": verdict})))
+    payload = {"verdict": verdict}
+    idempotency_key = None
+    if run_id:
+        payload["run_id"] = run_id
+        idempotency_key = f"review:{run_id}:{verdict}"
+        existing = (db.query(Activity.id)
+                      .filter(Activity.idempotency_key == idempotency_key)
+                      .first())
+        if existing:
+            return False
+
+    row = Activity(
+        project_id=project_id,
+        task_id=task_id,
+        actor=actor,
+        action="review_verdict",
+        detail=(note or f"Review verdict: {verdict}"),
+        diff=_json.dumps(payload, sort_keys=True),
+        idempotency_key=idempotency_key,
+    )
+    if idempotency_key is None:
+        db.add(row)
+        return True
+
+    # The pre-check handles ordinary transport retries. The unique index plus
+    # savepoint also closes the race between concurrent retries.
+    try:
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        return False
+    return True
 
 
 def latest_review_verdict(db, *, task_id: str, actor: str,
