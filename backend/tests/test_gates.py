@@ -111,6 +111,21 @@ def test_has_branch_or_pr_accepts_either(test_db):
         assert gates._has_branch_or_pr(db.get(Task, t3)).ok is False
 
 
+def test_sending_to_review_requires_a_pull_request(test_db):
+    """Work is only merged through a PR, so it can't reach review without one
+    — a bare branch is not enough."""
+    t_branch = _seed_task(test_db, dod=[{"text": "d", "checked": True}], branch="feat/x")
+    t_pr = _seed_task(test_db, dod=[{"text": "d", "checked": True}],
+                      pr_url="https://github.com/o/r/pull/1")
+    with test_db() as db:
+        r1 = gates.evaluate(db.get(Task, t_branch), from_status="in_progress",
+                            to_status="review")
+        r2 = gates.evaluate(db.get(Task, t_pr), from_status="in_progress",
+                            to_status="review")
+    assert "pr_url_set" in {g.name for g in gates.failures(r1)}
+    assert gates.failures(r2) == []
+
+
 def test_pr_url_set_requires_pr(test_db):
     t1 = _seed_task(test_db, pr_url="https://github.com/o/r/pull/9")
     t2 = _seed_task(test_db, branch="feat/x")  # branch alone isn't enough
@@ -191,12 +206,16 @@ def test_move_task_allowed_when_gates_enabled_and_all_pass(test_db):
 def test_move_to_done_requires_pr_and_all_dod_checked(test_db):
     t = _seed_task(test_db,
                     dod=[{"text": "ship", "checked": True}],
-                    assignee="A", branch="feat/x", pr_url="",
+                    assignee="A", branch="feat/x",
+                    pr_url="https://github.com/o/r/pull/1",
                     gates_enabled=True)
-    # First move it through to review.
+    # First move it through to review, then lose the PR link.
     core_services.move_task(t, "todo", actor="system")
     core_services.move_task(t, "in_progress", actor="system")
     core_services.move_task(t, "review", actor="system")
+    with test_db() as db:
+        db.get(Task, t).pr_url = ""
+        db.commit()
     # Now blocked at review→done because no PR URL.
     with pytest.raises(gates.GateFailure) as exc:
         core_services.move_task(t, "done", actor="system")

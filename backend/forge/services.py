@@ -2683,7 +2683,9 @@ def _build_task_prompt(task, extra_context: str = "") -> str:
     parts.append("\n" + _required_block("repo_check"))
     if extra_context:
         parts.append("\n## Follow-up from the user\n" + extra_context)
-    parts.append("\n" + _required_block("output_contract"))
+    from backend.forge.workflow import _integration_target
+    base = _integration_target(None, task) or "the repository's default branch"
+    parts.append("\n" + _required_block("output_contract").replace("{{BASE_BRANCH}}", base))
     return "\n".join(parts)
 
 

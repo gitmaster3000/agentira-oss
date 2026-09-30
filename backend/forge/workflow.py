@@ -31,9 +31,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import yaml
 from pydantic import BaseModel, Field, model_validator, validator
@@ -198,11 +199,15 @@ class IntegrationFailureSpec(BaseModel):
 class IntegrateSpec(BaseModel):
     """Branch-integration policy (workflow slice 2). POLICY lives here in
     config; the ACTION is deterministic daemon code (daemon/integrate.py —
-    merge --no-ff in the shared clone, push origin)."""
+    check the PR's merge result, then merge the PR through GitHub)."""
+    # Nothing is merged without a pull request (user rule, 2026-09-25), so
+    # this is the only way in; it is named so the policy reads in the YAML.
+    via: Literal["pull_request"] = "pull_request"
+    # How GitHub merges the PR: a merge commit, a squash, or a rebase.
+    merge_method: Literal["merge", "squash", "rebase"] = "merge"
     # "" = the task's repo default_branch (Loop v1 C5). Never a literal main:
     # a fork/branch-based project (e.g. main-rsi) must not merge into main.
     target_branch: str = ""
-    push: bool = True
     verify: VerifySpec = Field(default_factory=VerifySpec)
     on_failure: IntegrationFailureSpec = Field(default_factory=IntegrationFailureSpec)
 
@@ -221,6 +226,18 @@ class OnEnter(BaseModel):
     """What happens when a task ARRIVES in a column via the driver (slice 3:
     done -> dispatch the documentation role on the freshly merged task)."""
     dispatch_role: Optional[str] = None
+    # On a HUMAN move into this column (manual_move.dispatch): start the
+    # task's assigned agent on it (the work column has no hand-off role).
+    dispatch_assignee: bool = False
+
+
+class ManualMoveSpec(BaseModel):
+    """What a HUMAN moving a task into a column triggers. dispatch=True →
+    the column's agent is dispatched with the column's prompt: the role that
+    enters the column (on_success.assign_role of the column before it, or
+    on_enter.dispatch_role), else the assignee when on_enter.dispatch_assignee.
+    Agent/workflow moves never trigger it — those paths dispatch themselves."""
+    dispatch: bool = False
 
 
 class ColumnSpec(BaseModel):
@@ -279,6 +296,7 @@ class Workflow(BaseModel):
     roles: dict[str, RoleSpec] = Field(default_factory=dict)
     bounce: BounceSpec = Field(default_factory=BounceSpec)
     rejection: RejectionSpec = Field(default_factory=RejectionSpec)
+    manual_move: ManualMoveSpec = Field(default_factory=ManualMoveSpec)
 
     @validator("columns")
     def columns_not_empty(cls, v):  # noqa: N805
@@ -447,6 +465,85 @@ def pick_role_agent(db, *, project_id: str, role: RoleSpec,
     if role.fallback == "any":
         return min(candidates, key=lambda a: _in_flight(db, a.id))
     return None
+
+
+def _entry_role(flow: "Workflow", column_name: str) -> str | None:
+    """The role dispatched INTO a column: the preceding column's
+    on_success.assign_role, else the column's own on_enter.dispatch_role."""
+    for col in flow.columns:
+        s = col.on_success
+        if s and s.advance_to == column_name and s.assign_role:
+            return s.assign_role
+    col = flow.column(column_name)
+    return col.on_enter.dispatch_role if col and col.on_enter else None
+
+
+def _agent_named(db, name: str | None) -> Agent | None:
+    if not name:
+        return None
+    return db.query(Agent).filter(Agent.name == name).first()
+
+
+def dispatch_on_manual_move(task_id: str, to_status: str, actor: str) -> dict:
+    """A HUMAN moved a task into `to_status`: dispatch that column's agent
+    with the column's prompt, per `manual_move` + `on_enter` in the workflow
+    config. Agent and workflow moves are ignored (they dispatch themselves).
+    Never raises into the move."""
+    try:
+        with SessionLocal() as db:
+            if actor in ("workflow", "system") or _agent_named(db, actor):
+                return {"dispatched": False, "reason": "not_a_human_move"}
+            task = db.get(Task, task_id)
+            if not task:
+                return {"dispatched": False, "reason": "task_gone"}
+            project = db.get(Project, task.project_id) if task.project_id else None
+            if not project or not getattr(project, "workflow_enabled", False):
+                return {"dispatched": False, "reason": "workflow_disabled"}
+            flow = effective_workflow(project)
+            if not flow.manual_move.dispatch:
+                return {"dispatched": False, "reason": "policy_off"}
+            if runs_repo.has_active_run(db, task.id):
+                return {"dispatched": False, "reason": "run_active"}
+            col = flow.column(to_status)
+            assignee = _agent_named(db, task.assignee)
+            role_name = _entry_role(flow, to_status)
+            agent, prompt = None, ""
+            if role_name and role_name in flow.roles:
+                role = flow.roles[role_name]
+                matches = [m.lower() for m in role.match]
+                if assignee and any(m in (assignee.name or "").lower() for m in matches):
+                    agent = assignee
+                else:
+                    agent = pick_role_agent(
+                        db, project_id=task.project_id, role=role,
+                        previous_agent_id=assignee.id if assignee else None)
+                prompt = _role_handoff_prompt(
+                    flow, role_name, overrides=_prompt_overrides(project),
+                    branch=task.branch or "", pr_url=task.pr_url or "")
+            elif col and col.on_enter and col.on_enter.dispatch_assignee:
+                agent = assignee
+            if agent is None:
+                return {"dispatched": False, "reason": "no_agent"}
+            agent_id, agent_name = agent.id, agent.name
+            reassign = agent_name != task.assignee
+        if reassign:
+            from backend import services as core_task_services
+            core_task_services.update_task(task_id, assignee=agent_name,
+                                           actor="workflow")
+        from backend.forge import services
+        d = services.schedule_task_run(task_id=task_id, agent_id=agent_id,
+                                       extra_context=prompt)
+        if isinstance(d, dict) and d.get("error"):
+            logger.warning("workflow: manual-move dispatch failed %s -> %s: %s",
+                           task_id, agent_name, d["error"])
+            return {"dispatched": False, "reason": "dispatch_error",
+                    "error": d["error"]}
+        return {"dispatched": True, "agent": agent_name,
+                "run_id": d.get("run_id") if isinstance(d, dict) else None}
+    except Exception as exc:  # noqa: BLE001 — never break a move
+        logger.exception("workflow.dispatch_on_manual_move failed %s: %s",
+                         task_id, exc)
+        return {"dispatched": False, "reason": "exception"}
 
 
 def _bounce_gate_failure(db, *, task, run, current: str, target: str,
@@ -790,18 +887,29 @@ def advance_after_run(run_id: str) -> dict:
                 return {"advanced": False, "reason": f"no_on_success_for_{current}"}
             target = spec.advance_to
 
-            # The driver respects the same evidence a manual move would —
-            # except the PR-proxy gates when the flow integrates the branch
-            # itself: gates exist to stop FAKED progress, and a system-performed
-            # merge (verified by the daemon, conflict-aborted) is strictly
-            # stronger evidence than a pr_url string. DoD gates still apply.
+            # The driver respects exactly the evidence a manual move would.
+            # Nothing merges without a pull request (user rule, 2026-09-25):
+            # the PR gate is never waived, and an approved task with no PR is
+            # refused with a plain comment rather than bounced or merged.
             import time as _time
             _started = _time.monotonic()
             all_results = gates.evaluate(task, from_status=current, to_status=target)
             fails = gates.failures(all_results)
             if spec.integrate is not None:
-                fails = [f for f in fails
-                         if f.name not in ("pr_url_set", "has_branch_or_pr")]
+                pr_number = _pr_number(task.pr_url)
+                if pr_number is None:
+                    services_core = __import__("backend.services", fromlist=["add_comment"])
+                    services_core.add_comment(
+                        task.id,
+                        ("⛔ **Merge refused** — there is no pull request linked to "
+                         "this task. Work is only merged through an approved "
+                         "pull request: open one for the task's branch and link "
+                         "its address (…/pull/<number>) on the task."),
+                        actor="workflow")
+                    _log_driver_decision(
+                        db, task=task, run=run, from_status=current,
+                        to_status=target, result="no_op:no_pull_request")
+                    return {"advanced": False, "reason": "no_pull_request"}
                 # Terminal gate (plan v4 §5): merging requires >=1 typed
                 # evidence.* condition. The human-approval fact is fetched from
                 # the review_verdict store and its snapshot is persisted as its
@@ -885,11 +993,6 @@ def advance_after_run(run_id: str) -> dict:
             # daemon reports back. Conflict/push failure -> the task stays put
             # with a classified reason.
             if spec.integrate is not None:
-                # AP-520: merge the task's WORK branch. The finishing run is
-                # usually the reviewer's — its own worktree branch is empty.
-                branch = (task.branch or "").strip()
-                if not branch and not _is_handoff_run(db, run, task):
-                    branch = (run.worktree_branch or "").strip()
                 agent = db.get(Agent, run.agent_id) if run.agent_id else None
                 runtime_id = agent.runtime_id if agent else None
                 source_url = _task_source_url(db, task)
@@ -911,12 +1014,12 @@ def advance_after_run(run_id: str) -> dict:
                     return {"advanced": False, "reason": "no_verify_cmd"}
                 timeout_min = (getattr(project, "verify_timeout_minutes", None)
                                or ispec.verify.default_timeout_minutes)
-                if not branch or not runtime_id or not source_url or not target_branch:
+                if not runtime_id or not source_url or not target_branch:
                     _log_driver_decision(
                         db, task=task, run=run, from_status=current, to_status=target,
                         result="no_op:integration_missing_info")
                     return {"advanced": False, "reason": "integration_missing_info",
-                            "branch": branch, "runtime": bool(runtime_id),
+                            "runtime": bool(runtime_id),
                             "source_url": bool(source_url),
                             "target": bool(target_branch)}
                 task_id_, run_id_ = task.id, run.id
@@ -928,14 +1031,16 @@ def advance_after_run(run_id: str) -> dict:
                 from backend.forge.ws_dispatch import hub
                 _dispatch_coro(hub.dispatch_integrate(
                     runtime_id=runtime_id, task_id=task_id_, run_id=run_id_,
-                    source_url=source_url, branch=branch,
-                    target_branch=target_branch, push=ispec.push,
+                    source_url=source_url,
+                    target_branch=target_branch, pr_number=pr_number,
+                    pr_url=(task.pr_url or "").strip(),
+                    merge_method=ispec.merge_method,
                     verify_cmd=verify_cmd, verify_timeout_s=60 * int(timeout_min),
                 ))
-                logger.info("workflow: %s integration requested (%s -> %s)",
-                            task.key or task.id, branch, target_branch)
+                logger.info("workflow: %s integration requested (PR #%s -> %s)",
+                            task.key or task.id, pr_number, target_branch)
                 return {"advanced": False, "integration_requested": True,
-                        "branch": branch, "target": target_branch}
+                        "pr_number": pr_number, "target": target_branch}
 
             next_agent = None
             if spec.assign_role:
@@ -1023,6 +1128,13 @@ def _task_source_url(db, task) -> str:
         pass
     project = db.get(Project, task.project_id)
     return (getattr(project, "repo_url", None) or "") if project else ""
+
+
+def _pr_number(pr_url: str | None) -> int | None:
+    """The pull-request number in a task's linked PR address, or None when it
+    isn't a pull-request link (the daemon merges by number)."""
+    m = re.search(r"/pull/(\d+)(?:[/?#]|$)", (pr_url or "").strip())
+    return int(m.group(1)) if m else None
 
 
 def _integration_target(db, task) -> str:
@@ -1164,9 +1276,8 @@ def complete_integration(*, task_id: str, run_id: str | None,
 
         # TaskService, not a raw write: auth (AP-374), activity logging
         # (AP-375), and agent wake come from the one place. skip_gates=True
-        # is the explicit re-entrancy escape hatch — the merge just
-        # completed is stronger evidence than the pr_url/branch gates this
-        # transition would otherwise re-check (see docstring above).
+        # only avoids re-checking: every gate (incl. the linked PR) was
+        # already enforced before the integration was requested.
         from backend import services as core_task_services
         core_task_services.move_task(task_id_, target, actor="workflow",
                                      skip_gates=True, record_transition=False)

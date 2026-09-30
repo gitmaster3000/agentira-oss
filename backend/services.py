@@ -979,6 +979,17 @@ def get_deployment_logs(project_id: str, deployment_id: str, *, cursor: int = 0)
         return _deploy_flow.get_logs(db, project_id, deployment_id, cursor=cursor)
 
 
+def apply_deploy_result(provider_deployment_id: str, *, status: str | None = None,
+                        url: str | None = None, detail: str = "",
+                        logs: list[str] | None = None) -> dict:
+    with _session() as db:
+        result = _deploy_flow.apply_daemon_result(
+            db, provider_deployment_id, status=status, url=url,
+            detail=detail, logs=logs)
+        db.commit()
+        return result
+
+
 def delete_project(project_id: str, actor: str = "system") -> bool:
     """Cascade-delete a project and everything it owns: tasks, epics, members,
     activities, attachments (rows + on-disk files), forge runs, and chats.

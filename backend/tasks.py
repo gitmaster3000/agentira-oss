@@ -126,53 +126,10 @@ class TaskService:
         milestone_id: str | None = None,
     ) -> dict:
         with services._session() as db:
-            project = db.get(Project, project_id)
-            if not project:
-                raise ValueError(f"Project {project_id} not found")
-
-            require_project_access(db, actor, project_id, "write")
-
-            status_id = services._get_status_id(db, status)
-            start_dt = _parse_dt(start_date)
-            due_dt = _parse_dt(due_date)
-
-            prefix = project.key_prefix or "PROJ"
-            num = project.next_task_number or 1
-            task_key = f"{prefix}-{num}"
-            project.next_task_number = num + 1
-
-            task = Task(
-                project_id=project_id,
-                key=task_key,
-                type=self.task_type,
-                title=title,
-                description=description,
-                status_id=status_id,
-                priority=TaskPriority(priority),
-                assignee=assignee,
-                creator=actor,
-                tags=",".join(tags) if tags else "",
-                start_date=start_dt,
-                due_date=due_dt,
-                dod_items=json.dumps(services._normalize_dod(dod_items)) if dod_items else None,
-                epic_id=epic_id if epic_id and epic_id.strip() else None,
-            )
-            db.add(task)
-            db.flush()
-
-            # AP-496: let a caller create a task already nested under a parent
-            # or already counted towards a milestone — agents plan that way.
-            if parent_id:
-                task_graph.set_parent(db, task, parent_id)
-            if milestone_id and milestone_id.strip():
-                task_graph.validate_milestone(db, task, milestone_id.strip())
-                task.milestone_id = milestone_id.strip()
-
-            services._log_activity(
-                db, actor, "task.create", f"Created task: {title}",
-                project_id=project_id, task_id=task.id,
-                notify_users=[assignee] if assignee and assignee != actor else []
-            )
+            task = self.add(
+                db, project_id, title, description, status, priority, assignee,
+                tags, start_date, due_date, dod_items, epic_id, actor,
+                parent_id=parent_id, milestone_id=milestone_id)
             db.commit()
 
             if assignee and assignee != actor:
@@ -183,6 +140,75 @@ class TaskService:
 
             db.refresh(task)
             return services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
+
+    def add(
+        self,
+        db,
+        project_id: str,
+        title: str,
+        description: str = "",
+        status: str = "backlog",
+        priority: str = "medium",
+        assignee: str = "",
+        tags: list[str] | None = None,
+        start_date: str | None = None,
+        due_date: str | None = None,
+        dod_items: Optional[list[dict]] = None,
+        epic_id: str | None = None,
+        actor: str = "system",
+        parent_id: str | None = None,
+        milestone_id: str | None = None,
+    ) -> Task:
+        """Stage a task + its activity row on `db` without committing, so
+        callers can compose several writes into one transaction."""
+        project = db.get(Project, project_id)
+        if not project:
+            raise ValueError(f"Project {project_id} not found")
+
+        require_project_access(db, actor, project_id, "write")
+
+        status_id = services._get_status_id(db, status)
+        start_dt = _parse_dt(start_date)
+        due_dt = _parse_dt(due_date)
+
+        prefix = project.key_prefix or "PROJ"
+        num = project.next_task_number or 1
+        task_key = f"{prefix}-{num}"
+        project.next_task_number = num + 1
+
+        task = Task(
+            project_id=project_id,
+            key=task_key,
+            type=self.task_type,
+            title=title,
+            description=description,
+            status_id=status_id,
+            priority=TaskPriority(priority),
+            assignee=assignee,
+            creator=actor,
+            tags=",".join(tags) if tags else "",
+            start_date=start_dt,
+            due_date=due_dt,
+            dod_items=json.dumps(services._normalize_dod(dod_items)) if dod_items else None,
+            epic_id=epic_id if epic_id and epic_id.strip() else None,
+        )
+        db.add(task)
+        db.flush()
+
+        # AP-496: let a caller create a task already nested under a parent
+        # or already counted towards a milestone — agents plan that way.
+        if parent_id:
+            task_graph.set_parent(db, task, parent_id)
+        if milestone_id and milestone_id.strip():
+            task_graph.validate_milestone(db, task, milestone_id.strip())
+            task.milestone_id = milestone_id.strip()
+
+        services._log_activity(
+            db, actor, "task.create", f"Created task: {title}",
+            project_id=project_id, task_id=task.id,
+            notify_users=[assignee] if assignee and assignee != actor else []
+        )
+        return task
 
     # ── read ──────────────────────────────────────────────────────────────
     def list(
@@ -451,6 +477,12 @@ class TaskService:
             db.refresh(task)
             result = services._task_to_dict(task, attachments_count=services._attachment_count(db, task.id))
 
+        # A human moving a task starts that column's agent with its workflow
+        # prompt (policy in the workflow config; no-op otherwise).
+        if old != new_status:
+            from backend.forge import workflow as _workflow
+            _workflow.dispatch_on_manual_move(task_id, new_status, actor)
+
         # AP-190: a completed task compacts each agent's conversation so a later
         # reopen starts from a summary, not the whole transcript. Best-effort —
         # the move must succeed regardless. Done outside the session above.
@@ -460,6 +492,13 @@ class TaskService:
                 compaction.compact_task_on_done(task_id)
             except Exception as exc:  # noqa: BLE001 — never fail a move on this
                 logger.warning("compaction on done failed task=%s: %s",
+                               task_id, exc)
+            # C7c: closing the last open task closes the epic (deterministic).
+            try:
+                from backend import epic_progress
+                epic_progress.close_epic_if_complete(task_id, actor)
+            except Exception as exc:  # noqa: BLE001 — never fail a move on this
+                logger.warning("epic auto-close failed task=%s: %s",
                                task_id, exc)
         return result
 

@@ -13,12 +13,15 @@ from backend.deploy.contract import (
 )
 from backend.deploy.adapter import DeployAdapter
 from backend.deploy.contract import TargetKind
+from backend.deploy.docker import DockerAdapter
 from backend.deploy.railway import RailwayAdapter
 from backend.deploy.registry import get_adapter, register
 
 register(TargetKind.RAILWAY, RailwayAdapter())
+register(TargetKind.DOCKER, DockerAdapter())
 
 __all__ = [
+    "DockerAdapter",
     "RailwayAdapter",
     "Capability",
     "DeployTargetConfig",

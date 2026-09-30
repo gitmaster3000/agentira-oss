@@ -36,3 +36,36 @@ def test_contract_demands_push_and_verification():
 def test_repo_check_block_is_config_too():
     p = _build_task_prompt(_T())
     assert "## Before you start — check you're in the right repo" in p
+
+
+# ── Merge only through a pull request ─────────────────────────────────────
+
+def test_contract_tells_implementer_to_open_a_pr_and_link_it():
+    p = _build_task_prompt(_T())
+    assert "pull request" in p.lower()
+    assert "gh pr create" in p                    # opens it
+    assert "pr_url" in p                          # links it on the task
+
+
+def test_contract_names_the_projects_base_branch_not_main(monkeypatch):
+    from backend import services as core_services
+    monkeypatch.setattr(core_services, "resolve_project_repo",
+                        lambda pid, repo_name=None: {"default_branch": "main-rsi"})
+
+    class T(_T):
+        project_id = "p1"
+        repo_name = None
+    p = _build_task_prompt(T())
+    assert "--base main-rsi" in p
+    assert "{{BASE_BRANCH}}" not in p
+
+
+def test_contract_without_a_known_base_branch_says_use_the_default():
+    p = _build_task_prompt(_T())
+    assert "{{BASE_BRANCH}}" not in p
+    assert "default branch" in p.lower()
+
+
+def test_pr_is_a_required_deliverable():
+    p = _build_task_prompt(_T())
+    assert 'kind="pr"' in p
