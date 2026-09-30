@@ -17,6 +17,7 @@ import pytest
 
 import backend.db as db_mod
 from backend import services as core_services
+from backend.tests._board import join_project
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, RuntimeStatus, Run, RunStatus
 
@@ -69,6 +70,7 @@ def _mk_task_agent(TestSession):
                                      actor="system")
     agent = forge_services.create_agent(name="A", executor_type="cli",
                                         runtime_id=rt_id)
+    join_project(project["id"], agent["id"])
     return task["id"], agent["id"]
 
 
@@ -241,6 +243,8 @@ def test_different_agents_run_concurrently(test_db):
                                      runtime_id=rt_id)
     a2 = forge_services.create_agent(name="A2", executor_type="cli",
                                      runtime_id=rt_id)
+    join_project(p1["id"], a1["id"])
+    join_project(p2["id"], a2["id"])
     fake = _FakeHub()
     with patch("backend.forge.ws_dispatch.hub", fake):
         r1 = _drive(lambda: forge_services.schedule_task_run(

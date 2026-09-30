@@ -19,6 +19,7 @@ import pytest
 
 import backend.db as db_mod
 from backend import services as core_services
+from backend.tests._board import join_project
 from backend.forge import services as forge_services
 from backend.forge.models import (
     ForgeRuntime, RuntimeStatus, Run, RunStatus, RunOutcome,
@@ -67,6 +68,7 @@ def _mk_task_agent():
     task = core_services.create_task(project["id"], "Build it", actor="system")
     agent = forge_services.create_agent(name="A", executor_type="cli",
                                         runtime_id=rt_id)
+    join_project(project["id"], agent["id"])
     return task["id"], agent["id"]
 
 

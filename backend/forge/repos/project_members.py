@@ -5,6 +5,13 @@ from __future__ import annotations
 from backend.models import ProjectMember
 
 
+def is_member(db, *, project_id: str, profile_id: str) -> bool:
+    return (db.query(ProjectMember.id)
+              .filter(ProjectMember.project_id == project_id,
+                      ProjectMember.profile_id == profile_id)
+              .first()) is not None
+
+
 def ensure_member(db, *, project_id: str, profile_id: str,
                   org_id: str | None) -> bool:
     """Add `profile_id` to `project_id` if absent. Returns True when a row
