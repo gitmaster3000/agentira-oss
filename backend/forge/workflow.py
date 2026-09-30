@@ -1068,6 +1068,7 @@ def advance_after_run(run_id: str) -> dict:
                                  to_status=target, result="advanced")
             db.commit()
             task_id, task_key = task.id, (task.key or task.id)
+            task_project_id = task.project_id
             task_branch, task_pr_url = task.branch or "", task.pr_url or ""
             next_agent_id = next_agent.id if next_agent else None
             next_agent_name = next_agent.name if next_agent else None
@@ -1096,13 +1097,22 @@ def advance_after_run(run_id: str) -> dict:
                 flow, spec.assign_role, overrides=prompt_overrides,
                 branch=task_branch, pr_url=task_pr_url)
             from backend.forge import services
-            d = services.schedule_task_run(task_id=task_id,
-                                           agent_id=next_agent_id,
-                                           extra_context=handoff_prompt)
+            try:
+                d = services.schedule_task_run(task_id=task_id,
+                                               agent_id=next_agent_id,
+                                               extra_context=handoff_prompt)
+            except Exception as exc:  # noqa: BLE001 — surfaced below
+                logger.exception("workflow: hand-off dispatch raised %s -> %s",
+                                 task_key, next_agent_name)
+                d = {"error": f"{type(exc).__name__}: {exc}"}
             if isinstance(d, dict) and d.get("error"):
                 logger.warning("workflow: hand-off dispatch failed %s -> %s: %s",
                                task_key, next_agent_name, d["error"])
                 result["dispatch_error"] = d["error"]
+                _surface_handoff_failure(
+                    task_id=task_id, task_key=task_key,
+                    project_id=task_project_id, agent_name=next_agent_name,
+                    error=d["error"])
             else:
                 result["run_id"] = d.get("run_id") if isinstance(d, dict) else None
         logger.info("workflow: %s %s->%s assignee=%s run=%s",
@@ -1113,6 +1123,34 @@ def advance_after_run(run_id: str) -> dict:
         logger.exception("workflow.advance_after_run failed for %s: %s",
                          run_id, exc)
         return {"advanced": False, "reason": "exception", "error": str(exc)}
+
+
+def _surface_handoff_failure(*, task_id: str, task_key: str,
+                             project_id: str | None, agent_name: str | None,
+                             error: str) -> None:
+    """The task moved and was assigned, but the next agent's run did not start.
+    Say so on the task and notify admins — a hand-off must never fail silently
+    (nothing else retries a task that already left its dispatching column)."""
+    try:
+        from backend.forge.repos import activities as activities_repo
+        from backend.forge.services import _notify_admins
+        with SessionLocal() as db:
+            activities_repo.add_task_comment(
+                db, project_id=project_id, task_id=task_id,
+                detail=(f"🚩 **Needs attention** — the task was handed to "
+                        f"{agent_name or 'the next agent'}, but their run did "
+                        f"not start: {error}\n\nStart it from the task page "
+                        f"(Run) once the agent is free."))
+            db.commit()
+            _notify_admins(
+                db, type_="workflow.needs_attention",
+                title=f"{task_key}: hand-off to {agent_name or 'next agent'} "
+                      f"did not start",
+                link=f"/projects/{project_id}/tasks/{task_id}")
+            db.commit()
+    except Exception:  # noqa: BLE001 — surfacing must not break finish_run
+        logger.exception("workflow: could not surface hand-off failure for %s",
+                         task_key)
 
 
 def _task_source_url(db, task) -> str:
