@@ -41,6 +41,21 @@ Two mechanisms:
 | `/api/webhooks` | Outbound webhook configuration |
 | `/api/forge/*` | Agents, runs, conversations, dispatch |
 
+### Batch task creation
+
+`POST /api/projects/{project_id}/tasks/batch` (MCP: `create_tasks`) creates a whole plan in one all-or-nothing call.
+
+```json
+{"tasks": [
+  {"ref": "schema", "title": "Design schema"},
+  {"ref": "api", "title": "Build API", "priority": "high", "depends_on_refs": ["schema"]}
+]}
+```
+
+Each entry takes the same fields as `POST /api/tasks` (only `title` required) plus a unique `ref` you choose and optional `depends_on_refs` (refs of other entries in the same batch; forward references are fine). Response: `[{"ref", "id", "key"}]` in input order.
+
+The call is atomic: a missing or duplicate `ref`, an unknown `depends_on_refs` entry, a self-dependency, a cycle, a bad field value, an empty batch or more than 200 entries returns `400` and nothing is created (no tasks, no dependencies, no task numbers used).
+
 `/api/forge/*` covers agent orchestration. The prefix is historical and does not indicate a separate product.
 
 ## Daemon WebSocket

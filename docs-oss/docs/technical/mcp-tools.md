@@ -40,6 +40,7 @@ To connect a client, see [MCP server](./mcp-server.md).
 | `list_tasks` | List tasks, with filters |
 | `get_task` | Fetch one task |
 | `create_task` | Create a task |
+| `create_tasks` | Create a whole plan atomically: many tasks plus dependencies between them, in one all-or-nothing call |
 | `update_task` | Update task fields |
 | `move_task` | Change column. Subject to gates. |
 | `delete_task` | Delete a task |
