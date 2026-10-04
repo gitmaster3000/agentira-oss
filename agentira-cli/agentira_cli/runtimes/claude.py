@@ -3,12 +3,37 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass
 from typing import Any
 
 from .base import Runtime
 
 logger = logging.getLogger("agentira.runtime.claude")
+
+
+# Terse-output token saver (replaces the owner's caveman plugin, which is no
+# longer loaded). Off with AGENTIRA_CLAUDE_TERSE=0.
+TERSE_PROMPT = (
+    "Be terse: drop filler, pleasantries and recaps. Keep technical "
+    "substance, code and commit messages normal."
+)
+
+
+def isolated_settings_json() -> str:
+    """Inline --settings payload for a dispatched agent.
+
+    Paired with --setting-sources project,local so the machine owner's
+    ~/.claude plugins and hooks never load. Re-adds only the rtk Bash hook
+    (token saver) when rtk is installed; AGENTIRA_CLAUDE_RTK=0 disables it.
+    """
+    settings: dict = {"enabledPlugins": {}}
+    if os.environ.get("AGENTIRA_CLAUDE_RTK", "1") != "0" and shutil.which("rtk"):
+        settings["hooks"] = {"PreToolUse": [{
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "rtk hook claude"}],
+        }]}
+    return json.dumps(settings)
 
 
 class ClaudeRuntime(Runtime):
@@ -87,12 +112,17 @@ class ClaudeRuntime(Runtime):
             "--permission-mode", "bypassPermissions",
             "--max-turns", str(max_turns),
         ]
-        if mcp_strict:
-            # Override mode: agent ONLY sees Agentira-configured servers.
-            # Ignores the user's host ~/.claude.json MCP entries entirely.
-            # Default is to merge host + Agentira so user-installed
-            # integrations stay available.
+        # Dispatched agents never inherit the owner's personal setup
+        # (Gmail/Drive connectors, plugins, skills): only the generated
+        # Agentira MCP bundle loads. Extra servers are an explicit per-agent
+        # list already merged into that bundle. mcp_strict (legacy flag) still
+        # forces strict mode when no bundle is supplied.
+        if mcp_strict or mcp_config_path:
             args.append("--strict-mcp-config")
+        args += ["--setting-sources", "project,local",
+                 "--settings", isolated_settings_json()]
+        if os.environ.get("AGENTIRA_CLAUDE_TERSE", "1") != "0":
+            system_prompt = f"{system_prompt}\n\n{TERSE_PROMPT}" if system_prompt else TERSE_PROMPT
         if model:
             args += ["--model", model]
         if system_prompt:
