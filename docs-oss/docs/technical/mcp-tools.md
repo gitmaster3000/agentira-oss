@@ -124,9 +124,16 @@ task row to `id`, `key`, `title`, `status`, `start`, `due`, and `blocked_by`.
 `depends_on_id`, and `parent_id` accept either the internal ID or a task key
 such as `AP-561`.
 
+**Write responses are compact by default.** Row-returning mutation tools return
+only `id` and, for tasks, `key`. Pass `verbose=true` when you need the full
+created or updated object. This applies to profile, project, membership, epic,
+task, dependency, milestone, comment, and attachment writes. Batch task
+creation already returns compact `{ref, id, key}` receipts, delete tools return
+booleans, and run/review tools keep their purpose-specific status responses.
+
 **Register artifacts, do not describe them.** The conversation transcript is not an artifact. Work described in chat but never registered is invisible to whoever reads the run later.
 
-**Declare an outcome.** A run without `finish_run` may be reported as succeeded by default even when nothing happened. Declare `needs_input` with one specific question rather than guessing.
+**Declare an outcome.** A run without `finish_run` may be reported as succeeded by default even when nothing happened. Declare `needs_input` with one specific question rather than guessing. Write the question as the `summary`, and pass `options` (a list of short answers) when there are obvious choices. The question appears in the task chat, where the person can pick an option or type a reply.
 
 **Attach to exactly one parent.** `create_attachment` takes one of `task_id`, `project_id`, or `epic_id`, not several.
 

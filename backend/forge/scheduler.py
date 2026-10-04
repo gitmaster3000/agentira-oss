@@ -19,6 +19,7 @@ from backend.db import SessionLocal
 from backend.forge import conductor as _conductor
 from backend.forge import concierge as _concierge
 from backend.forge import reconciler as _reconciler
+from backend.forge import usage_limits as _usage_limits
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus
 
 logger = logging.getLogger("agentira.forge.scheduler")
@@ -73,6 +74,15 @@ class ForgeScheduler:
         )
         logger.info("Stale-run reconciler scheduled every %ss.",
                     _reconciler.RECONCILE_INTERVAL_S)
+        # Usage limits: relaunch limit-paused runs once their reset has passed.
+        self._scheduler.add_job(
+            _usage_limits.resume_due_runs,
+            trigger=IntervalTrigger(seconds=30),
+            id="usage_limit_resume",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         # AP-390: dispatch-outbox delivery sweep. Frames written by a
         # process that doesn't hold the daemon's WS socket (flowty-mcp
         # serving finish_run, redeploy windows) are delivered here,

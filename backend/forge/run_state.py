@@ -32,6 +32,7 @@ _ALLOWED: dict[RunStatus, frozenset[RunStatus]] = {
     }),
     RunStatus.RUNNING: frozenset({
         RunStatus.INTERRUPTING, RunStatus.COMPLETED, RunStatus.FAILED,
+        RunStatus.PAUSED,  # usage limit: parked until the limit resets
     }),
     RunStatus.INTERRUPTING: frozenset({
         RunStatus.PAUSED, RunStatus.CANCELLED,

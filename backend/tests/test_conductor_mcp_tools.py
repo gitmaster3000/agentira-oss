@@ -43,7 +43,9 @@ def test_mcp_update_epic_sets_status():
     proj = _project()
     epic = services.create_epic(proj["id"], "Loop", actor="planner-x")
     with _as("planner-x"):
-        out = asyncio.run(mcp_server.update_epic(epic["id"], status="in_progress"))
+        out = asyncio.run(mcp_server.update_epic(
+            epic["id"], status="in_progress", verbose=True,
+        ))
     assert out["status"] == "in_progress"
 
 
@@ -58,7 +60,9 @@ def test_mcp_create_task_into_epic():
     proj = _project()
     epic = services.create_epic(proj["id"], "Loop", actor="planner-x")
     with _as("planner-x"):
-        t = asyncio.run(mcp_server.create_task(proj["id"], "Step 1", epic_id=epic["id"]))
+        t = asyncio.run(mcp_server.create_task(
+            proj["id"], "Step 1", epic_id=epic["id"], verbose=True,
+        ))
     assert t["epic_id"] == epic["id"]
 
 

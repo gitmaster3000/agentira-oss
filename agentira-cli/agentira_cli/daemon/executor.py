@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 import urllib.error
@@ -28,6 +29,16 @@ logger = logging.getLogger("agentira.daemon.executor")
 
 _BATCH_INTERVAL = 0.5  # seconds between event flushes
 _CRASH_TAIL_EVENTS = 8  # how many trailing stream events to keep for diagnostics
+
+_BACKGROUND_STARTED_RE = re.compile(
+    r"(?:running in background with ID|background task(?: id)?)[\s:]+([\w.-]+)",
+    re.IGNORECASE,
+)
+_BACKGROUND_DONE_RE = re.compile(
+    r"(?:status[^\w]*(?:completed|failed|killed|exited)|"
+    r"(?:process|command|task) (?:completed|finished|exited|was killed))",
+    re.IGNORECASE,
+)
 
 # HTTP gateway (ollama and similar) chat-completions timeout. Local models
 # can take minutes; env-overridable.
@@ -101,6 +112,14 @@ class StreamResult:
         self.output_tokens = 0
         # Set by Runtime.execute_turn when a CLI session id was lost and retried.
         self.session_lost: bool = False
+        # Claude's non-interactive process exits at end-turn, killing tasks it
+        # launched in the background. The Claude adapter consumes this signal
+        # and resumes the session once before the daemon posts completion.
+        self.background_tasks_live: bool = False
+        # The backend's outcome is set only by this MCP call. Recording its
+        # presence lets Claude's one-shot background recovery reject another
+        # clean end-turn with no semantic verdict.
+        self.finish_run_called: bool = False
 
 
 async def run_cli_stream(
@@ -222,6 +241,13 @@ async def run_cli_stream(
         # has been observed to exit 0 after rejecting an unentitled
         # model string, which would otherwise look like silent success).
         saw_result_event = False
+        # Claude Bash's ``run_in_background`` returns a task id in the paired
+        # tool_result. Keep both the pending launch and confirmed ids so an
+        # end-turn can never masquerade as a completed run while work is live.
+        pending_background_uses: set[str] = set()
+        live_background_tasks: set[str] = set()
+        background_controls: dict[str, tuple[str, str]] = {}
+        finish_run_called = False
         # Per-run tee'd log files. Opened in unbuffered binary mode so a
         # crashed daemon doesn't lose recent bytes; closed in the finally
         # block below. (Both bound to None above the try.)
@@ -303,11 +329,42 @@ async def run_cli_stream(
                 recent.append(ev)
 
             elif isinstance(event, ToolUseEvent):
+                tool_input = event.tool_input if isinstance(event.tool_input, dict) else {}
+                tool_use_id = event.tool_use_id or f"anonymous-{len(pending_background_uses)}"
+                if (event.tool_name == "Bash"
+                        and bool(tool_input.get("run_in_background"))):
+                    pending_background_uses.add(tool_use_id)
+                elif event.tool_name in ("BashOutput", "KillShell"):
+                    background_id = str(
+                        tool_input.get("bash_id")
+                        or tool_input.get("shell_id")
+                        or tool_input.get("task_id")
+                        or ""
+                    )
+                    if background_id:
+                        background_controls[tool_use_id] = (
+                            event.tool_name, background_id,
+                        )
+                if (event.tool_name == "finish_run"
+                        or event.tool_name.endswith("__finish_run")):
+                    finish_run_called = True
                 ev = {"type": "tool_use", "tool": event.tool_name, "input": event.tool_input}
                 batch.append(ev)
                 recent.append(ev)
 
             elif isinstance(event, ToolResultEvent):
+                tool_use_id = event.tool_use_id or event.tool_name
+                if tool_use_id in pending_background_uses:
+                    match = _BACKGROUND_STARTED_RE.search(event.output or "")
+                    if match:
+                        live_background_tasks.add(match.group(1).rstrip("."))
+                    pending_background_uses.discard(tool_use_id)
+                control = background_controls.pop(tool_use_id, None)
+                if control:
+                    control_name, background_id = control
+                    if (control_name == "KillShell"
+                            or _BACKGROUND_DONE_RE.search(event.output or "")):
+                        live_background_tasks.discard(background_id)
                 ev = {"type": "tool_result", "tool": event.tool_name, "output": event.output}
                 batch.append(ev)
                 recent.append(ev)
@@ -362,6 +419,11 @@ async def run_cli_stream(
             result.error = f"{base}\n\n{_crash_tail(recent)}"
             logger.warning("Runtime exited with no result frame — %s",
                             _crash_tail(recent).replace("\n", " | "))
+
+        result.background_tasks_live = bool(
+            pending_background_uses or live_background_tasks
+        )
+        result.finish_run_called = finish_run_called
 
     finally:
         if on_proc:

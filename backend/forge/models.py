@@ -121,6 +121,10 @@ class ForgeRuntime(Base):
     gateway_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     gateway_token: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Subscription usage limit: no new runs go to agents on this runtime until
+    # this time (NULL / past = free). `limit_reason` is the provider's message.
+    limited_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    limit_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     agents: Mapped[list["Agent"]] = relationship(back_populates="runtime")
@@ -227,6 +231,16 @@ class Run(Base):
     # "discard" (Discard — throw the run away). Decides the terminal state the
     # daemon ack / reconciler resolves to (PAUSED vs CANCELLED). NULL otherwise.
     interrupt_intent: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Usage-limit pause: a PAUSED run with pause_reason="usage_limit" resumes
+    # itself (same session) once resume_at passes. limit_hits counts
+    # consecutive limit hits — drives the backoff when no reset time is given.
+    pause_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    resume_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    limit_hits: Mapped[int] = mapped_column(Integer, default=0)
+    # AP-509: when the human dismissed this run's question from "Needs you".
+    # Only hides it while it predates finished_at — a new question reappears.
+    question_dismissed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # CLEANUP(AP-190): drop this column. A Run is one-per-(agent,task) — the
     # work-view of that task's chat — so there's no per-turn "is this work?"
     # flag to gate visibility. Needs a migration to drop forge_runs.is_work.

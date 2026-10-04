@@ -639,8 +639,19 @@ def run_migrations():
 
         # activities
         if "activities" in tables:
-            if _ensure_column(conn, "activities", "diff", "TEXT"):
+            activities_changed = False
+            activities_changed |= _ensure_column(conn, "activities", "diff", "TEXT")
+            activities_changed |= _ensure_column(
+                conn, "activities", "idempotency_key", "VARCHAR(80)"
+            )
+            if activities_changed:
                 conn.commit()
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_activities_org_idempotency_key "
+                "ON activities(org_id, idempotency_key)"
+            ))
+            conn.commit()
 
         # profiles
         if "profiles" in tables:
@@ -956,6 +967,15 @@ def run_migrations():
                                     "VARCHAR(64)")
             added |= _ensure_column(conn, "forge_runs", "ready_checks_at",
                                     "TIMESTAMP")
+            # AP-509: "Needs you" question dismissed by the human.
+            added |= _ensure_column(conn, "forge_runs", "question_dismissed_at",
+                                    "TIMESTAMP")
+            # Usage-limit pause: auto-resume time + reason + consecutive hits.
+            added |= _ensure_column(conn, "forge_runs", "pause_reason",
+                                    "VARCHAR(20)")
+            added |= _ensure_column(conn, "forge_runs", "resume_at", "TIMESTAMP")
+            added |= _ensure_column(conn, "forge_runs", "limit_hits",
+                                    "INTEGER DEFAULT 0")
             if added:
                 conn.commit()
 
@@ -966,6 +986,10 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_runtimes", "gateway_url", "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runtimes", "gateway_token", "VARCHAR(500)")
             added |= _ensure_column(conn, "forge_runtimes", "host_tools", "TEXT")
+            added |= _ensure_column(conn, "forge_runtimes", "limited_until",
+                                    "TIMESTAMP")
+            added |= _ensure_column(conn, "forge_runtimes", "limit_reason",
+                                    "VARCHAR(300)")
             if added:
                 conn.commit()
 

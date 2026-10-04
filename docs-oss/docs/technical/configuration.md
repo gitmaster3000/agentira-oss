@@ -64,6 +64,12 @@ Evidence providers need GitHub App credentials. Without them, `github_pr`, `ci`,
 | `FORGE_WS_HEARTBEAT_TIMEOUT_S` | Heartbeat timeout |
 | `FORGE_OUTBOX_SWEEP_INTERVAL_S` | Outbox redelivery sweep interval |
 | `FORGE_DISPATCH_REDELIVER_TTL_S` | How long an unacknowledged dispatch stays eligible |
+| `FORGE_LIMIT_FIRST_BACKOFF_S` | Usage limit with no reset time: wait this long first (default 1800) |
+| `FORGE_LIMIT_BACKOFF_S` | Usage limit with no reset time: wait after each further hit (default 3600) |
+| `FORGE_LIMIT_RESET_GRACE_S` | Added to a parsed reset time before resuming (default 60) |
+| `FORGE_LIMIT_MAX_PAUSES` | Consecutive limit pauses before the run fails for real (default 48) |
+
+An agent may set `{"fallback_model": "<id>"}` in its `config_json`; a run that hits a usage limit then resumes at once on that model (same runtime). None by default.
 
 ## Daemon
 

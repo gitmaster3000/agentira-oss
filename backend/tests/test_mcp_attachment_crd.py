@@ -93,6 +93,7 @@ def test_member_can_create_read_and_delete_each_scope(owner_kind):
             filename=f"{owner_kind}.txt",
             content=f"{owner_kind} body",
             content_type="text/plain",
+            verbose=True,
             **owner_args,
         ))
         listed = asyncio.run(mcp_server.read_attachment(**owner_args))

@@ -78,6 +78,7 @@ transition guard rejects it.
 | `running` | `interrupting` | user — **Stop** (intent=pause) or **Discard** (intent=discard) | |
 | `running` | `completed` | daemon — complete(success) | |
 | `running` | `failed` | daemon — complete(error) / reconciler | Daemon died or errored. |
+| `running` | `paused` | daemon — complete(error) classified as a usage limit | `pause_reason=usage_limit`, `resume_at` set; the runtime is marked limited (no new dispatches). The scheduler sweep resumes it at `resume_at` via `paused → pending` with the same session. |
 | `interrupting` | `paused` | daemon ack, or reconciler timeout | when `interrupt_intent=pause` |
 | `interrupting` | `cancelled` | daemon ack, or reconciler timeout | when `interrupt_intent=discard` |
 | `paused` | `pending` | user — **Resume** | Re-dispatch with `--resume`; then `pending → running` as usual. |
