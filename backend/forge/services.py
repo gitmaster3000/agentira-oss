@@ -430,6 +430,9 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "runtime_id": a.runtime_id,
         "runtime_provider": a.runtime.provider if a.runtime else "",
         "runtime_version": a.runtime.version if a.runtime else "",
+        # Usage limit: set while the agent's runtime is resting.
+        "resting_until": _iso(_resting_until(a.runtime)),
+        "rest_label": _rest_label(_resting_until(a.runtime)),
         # Three-kind identity: derived from role + runtime_id presence.
         # Defensive — list_agents already filters out service_account rows,
         # but a single agent fetched by id might return either kind.
@@ -521,6 +524,19 @@ def _broadcast_status(run_id: str | None,
         pass
 
 
+def _resting_until(runtime):
+    lu = runtime.limited_until if runtime else None
+    if lu is None:
+        return None
+    lu = lu if lu.tzinfo else lu.replace(tzinfo=timezone.utc)
+    return lu if lu > datetime.now(timezone.utc) else None
+
+
+def _rest_label(resume_at) -> str:
+    from backend.forge.usage_limits import rest_label
+    return rest_label(resume_at)
+
+
 def _run_to_dict(r: Run) -> dict:
     return {
         "id": r.id,
@@ -537,6 +553,12 @@ def _run_to_dict(r: Run) -> dict:
         "is_work": bool(r.is_work),
         # While INTERRUPTING: "pause" (Stop) or "discard" (Discard).
         "interrupt_intent": r.interrupt_intent or None,
+        # Usage-limit pause: plain-words label + when it resumes by itself.
+        "pause_reason": r.pause_reason or None,
+        "resume_at": _iso(r.resume_at),
+        "rest_label": (_rest_label(r.resume_at)
+                       if r.pause_reason == "usage_limit" and r.status == RunStatus.PAUSED
+                       else ""),
         "outcome": r.outcome.value if r.outcome else None,
         "summary": r.summary or "",
         "diff_stat": r.diff_stat or "",
@@ -2341,6 +2363,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
                      mcp_strict: bool = False,
                      resume_session_id: str = "",
                      scope_key: str = "",
+                     model_override: str = "",
                      # Worktree source info. Daemon uses these to git
                      # worktree the user's repo into the agent's cwd.
                      worktree_source_path: str = "",
@@ -2395,6 +2418,12 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         runtime = db.get(ForgeRuntime, a.runtime_id)
         if not runtime:
             return {"error": "Runtime not found"}
+        # Usage limit: a resting runtime takes no new runs until it resets
+        # (a fallback-model resume is the one exception).
+        from backend.forge import usage_limits as _limits
+        _limit = None if model_override else _limits.runtime_limit(runtime.id)
+        if _limit:
+            return {"error": _limit["label"], "resting_until": _limit["until"].isoformat()}
 
         # Reserve a Run row for run-less task chat turns. When a chat lands in
         # `task:T` without an explicit run_id (no Run button click, no
@@ -2462,7 +2491,7 @@ def dispatch_trigger(agent_id: str, prompt: str, *,
         provider = runtime.provider
         gateway_url = runtime.gateway_url or ""
         gateway_token = runtime.gateway_token or ""
-        model = a.model or ""
+        model = model_override or a.model or ""
         persona_prompt = a.system_prompt or ""
         agent_name = a.runtime_agent_name or (a.profile.name if a.profile else a.name)
         # AP-152: agent's api_key — injected into env so the agent can curl
@@ -2912,7 +2941,8 @@ def _resume_continuation_prompt() -> str:
 
 def dispatch_pending_run(*, run_id: str,
                          prompt_override: str | None = None,
-                         resume: bool = False) -> dict:
+                         resume: bool = False,
+                         model_override: str = "") -> dict:
     """AP-112: dispatch a READY/PENDING run, optionally with an edited prompt.
 
     Loads the Run, resolves the run-context bundle (repo, MCP, env, scope)
@@ -3172,6 +3202,7 @@ def dispatch_pending_run(*, run_id: str,
         resume_session_id=resume_id,
         scope_key=scope,
         log_dir=run_log_dir,
+        model_override=model_override,
     )
     return {**result, "run_id": run_id, "task_id": task_id}
 
@@ -3537,7 +3568,7 @@ def pause_run(run_id: str) -> dict:
     return res
 
 
-def resume_run(run_id: str) -> dict:
+def resume_run(run_id: str, *, model_override: str = "") -> dict:
     """Resume a PAUSED run by relaunching it.
 
     Pausing terminated the subprocess, so there is nothing to un-freeze.
@@ -3553,12 +3584,15 @@ def resume_run(run_id: str) -> dict:
         if r and r.status == RunStatus.PAUSED:
             r.status = RunStatus.PENDING
             r.interrupt_intent = None
+            r.pause_reason = None
+            r.resume_at = None
             # AP-371: re-arm the liveness clock — the paused row's stamp is
             # stale, and the reconciler sweeps PENDING rows too.
             r.last_heartbeat_at = datetime.now(timezone.utc)
             db.commit()
             _broadcast_status(run_id, RunStatus.PENDING)
-    return dispatch_pending_run(run_id=run_id, resume=True)
+    return dispatch_pending_run(run_id=run_id, resume=True,
+                                model_override=model_override)
 
 
 def scope_live(scope_key: str) -> dict:
@@ -4311,6 +4345,20 @@ def complete_trigger(agent_id: str, *, trace_id: str, run_id: str | None,
                     db.commit()
         return {"ok": True, "trace_id": trace_id, "paused": True,
                 "logged": logger_msg + " [paused — session persisted]"}
+
+    # Usage limit: not a failure. Park the run (same session) until the limit
+    # resets; the scheduler sweep resumes it. Queued work waits behind it.
+    if run_id and not success:
+        from backend.forge import usage_limits as _limits
+        _paused = _limits.pause_on_limit(run_id, error or "", session_id=session_id)
+        if _paused:
+            _scope = _TRACE_SCOPE.pop(trace_id, "")
+            if session_id and _scope:
+                upsert_conversation(agent_id=agent_id, scope_key=_scope,
+                                    runtime_session_id=session_id)
+            return {"ok": True, "trace_id": trace_id, "paused": True,
+                    "resume_at": _paused["resume_at"].isoformat(),
+                    "logged": logger_msg + f" [usage limit — {_paused['label']}]"}
 
     # AP-108: the agent's explicit finish_run verdict outranks the process
     # exit code. If the agent already declared an outcome, its work is done

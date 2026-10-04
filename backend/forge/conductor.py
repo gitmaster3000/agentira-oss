@@ -39,6 +39,7 @@ from pathlib import Path
 from backend.db import SessionLocal
 from backend.models import Profile, Project, Task, Status, Role
 from backend.forge.models import Agent, Run, RunStatus, ForgeRuntime
+from backend.forge.repos import usage_limits as _limit_repo
 
 logger = logging.getLogger("agentira.forge.conductor")
 
@@ -533,6 +534,8 @@ def run_tick() -> dict:
 
     with SessionLocal() as db:
         in_progress_id = _in_progress_status_id(db)
+        # Runtimes resting on a usage limit take no new work; queued tasks wait.
+        limited_runtimes = _limit_repo.limited_runtime_ids(db, datetime.now(timezone.utc))
         profiles = (db.query(Profile)
                       .filter(Profile.conductor_enabled == True)  # noqa: E712
                       .filter(Profile.default_project_id.isnot(None))
@@ -544,6 +547,9 @@ def run_tick() -> dict:
                 continue
             if not agent.runtime_id:
                 skipped.append({"agent": agent.id, "reason": "no_runtime"})
+                continue
+            if agent.runtime_id in limited_runtimes:
+                skipped.append({"agent": agent.id, "reason": "usage_limit"})
                 continue
             cap = max(1, int(prof.max_concurrent_runs or 1))
             inflight = _agent_in_flight_count(db, agent.id)
