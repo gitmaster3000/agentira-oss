@@ -315,21 +315,26 @@ def _roadmap_tasks(road):
     return [task for group in road["epics"] for task in group["tasks"]]
 
 
-def test_roadmap_defaults_to_open_work_and_allows_done_filter(client):
+def test_roadmap_rest_keeps_done_tasks_and_can_hide_them(client):
     pid = _project(client)
     open_task = _task(client, pid, "Open")
     done_task = _task(client, pid, "Done")
     client.post(f"/api/tasks/{done_task['id']}/move", json={"status": "done"})
 
     default_rows = _roadmap_tasks(client.get(f"/api/projects/{pid}/roadmap").json())
-    assert open_task["id"] in {task["id"] for task in default_rows}
-    assert done_task["id"] not in {task["id"] for task in default_rows}
-    assert all(task["status"] != "done" for task in default_rows)
+    assert {open_task["id"], done_task["id"]} <= {t["id"] for t in default_rows}
+
+    open_rows = _roadmap_tasks(client.get(
+        f"/api/projects/{pid}/roadmap", params={"include_done": "false"},
+    ).json())
+    assert open_task["id"] in {t["id"] for t in open_rows}
+    assert done_task["id"] not in {t["id"] for t in open_rows}
 
     done_rows = _roadmap_tasks(client.get(
-        f"/api/projects/{pid}/roadmap", params={"status": "done"},
+        f"/api/projects/{pid}/roadmap",
+        params={"status": "done", "include_done": "false"},
     ).json())
-    assert [task["id"] for task in done_rows] == [done_task["id"]]
+    assert [t["id"] for t in done_rows] == [done_task["id"]]
 
 
 def test_roadmap_filters_and_compact_fields(client):

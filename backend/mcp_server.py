@@ -372,15 +372,17 @@ async def get_roadmap(
     milestone_id: str = None,
     status: str = None,
     fields: str = None,
+    include_done: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Read the project roadmap: tasks grouped by epic (or 'tag') with start/due
     dates and progress, the dependency edges between them, every task's
     is_blocked / blocked_by / blocks / subtasks rollup, the project's milestones
     with derived progress, and a summary (total/done/blocked counts). Filter by
-    epic_ids, tag, milestone_id, or status. Done work is excluded unless status
-    is explicitly set. Use fields="compact" for task rows containing only id,
-    key, title, status, start, due, and blocked_by.
+    epic_ids, tag, milestone_id, or status. Done work is excluded unless
+    include_done=true or status is explicitly set. Use fields="compact" for
+    task rows containing only id, key, title, status, start, due, and
+    blocked_by.
 
     Read this before planning or picking up work: a task whose is_blocked is
     true cannot be started yet — finish what it is blocked_by first."""
@@ -394,6 +396,7 @@ async def get_roadmap(
         milestone_id=milestone_id,
         status=status,
         fields=fields,
+        include_done=include_done,
     )
 
 

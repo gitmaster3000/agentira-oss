@@ -90,4 +90,18 @@ def test_mcp_get_roadmap_forwards_filters(monkeypatch):
         "milestone_id": "milestone-1",
         "status": "todo",
         "fields": "compact",
+        "include_done": False,
     }
+
+
+def test_mcp_get_roadmap_hides_done_by_default_but_can_include_it(monkeypatch):
+    calls = []
+    monkeypatch.setattr(services, "authorize_project_access", lambda *_args: None)
+    monkeypatch.setattr(
+        services, "get_roadmap", lambda project_id, **kw: calls.append(kw) or {},
+    )
+
+    asyncio.run(mcp_server.get_roadmap("project-1"))
+    asyncio.run(mcp_server.get_roadmap("project-1", include_done=True))
+
+    assert [c["include_done"] for c in calls] == [False, True]

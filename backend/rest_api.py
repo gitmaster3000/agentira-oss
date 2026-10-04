@@ -1006,6 +1006,7 @@ def api_get_roadmap(
     milestone_id: str | None = None,
     status: str | None = None,
     fields: str | None = None,
+    include_done: bool = True,
     actor: str = Depends(get_current_user),
 ):
     try:
@@ -1018,6 +1019,7 @@ def api_get_roadmap(
             milestone_id=milestone_id,
             status=status,
             fields=fields,
+            include_done=include_done,
         )
     except ValueError as e:
         raise HTTPException(404, str(e))

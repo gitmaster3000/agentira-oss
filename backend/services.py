@@ -1957,8 +1957,10 @@ def get_roadmap(
     milestone_id: str | None = None,
     status: str | None = None,
     fields: str | None = None,
+    include_done: bool = True,
 ) -> dict:
-    """Return filtered roadmap data, excluding done work by default."""
+    """Return filtered roadmap data. `include_done=False` hides done tasks
+    unless `status` is given explicitly."""
     with _session() as db:
         project = db.get(Project, project_id)
         if not project:
@@ -1986,7 +1988,7 @@ def get_roadmap(
             query = query.filter(Task.milestone_id == milestone_id)
         if status:
             query = query.filter(Task.status_id == _get_status_id(db, status))
-        else:
+        elif not include_done:
             query = query.filter(Task.status_id != _get_status_id(db, "done"))
         tasks = query.order_by(Task.created_at.asc()).all()
 
