@@ -166,7 +166,7 @@ export function RunDetail() {
                             style={{ backgroundColor: s.bg }}
                         >
                             <StatusIcon className="w-3.5 h-3.5" />
-                            {s.label}
+                            {run.rest_label || s.label}
                         </span>
                         {isActive && (
                             <span className="relative flex h-2.5 w-2.5">
