@@ -58,7 +58,7 @@ Typical checks:
 | Transition | Evidence |
 |---|---|
 | Into `todo` | A definition of done exists |
-| Into `review` | A branch or pull request exists |
+| Into `review` | A pull request is linked (work is only merged through a pull request) |
 | Into `done` | All definition-of-done items checked, pull request linked |
 
 ## The audit record

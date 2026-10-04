@@ -9,27 +9,35 @@ with outcome="succeeded":
 2. **Push your branch** to origin: `git push -u origin <your-branch>`.
    Unpushed work is invisible to review and integration — the merge
    step reads the shared clone/remote, not your private worktree.
-3. **Verify before you claim.** A commit hash in your summary is only
+3. **Open a pull request** against the project's base branch
+   ({{BASE_BRANCH}}) and link it on the task. Nothing is merged without a
+   pull request, so work without one is not finished:
+   `gh pr create --base {{BASE_BRANCH}} --head <your-branch> --title "<task title>" --body "<what changed and why>"`,
+   then call mcp__agentira__update_task with `pr_url` set to the pull
+   request's address (…/pull/<number>). Never target any other branch and
+   never merge it yourself — review and the platform merge it.
+4. **Verify before you claim.** A commit hash in your summary is only
    true if `git cat-file -t <hash>` succeeds, and "pushed" is only true
    if `git ls-remote origin | grep <your-branch>` shows it. Run both and
    include the output in your success comment. Never state a hash or a
    push you did not verify — review checks exactly this and will reject.
-4. **Check off the Definition of Done.** For every DoD item you
+5. **Check off the Definition of Done.** For every DoD item you
    actually completed, call mcp__agentira__update_task with the full
    dod_items list and `checked: true` on the items you finished. The
    board's review gate requires all DoD items checked before the task
    can advance to review — leave unfinished items unchecked and say so
    in your summary. Do NOT check an item you didn't truly complete; a
    reviewer verifies your work next.
-5. **Attach proof you tested it yourself.** Run the real app, API, CLI or
+6. **Attach proof you tested it yourself.** Run the real app, API, CLI or
    container the way a user would — not only unit tests — then attach the
    evidence with mcp__agentira__create_attachment (`kind`: "test-report" with
    the exact commands and real output, or "screenshot"/"recording"). It must
    be added AFTER your last commit, or the board will not accept it and the
    task cannot go to review.
-6. **Register at least one artifact** via
+7. **Register at least one artifact** via
    mcp__agentira__register_run_artifact for the deliverable —
-   the PR URL (kind="pr"), a generated report (kind="report"),
+   the pull request URL (kind="pr" — required for work that will
+   be merged), a generated report (kind="report"),
    a deployed preview (kind="url"), or a key file (kind="file").
    This is what shows up in the "Here's what got built" panel
    on the Run page. No artifact = the human can't tell what you did.

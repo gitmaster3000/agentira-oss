@@ -27,6 +27,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from backend import services
+from backend import task_batch
 
 # ── Global Actor Context ──────────────────────────────────────────────────────
 # Set per-request by the auth middleware; read by tool handlers.
@@ -147,6 +148,13 @@ class ASGILoggingMiddleware:
 
 # ── Tool Definitions ───────────────────────────────────────────────────────────
 
+def _write_result(result: dict, verbose: bool) -> dict:
+    """Return a compact mutation receipt, preserving errors and opt-in detail."""
+    if verbose or "id" not in result:
+        return result
+    return {field: result[field] for field in ("id", "key") if field in result}
+
+
 @mcp.tool()
 async def get_me(ctx: Context) -> str:
     """Get your own profile details. Uses the verified auth context."""
@@ -154,14 +162,20 @@ async def get_me(ctx: Context) -> str:
     return f"Hello! You are connected as Client ID: {actor}."
 
 @mcp.tool()
-async def update_profile(display_name: str = None, avatar_url: str = None, webhook_url: str = None, ctx: Context = None) -> dict:
+async def update_profile(display_name: str = None, avatar_url: str = None,
+                         webhook_url: str = None, verbose: bool = False,
+                         ctx: Context = None) -> dict:
     """Update your own profile. Set webhook_url so Agentira can push task events to your runtime."""
     actor = actor_ctx.get()
     with services._session() as db:
         p = services._get_profile_by_name(db, actor)
         if not p:
             raise ValueError(f"Profile not found: {actor}")
-        return services.update_profile(p.id, display_name=display_name, avatar_url=avatar_url, webhook_url=webhook_url)
+        result = services.update_profile(
+            p.id, display_name=display_name, avatar_url=avatar_url,
+            webhook_url=webhook_url,
+        )
+        return _write_result(result, verbose)
 
 @mcp.tool()
 async def login(name: str, password: str) -> str:
@@ -178,14 +192,15 @@ async def login(name: str, password: str) -> str:
 # ── Project Tools ──────────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def create_project(name: str, description: str = "", ctx: Context = None) -> dict:
+async def create_project(name: str, description: str = "",
+                         verbose: bool = False, ctx: Context = None) -> dict:
     """Create a new project."""
     actor = actor_ctx.get()
     try:
         logger.info(f"Tool create_project called with name='{name}', actor='{actor}'")
         res = services.create_project(name, description, actor=actor)
         logger.debug(f"Tool create_project success: {res}")
-        return res
+        return _write_result(res, verbose)
     except Exception as e:
         logger.error(f"Tool create_project failed: {e}\n{traceback.format_exc()}")
         raise
@@ -203,13 +218,15 @@ async def get_project(project_id: str, ctx: Context = None) -> dict:
 
 @mcp.tool()
 async def update_project(project_id: str, name: str = None, description: str = None,
-                         direction_md: str = None, ctx: Context = None) -> dict:
+                         direction_md: str = None, verbose: bool = False,
+                         ctx: Context = None) -> dict:
     """Update project metadata. `direction_md` = the project's goals & current
     priorities in plain language — sprint planning reads it."""
-    return services.update_project(
+    result = services.update_project(
         project_id, name, description, direction_md=direction_md,
         actor=actor_ctx.get(),
     )
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def delete_project(project_id: str, ctx: Context = None) -> bool:
@@ -217,10 +234,13 @@ async def delete_project(project_id: str, ctx: Context = None) -> bool:
     return services.delete_project(project_id, actor=actor_ctx.get())
 
 @mcp.tool()
-async def add_project_member(project_id: str, profile_name: str, ctx: Context = None) -> dict:
+async def add_project_member(project_id: str, profile_name: str,
+                             verbose: bool = False,
+                             ctx: Context = None) -> dict:
     """Add a user to a project."""
     actor = actor_ctx.get()
-    return services.add_project_member(project_id, profile_name, actor=actor)
+    result = services.add_project_member(project_id, profile_name, actor=actor)
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def remove_project_member(project_id: str, profile_name: str, ctx: Context = None) -> bool:
@@ -238,19 +258,28 @@ async def list_epics(project_id: str = None, ctx: Context = None) -> list[dict]:
     return services.list_epics(project_id=project_id, actor=actor)
 
 @mcp.tool()
-async def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", ctx: Context = None) -> dict:
+async def create_epic(project_id: str, title: str, description: str = "",
+                      color: str = "#7c4dff", verbose: bool = False,
+                      ctx: Context = None) -> dict:
     """Create a new epic."""
     actor = actor_ctx.get()
-    return services.create_epic(project_id, title, description=description, color=color, actor=actor)
+    result = services.create_epic(
+        project_id, title, description=description, color=color, actor=actor,
+    )
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def update_epic(epic_id: str, title: str = None, description: str = None, color: str = None,
-                      status: str = None, ctx: Context = None) -> dict:
+                      status: str = None, verbose: bool = False,
+                      ctx: Context = None) -> dict:
     """Update epic metadata. `status`: backlog (parked) | in_progress (in the
     current sprint) | done."""
     actor = actor_ctx.get()
-    return services.update_epic(epic_id, title=title, description=description, color=color,
-                                status=status, actor=actor)
+    result = services.update_epic(
+        epic_id, title=title, description=description, color=color,
+        status=status, actor=actor,
+    )
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def delete_epic(epic_id: str, ctx: Context = None) -> bool:
@@ -274,6 +303,7 @@ async def create_task(
     parent_id: str = None,
     milestone_id: str = None,
     epic_id: str = None,
+    verbose: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Create a new task in a project. Use dod_items to set a definition-of-done checklist (list of {text, checked}). Use parent_id to create it as a subtask of another task, milestone_id to count it towards a roadmap milestone (see get_roadmap / list_milestones), and epic_id to put it under an epic."""
@@ -285,10 +315,16 @@ async def create_task(
             parent_id=parent_id, milestone_id=milestone_id, epic_id=epic_id,
         )
         logger.debug(f"Tool create_task success: {res}")
-        return res
+        return _write_result(res, verbose)
     except Exception as e:
         logger.error(f"Tool create_task failed: {e}\n{traceback.format_exc()}")
         raise
+
+@mcp.tool()
+async def create_tasks(project_id: str, tasks: list[dict], ctx: Context = None) -> list[dict]:
+    """Create a whole plan in ONE atomic call (all-or-nothing) instead of many create_task + add_dependency calls. Each entry takes the create_task fields (title required; description, status, priority, assignee, tags, start_date, due_date, dod_items, parent_id, milestone_id, epic_id) plus a client-chosen unique `ref` and optional `depends_on_refs` (refs of other entries in this batch that must finish first; forward references are fine). Unknown refs, duplicate refs, self-dependencies and cycles are rejected and nothing is written. Max 200 entries. Returns [{ref, id, key}] in input order."""
+    return task_batch.create_tasks(project_id, tasks, actor=actor_ctx.get())
+
 
 @mcp.tool()
 async def list_tasks(
@@ -333,17 +369,21 @@ async def update_task(
     epic_id: str = None,
     parent_id: str = None,
     milestone_id: str = None,
+    verbose: bool = False,
     ctx: Context = None,
 ) -> dict:
     """Update task metadata. Use branch/pr_url to link git branch or PR. Use dod_items to set definition-of-done checklist (list of {text, checked}). Use start_date/due_date for roadmap planning. Use epic_id to attach to an epic (or empty string to detach). Use parent_id to nest this task under another one, and milestone_id to count it towards a milestone — pass "" to either to detach."""
     actor = actor_ctx.get()
-    return services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, parent_id=parent_id, milestone_id=milestone_id, actor=actor)
+    result = services.update_task(task_id, title, description, priority, assignee, tags, start_date=start_date, due_date=due_date, dod_items=dod_items, branch=branch, pr_url=pr_url, epic_id=epic_id, parent_id=parent_id, milestone_id=milestone_id, actor=actor)
+    return _write_result(result, verbose)
 
 @mcp.tool()
-async def move_task(task_id: str, status: str, ctx: Context = None) -> dict:
+async def move_task(task_id: str, status: str, verbose: bool = False,
+                    ctx: Context = None) -> dict:
     """Change task status (e.g. move to 'in-progress')."""
     actor = actor_ctx.get()
-    return services.move_task(task_id, status, actor=actor)
+    result = services.move_task(task_id, status, actor=actor)
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def delete_task(task_id: str, ctx: Context = None) -> bool:
@@ -385,11 +425,13 @@ async def list_dependencies(project_id: str, ctx: Context = None) -> list[dict]:
 
 @mcp.tool()
 async def add_dependency(project_id: str, task_id: str, depends_on_id: str,
-                         ctx: Context = None) -> dict:
+                         verbose: bool = False, ctx: Context = None) -> dict:
     """Declare that `task_id` waits on `depends_on_id`. Idempotent. Rejected if it
     would create a cycle, point at itself, or cross projects."""
-    return services.add_dependency(project_id, task_id, depends_on_id,
-                                   actor=actor_ctx.get())
+    result = services.add_dependency(
+        project_id, task_id, depends_on_id, actor=actor_ctx.get(),
+    )
+    return _write_result(result, verbose)
 
 
 @mcp.tool()
@@ -409,23 +451,29 @@ async def list_milestones(project_id: str, ctx: Context = None) -> list[dict]:
 @mcp.tool()
 async def create_milestone(project_id: str, title: str, description: str = "",
                            due_date: str = None, color: str = "#2ecc71",
+                           verbose: bool = False,
                            ctx: Context = None) -> dict:
     """Create a dated roadmap milestone (a launch, demo or deadline). Link tasks to
     it with update_task(milestone_id=...) — progress is derived from those tasks."""
-    return services.create_milestone(project_id, title=title, description=description,
-                                     due_date=due_date, color=color,
-                                     actor=actor_ctx.get())
+    result = services.create_milestone(
+        project_id, title=title, description=description, due_date=due_date,
+        color=color, actor=actor_ctx.get(),
+    )
+    return _write_result(result, verbose)
 
 
 @mcp.tool()
 async def update_milestone(project_id: str, milestone_id: str, title: str = None,
                            description: str = None, due_date: str = None,
                            status: str = None, color: str = None,
+                           verbose: bool = False,
                            ctx: Context = None) -> dict:
     """Update a milestone. `status` is one of planned | achieved | missed."""
-    return services.update_milestone(project_id, milestone_id, title=title,
-                                     description=description, due_date=due_date,
-                                     status=status, color=color, actor=actor_ctx.get())
+    result = services.update_milestone(
+        project_id, milestone_id, title=title, description=description,
+        due_date=due_date, status=status, color=color, actor=actor_ctx.get(),
+    )
+    return _write_result(result, verbose)
 
 
 @mcp.tool()
@@ -438,10 +486,12 @@ async def delete_milestone(project_id: str, milestone_id: str,
 # ── Collaboration Tools ────────────────────────────────────────────────────────
 
 @mcp.tool()
-async def add_comment(task_id: str, comment: str, ctx: Context = None) -> dict:
+async def add_comment(task_id: str, comment: str, verbose: bool = False,
+                      ctx: Context = None) -> dict:
     """Add a comment/activity log to a task."""
     actor = actor_ctx.get()
-    return services.add_comment(task_id, comment, actor=actor)
+    result = services.add_comment(task_id, comment, actor=actor)
+    return _write_result(result, verbose)
 
 @mcp.tool()
 async def get_activity(task_id: str, ctx: Context = None) -> list[dict]:
@@ -587,6 +637,7 @@ async def create_attachment(
     content_base64: str = "",
     content_type: str = "application/octet-stream",
     kind: str = "other",
+    verbose: bool = False,
 ) -> dict:
     """Create an attachment for exactly one task, project, or epic.
 
@@ -609,9 +660,10 @@ async def create_attachment(
     else:
         return {"error": "Provide content (text) or content_base64 (binary)"}
     if _api_base():
-        return _proxy_upload(
+        result = _proxy_upload(
             owner_kind, owner_id, filename, file_bytes, content_type, kind,
         )
+        return _write_result(result, verbose)
 
     owner_args = {f"{owner_kind}_id": owner_id}
     if owner_kind == "task":
@@ -620,7 +672,7 @@ async def create_attachment(
         services.authorize_project_access(owner_id, actor=actor, access="write")
     else:
         services.authorize_epic_access(owner_id, actor=actor, access="write")
-    return _attachments.add(
+    result = _attachments.add(
         **owner_args,
         filename=filename,
         file_bytes=file_bytes,
@@ -628,6 +680,7 @@ async def create_attachment(
         kind=kind,
         uploaded_by=actor,
     )
+    return _write_result(result, verbose)
 
 
 @mcp.tool()
@@ -726,6 +779,7 @@ async def finish_run(
     run_id: str,
     outcome: str,
     summary: str = "",
+    options: list[str] | None = None,
     ctx: Context = None,
 ) -> dict:
     """Declare the semantic verdict of a Forge run you're working.
@@ -744,6 +798,10 @@ async def finish_run(
         - "failed"      — something is wrong; not recoverable mid-run
       summary: one paragraph describing what changed or what's blocking
                you. This is the line humans read first — be specific.
+               For "needs_input", write it as the question itself: it is
+               posted into the task chat, where the human answers.
+      options: optional, "needs_input" only — short suggested answers the
+               human can pick with one click (they can always type their own).
 
     The run's process status (running/completed/failed/cancelled) is
     tracked separately by the daemon. A run can be status=completed +
@@ -753,7 +811,8 @@ async def finish_run(
     from backend.forge import services as forge_services
     try:
         logger.info(f"Tool finish_run called: run={run_id} outcome={outcome}")
-        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary)
+        res = forge_services.finish_run(run_id, outcome=outcome, summary=summary,
+                                        options=options)
         if not res.get("ok"):
             logger.warning(f"Tool finish_run rejected: {res.get('error')}")
         return res

@@ -227,6 +227,10 @@ class Run(Base):
     # "discard" (Discard — throw the run away). Decides the terminal state the
     # daemon ack / reconciler resolves to (PAUSED vs CANCELLED). NULL otherwise.
     interrupt_intent: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # AP-509: when the human dismissed this run's question from "Needs you".
+    # Only hides it while it predates finished_at — a new question reappears.
+    question_dismissed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # CLEANUP(AP-190): drop this column. A Run is one-per-(agent,task) — the
     # work-view of that task's chat — so there's no per-turn "is this work?"
     # flag to gate visibility. Needs a migration to drop forge_runs.is_work.

@@ -94,7 +94,7 @@ Comment `/integration-test` on a pull request to run the full suite with the CLI
 
 ## What must pass before Agentira merges
 
-When an approved task is merged, the daemon merges it in a scratch copy, runs the project's **verify command** there, and pushes only if it exits 0. For Agentira itself that command is:
+Nothing is merged without a pull request. When an approved task is merged, the daemon checks out the pull request's merge result in a scratch copy, runs the project's **verify command** there, and only if it exits 0 asks GitHub to merge the pull request (the daemon uses your `gh` login and never pushes to the base branch itself). For Agentira itself that command is:
 
 ```bash
 scripts/verify.sh
@@ -102,4 +102,4 @@ scripts/verify.sh
 
 It installs the locked backend dependencies into a cached virtualenv, runs the backend suite, then the frontend tests and build. The daemon machine needs `uv`, Node.js and Docker.
 
-If it fails, nothing is pushed and the task goes back to the implementer with the output. What happens on failure is set in `templates/workflow/default.yaml` (`integrate.verify`, `integrate.on_failure`); the command itself is the project setting "Command that proves the project works".
+If it fails, or the pull request conflicts or is not mergeable, nothing is merged and the task goes back to the implementer with the output. Policy is set in `templates/workflow/default.yaml`: `integrate.via: pull_request`, `integrate.merge_method` (`merge`, `squash` or `rebase`), `integrate.verify`, `integrate.on_failure`; the command itself is the project setting "Command that proves the project works".

@@ -106,7 +106,8 @@ def _pr_url_set(task: Task) -> GateResult:
     if (task.pr_url or "").strip():
         return GateResult("pr_url_set", True)
     return GateResult("pr_url_set", False,
-                      "Link the PR URL before marking done.")
+                      "Open a pull request and link its URL on the task — work is "
+                      "only merged through a pull request.")
 
 
 # Attachment kinds that count as proof of manual, end-to-end testing.

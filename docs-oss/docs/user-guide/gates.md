@@ -55,7 +55,7 @@ Which checks guard which move is declared in the workflow file (`templates/workf
 checks:
   backlog->todo: [has_dod, has_assignee]
   todo->in_progress: [has_assignee]
-  in_progress->review: [dod_all_checked, has_branch_or_pr, proof]
+  in_progress->review: [dod_all_checked, pr_url_set, proof]
   review->done: [pr_url_set, dod_all_checked, proof]
 ```
 

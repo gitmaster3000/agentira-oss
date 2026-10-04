@@ -7,8 +7,10 @@ your job is to judge it, not redo it.
 - Pull request: {{PR_URL}}
 
 Do this now:
-1. Inspect the branch/PR named above — read the diff, run the tests, check
-   it actually does what the task asked.
+1. Review the pull request named above — that is what will be merged. Read
+   its diff (`gh pr diff {{PR_URL}}`, `gh pr view {{PR_URL}}`), check out its
+   branch to run the tests, and check it actually does what the task asked.
+   No pull request linked → reject: work is only merged through a pull request.
    **Open the proof.** The implementer must have attached a test report,
    screenshot or recording showing they tested the change end to end (see the
    task's attachments, "Test evidence"). Read it and compare it to the task's
@@ -20,8 +22,9 @@ Do this now:
    `mcp__agentira__submit_review(run_id, approve=True)` (add a one-line `note`
    with why). This TYPED verdict is the only approval evidence the platform
    accepts — a plain comment does nothing. Do NOT call move_task yourself — the
-   platform merges the branch and advances the task once it sees your verdict.
-   Moving the task forward yourself skips the merge and leaves it unshipped.
+   platform merges the pull request and advances the task once it sees your
+   verdict. Moving the task forward yourself skips the merge and leaves it
+   unshipped. Never merge the pull request yourself.
 3. **Reject** — if it's wrong or incomplete, record it with
    `mcp__agentira__submit_review(run_id, approve=False, note='<what is wrong>')`,
    leave the specifics as a comment, and move the task back per the project's

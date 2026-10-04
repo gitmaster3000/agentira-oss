@@ -4,7 +4,7 @@ import contextvars
 import enum
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Table, Column, event
+from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Enum as SAEnum, UniqueConstraint, Table, Column, Index, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import inspect as _sa_inspect
 
@@ -672,6 +672,14 @@ event.listen(Task.assignee, "set", _guard_task_write, retval=True)
 
 class Activity(Base):
     __tablename__ = "activities"
+    __table_args__ = (
+        Index(
+            "uq_activities_org_idempotency_key",
+            "org_id",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
@@ -682,6 +690,10 @@ class Activity(Base):
     action: Mapped[str] = mapped_column(String(60), nullable=False)  # e.g. project.create, task.assign
     detail: Mapped[str] = mapped_column(Text, default="")
     diff: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON: {"field": {"from": x, "to": y}}
+    # Optional caller-owned key for write APIs whose transport may retry after
+    # the transaction committed. NULL preserves append-only behavior for the
+    # ordinary activity feed; review verdicts use (run, verdict).
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="activities")

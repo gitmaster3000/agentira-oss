@@ -14,6 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import services
+from backend import task_batch
 from backend import task_graph
 from backend import task_links
 from backend.password_service import password_service
@@ -192,6 +193,10 @@ class TaskUpdate(BaseModel):
 class DependencyCreate(BaseModel):
     task_id: str
     depends_on_id: str
+
+
+class TaskBatchCreate(BaseModel):
+    tasks: list[dict]
 
 
 class LinkCreate(BaseModel):
@@ -1023,6 +1028,15 @@ def api_add_dependency(project_id: str, body: DependencyCreate,
         raise HTTPException(400, str(e))
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@projects.post("/{project_id}/tasks/batch")
+def api_create_tasks_batch(project_id: str, body: TaskBatchCreate,
+                           actor: str = Depends(get_current_user)):
+    try:
+        return task_batch.create_tasks(project_id, body.tasks, actor=actor)
+    except ValueError as e:  # GraphError is a ValueError
+        raise HTTPException(400, str(e))
 
 
 @projects.delete("/{project_id}/dependencies/{dep_id}")

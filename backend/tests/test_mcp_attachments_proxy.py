@@ -79,6 +79,7 @@ def test_create_attachment_proxies_to_backend(env):
         out = asyncio.run(mcp_server.create_attachment(
             task_id=task["id"], filename="note.txt", content="hello forge",
             kind="test-report",
+            verbose=True,
         ))
     assert out["filename"] == "note.txt"
     assert out["task_id"] == task["id"]
@@ -130,6 +131,7 @@ def test_scoped_crd_uses_backend_routes(env, owner_kind):
             filename=f"{owner_kind}.txt",
             content=f"{owner_kind} content",
             content_type="text/plain",
+            verbose=True,
             **owner_args,
         ))
         listed = asyncio.run(mcp_server.read_attachment(**owner_args))
