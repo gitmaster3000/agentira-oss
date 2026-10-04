@@ -237,6 +237,9 @@ class Run(Base):
     pause_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
     resume_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     limit_hits: Mapped[int] = mapped_column(Integer, default=0)
+    # Daemon/backend restart: how many times the reconciler relaunched this
+    # run's session after the daemon stopped reporting it (retry budget).
+    restart_resumes: Mapped[int] = mapped_column(Integer, default=0)
     # AP-509: when the human dismissed this run's question from "Needs you".
     # Only hides it while it predates finished_at — a new question reappears.
     question_dismissed_at: Mapped[datetime | None] = mapped_column(

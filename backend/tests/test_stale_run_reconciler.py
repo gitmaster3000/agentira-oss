@@ -173,3 +173,54 @@ def test_reconciler_is_idempotent(test_db):
     second = reconcile_stale_runs()
     assert len(first["reconciled"]) == 1
     assert second["reconciled"] == []
+
+
+# ── restart resume ───────────────────────────────────────────────────
+
+def _stale_with_session(session_id="sess-1", resumes=0):
+    w = _make_run(run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
+    with forge_services._session() as db:
+        r = db.query(Run).filter(Run.id == w["run_id"]).first()
+        r.session_id = session_id
+        r.restart_resumes = resumes
+        db.commit()
+    return w
+
+
+def _dispatch_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(forge_services, "dispatch_pending_run",
+                        lambda **kw: calls.append(kw) or {"ok": True})
+    return calls
+
+
+def test_stale_run_with_session_resumes_instead_of_failing(test_db, monkeypatch):
+    calls = _dispatch_calls(monkeypatch)
+    w = _stale_with_session()
+    out = reconcile_stale_runs()
+    assert out["resumed"] == [w["run_id"]] and out["reconciled"] == []
+    assert [(c["run_id"], c["resume"]) for c in calls] == [(w["run_id"], True)]
+    with bdb.SessionLocal() as db:
+        r = db.query(Run).filter(Run.id == w["run_id"]).first()
+        assert r.status == RunStatus.PENDING and r.restart_resumes == 1
+        assert r.error is None and r.finished_at is None
+
+
+def test_stale_run_without_session_still_fails(test_db, monkeypatch):
+    calls = _dispatch_calls(monkeypatch)
+    _make_run(run_heartbeat_age_s=STALE_RUN_THRESHOLD_S + 30)
+    out = reconcile_stale_runs()
+    assert len(out["reconciled"]) == 1 and out["resumed"] == [] and calls == []
+
+
+def test_retry_budget_spent_fails_and_escalates(test_db, monkeypatch):
+    calls = _dispatch_calls(monkeypatch)
+    monkeypatch.setenv("FORGE_RESTART_MAX_RESUMES", "2")
+    w = _stale_with_session(resumes=2)
+    out = reconcile_stale_runs()
+    assert [r["run_id"] for r in out["reconciled"]] == [w["run_id"]]
+    assert calls == []
+    with bdb.SessionLocal() as db:
+        r = db.query(Run).filter(Run.id == w["run_id"]).first()
+        assert r.status == RunStatus.FAILED
+    assert any("reconciled" in n.title for n in _admin_notes())

@@ -976,6 +976,8 @@ def run_migrations():
             added |= _ensure_column(conn, "forge_runs", "resume_at", "TIMESTAMP")
             added |= _ensure_column(conn, "forge_runs", "limit_hits",
                                     "INTEGER DEFAULT 0")
+            added |= _ensure_column(conn, "forge_runs", "restart_resumes",
+                                    "INTEGER DEFAULT 0")
             if added:
                 conn.commit()
 

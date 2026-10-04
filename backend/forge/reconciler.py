@@ -16,6 +16,7 @@ Scheduled from `backend.forge.scheduler` every `RECONCILE_INTERVAL_S`.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from backend.db import SessionLocal
@@ -23,7 +24,7 @@ from backend.forge.models import (
     Run, RunStatus, RunOutcome,
 )
 from backend.forge.runs import RECONCILED_ERROR
-from backend.forge.services import _notify_admins, _broadcast_status
+from backend.forge.services import _notify_admins, _broadcast_status, resume_run as _resume_run
 
 logger = logging.getLogger("agentira.forge.reconciler")
 
@@ -38,6 +39,15 @@ STALE_RUN_THRESHOLD_S = 120
 # for intent=discard). The daemon's SIGTERM→SIGKILL window is ~5s; 30s gives
 # generous slack while still feeling responsive.
 STUCK_TRANSIENT_THRESHOLD_S = 30
+
+
+def max_restart_resumes() -> int:
+    """Retry budget: relaunches of one run after its daemon went silent
+    (FORGE_RESTART_MAX_RESUMES, default 3) before the run is failed."""
+    try:
+        return int(os.environ.get("FORGE_RESTART_MAX_RESUMES", 3))
+    except ValueError:
+        return 3
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -55,6 +65,8 @@ def reconcile_stale_runs() -> dict:
     transient_cutoff = now - timedelta(seconds=STUCK_TRANSIENT_THRESHOLD_S)
     reconciled: list[dict] = []
     escalated: list[dict] = []
+    to_resume: list[str] = []
+    budget = max_restart_resumes()
 
     with SessionLocal() as db:
         # Escalate stuck INTERRUPTING rows first — these resolve fast in the
@@ -106,6 +118,17 @@ def reconcile_stale_runs() -> dict:
             elif rhb >= cutoff:
                 continue  # daemon reported this run recently — it's alive
 
+            # A restart (daemon/backend) interrupts in-flight runs. With a
+            # captured session the run resumes instead of failing, up to the
+            # retry budget; past it, fall through and escalate as FAILED.
+            if (run.session_id and run.outcome is None
+                    and (run.restart_resumes or 0) < budget):
+                run.restart_resumes = (run.restart_resumes or 0) + 1
+                run.status = RunStatus.PAUSED
+                _broadcast_status(run.id, RunStatus.PAUSED)
+                to_resume.append(run.id)
+                continue
+
             run.status = RunStatus.FAILED
             run.finished_at = now
             if run.outcome is None:
@@ -128,12 +151,31 @@ def reconcile_stale_runs() -> dict:
                 "last_heartbeat": rhb.isoformat() if rhb else None,
             })
 
-        if reconciled:
+        if reconciled or to_resume:
             db.commit()
+        if reconciled:
             logger.warning(
                 "Reconciler flipped %d stale run(s) to FAILED: %s",
                 len(reconciled), [r["run_id"] for r in reconciled],
             )
 
+    resumed: list[str] = []
+    for run_id in to_resume:
+        try:
+            res = _resume_run(run_id)
+        except Exception:  # noqa: BLE001 — one bad run must not stall the sweep
+            logger.exception("restart-resume failed run=%s", run_id)
+            continue
+        if res.get("error"):
+            # Run is back in PENDING with a fresh clock; if the daemon is still
+            # away it goes stale again and spends the next resume.
+            logger.warning("restart-resume run=%s: %s", run_id, res["error"])
+        else:
+            resumed.append(run_id)
+    if resumed:
+        logger.warning("Reconciler resumed %d interrupted run(s): %s",
+                       len(resumed), resumed)
+
     return {"reconciled": reconciled, "escalated": escalated,
+            "resumed": resumed,
             "at": now.isoformat()}
