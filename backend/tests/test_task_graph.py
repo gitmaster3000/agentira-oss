@@ -51,6 +51,22 @@ def test_task_can_be_parented_and_reports_children(client):
     assert [s["id"] for s in subs] == [child["id"]]
 
 
+def test_parent_reference_accepts_task_key(client):
+    pid = _project(client)
+    parent = _task(client, pid, "Parent")
+
+    child = _task(client, pid, "Child", parent_id=parent["key"])
+    assert child["parent_id"] == parent["id"]
+
+    other = _task(client, pid, "Other")
+    updated = client.patch(
+        f"/api/tasks/{other['key']}",
+        json={"parent_id": parent["key"]},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["parent_id"] == parent["id"]
+
+
 def test_subtask_done_count_tracks_status(client):
     pid = _project(client)
     parent = _task(client, pid, "Parent")
@@ -293,6 +309,110 @@ def test_roadmap_exposes_dependencies_and_milestones(client):
     blocked = next(t for t in task_rows if t["id"] == b["id"])
     assert blocked["is_blocked"] is True
     assert next(t for t in task_rows if t["id"] == a["id"])["is_blocked"] is False
+
+
+def _roadmap_tasks(road):
+    return [task for group in road["epics"] for task in group["tasks"]]
+
+
+def test_roadmap_rest_keeps_done_tasks_and_can_hide_them(client):
+    pid = _project(client)
+    open_task = _task(client, pid, "Open")
+    done_task = _task(client, pid, "Done")
+    client.post(f"/api/tasks/{done_task['id']}/move", json={"status": "done"})
+
+    default_rows = _roadmap_tasks(client.get(f"/api/projects/{pid}/roadmap").json())
+    assert {open_task["id"], done_task["id"]} <= {t["id"] for t in default_rows}
+
+    open_rows = _roadmap_tasks(client.get(
+        f"/api/projects/{pid}/roadmap", params={"include_done": "false"},
+    ).json())
+    assert open_task["id"] in {t["id"] for t in open_rows}
+    assert done_task["id"] not in {t["id"] for t in open_rows}
+
+    done_rows = _roadmap_tasks(client.get(
+        f"/api/projects/{pid}/roadmap",
+        params={"status": "done", "include_done": "false"},
+    ).json())
+    assert [t["id"] for t in done_rows] == [done_task["id"]]
+
+
+def test_roadmap_filters_and_compact_fields(client):
+    pid = _project(client)
+    epic = client.post(
+        f"/api/projects/{pid}/epics", json={"title": "Selected"},
+    ).json()
+    other_epic = client.post(
+        f"/api/projects/{pid}/epics", json={"title": "Other"},
+    ).json()
+    milestone = client.post(
+        f"/api/projects/{pid}/milestones", json={"title": "Launch"},
+    ).json()
+    blocker = _task(client, pid, "Blocker", epic_id=other_epic["id"])
+    selected = _task(
+        client,
+        pid,
+        "Selected task",
+        epic_id=epic["id"],
+        milestone_id=milestone["id"],
+        tags=["focus", "second"],
+        status="todo",
+        start_date="2026-10-01",
+        due_date="2026-10-03",
+    )
+    _task(
+        client,
+        pid,
+        "Near tag",
+        epic_id=epic["id"],
+        tags=["focus-extra"],
+        status="backlog",
+    )
+    client.post(
+        f"/api/projects/{pid}/dependencies",
+        json={"task_id": selected["key"], "depends_on_id": blocker["key"]},
+    )
+
+    cases = [
+        ({"epic_ids": epic["id"]}, {selected["id"]}),
+        ({"tag": "focus"}, {selected["id"]}),
+        ({"milestone_id": milestone["id"]}, {selected["id"]}),
+    ]
+    for params, expected_ids in cases:
+        rows = _roadmap_tasks(client.get(
+            f"/api/projects/{pid}/roadmap", params=params,
+        ).json())
+        ids = {task["id"] for task in rows}
+        assert expected_ids <= ids
+        if "epic_ids" in params:
+            assert blocker["id"] not in ids
+        if "tag" in params or "milestone_id" in params:
+            assert ids == expected_ids
+
+    status_rows = _roadmap_tasks(client.get(
+        f"/api/projects/{pid}/roadmap", params={"status": "todo"},
+    ).json())
+    assert selected["id"] in {task["id"] for task in status_rows}
+    assert all(task["status"] == "todo" for task in status_rows)
+
+    compact = client.get(
+        f"/api/projects/{pid}/roadmap",
+        params={
+            "epic_ids": epic["id"],
+            "tag": "focus",
+            "milestone_id": milestone["id"],
+            "status": "todo",
+            "fields": "compact",
+        },
+    )
+    assert compact.status_code == 200, compact.text
+    rows = _roadmap_tasks(compact.json())
+    assert len(rows) == 1
+    assert set(rows[0]) == {
+        "id", "key", "title", "status", "start", "due", "blocked_by",
+    }
+    assert rows[0]["due"].startswith("2026-10-03")
+    assert [task["id"] for task in rows[0]["blocked_by"]] == [blocker["id"]]
 
 
 # ── agent-facing surface (MCP calls these services directly) ─────────────
