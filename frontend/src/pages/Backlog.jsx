@@ -5,6 +5,7 @@ import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { CreateEpicModal } from '../components/CreateEpicModal';
+import { matchesTaskSearch } from '../lib/taskSearch';
 import { ChevronDown, ChevronRight, UserPlus, Zap, Tag } from 'lucide-react';
 
 export function Backlog() {
@@ -23,6 +24,7 @@ export function Backlog() {
     // through it so editing a task and clicking another row prompts first.
     const outletCtx = useOutletContext() || {};
     const requestSelectTask = outletCtx.requestSelectTask;
+    const searchQuery = outletCtx.searchQuery;
     const [isEditing, setIsEditing] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
     const [showCreateEpic, setShowCreateEpic] = useState(false);
@@ -117,13 +119,15 @@ export function Backlog() {
 
     const toggleSection = (id) => setCollapsedSections(prev => ({ ...prev, [id]: !prev[id] }));
 
+    const visibleTasks = tasks.filter(t => matchesTaskSearch(t, searchQuery));
+
     // Grouping logic
     let sections = [];
     if (groupBy === 'epic') {
         const grouped = {};
         epics.forEach(ep => { grouped[ep.id] = { id: ep.id, title: ep.title, color: ep.color, tasks: [], type: 'epic' }; });
         grouped['__none__'] = { id: '__none__', title: 'Ungrouped', tasks: [], type: 'none' };
-        tasks.forEach(task => {
+        visibleTasks.forEach(task => {
             const key = task.epic_id && grouped[task.epic_id] ? task.epic_id : '__none__';
             grouped[key].tasks.push(task);
         });
@@ -135,7 +139,7 @@ export function Backlog() {
     } else {
         // Group by Tag
         const grouped = {};
-        tasks.forEach(task => {
+        visibleTasks.forEach(task => {
             const tag = task.tags && task.tags.length > 0 ? task.tags[0] : 'No Tag';
             if (!grouped[tag]) grouped[tag] = { id: tag, title: tag, tasks: [], type: 'tag' };
             grouped[tag].tasks.push(task);
