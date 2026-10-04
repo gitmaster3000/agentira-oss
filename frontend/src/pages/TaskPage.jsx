@@ -6,6 +6,7 @@ import { Markdown } from '../components/Markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { MentionInput } from '../components/MentionInput';
 import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
+import { TestedBy } from '../components/TaskDetail/TestedBy';
 import { LinksSection } from '../components/TaskDetail/LinksSection';
 import { CollapsibleSection } from '../components/TaskDetail/CollapsibleSection';
 import { ROUTES } from '../routes';
@@ -810,6 +811,7 @@ function PlanTab(props) {
         loadTask,
     } = props;
 
+    const [proofTick, setProofTick] = useState(0);
     const [openSections, setOpenSections] = useState({
         details: true, relations: true, dod: true, git: true, files: false, dates: true,
     });
@@ -1063,6 +1065,10 @@ function PlanTab(props) {
                             <Plus className="w-4 h-4" />
                         </button>
                     </div>
+
+                    <div className="mt-3">
+                        <TestedBy taskId={taskId} refreshKey={proofTick} />
+                    </div>
                 </CollapsibleSection>
 
                 <CollapsibleSection
@@ -1186,7 +1192,7 @@ function PlanTab(props) {
                     onToggle={() => toggleSection('files')}
                     separated
                 >
-                    <AttachmentsSection taskId={taskId} bare />
+                    <AttachmentsSection taskId={taskId} bare onChanged={() => setProofTick((t) => t + 1)} />
                 </CollapsibleSection>
 
                 <CollapsibleSection

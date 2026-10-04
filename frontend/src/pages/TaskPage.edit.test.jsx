@@ -13,6 +13,7 @@ vi.mock('../api', () => ({
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         listProjectRepos: vi.fn(() => Promise.resolve([])),
         listAttachments: vi.fn(() => Promise.resolve([])),
+        getTaskProof: vi.fn(() => Promise.resolve({ present: false, stale: false })),
         listSubtasks: vi.fn(() => Promise.resolve([])),
         listTasks: vi.fn(() => Promise.resolve([])),
         listMilestones: vi.fn(() => Promise.resolve([])),

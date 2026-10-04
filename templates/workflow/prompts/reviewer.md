@@ -11,6 +11,13 @@ Do this now:
    its diff (`gh pr diff {{PR_URL}}`, `gh pr view {{PR_URL}}`), check out its
    branch to run the tests, and check it actually does what the task asked.
    No pull request linked → reject: work is only merged through a pull request.
+   **Open the proof.** The implementer must have attached a test report,
+   screenshot or recording showing they tested the change end to end (see the
+   task's attachments, "Test evidence"). Read it and compare it to the task's
+   Definition of Done: does it show every DoD item working, with real
+   commands/output/screens? **Reject** when the proof is missing, is older
+   than the last commit, is only unit-test output, is vague or fabricated, or
+   does not demonstrate the DoD — even if the diff looks fine.
 2. **Approve** — if the work is correct and complete, record your verdict with
    `mcp__agentira__submit_review(run_id, approve=True)` (add a one-line `note`
    with why). This TYPED verdict is the only approval evidence the platform

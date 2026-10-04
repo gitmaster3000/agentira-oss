@@ -49,15 +49,36 @@ Two rules make this trustworthy.
 
 ## What gates check
 
-Typical column-exit checks:
+Which checks guard which move is declared in the workflow file (`templates/workflow/default.yaml`), not in code:
 
-| Transition | Required evidence |
+```yaml
+checks:
+  backlog->todo: [has_dod, has_assignee]
+  todo->in_progress: [has_assignee]
+  in_progress->review: [dod_all_checked, pr_url_set, proof]
+  review->done: [pr_url_set, dod_all_checked, proof]
+```
+
+Each name is a check kind. A typo in the file is refused when it loads, so a gate can never silently switch off.
+
+| Check | Passes when |
 |---|---|
-| Into `todo` | The task has a definition of done |
-| Into `review` | A pull request is linked (work is only merged through a pull request) |
-| Into `done` | Every definition-of-done item is checked, and a pull request is linked |
+| `has_dod` | The task has a definition of done |
+| `has_assignee` | The task has an assignee |
+| `dod_all_checked` | Every definition-of-done item is checked |
+| `has_branch_or_pr` | A branch or pull request exists |
+| `pr_url_set` | A pull request is linked |
+| `proof` | The agent tested the change end to end and attached the proof |
 
-When a move fails, the interface names which gates failed and why. The API returns a structured error listing them.
+When a move fails, the interface names which gates failed and why, in plain words. The API returns a structured error listing them. When an agent finishes a run and the move to review is refused, the agent is sent back with the reason to fix it.
+
+### Proof
+
+Every task is tested end to end by the agent who built it — the real app, API, CLI or container, the way a user would, not only unit tests. The `proof` check requires at least one attachment of kind `test-report`, `recording` or `screenshot` added **after the task's latest commit**. Proof that predates a later change does not count: change the code again and the agent has to test again.
+
+If it is missing the agent sees: *"Test it yourself end to end and attach the proof (test report or screenshot)."* The reviewer opens the proof and rejects the task when it does not demonstrate the definition of done. The task page shows "Tested by <agent> — see proof".
+
+Attach proof with `create_attachment` (MCP) or the upload endpoint, passing `kind`.
 
 ## The audit record
 

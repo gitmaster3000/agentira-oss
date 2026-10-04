@@ -712,6 +712,9 @@ class Attachment(Base):
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     epic_id: Mapped[str | None] = mapped_column(ForeignKey("epics.id"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    # AP-475: machine-readable evidence classification. Keep "other" as the
+    # back-compatible default for existing and ordinary project files.
+    kind: Mapped[str] = mapped_column(String(32), default="other", nullable=False)
     content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     size_bytes: Mapped[int] = mapped_column(default=0)
