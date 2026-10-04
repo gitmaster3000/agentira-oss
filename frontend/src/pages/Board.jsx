@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
+import { matchesTaskSearch } from '../lib/taskSearch';
 
 // Board status dot colors — from the design system (guidelines/colors-semantic.html).
 const STATUS_COLORS = {
@@ -49,7 +50,7 @@ export function Board() {
         const filtered = {};
         for (const [colId, tasks] of Object.entries(board.columns)) {
             filtered[colId] = tasks.filter(task => {
-                if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                if (!matchesTaskSearch(task, searchQuery)) return false;
                 if (filterPriority && task.priority !== filterPriority) return false;
                 if (filterAssignee && task.assignee !== filterAssignee) return false;
                 if (filterEpic && String(task.epic_id) !== String(filterEpic)) return false;
