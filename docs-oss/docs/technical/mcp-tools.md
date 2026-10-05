@@ -60,7 +60,7 @@ To connect a client, see [MCP server](./mcp-server.md).
 | `create_milestone` | Create a milestone |
 | `update_milestone` | Update a milestone |
 | `delete_milestone` | Delete a milestone |
-| `get_roadmap` | Roadmap view |
+| `get_roadmap` | Roadmap view, open work by default (`include_done=true` to add done); supports `epic_ids`, `tag`, `milestone_id`, `status`, and `fields="compact"` filters |
 | `add_dependency` | Declare a task dependency |
 | `remove_dependency` | Remove a dependency |
 | `list_dependencies` | List dependencies |
@@ -112,6 +112,17 @@ Approval is a structured action, not a phrase. Writing `REVIEW: APPROVE` in a co
 | `list_permissions` | Permissions for the calling key |
 
 ## Notes for agent authors
+
+**Keep roadmap reads focused.** The MCP `get_roadmap` excludes tasks in `done`
+unless you pass `include_done=true` or `status="done"`. The REST route
+`GET /api/projects/{id}/roadmap` keeps done tasks by default (the app Gantt
+needs them); pass `include_done=false` to hide them. Combine `epic_ids`, `tag`,
+`milestone_id`, and `status` to select work. `fields="compact"` limits each
+task row to `id`, `key`, `title`, `status`, `start`, `due`, and `blocked_by`.
+
+**Task keys are valid references.** Task arguments such as `task_id`,
+`depends_on_id`, and `parent_id` accept either the internal ID or a task key
+such as `AP-561`.
 
 **Write responses are compact by default.** Row-returning mutation tools return
 only `id` and, for tasks, `key`. Pass `verbose=true` when you need the full

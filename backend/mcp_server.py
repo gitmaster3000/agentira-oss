@@ -397,17 +397,40 @@ async def delete_task(task_id: str, ctx: Context = None) -> bool:
 # milestones) instead of dumping a flat task list.
 
 @mcp.tool()
-async def get_roadmap(project_id: str, group_by: str = "epic", ctx: Context = None) -> dict:
+async def get_roadmap(
+    project_id: str,
+    group_by: str = "epic",
+    epic_ids: list[str] = None,
+    tag: str = None,
+    milestone_id: str = None,
+    status: str = None,
+    fields: str = None,
+    include_done: bool = False,
+    ctx: Context = None,
+) -> dict:
     """Read the project roadmap: tasks grouped by epic (or 'tag') with start/due
     dates and progress, the dependency edges between them, every task's
     is_blocked / blocked_by / blocks / subtasks rollup, the project's milestones
-    with derived progress, and a summary (total/done/blocked counts).
+    with derived progress, and a summary (total/done/blocked counts). Filter by
+    epic_ids, tag, milestone_id, or status. Done work is excluded unless
+    include_done=true or status is explicitly set. Use fields="compact" for
+    task rows containing only id, key, title, status, start, due, and
+    blocked_by.
 
     Read this before planning or picking up work: a task whose is_blocked is
     true cannot be started yet — finish what it is blocked_by first."""
     actor = actor_ctx.get()
     services.authorize_project_access(project_id, actor, "read")
-    return services.get_roadmap(project_id, group_by=group_by)
+    return services.get_roadmap(
+        project_id,
+        group_by=group_by,
+        epic_ids=epic_ids,
+        tag=tag,
+        milestone_id=milestone_id,
+        status=status,
+        fields=fields,
+        include_done=include_done,
+    )
 
 
 @mcp.tool()
