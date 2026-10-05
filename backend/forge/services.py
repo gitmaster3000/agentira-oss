@@ -7,8 +7,9 @@ import json as _json
 import functools
 from datetime import datetime, timezone
 from typing import Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from sqlalchemy import func
+from backend.forge.board_access import board_access_summary
 
 from backend.db import SessionLocal
 from backend.models import Profile
@@ -466,6 +467,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
             _iso(a.profile.git_token_checked_at) if a.profile else None
         ),
         "created_at": _iso(a.created_at),
+        "board_access": board_access_summary(object_session(a), a),
     }
 
 
@@ -2977,6 +2979,10 @@ def dispatch_pending_run(*, run_id: str,
             return {"error": "Agent not found"}
         if not agent.runtime_id:
             return {"error": "Agent has no bound runtime"}
+        from backend.forge.board_access import board_access_problem
+        unreachable = board_access_problem(db, agent, run.project_id)
+        if unreachable:
+            return {"error": unreachable}
 
         # Capture FKs as plain values — the ORM `run`/`agent` objects become
         # detached after the session closes; later attribute access would

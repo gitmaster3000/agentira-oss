@@ -8,7 +8,7 @@ sidebar_label: Run lifecycle
 
 ## Dispatch
 
-1. **Validate.** The backend confirms the task has an assignee, that the assignee is a project member, and that the caller may dispatch.
+1. **Validate.** The backend confirms the task has an assignee, that the assignee is a project member, and that the caller may dispatch. The agent must also be able to reach the board: it needs a profile with an API key (that key authenticates its Agentira MCP) and membership of the task's project. If not, dispatch is refused with a plain reason such as "planner cannot reach this project board — add it as a member of the project." The same check shows as a warning on the agent card (`board_access` on the agent payload).
 2. **Resolve sandbox mode.** The project mode overrides the agent default, then downshifts to what the runtime supports. The resolved mode is logged.
 3. **Reserve a run.** A run row is created before work starts, so logs and artifacts have a destination.
 4. **Record in-flight state.** Written to memory and disk, so a restart does not lose the turn.

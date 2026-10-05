@@ -25,6 +25,7 @@ import pytest
 
 import backend.db as bdb
 from backend import services as core_services
+from backend.tests._board import join_project
 from backend.forge import services as forge_services
 from backend.forge.models import ForgeRuntime, Run, RunStatus, RuntimeStatus
 from backend.models import Profile
@@ -46,6 +47,7 @@ def _setup(TestSession) -> dict:
     task = core_services.create_task(project["id"], "T", actor="system")
     agent = forge_services.create_agent(name="A", executor_type="cli",
                                         runtime_id=rt_id)
+    join_project(project["id"], agent["id"])
     return {"task_id": task["id"], "agent_id": agent["id"],
             "project_id": project["id"]}
 
@@ -202,6 +204,7 @@ def test_max_concurrent_runs_2_allows_two_different_tasks(test_db):
 
     project = core_services.create_project("P2", actor="system")
     t2 = core_services.create_task(project["id"], "T2", actor="system")
+    join_project(project["id"], s["agent_id"])
     r2 = forge_services.prepare_task_run(
         task_id=t2["id"], agent_id=s["agent_id"],
     )
@@ -223,6 +226,7 @@ def test_max_concurrent_runs_1_rejects_second_across_tasks(test_db):
 
     project = core_services.create_project("P2", actor="system")
     t2 = core_services.create_task(project["id"], "T2", actor="system")
+    join_project(project["id"], s["agent_id"])
     r2 = forge_services.prepare_task_run(
         task_id=t2["id"], agent_id=s["agent_id"],
     )
