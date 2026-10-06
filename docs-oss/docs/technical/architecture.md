@@ -63,7 +63,7 @@ backend/
 ├── db.py                # engine, dialect-aware migrations
 ├── auth.py              # RBAC, transition checks
 ├── jwt_auth.py
-├── gates.py             # transition gates
+├── gates.py             # registry of check kinds; transitions are declared in templates/workflow/default.yaml `checks:`
 ├── sandbox.py           # sandbox resolver
 ├── attachments.py
 ├── task_graph.py        # dependencies

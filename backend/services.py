@@ -2304,19 +2304,31 @@ def add_attachment(
     filename: str,
     file_bytes: bytes,
     content_type: str = "application/octet-stream",
+    kind: str = "other",
     uploaded_by: str = "system",
     actor: str = "system",
 ) -> dict:
     authorize_task_access(task_id, actor, "write")
     return _attachments.add(
         task_id=task_id, filename=filename, file_bytes=file_bytes,
-        content_type=content_type, uploaded_by=uploaded_by,
+        content_type=content_type, kind=kind, uploaded_by=uploaded_by,
     )
 
 
 def list_attachments(task_id: str, actor: str = "system") -> list[dict]:
     authorize_task_access(task_id, actor, "read")
     return _attachments.list_for_task(task_id)
+
+
+def get_task_proof(task_id: str, actor: str = "system") -> dict:
+    """Who tested the task end to end, and the proof to open (see gates.proof)."""
+    from backend import gates
+    authorize_task_access(task_id, actor, "read")
+    with _session() as db:
+        task = _resolve_task(db, task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+        return gates.proof_summary(task)
 
 
 def list_project_attachments(

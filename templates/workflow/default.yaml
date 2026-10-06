@@ -91,6 +91,21 @@ columns:
     on_enter:
       dispatch_role: documentation
 
+# Transition checks — what a task must prove to move between columns. Each
+# key is "from->to"; each value lists check kinds from the registry in
+# backend/gates.py (has_dod, has_assignee, dod_all_checked, has_branch_or_pr,
+# pr_url_set, proof). Enforced by the engine on every move (per-project opt-in
+# via gates_enabled) and by the driver's advance; a failed check blocks the
+# move with a plain-language reason, and a failed advance feeds the bounce
+# below. Moves not listed (incl. all backward moves) have no checks.
+#   proof: at least one test-report / recording / screenshot attachment added
+#          after the task's latest commit — the agent tested it end to end.
+checks:
+  backlog->todo: [has_dod, has_assignee]
+  todo->in_progress: [has_assignee]
+  in_progress->review: [dod_all_checked, pr_url_set, proof]
+  review->done: [pr_url_set, dod_all_checked, proof]
+
 # AP-231 self-correction: a run that succeeds but fails the advance gate
 # (missing DoD/branch evidence) is re-dispatched to the same agent with a
 # corrective prompt, up to max_attempts total runs on the task within the

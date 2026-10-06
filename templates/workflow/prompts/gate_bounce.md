@@ -11,6 +11,11 @@ Close the gap now:
 - If something on the list is NOT done, either finish it now (commit the
   work) or leave it unchecked and explain precisely what remains in a task
   comment.
+- If the list mentions **proof**: run the real app, API, CLI or container the
+  way a user would (not only unit tests), then attach the evidence with
+  mcp__agentira__create_attachment — `kind` "test-report" (exact commands and
+  their real output) or "screenshot"/"recording". Proof must be added AFTER
+  your last commit; if you change code again, re-test and attach fresh proof.
 - Then call mcp__agentira__finish_run again with an honest outcome.
 
 This is a one-time correction pass — if the task still can't advance after

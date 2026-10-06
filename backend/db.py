@@ -878,6 +878,14 @@ def run_migrations():
             if added:
                 conn.commit()
 
+        # AP-475: classify evidence without invalidating existing attachments.
+        if "attachments" in tables:
+            if _ensure_column(
+                conn, "attachments", "kind",
+                "VARCHAR(32) DEFAULT 'other' NOT NULL",
+            ):
+                conn.commit()
+
         # epics
         if "epics" in tables:
             if _ensure_column(conn, "epics", "creator", "VARCHAR(120) DEFAULT ''"):
