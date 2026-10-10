@@ -488,13 +488,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         {/* AP-301: launch a run from the side panel. */}
                         <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
                             <SectionLabel inline>Agent runs</SectionLabel>
-                            <button
+                            {profiles.some(p => p.account_type === 'agentira_agent' && p.name === task.assignee) && <button
                                 onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
                                 className="inline-flex items-center transition-colors"
                                 style={{ gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 7, background: 'var(--accent-subtle, rgba(124,77,255,.14))', color: 'var(--accent-primary, #7c4dff)' }}
                             >
                                 <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
-                            </button>
+                            </button>}
                         </div>
                         {pickingAgent && (
                             <div style={{ marginBottom: 16, padding: 10, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-app)' }}>
