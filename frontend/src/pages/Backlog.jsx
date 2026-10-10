@@ -146,6 +146,8 @@ export function Backlog() {
         });
         sections = Object.values(grouped).sort((a, b) => a.title.localeCompare(b.title));
     }
+    // While searching, drop empty groups so matches aren't buried under them.
+    if (searchQuery?.trim()) sections = sections.filter(s => s.tasks.length > 0);
 
     const priorityColors = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e' };
 
