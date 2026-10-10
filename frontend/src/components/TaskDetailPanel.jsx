@@ -94,8 +94,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const [taskRuns, setTaskRuns] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
-    const [forgeAgents, setForgeAgents] = useState([]);
-    const [pickingAgent, setPickingAgent] = useState(false);
     const [scheduling, setScheduling] = useState(false);
     const [editingBranch, setEditingBranch] = useState(false);
     const [branchValue, setBranchValue] = useState(task.branch || '');
@@ -261,22 +259,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
         catch (err) { alert(err.message); }
     };
 
-    const openAgentPicker = async () => {
-        setPickingAgent(true);
-        try {
-            const data = await api.forge.listAgents();
-            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
-        } catch (err) {
-            console.error('Failed to load agents:', err);
-            setForgeAgents([]);
-        }
-    };
-
-    const handleScheduleRun = async (agentId) => {
+    const handleRunWithAgent = async () => {
         setScheduling(true);
         try {
-            const result = await api.forge.prepareTaskRun(task.id, agentId);
-            setPickingAgent(false);
+            const agents = await api.forge.listAgents();
+            const agent = (Array.isArray(agents) ? agents : []).find(a => a.runtime_id && a.name === task.assignee);
+            if (!agent) throw new Error('The assigned agent has no runtime. Set one up first.');
+            const result = await api.forge.prepareTaskRun(task.id, agent.id);
             await loadTaskRuns();
             const runId = result.id || result.run_id;
             if (runId) navigate(ROUTES.FORGE_RUN(runId));
@@ -489,54 +478,15 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
                             <SectionLabel inline>Agent runs</SectionLabel>
                             {profiles.some(p => p.account_type === 'agentira_agent' && p.name === task.assignee) && <button
-                                onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
+                                disabled={scheduling}
+                                onClick={handleRunWithAgent}
                                 className="inline-flex items-center transition-colors"
                                 style={{ gap: 5, fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 7, background: 'var(--accent-subtle, rgba(124,77,255,.14))', color: 'var(--accent-primary, #7c4dff)' }}
                             >
-                                <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : 'Run with agent'}
+                                <Play className="w-3 h-3" /> Run with agent
                             </button>}
                         </div>
-                        {pickingAgent && (
-                            <div style={{ marginBottom: 16, padding: 10, borderRadius: 10, border: '1px solid var(--border-subtle)', background: 'var(--bg-app)' }}>
-                                {forgeAgents.length === 0 ? (
-                                    <p style={{ fontSize: 11.5 }} className="text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
-                                ) : (
-                                    [...forgeAgents].sort((a, b) => {
-                                        const aA = task?.assignee && a.name === task.assignee;
-                                        const bA = task?.assignee && b.name === task.assignee;
-                                        if (aA && !bA) return -1;
-                                        if (bA && !aA) return 1;
-                                        return (a.name || '').localeCompare(b.name || '');
-                                    }).map(a => {
-                                        const online = a.status === 'online';
-                                        const isAssigned = task?.assignee && a.name === task.assignee;
-                                        return (
-                                            <button
-                                                key={a.id}
-                                                disabled={scheduling || !online}
-                                                onClick={() => handleScheduleRun(a.id)}
-                                                className="w-full flex items-center transition-colors"
-                                                style={{ gap: 9, padding: '7px 8px', borderRadius: 8, textAlign: 'left', opacity: online ? 1 : 0.5, cursor: online ? 'pointer' : 'not-allowed', border: isAssigned ? '1px solid rgba(124,77,255,.4)' : '1px solid transparent' }}
-                                            >
-                                                <span style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, background: 'var(--bg-card)', fontSize: 11, fontWeight: 700 }} className="flex items-center justify-center text-text-secondary">
-                                                    {a.name?.[0]?.toUpperCase() || 'A'}
-                                                </span>
-                                                <span className="flex-1 min-w-0">
-                                                    <span className="flex items-center" style={{ gap: 6 }}>
-                                                        <span style={{ fontSize: 12.5 }} className="text-text-primary truncate">{a.name}</span>
-                                                        {isAssigned && <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4, background: 'rgba(124,77,255,.15)', color: '#7c4dff' }}>assignee</span>}
-                                                    </span>
-                                                    <span style={{ fontSize: 10.5 }} className="text-text-tertiary truncate block">{a.model || a.runtime_type || 'no model'}</span>
-                                                </span>
-                                                <span style={{ fontSize: 10.5 }} className={online ? 'text-green-400' : 'text-text-tertiary'}>{online ? 'online' : 'offline'}</span>
-                                            </button>
-                                        );
-                                    })
-                                )}
-                            </div>
-                        )}
-                        {!pickingAgent && (
-                            workRuns.length > 0 ? (
+                        {workRuns.length > 0 ? (
                                 <div style={{ marginBottom: 16 }}>
                                     {workRuns.slice(0, 5).map(r => (
                                         <button
@@ -554,8 +504,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                                 </div>
                             ) : (
                                 <p style={{ fontSize: 11.5, marginBottom: 16 }} className="text-text-tertiary">No agent runs yet. Launch one to get started.</p>
-                            )
-                        )}
+                            )}
 
                         <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr', gap: '12px 10px', fontSize: 12.5, alignItems: 'center', marginBottom: 18 }}>
                             <span className="text-text-tertiary">Status</span>

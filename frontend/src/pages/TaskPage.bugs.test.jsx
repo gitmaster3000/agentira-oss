@@ -100,7 +100,6 @@ describe('TaskPage — full detail view bugs', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
         fireEvent.click(await screen.findByRole('button', { name: /run with agent/i }));
-        fireEvent.click(await screen.findByText('Implementer'));
 
         await waitFor(() =>
             expect(api.forge.prepareTaskRun).toHaveBeenCalledWith('T1', 'a1'));
