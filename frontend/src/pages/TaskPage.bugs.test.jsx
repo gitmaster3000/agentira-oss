@@ -77,7 +77,24 @@ describe('TaskPage — full detail view bugs', () => {
         ]);
     });
 
+    it('hides "Run with agent" unless the assignee is a managed Agentira agent', async () => {
+        api.getTask.mockResolvedValue(baseTask({ assignee: 'Alice' }));
+        api.getProjectMembers.mockResolvedValue([
+            { id: 'u1', name: 'Alice', account_type: 'human' },
+            { id: 'u2', name: 'Implementer', account_type: 'agentira_agent' },
+        ]);
+        renderTaskPageByKey();
+        await screen.findByText('My task');
+        fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
+        await screen.findByText(/no agent run yet/i);
+        expect(screen.queryByRole('button', { name: /run with agent/i })).toBeNull();
+    });
+
     it('starts a run with the task id even when the URL carries the task key', async () => {
+        api.getTask.mockResolvedValue(baseTask({ assignee: 'Implementer' }));
+        api.getProjectMembers.mockResolvedValue([
+            { id: 'u2', name: 'Implementer', account_type: 'agentira_agent' },
+        ]);
         renderTaskPageByKey();
         await screen.findByText('My task');
 

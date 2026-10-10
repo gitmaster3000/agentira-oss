@@ -239,6 +239,10 @@ describe('TaskPage — detail view (AP-353)', () => {
     });
 
     it('can start an agent run from the Run tab (regression guard)', async () => {
+        api.getTask.mockResolvedValue(baseTask({ assignee: 'Implementer' }));
+        api.getProjectMembers.mockResolvedValue([
+            { id: 'u2', name: 'Implementer', account_type: 'agentira_agent' },
+        ]);
         renderTaskPage();
         await screen.findByText('My task');
 

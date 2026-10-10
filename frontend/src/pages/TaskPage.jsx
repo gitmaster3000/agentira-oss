@@ -508,6 +508,7 @@ export function TaskPage() {
                         summaryUpdatedAt={summaryUpdatedAt}
                         task={task}
                         forgeAgents={forgeAgents}
+                        canRunWithAgent={profiles.some(p => p.account_type === 'agentira_agent' && p.name === task.assignee)}
                         pickingAgent={pickingAgent}
                         setPickingAgent={setPickingAgent}
                         scheduling={scheduling}
@@ -530,8 +531,8 @@ export function TaskPage() {
     );
 }
 
-function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
-    const launcher = (
+function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, canRunWithAgent, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
+    const launcher = !canRunWithAgent ? null : (
         <RunLauncher
             task={task}
             forgeAgents={forgeAgents}
@@ -550,9 +551,9 @@ function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forge
                 <Bot className="w-8 h-8 text-text-tertiary flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                     <p className="text-sm text-text-secondary">No agent run yet for this task.</p>
-                    <p className="text-xs text-text-tertiary mt-0.5">Kick one off, or wait for an agent to pick it up.</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">{canRunWithAgent ? 'Kick one off, or wait for an agent to pick it up.' : 'Assign a managed agent to run this task.'}</p>
                 </div>
-                <div className="flex-shrink-0">{launcher}</div>
+                {launcher && <div className="flex-shrink-0">{launcher}</div>}
             </div>
         );
     }
