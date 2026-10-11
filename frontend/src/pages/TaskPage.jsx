@@ -150,8 +150,6 @@ export function TaskPage() {
     const [prUrlValue, setPrUrlValue] = useState('');
     const [copiedField, setCopiedField] = useState(null);
     const [profiles, setProfiles] = useState([]);
-    const [forgeAgents, setForgeAgents] = useState([]);
-    const [pickingAgent, setPickingAgent] = useState(false);
     const [scheduling, setScheduling] = useState(false);
 
     // Edit mode for the core task fields (title + description). Status,
@@ -320,22 +318,13 @@ export function TaskPage() {
         }
     };
 
-    const openAgentPicker = async () => {
-        setPickingAgent(true);
-        try {
-            const data = await api.forge.listAgents();
-            setForgeAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
-        } catch (err) {
-            console.error('Failed to load agents:', err);
-            setForgeAgents([]);
-        }
-    };
-
-    const handleScheduleRun = async (agentId) => {
+    const handleRunWithAgent = async () => {
         setScheduling(true);
         try {
-            const result = await api.forge.prepareTaskRun(taskUid, agentId);
-            setPickingAgent(false);
+            const agents = await api.forge.listAgents();
+            const agent = (Array.isArray(agents) ? agents : []).find(a => a.runtime_id && a.name === task.assignee);
+            if (!agent) throw new Error('The assigned agent has no runtime. Set one up first.');
+            const result = await api.forge.prepareTaskRun(taskUid, agent.id);
             const runId = result.id || result.run_id;
             if (runId) navigate(ROUTES.FORGE_RUN(runId));
         } catch (err) {
@@ -507,13 +496,9 @@ export function TaskPage() {
                         runActive={runActive}
                         summaryUpdatedAt={summaryUpdatedAt}
                         task={task}
-                        forgeAgents={forgeAgents}
                         canRunWithAgent={profiles.some(p => p.account_type === 'agentira_agent' && p.name === task.assignee)}
-                        pickingAgent={pickingAgent}
-                        setPickingAgent={setPickingAgent}
                         scheduling={scheduling}
-                        openAgentPicker={openAgentPicker}
-                        handleScheduleRun={handleScheduleRun}
+                        handleRunWithAgent={handleRunWithAgent}
                     />
                 )}
 
@@ -531,16 +516,11 @@ export function TaskPage() {
     );
 }
 
-function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forgeAgents, canRunWithAgent, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun }) {
+function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, canRunWithAgent, scheduling, handleRunWithAgent }) {
     const launcher = !canRunWithAgent ? null : (
         <RunLauncher
-            task={task}
-            forgeAgents={forgeAgents}
-            pickingAgent={pickingAgent}
-            setPickingAgent={setPickingAgent}
             scheduling={scheduling}
-            openAgentPicker={openAgentPicker}
-            handleScheduleRun={handleScheduleRun}
+            handleRunWithAgent={handleRunWithAgent}
             label={run ? 'Run again with agent' : 'Run with agent'}
         />
     );
@@ -638,61 +618,16 @@ function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, forge
     );
 }
 
-function RunLauncher({ task, forgeAgents, pickingAgent, setPickingAgent, scheduling, openAgentPicker, handleScheduleRun, label }) {
+function RunLauncher({ scheduling, handleRunWithAgent, label }) {
     return (
-        <div>
-            <div className="flex justify-end">
-                <button
-                    onClick={pickingAgent ? () => setPickingAgent(false) : openAgentPicker}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors"
-                >
-                    <Play className="w-3 h-3" /> {pickingAgent ? 'Cancel' : label}
-                </button>
-            </div>
-            {pickingAgent && (
-                <div className="mt-3 p-3 rounded-lg border border-border-subtle bg-bg-app/50 text-left">
-                    {forgeAgents.length === 0 ? (
-                        <p className="text-xs text-text-tertiary">No online agents bound to a runtime. Create one in Forge first.</p>
-                    ) : (
-                        <div className="space-y-1">
-                            {[...forgeAgents].sort((a, b) => {
-                                const aAssigned = task?.assignee && a.name === task.assignee;
-                                const bAssigned = task?.assignee && b.name === task.assignee;
-                                if (aAssigned && !bAssigned) return -1;
-                                if (bAssigned && !aAssigned) return 1;
-                                return (a.name || '').localeCompare(b.name || '');
-                            }).map(a => {
-                                const online = a.status === 'online';
-                                const isAssigned = task?.assignee && a.name === task.assignee;
-                                return (
-                                    <button
-                                        key={a.id}
-                                        disabled={scheduling || !online}
-                                        onClick={() => handleScheduleRun(a.id)}
-                                        className={`w-full text-left px-3 py-2 rounded-md flex items-center gap-3 transition-colors border ${isAssigned ? 'border-accent-primary/40 bg-accent-subtle/30' : 'border-transparent'} ${online ? 'hover:bg-bg-hover cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-                                    >
-                                        <div className="w-7 h-7 rounded-md bg-bg-panel border border-border-subtle flex items-center justify-center text-xs font-bold text-text-secondary">
-                                            {a.name?.[0]?.toUpperCase() || 'A'}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm text-text-primary truncate flex items-center gap-2">
-                                                {a.name}
-                                                {isAssigned && (
-                                                    <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-primary/15 text-accent-primary">assignee</span>
-                                                )}
-                                            </div>
-                                            <div className="text-xs text-text-tertiary truncate">{a.model || a.runtime_type || 'no model'}</div>
-                                        </div>
-                                        <span className={`text-xs ${online ? 'text-green-400' : 'text-text-tertiary'}`}>
-                                            {online ? 'online' : 'offline'}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
+        <div className="flex justify-end">
+            <button
+                disabled={scheduling}
+                onClick={handleRunWithAgent}
+                className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            >
+                <Play className="w-3 h-3" /> {label}
+            </button>
         </div>
     );
 }

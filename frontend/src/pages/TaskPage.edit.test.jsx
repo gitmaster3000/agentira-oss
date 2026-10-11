@@ -248,7 +248,6 @@ describe('TaskPage — detail view (AP-353)', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
         fireEvent.click(await screen.findByRole('button', { name: /run with agent/i }));
-        fireEvent.click(await screen.findByText('Implementer'));
 
         await waitFor(() =>
             expect(api.forge.prepareTaskRun).toHaveBeenCalledWith('T1', 'a1'));
