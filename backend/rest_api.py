@@ -1298,9 +1298,12 @@ tasks = APIRouter(prefix="/api/tasks", tags=["tasks"],
 def api_list_tasks(
     project_id: Optional[str] = None, status: Optional[str] = None,
     assignee: Optional[str] = None, priority: Optional[str] = None,
+    tag: Optional[str] = None, epic_id: Optional[str] = None,
+    milestone_id: Optional[str] = None,
     actor: str = Depends(get_current_user),
 ):
-    return services.list_tasks(project_id=project_id, status=status, assignee=assignee, priority=priority, actor=actor)
+    return services.list_tasks(project_id=project_id, status=status, assignee=assignee, priority=priority, actor=actor,
+                               tag=tag, epic_id=epic_id, milestone_id=milestone_id)
 
 @tasks.post("")
 def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):

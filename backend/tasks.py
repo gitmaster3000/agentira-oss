@@ -17,6 +17,8 @@ import logging
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import literal
+
 from backend import services
 from backend import agent_notifier
 from backend import task_graph
@@ -218,6 +220,9 @@ class TaskService:
         assignee: Optional[str] = None,
         priority: Optional[str] = None,
         actor: str = "system",
+        tag: Optional[str] = None,
+        epic_id: Optional[str] = None,
+        milestone_id: Optional[str] = None,
     ) -> list[dict]:
         with services._session() as db:
             q = core_tasks_repo.with_list_relations(db.query(Task))
@@ -234,6 +239,15 @@ class TaskService:
                 q = q.filter(Task.assignee == assignee)
             if priority:
                 q = q.filter(Task.priority == TaskPriority(priority))
+            if tag:
+                # tags is a comma-joined string: match the whole tag, not a substring.
+                esc = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                q = q.filter(literal(",").concat(Task.tags).concat(",")
+                             .like(f"%,{esc},%", escape="\\"))
+            if epic_id:
+                q = q.filter(Task.epic_id == epic_id)
+            if milestone_id:
+                q = q.filter(Task.milestone_id == milestone_id)
 
             tasks = q.order_by(Task.updated_at.desc()).all()
             ids = [t.id for t in tasks]
