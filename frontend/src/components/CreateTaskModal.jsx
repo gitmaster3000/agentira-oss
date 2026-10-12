@@ -95,61 +95,78 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         }
     };
 
+    const lbl = { color: 'var(--text-tertiary)', letterSpacing: '0.06em' };
+    const labelCls = 'block text-[10px] font-bold uppercase mb-1.5';
+    const chipStyle = { border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', backgroundColor: 'transparent' };
+
     return (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onClose}>
-            <div
-                className="w-full max-w-md rounded-xl shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+            <form
+                onSubmit={handleSubmit}
+                className="w-full max-w-lg rounded-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col"
                 onClick={e => e.stopPropagation()}
                 style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
             >
-                <div className="px-6 py-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>New Task</h2>
+                <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                    <h2 className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>New task</h2>
+                    <div className="flex-1" />
+                    <button type="button" aria-label="Close" onClick={onClose} className="btn btn-ghost px-2 py-0.5 text-base leading-none">×</button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-4">
-                    <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Task template</label>
-                        <div className="flex flex-wrap gap-2">
-                            {TASK_TEMPLATES.map(t => (
-                                <button
-                                    key={t.id}
-                                    type="button"
-                                    aria-label={`Task template: ${t.name}`}
-                                    onClick={() => applyTaskTemplate(t.id)}
-                                    className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                                    style={{ border: '1px solid var(--border-subtle)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
-                                >
-                                    {t.name}
-                                </button>
-                            ))}
-                        </div>
+                <div className="p-4 flex flex-col gap-4 overflow-y-auto">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase" style={lbl}>Start from</span>
+                        {TASK_TEMPLATES.map(t => (
+                            <button
+                                key={t.id}
+                                type="button"
+                                aria-label={`Task template: ${t.name}`}
+                                onClick={() => applyTaskTemplate(t.id)}
+                                className="px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+                                style={chipStyle}
+                            >
+                                {t.name}
+                            </button>
+                        ))}
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Title</label>
                         <input
                             autoFocus
-                            className="input"
+                            aria-label="Title"
+                            className="input text-sm font-semibold"
+                            placeholder="Task title"
                             value={formData.title}
                             onChange={e => setFormData({ ...formData, title: e.target.value })}
                             maxLength={255}
                             required
                         />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Description</label>
                         <textarea
                             aria-label="Description"
-                            className="input resize-none h-24"
+                            className="input resize-none h-24 mt-2"
+                            placeholder="Add a description…"
                             value={formData.description}
                             onChange={e => setFormData({ ...formData, description: e.target.value })}
                         />
                     </div>
 
-                    <div className="flex gap-4">
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Priority</label>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                            <label className={labelCls} style={lbl}>Epic</label>
+                            <select
+                                aria-label="Epic"
+                                className="input"
+                                value={formData.epic_id}
+                                onChange={e => setFormData({ ...formData, epic_id: e.target.value })}
+                            >
+                                <option value="">No epic</option>
+                                {epics.map(ep => (
+                                    <option key={ep.id} value={ep.id}>{ep.title}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className={labelCls} style={lbl}>Priority</label>
                             <select
                                 aria-label="Priority"
                                 className="input"
@@ -162,22 +179,10 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 <option value="critical">Critical</option>
                             </select>
                         </div>
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Epic</label>
+                        <div>
+                            <label className={labelCls} style={lbl}>Assignee</label>
                             <select
-                                className="input"
-                                value={formData.epic_id}
-                                onChange={e => setFormData({ ...formData, epic_id: e.target.value })}
-                            >
-                                <option value="">Unassigned</option>
-                                {epics.map(ep => (
-                                    <option key={ep.id} value={ep.id}>{ep.title}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="flex-1">
-                            <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Assignee</label>
-                            <select
+                                aria-label="Assignee"
                                 className="input"
                                 value={formData.assignee}
                                 onChange={e => setFormData({ ...formData, assignee: e.target.value })}
@@ -190,21 +195,23 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 ))}
                             </select>
                         </div>
+                        <div>
+                            <label className={labelCls} style={lbl}>Tags</label>
+                            <input
+                                aria-label="Tags"
+                                className="input"
+                                placeholder="frontend, urgent"
+                                value={formData.tags}
+                                onChange={e => setFormData({ ...formData, tags: e.target.value })}
+                            />
+                        </div>
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Tags</label>
-                        <input
-                            className="input"
-                            placeholder="Comma separated, e.g. frontend, urgent"
-                            value={formData.tags}
-                            onChange={e => setFormData({ ...formData, tags: e.target.value })}
-                        />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Definition of Done</label>
-                        <div className="flex flex-wrap gap-2 mb-2">
+                    <div className="rounded-lg p-3" style={{ border: '1px solid var(--border-subtle)' }}>
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>What "done" means</span>
+                            <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>optional</span>
+                            <div className="flex-1" />
                             {DOD_TEMPLATES.map(t => {
                                 const active = isDodTemplateActive(t.id);
                                 return (
@@ -214,10 +221,10 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                         aria-label={`DoD template: ${t.name}`}
                                         aria-pressed={active}
                                         onClick={() => toggleDodTemplate(t.id)}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
                                         style={active
                                             ? { border: '1px solid var(--accent-primary)', color: 'var(--accent-on)', backgroundColor: 'var(--accent-primary)' }
-                                            : { border: '1px solid var(--border-subtle)', color: 'var(--accent-primary)', backgroundColor: 'transparent' }}
+                                            : chipStyle}
                                     >
                                         <span aria-hidden="true">{active ? '✓' : '+'}</span>
                                         {t.name}
@@ -238,7 +245,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         <div className="flex gap-2">
                             <input
                                 className="input flex-1"
-                                placeholder="Add DOD item..."
+                                placeholder="Add criterion…"
                                 value={newDodText}
                                 onChange={e => setNewDodText(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDodItem(); } }}
@@ -248,7 +255,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     </div>
 
                     <div>
-                        <label className="block text-xs font-bold uppercase mb-1.5" style={{ color: 'var(--text-tertiary)', letterSpacing: '0.04em' }}>Attachments</label>
+                        <label className={labelCls} style={lbl}>Attachments</label>
                         {files.length > 0 && (
                             <div className="flex flex-col gap-1.5 mb-2">
                                 {files.map((file, i) => (
@@ -267,15 +274,15 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                             onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
                         />
                     </div>
+                </div>
 
-                    <div className="flex justify-end gap-2 pt-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                        <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
-                        <button type="submit" disabled={loading} className="btn btn-primary">
-                            {loading ? 'Creating...' : 'Create Task'}
-                        </button>
-                    </div>
-                </form>
-            </div>
+                <div className="flex items-center justify-end gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                    <button type="button" onClick={onClose} className="btn btn-ghost">Cancel</button>
+                    <button type="submit" disabled={loading} className="btn btn-primary">
+                        {loading ? 'Creating...' : 'Create'}
+                    </button>
+                </div>
+            </form>
         </div>
     );
 }
