@@ -27,7 +27,6 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         tags: ''
     });
     const [type, setType] = useState('task');
-    const [epicColor, setEpicColor] = useState(EPIC_COLORS[0]);
     const [dodItems, setDodItems] = useState([]);
     const [newDodText, setNewDodText] = useState('');
     const [files, setFiles] = useState([]);
@@ -99,7 +98,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                 const epic = await api.createEpic(projectId, {
                     title: formData.title.trim(),
                     description: formData.description.trim(),
-                    color: epicColor
+                    color: EPIC_COLORS[epics.length % EPIC_COLORS.length]
                 });
                 if (onCreated) onCreated(epic);
                 onClose();
@@ -205,24 +204,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         />
                     </div>
 
-                    {type === 'epic' ? (
-                        <div>
-                            <label className={labelCls} style={lbl}>Colour</label>
-                            <div className="flex flex-wrap gap-2.5">
-                                {EPIC_COLORS.map(c => (
-                                    <button
-                                        key={c}
-                                        type="button"
-                                        aria-label={`Epic colour ${c}`}
-                                        aria-pressed={epicColor === c}
-                                        onClick={() => setEpicColor(c)}
-                                        className={`w-7 h-7 rounded-full transition-transform hover:scale-110 ${epicColor === c ? 'ring-2 ring-white ring-offset-2 ring-offset-bg-card' : ''}`}
-                                        style={{ backgroundColor: c }}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-                    ) : (<>
+                    {type !== 'epic' && (<>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className={labelCls} style={lbl}>Epic</label>
