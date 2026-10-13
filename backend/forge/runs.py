@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from backend.db import SessionLocal
+from backend.forge.run_notify import run_meta
 from backend.forge.models import (
     Agent, Run, AgentStatus, RunStatus, RunOutcome,
 )
@@ -84,6 +85,7 @@ def create(*, agent_id: str, task_id: str | None = None,
             type_="forge.run.created",
             title=f"{agent_name} run created",
             link=f"/forge/runs/{r.id}",
+            meta=run_meta(db, r, agent, status="created"),
         )
         db.commit()
         db.refresh(r)
@@ -268,6 +270,7 @@ def start(run_id: str) -> dict | None:
             type_="forge.run.started",
             title=f"{agent_name} run started",
             link=f"/forge/runs/{run_id}",
+            meta=run_meta(db, r, agent, status="running"),
         )
         db.commit()
         db.refresh(r)
@@ -306,6 +309,7 @@ def complete(run_id: str, *, input_tokens: int = 0,
                 type_="forge.run.failed",
                 title=f"{agent_name} run failed: {short_err}",
                 link=f"/forge/runs/{run_id}",
+                meta=run_meta(db, r, agent, status="failed", error=short_err),
             )
             _notify_project_members(
                 db,
@@ -313,6 +317,7 @@ def complete(run_id: str, *, input_tokens: int = 0,
                 type_="forge.run.failed",
                 title=f"{agent_name} run failed",
                 link=f"/forge/runs/{run_id}",
+                meta=run_meta(db, r, agent, status="failed", error=short_err),
             )
         else:
             _notify_project_members(
@@ -321,6 +326,7 @@ def complete(run_id: str, *, input_tokens: int = 0,
                 type_="forge.run.completed",
                 title=f"{agent_name} run completed",
                 link=f"/forge/runs/{run_id}",
+                meta=run_meta(db, r, agent, status="completed"),
             )
         db.commit()
         db.refresh(r)

@@ -891,6 +891,10 @@ def run_migrations():
             if _ensure_column(conn, "epics", "creator", "VARCHAR(120) DEFAULT ''"):
                 conn.commit()
 
+        if "notifications" in tables:
+            if _ensure_column(conn, "notifications", "meta", "TEXT"):
+                conn.commit()
+
         # attachments — AP-152: project-level attachments share the table.
         # `task_id` becomes nullable; new `project_id` FK added. A row carries
         # exactly one (XOR is enforced in `backend.attachments.add`).

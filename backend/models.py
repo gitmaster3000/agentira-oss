@@ -313,6 +313,9 @@ class Notification(Base):
     link: Mapped[str] = mapped_column(String(255), default="")      # e.g. /projects/123
     read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Optional JSON blob (agent, task key/title, project, status, …) that lets the
+    # UI render a rich row; NULL on legacy rows, which fall back to `title`.
+    meta: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     profile: Mapped["Profile"] = relationship(back_populates="notifications")
 
