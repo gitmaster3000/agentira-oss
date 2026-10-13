@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Create task — mockup</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:rgba(255,255,255,.09);--tint:rgba(255,255,255,.05);--text:#f0f3f6;--muted:#8b949e;--lav:#c9b8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,Inter,sans-serif;padding:32px}
+.modal{width:680px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.hd,.ft{padding:12px 16px;display:flex;align-items:center;gap:8px}.hd{border-bottom:1px solid var(--line);font-weight:600}.ft{border-top:1px solid var(--line);justify-content:flex-end}
+.bd{padding:16px;display:flex;flex-direction:column;gap:14px}
+label{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.in{background:var(--tint);border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--muted)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.g3{display:grid;grid-template-columns:8rem 1fr;gap:12px}
+.chip{display:inline-block;background:rgba(201,184,255,.15);color:var(--lav);border-radius:999px;padding:2px 9px;margin-right:4px;font-size:11px}
+.sug{margin-top:4px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:4px}.sug div{padding:4px 8px;border-radius:6px}.sug .on{background:var(--tint)}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:16px;text-align:center;color:var(--muted)}
+.btn{padding:6px 14px;border-radius:8px;border:1px solid var(--line)}.pri{background:var(--lav);color:#111;border-color:var(--lav)}
+.sec{border:1px solid var(--line);border-radius:10px;padding:12px}
+</style>
+<div class="modal">
+ <div class="hd">New task<span style="flex:1"></span>×</div>
+ <div class="bd">
+  <div class="g3"><div><label>Type</label><div class="in">Task</div></div><div><label>Title</label><div class="in">Task title</div></div></div>
+  <div><label>Description</label><div class="in" style="height:90px">Add a description…</div></div>
+  <div class="g2">
+   <div><label>Assignee</label><div class="in">Unassigned</div></div>
+   <div><label>Priority</label><div class="in">Medium</div></div>
+   <div><label>Epic</label><div class="in">No epic</div></div>
+   <div><label>Due date</label><div class="in">dd/mm/yyyy</div></div>
+  </div>
+  <div><label>Tags</label><div class="in"><span class="chip">frontend ×</span><span class="chip">urgent ×</span> fr…</div>
+   <div class="sug"><div class="on">frontend</div><div>friction</div></div></div>
+  <div class="sec"><label>Linked tasks</label>
+   <div style="display:flex;gap:8px"><div class="in" style="width:130px">Waits on</div><div class="in" style="flex:1">Search a task…</div></div>
+   <div style="margin-top:8px">● AP-12 Waits on — Set up auth ×</div></div>
+  <div class="sec"><label>Definition of Done · optional</label><div class="in">Add criterion…</div></div>
+  <div><label>Attachments</label><div class="drop">Drag &amp; drop files here, or <u>browse</u></div></div>
+ </div>
+ <div class="ft"><span class="btn">Cancel</span><span class="btn pri">Create</span></div>
+</div>

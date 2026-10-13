@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { LINK_TYPES } from './TaskDetail/LinksSection';
 
 const TYPES = [
     { id: 'task', label: 'Task' },
@@ -21,8 +22,15 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         priority: 'medium',
         assignee: '',
         epic_id: '',
-        tags: ''
+        due_date: ''
     });
+    const [tags, setTags] = useState([]);
+    const [tagInput, setTagInput] = useState('');
+    const [projectTasks, setProjectTasks] = useState([]);
+    const [links, setLinks] = useState([]);
+    const [linkType, setLinkType] = useState('relates_to');
+    const [linkQuery, setLinkQuery] = useState('');
+    const [dragging, setDragging] = useState(false);
     const [type, setType] = useState('task');
     const [dodItems, setDodItems] = useState([]);
     const [newDodText, setNewDodText] = useState('');
@@ -31,6 +39,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     useEffect(() => {
         api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
         api.getEpics(projectId).then(setEpics).catch(console.error);
+        api.listTasks(projectId).then(r => setProjectTasks(r || [])).catch(console.error);
     }, [projectId]);
 
     const addDodItem = () => {
@@ -42,6 +51,31 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const removeDodItem = (index) => setDodItems(dodItems.filter((_, i) => i !== index));
 
     const addFiles = (fileList) => setFiles([...files, ...Array.from(fileList)]);
+
+    const existingTags = [...new Set(projectTasks.flatMap(t => t.tags || []))].sort();
+    const tagQuery = tagInput.trim().toLowerCase();
+    const tagSuggestions = tagQuery
+        ? existingTags.filter(t => t.toLowerCase().includes(tagQuery) && !tags.includes(t)).slice(0, 6)
+        : [];
+
+    const addTag = (raw) => {
+        const t = raw.trim().replace(/,$/, '').trim();
+        if (t && !tags.includes(t)) setTags([...tags, t]);
+        setTagInput('');
+    };
+
+    const linkQ = linkQuery.trim().toLowerCase();
+    const linkMatches = linkQ
+        ? projectTasks
+            .filter(t => !links.some(l => l.task.id === t.id)
+                && `${t.key || t.id} ${t.title}`.toLowerCase().includes(linkQ))
+            .slice(0, 6)
+        : [];
+
+    const addLink = (task) => {
+        setLinks([...links, { task, type: linkType }]);
+        setLinkQuery('');
+    };
 
     const removeFile = (index) => setFiles(files.filter((_, i) => i !== index));
 
@@ -69,11 +103,15 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                 ...formData,
                 type,
                 epic_id: formData.epic_id || undefined,
-                tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
+                due_date: formData.due_date || undefined,
+                tags: tagInput.trim() && !tags.includes(tagInput.trim()) ? [...tags, tagInput.trim()] : tags,
                 dod_items: dodItems.length ? dodItems.map(({ text, checked }) => ({ text, checked })) : undefined
             });
             for (const file of files) {
                 await api.uploadAttachment(task.id, file);
+            }
+            for (const { task: other, type: linkKind } of links) {
+                await api.addTaskLink(task.id, other.id, linkKind);
             }
             onCreated(task);
             onClose();
@@ -188,17 +226,94 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                             </select>
                         </div>
                         <div>
-                            <label className={labelCls} style={lbl}>Tags</label>
+                            <label className={labelCls} style={lbl}>Due date</label>
                             <input
-                                aria-label="Tags"
+                                type="date"
+                                aria-label="Due date"
                                 className="input"
-                                placeholder="frontend, urgent"
-                                value={formData.tags}
-                                onChange={e => setFormData({ ...formData, tags: e.target.value })}
+                                value={formData.due_date}
+                                onChange={e => setFormData({ ...formData, due_date: e.target.value })}
                             />
                         </div>
                         </>)}
                     </div>
+
+                    {type !== 'epic' && (
+                    <div>
+                        <label className={labelCls} style={lbl}>Tags</label>
+                        <div className="input flex flex-wrap items-center gap-1.5">
+                            {tags.map(t => (
+                                <span key={t} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs" style={{ backgroundColor: 'var(--bg-hover, rgba(255,255,255,0.08))', color: 'var(--text-primary)' }}>
+                                    {t}
+                                    <button type="button" aria-label={`Remove tag ${t}`} onClick={() => setTags(tags.filter(x => x !== t))}>×</button>
+                                </span>
+                            ))}
+                            <input
+                                aria-label="Tags"
+                                className="flex-1 min-w-[8rem] bg-transparent outline-none text-sm"
+                                placeholder={tags.length ? '' : 'Type to add or find a tag'}
+                                value={tagInput}
+                                onChange={e => setTagInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput); }
+                                    else if (e.key === 'Backspace' && !tagInput && tags.length) setTags(tags.slice(0, -1));
+                                }}
+                            />
+                        </div>
+                        {tagSuggestions.length > 0 && (
+                            <div role="listbox" aria-label="Tag suggestions" className="mt-1 rounded-lg p-1" style={{ border: '1px solid var(--border-subtle)' }}>
+                                {tagSuggestions.map(t => (
+                                    <button key={t} type="button" role="option" onClick={() => addTag(t)}
+                                            className="block w-full text-left text-sm px-2 py-1 rounded hover:bg-white/5"
+                                            style={{ color: 'var(--text-primary)' }}>{t}</button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    )}
+
+                    {type !== 'epic' && (
+                    <div className="rounded-lg p-3" style={{ border: '1px solid var(--border-subtle)' }}>
+                        <span className="block text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Linked tasks</span>
+                        {links.length > 0 && (
+                            <div className="flex flex-col gap-1.5 mb-2">
+                                {links.map((l, i) => (
+                                    <div key={l.task.id} className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-primary)' }}>
+                                        <span className="text-[10px] uppercase" style={{ color: 'var(--text-tertiary)' }}>
+                                            {LINK_TYPES.find(x => x.value === l.type)?.label}
+                                        </span>
+                                        <span className="text-[10px] font-mono" style={{ color: 'var(--text-tertiary)' }}>{l.task.key || l.task.id}</span>
+                                        <span className="flex-1 truncate">{l.task.title}</span>
+                                        <button type="button" onClick={() => setLinks(links.filter((_, j) => j !== i))} className="btn btn-ghost px-2 py-0.5 text-xs">Remove</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <select aria-label="Link type" className="input w-36" value={linkType} onChange={e => setLinkType(e.target.value)}>
+                                {LINK_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                            </select>
+                            <input
+                                aria-label="Link task"
+                                className="input flex-1"
+                                placeholder="Search tasks by key or title…"
+                                value={linkQuery}
+                                onChange={e => setLinkQuery(e.target.value)}
+                            />
+                        </div>
+                        {linkMatches.length > 0 && (
+                            <div role="listbox" aria-label="Task matches" className="mt-1 rounded-lg p-1" style={{ border: '1px solid var(--border-subtle)' }}>
+                                {linkMatches.map(t => (
+                                    <button key={t.id} type="button" role="option" onClick={() => addLink(t)}
+                                            className="block w-full text-left text-sm px-2 py-1 rounded hover:bg-white/5 truncate"
+                                            style={{ color: 'var(--text-primary)' }}>
+                                        <span className="font-mono text-[10px] mr-2" style={{ color: 'var(--text-tertiary)' }}>{t.key || t.id}</span>{t.title}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                    )}
 
                     {type !== 'epic' && (
                     <div className="rounded-lg p-3" style={{ border: '1px solid var(--border-subtle)' }}>
@@ -241,13 +356,27 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 ))}
                             </div>
                         )}
-                        <input
-                            type="file"
-                            multiple
-                            className="text-sm"
-                            style={{ color: 'var(--text-secondary)' }}
-                            onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
-                        />
+                        <label
+                            data-testid="dropzone"
+                            className="block rounded-lg px-4 py-5 text-center text-sm cursor-pointer"
+                            style={{
+                                border: `1.5px dashed ${dragging ? 'var(--accent-primary, #c9b8ff)' : 'var(--border-subtle)'}`,
+                                color: 'var(--text-secondary)',
+                                backgroundColor: dragging ? 'rgba(201,184,255,0.08)' : 'transparent',
+                            }}
+                            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                            onDragLeave={() => setDragging(false)}
+                            onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+                        >
+                            Drag &amp; drop files here, or <u>browse</u>
+                            <input
+                                type="file"
+                                multiple
+                                aria-label="Attach files"
+                                className="sr-only"
+                                onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
+                            />
+                        </label>
                     </div>
                 </div>
 
