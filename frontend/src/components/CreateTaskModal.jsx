@@ -203,7 +203,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                     {type !== 'epic' && (
                     <div className="rounded-lg p-3" style={{ border: '1px solid var(--border-subtle)' }}>
                         <div className="flex flex-wrap items-center gap-2 mb-2">
-                            <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>What "done" means</span>
+                            <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>Definition of Done</span>
                             <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>optional</span>
                         </div>
                         {dodItems.length > 0 && (
