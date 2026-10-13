@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useSearchParams, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
-import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
@@ -122,6 +121,44 @@ function FilterDropdown({ label, value, options, onChange }) {
                 </div>
             )}
         </div>
+    );
+}
+
+// Project tabs — replace the old PROJECT section of the sidebar. Calendar,
+// Epics and Reports have no page yet, so they render disabled.
+const PROJECT_TABS = [
+    { label: 'Overview', leaf: 'overview' },
+    { label: 'Backlog', leaf: 'backlog' },
+    { label: 'Board', leaf: 'board' },
+    { label: 'Roadmap', leaf: 'roadmap' },
+    { label: 'Calendar' },
+    { label: 'Epics' },
+    { label: 'Reports' },
+    { label: 'Workflow', leaf: 'workflow' },
+    { label: 'Deploy', leaf: 'deploy' },
+    { label: 'Settings', leaf: 'settings' },
+];
+
+function ProjectTabs({ projectId }) {
+    const base = ROUTES.STUDIO_PROJECT(projectId);
+    return (
+        <nav aria-label="Project sections" className="flex items-end gap-1 px-4 overflow-x-auto shrink-0" style={{ scrollbarWidth: 'none' }}>
+            {PROJECT_TABS.map(({ label, leaf }) => {
+                const cls = 'whitespace-nowrap px-3 py-2 text-[13px] border-b-2 -mb-px transition-colors';
+                if (!leaf) {
+                    return <span key={label} aria-disabled="true" title="Coming soon" className={`${cls} border-transparent text-text-tertiary opacity-50 cursor-not-allowed`}>{label}</span>;
+                }
+                return (
+                    <NavLink
+                        key={label}
+                        to={`${base}/${leaf}`}
+                        className={({ isActive }) => `${cls} ${isActive ? 'border-accent-primary text-text-primary font-medium' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
+                    >
+                        {label}
+                    </NavLink>
+                );
+            })}
+        </nav>
     );
 }
 
@@ -334,9 +371,7 @@ export function ProjectLayout() {
         requestSelectTask,
     };
 
-    // Overview / Settings get a clean header (no filters, no activity feed).
-    // Board / Backlog / Roadmap keep the heavy header.
-    // Deploy gets no extra project header so its own PreviewBar sits directly under shell topbar.
+    // Every project page gets the key/name/tabs header; search + filters only on board views.
     const isBoardView = /\/(board|backlog|roadmap)(\/|$)/.test(location.pathname)
         || /\/project\/[^/]+\/?$/.test(location.pathname);
     const isDeployView = /\/deploy(\/|$)/.test(location.pathname);
@@ -344,36 +379,35 @@ export function ProjectLayout() {
     return (
         <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
             <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
-                {isBoardView ? (
-                    /* Clean single-row board toolbar (design: Agentira.dc.html board screen). */
-                    <header className="px-4 flex items-center gap-3 shrink-0 border-b" style={{ height: 53 }}>
+                <header className="shrink-0 border-b">
+                    <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
+                        <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
                         <MembersControl
                             members={members}
                             availableProfiles={availableProfiles}
                             onAdd={handleAddMember}
                             onRemove={handleRemoveMember}
                         />
-
-                        <div className="flex-1" />
-
-                        <div className="flex items-center relative group">
-                            <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
-                            <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                        </div>
-                        <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
-                        <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
-                        {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
-                            <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
+                        {isBoardView && (
+                            <>
+                                <div className="flex-1" />
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex items-center relative group">
+                                        <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
+                                        <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                                    </div>
+                                    <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
+                                    <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
+                                    {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
+                                        <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
+                                    )}
+                                </div>
+                            </>
                         )}
-                    </header>
-                ) : isDeployView ? null : (
-                    <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
-                        <div className="flex-1 min-w-0">
-                            <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
-                            <ProjectDescription text={board.project.description} />
-                        </div>
-                    </header>
-                )}
+                    </div>
+                    <ProjectTabs projectId={projectId} />
+                </header>
 
                 <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
                     <Outlet context={filters} />
@@ -412,24 +446,3 @@ export function ProjectLayout() {
     );
 }
 
-
-// Project description is Markdown: render it, clamp to two lines, and let the
-// reader expand the rest instead of cutting it off.
-function ProjectDescription({ text }) {
-    const [open, setOpen] = useState(false);
-    if (!text) return <p className="text-body-sm text-text-secondary">No description</p>;
-    const long = text.length > 160 || text.includes('\n');
-    return (
-        <div className="text-body-sm text-text-secondary">
-            <div style={open ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                <Markdown>{text}</Markdown>
-            </div>
-            {long && (
-                <button type="button" onClick={() => setOpen((o) => !o)}
-                    className="text-xs text-text-tertiary hover:text-text-primary mt-0.5">
-                    {open ? 'Show less' : 'Show more'}
-                </button>
-            )}
-        </div>
-    );
-}

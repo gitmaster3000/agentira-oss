@@ -84,11 +84,11 @@ describe('AppSidebar — collapsible rail', () => {
         mountSidebar();
 
         const labels = ['Home', 'Inbox', 'My Work', 'Chat', 'Agents', 'Runs', 'Conductor',
-            'Agent Runtimes', 'MCP Servers', 'Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Settings'];
+            'Agent Runtimes', 'MCP Servers'];
         for (const l of labels) expect(screen.getByText(l)).toBeInTheDocument();
 
         expect(screen.getByText('BUILD')).toBeInTheDocument();
-        expect(screen.getByText('PROJECT')).toBeInTheDocument();
+        expect(screen.queryByText('PROJECT')).not.toBeInTheDocument();
     });
 
     it('is 248px wide and un-collapsed when railOpen is true', () => {
