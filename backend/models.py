@@ -171,7 +171,8 @@ class Profile(Base):
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     reset_token: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     reset_token_expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-    avatar_url: Mapped[str] = mapped_column(String(500), default="")
+    # URL, "preset:<n>", or a small uploaded data URL.
+    avatar_url: Mapped[str] = mapped_column(Text, default="")
     api_key: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, default=None)
     webhook_url: Mapped[str] = mapped_column(String(500), default="")
     notification_transport: Mapped[str | None] = mapped_column(

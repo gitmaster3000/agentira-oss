@@ -711,6 +711,10 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "git_token", "VARCHAR(500)")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_valid", "BOOLEAN")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_checked_at", "TIMESTAMP")
+            # Uploaded avatars are stored inline as small data URLs; widen from VARCHAR(500).
+            if _dialect_name() == "postgresql":
+                conn.execute(text("ALTER TABLE profiles ALTER COLUMN avatar_url TYPE TEXT"))
+                conn.commit()
             if added or runtime_added:
                 conn.commit()
             # Backfill: copy runtime config from forge_agents onto its linked

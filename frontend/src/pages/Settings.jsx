@@ -5,6 +5,7 @@ import { ROUTES } from '../routes';
 import { useNavigate } from 'react-router-dom';
 import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, RefreshCw, Cog, X } from 'lucide-react';
 import { AppearanceSettings } from '../components/settings/AppearanceSettings';
+import { UserAvatar, CartoonFace, PRESET_COUNT, presetValue, resizeImageToDataUrl } from '../components/UserAvatar';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
@@ -149,21 +150,9 @@ const Row = ({ onClick, children, style }) => (
     </div>
 );
 
-// ── Avatar (human = initial, bot = icon) ────────────────────────────────────
+// ── Avatar (picture, chosen cartoon, or name-based default cartoon) ─────────
 function Avatar({ profile, size = 30, radius = '50%' }) {
-    const meta = ACCOUNT_META[profile?.account_type] || ACCOUNT_META.human;
-    const isHuman = !profile?.account_type || profile?.account_type === 'human';
-    const initial = ((profile?.display_name || profile?.name || '?')[0]).toUpperCase();
-    return (
-        <span style={{
-            width: size, height: size, borderRadius: radius, flexShrink: 0,
-            background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: size === 54 ? 20 : 12.5, fontWeight: 600,
-        }}>
-            {isHuman ? initial : <meta.Icon style={{ width: size * 0.5, height: size * 0.5 }} />}
-        </span>
-    );
+    return <UserAvatar profile={profile} size={size} radius={radius} />;
 }
 
 // ── Role badge (display-only) ────────────────────────────────────────────────
@@ -428,6 +417,7 @@ export function Settings() {
     // Profile tab local state
     const [displayName, setDisplayName] = useState('');
     const [profileEmail, setProfileEmail] = useState('');
+    const [avatarDraft, setAvatarDraft] = useState('');
     const [profileSaving, setProfileSaving] = useState(false);
     const [profileMsg, setProfileMsg] = useState('');
 
@@ -467,6 +457,7 @@ export function Settings() {
             setMe(meData);
             setDisplayName(meData.display_name || '');
             setProfileEmail(meData.email || '');
+            setAvatarDraft(meData.avatar_url || '');
         } catch (err) { console.error(err); }
         try { setBots(await api.listServiceAccounts()); } catch { /* ignore */ }
         if (isAdmin) {
@@ -487,12 +478,22 @@ export function Settings() {
     // ── Profile tab actions ────────────────────────────────────────────────
     const profileDirty = me && (
         displayName !== (me.display_name || '') || profileEmail !== (me.email || '')
+        || avatarDraft !== (me.avatar_url || '')
     );
+
+    async function pickAvatarFile(e) {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        try { setAvatarDraft(await resizeImageToDataUrl(file)); setProfileMsg(''); }
+        catch (err) { setProfileMsg(err.message); }
+    }
 
     async function saveProfile() {
         const patch = {};
         if (displayName !== (me.display_name || '')) patch.display_name = displayName;
         if (isHumanUser && profileEmail !== (me.email || '')) patch.email = profileEmail;
+        if (avatarDraft !== (me.avatar_url || '')) patch.avatar_url = avatarDraft;
         if (!Object.keys(patch).length) return;
         setProfileSaving(true); setProfileMsg('');
         try {
@@ -710,10 +711,31 @@ export function Settings() {
                         <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 18px', color: 'var(--text-primary)' }}>My profile</h2>
 
                         {/* Avatar row */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-                            <span style={{ width: 54, height: 54, borderRadius: '50%', background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 600, flexShrink: 0 }}>
-                                {(me.display_name || me.name || '?')[0].toUpperCase()}
-                            </span>
+                        <div style={{ marginBottom: 22 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+                                <UserAvatar profile={{ ...me, avatar_url: avatarDraft }} size={54} />
+                                <label style={{ fontSize: 12.5, color: 'var(--accent-primary)', cursor: 'pointer' }}>
+                                    Upload a picture
+                                    <input type="file" accept="image/*" data-testid="avatar-upload" style={{ display: 'none' }} onChange={pickAvatarFile} />
+                                </label>
+                                {avatarDraft && (
+                                    <button type="button" onClick={() => setAvatarDraft('')}
+                                        style={{ fontSize: 12.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
+                                        Use default
+                                    </button>
+                                )}
+                            </div>
+                            <FL>Or pick a character</FL>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                {Array.from({ length: PRESET_COUNT }, (_, i) => (
+                                    <button key={i} type="button" aria-label={`Avatar ${i + 1}`} aria-pressed={avatarDraft === presetValue(i)}
+                                        onClick={() => setAvatarDraft(presetValue(i))}
+                                        style={{ padding: 0, borderRadius: '50%', overflow: 'hidden', cursor: 'pointer', lineHeight: 0,
+                                            border: avatarDraft === presetValue(i) ? '2px solid var(--accent-primary)' : '2px solid transparent' }}>
+                                        <CartoonFace index={i} size={34} />
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         {/* Display name */}

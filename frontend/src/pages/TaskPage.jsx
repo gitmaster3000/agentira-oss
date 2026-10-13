@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { UserAvatar } from '../components/UserAvatar';
 import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -933,8 +934,8 @@ function PlanTab(props) {
                         <div>
                             <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
                             <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0" data-testid="task-assignee-avatar">
-                                {assigneeName ? assigneeName[0].toUpperCase() : '?'}
+                            <div className="flex-shrink-0" data-testid="task-assignee-avatar">
+                                <UserAvatar profile={profiles.find(p => p.name === assigneeName)} name={assigneeName || '?'} size={24} />
                             </div>
                             <select
                                 id="task-assignee"
