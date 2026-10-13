@@ -520,10 +520,15 @@ export function Settings() {
     // ── Members / Accounts actions ─────────────────────────────────────────
     async function handleInviteMember() {
         try {
-            const inv = await api.createInvite();
+            const email = (window.prompt("Email to send the invite to (leave blank to just get a link):") || "").trim();
+            const inv = await api.createInvite(email);
             const link = `${window.location.origin}/signup?invite=${inv.code}`;
             try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
-            window.prompt("Invite link (copied to clipboard) — share it:", link);
+            const note = inv.email_sent
+                ? `Invite emailed to ${email}. Link (copied to clipboard):`
+                : email ? "Couldn't send the email. Share this link instead (copied to clipboard):"
+                : "Invite link (copied to clipboard) — share it:";
+            window.prompt(note, link);
         } catch (err) { alert(err.message || "Failed to create invite"); }
     }
 

@@ -119,3 +119,5 @@ These are gated on `AGENTIRA_ENV=dev` and do nothing elsewhere.
 |---|---|
 | `SMTP_HOST` | Mail server |
 | `SMTP_FROM` | Sender address |
+
+With these set, Agentira emails a welcome message on signup, password-reset links, and invite links (Settings → Members → Invite, when an email address is entered). Without `SMTP_HOST`, emails are skipped and the invite link is shown for manual sharing.
