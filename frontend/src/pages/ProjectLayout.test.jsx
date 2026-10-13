@@ -47,13 +47,13 @@ describe('ProjectLayout header', () => {
         expect(nav.querySelectorAll('a, [aria-disabled]')).toHaveLength(10);
         expect(screen.getByRole('link', { name: 'Board' })).toHaveAttribute('aria-current', 'page');
         expect(screen.getByRole('link', { name: 'Backlog' })).toHaveAttribute('href', '/studio/project/p1/backlog');
-        expect(screen.getByPlaceholderText('Search tasks…')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Search board')).toBeInTheDocument();
     });
 
     it('keeps the tabs on non-board pages without the search box', async () => {
         mount('/studio/project/p1/deploy');
         expect(await screen.findByRole('link', { name: 'Deploy' })).toHaveAttribute('aria-current', 'page');
-        expect(screen.queryByPlaceholderText('Search tasks…')).not.toBeInTheDocument();
+        expect(screen.queryByPlaceholderText('Search board')).not.toBeInTheDocument();
     });
 
     it('shows the project description under the header on Overview only', async () => {
