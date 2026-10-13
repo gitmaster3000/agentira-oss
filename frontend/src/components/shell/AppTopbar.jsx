@@ -66,7 +66,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
     const navigate = useNavigate();
     const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
-    const { projects, runningByProject, runningTotal, pulseOpen, togglePulse } = useShellData();
+    const { projects, runningByProject, runningTotal, pulseOpen, togglePulse, recentNotifs: notifs, markNotifRead } = useShellData();
     const activeProjectId = urlProjectId || storedProjectId;
     const activeProject = projects.find((p) => p.id === activeProjectId) || projects[0] || null;
     const crumb = useBreadcrumb(activeProject?.name);
@@ -74,7 +74,6 @@ export function AppTopbar({ onNewProject, onMenu }) {
     const [projMenuOpen, setProjMenuOpen] = useState(false);
     const [newOpen, setNewOpen] = useState(false);
     const [bellOpen, setBellOpen] = useState(false);
-    const [notifs, setNotifs] = useState([]);
     const projRef = useRef(null);
     const newRef = useRef(null);
     const bellRef = useRef(null);
@@ -83,22 +82,13 @@ export function AppTopbar({ onNewProject, onMenu }) {
     const activeLive = activeProject ? runningByProject[activeProject.id] || 0 : 0;
 
     useEffect(() => {
-        let cancelled = false;
-        const load = async () => {
-            try {
-                const data = await api.getNotifications(false);
-                if (!cancelled) setNotifs(Array.isArray(data) ? data : []);
-            } catch { /* ignore */ }
-        };
-        load();
-        const id = setInterval(load, 30_000);
         const onDown = (e) => {
             if (projRef.current && !projRef.current.contains(e.target)) setProjMenuOpen(false);
             if (newRef.current && !newRef.current.contains(e.target)) setNewOpen(false);
             if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false);
         };
         document.addEventListener('mousedown', onDown);
-        return () => { cancelled = true; clearInterval(id); document.removeEventListener('mousedown', onDown); };
+        return () => document.removeEventListener('mousedown', onDown);
     }, []);
 
     const selectProject = (p) => {
@@ -111,7 +101,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
         try {
             if (!n.read) {
                 await api.markNotificationRead(n.id);
-                setNotifs((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+                markNotifRead(n.id);
             }
             if (n.link) navigate(n.link);
         } finally {

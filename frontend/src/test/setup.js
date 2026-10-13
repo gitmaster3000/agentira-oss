@@ -1,8 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import { clearRequestCache } from '../api';
 
-afterEach(() => cleanup());
+// api.request() reuses GET results for a moment; tests must not share them.
+afterEach(() => { cleanup(); clearRequestCache(); });
 
 // jsdom in this setup exposes `window.localStorage` as a bare object, so the
 // Storage methods the app relies on are missing. Give tests a real in-memory one.

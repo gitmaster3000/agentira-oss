@@ -28,6 +28,7 @@ const ShellDataContext = createContext({
     projects: [], runningRuns: [], runningByProject: {}, runningTotal: 0,
     waitingRuns: [], recentNotifs: [], agentCount: null, unread: 0,
     pulseOpen: false, togglePulse: () => {}, dismissWaiting: () => {},
+    markNotifRead: () => {},
 });
 
 const PULSE_KEY = 'agentira.pulseOpen';
@@ -59,6 +60,15 @@ export function ShellDataProvider({ children }) {
     const dismissWaiting = (id) => {
         setWaitingRuns((list) => list.filter((r) => r.id !== id));
         api.forge.dismissRun(id).catch(() => {});
+    };
+
+    // Mark one notification read locally (bell + Pulse share this list).
+    const markNotifRead = (id) => {
+        setRecentNotifs((list) => {
+            const next = list.map((x) => (x.id === id ? { ...x, read: true } : x));
+            setUnread(next.filter((x) => !x.read).length);
+            return next;
+        });
     };
 
     useEffect(() => {
@@ -109,7 +119,7 @@ export function ShellDataProvider({ children }) {
     const value = {
         projects, runningRuns, runningByProject, runningTotal,
         waitingRuns, recentNotifs, agentCount, unread,
-        pulseOpen, togglePulse, dismissWaiting,
+        pulseOpen, togglePulse, dismissWaiting, markNotifRead,
     };
     return <ShellDataContext.Provider value={value}>{children}</ShellDataContext.Provider>;
 }
