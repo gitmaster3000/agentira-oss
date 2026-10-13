@@ -9,6 +9,7 @@ import { CreateEpicModal } from '../components/CreateEpicModal';
 import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
+import { UserAvatar } from '../components/UserAvatar';
 
 // Members control — design board-toolbar "Members [N] ▾" dropdown: lists
 // current members (remove on hover) + the addable profiles under "Add member".
@@ -28,11 +29,7 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
     }, []);
-    const avatar = (name) => (
-        <span className="flex items-center justify-center flex-shrink-0" style={{ width: 28, height: 28, borderRadius: '50%', fontSize: 11, fontWeight: 700, background: 'var(--accent-subtle)', color: 'var(--accent-primary)' }}>
-            {(name || '?')[0]?.toUpperCase()}
-        </span>
-    );
+    const avatar = (profile) => <UserAvatar profile={profile} size={28} />;
     return (
         <div className="relative" ref={ref}>
             <button
@@ -49,7 +46,7 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
                     <div className="px-2 pt-1.5 pb-1 text-[9.5px] font-bold uppercase tracking-wider text-text-tertiary">Project members · {members.length}</div>
                     {members.map(m => (
                         <div key={m.id} className="group flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover">
-                            {avatar(m.display_name || m.name)}
+                            {avatar(m)}
                             <div className="flex-1 min-w-0">
                                 <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{m.display_name || m.name}</div>
                                 <div style={{ fontSize: 10.5 }} className="text-text-tertiary truncate">@{m.name}{m.role ? ` · ${m.role}` : ''}</div>
@@ -70,7 +67,7 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
                             )}
                             {matches.map(p => (
                                 <div key={p.id} onClick={() => { onAdd(p.name); setQuery(''); }} role="button" tabIndex={0} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover cursor-pointer">
-                                    {avatar(p.display_name || p.name)}
+                                    {avatar(p)}
                                     <div className="flex-1 min-w-0">
                                         <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{p.display_name || p.name}</div>
                                         <div style={{ fontSize: 10.5 }} className="text-text-tertiary truncate">@{p.name}{p.role ? ` · ${p.role}` : ''}</div>
