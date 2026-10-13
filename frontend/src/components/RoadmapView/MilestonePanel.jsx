@@ -54,7 +54,7 @@ function MilestoneRow({ milestone, onUpdate, onDelete }) {
                 <select
                     value={milestone.status}
                     onChange={(e) => onUpdate(milestone.id, { status: e.target.value })}
-                    className="text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1 text-text-secondary"
+                    className="input w-auto py-1 text-xs"
                 >
                     {Object.entries(STATUS_LABEL).map(([value, label]) => (
                         <option key={value} value={value}>{label}</option>

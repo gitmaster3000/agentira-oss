@@ -57,12 +57,12 @@ function LinkPicker({ options, onAdd, onCancel }) {
         <div className="space-y-2 mb-3 p-2 rounded bg-bg-app border border-border-subtle/40">
             <select value={type} onChange={(e) => setType(e.target.value)}
                     aria-label="Link type"
-                    className="w-full text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1.5 text-text-primary">
+                    className="input py-1.5 text-xs">
                 {LINK_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
             <select value={target} onChange={(e) => setTarget(e.target.value)}
                     aria-label="Task to link"
-                    className="w-full text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1.5 text-text-primary">
+                    className="input py-1.5 text-xs">
                 <option value="">Pick a task…</option>
                 {options.map(t => (
                     <option key={t.id} value={t.id}>{(t.key || t.id)} — {t.title}</option>
@@ -191,7 +191,7 @@ export function LinksSection({ task, onChanged, isEditing = false, onOpenTask, c
                     <select
                         value={task.milestone_id || ''}
                         onChange={(e) => run(() => api.updateTask(task.id, { milestone_id: e.target.value }))}
-                        className="w-full text-xs bg-bg-panel border border-border-subtle rounded px-2 py-1.5 text-text-secondary"
+                        className="input py-1.5 text-xs"
                     >
                         <option value="">No milestone</option>
                         {milestones.map(m => (

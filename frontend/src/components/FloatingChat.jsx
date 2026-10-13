@@ -311,7 +311,7 @@ export function FloatingChat() {
                     onChange={(e) => setSelectedId(e.target.value)}
                     onMouseDown={(e) => e.stopPropagation()}
                     disabled={unavailable || agents.length === 0}
-                    className="flex-1 min-w-0 bg-bg-hover border border-border-subtle rounded-md px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent-primary"
+                    className="input flex-1 min-w-0 py-1 text-sm"
                 >
                     {agents.length === 0 && <option>Loading…</option>}
                     {agents.map((a) => (
