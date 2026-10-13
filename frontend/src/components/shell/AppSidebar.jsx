@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useCurrentProjectId } from '../../currentProject';
 import { useShellData, projectKey } from './shellData';
@@ -66,7 +66,6 @@ const projectIcon = (
 export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewProject }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
     const { user } = useAuth();
     const { projects, runningByProject, runningTotal, agentCount, unread } = useShellData();
@@ -83,7 +82,10 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewP
         return () => document.removeEventListener('mousedown', onDown);
     }, []);
 
-    const activeProjectId = urlProjectId || storedProjectId;
+    // Highlight a project only on its own pages: /studio/project/:id/... (that id)
+    // or a task page (the stored id). Home, Inbox etc. highlight none.
+    const urlMatch = path.match(/^\/studio\/project\/([^/]+)/);
+    const activeProjectId = urlMatch ? urlMatch[1] : path.startsWith('/studio/tasks/') ? storedProjectId : null;
 
     const is = {
         home: path === '/studio',

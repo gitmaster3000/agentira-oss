@@ -44,14 +44,14 @@ const RUNS = [
     { id: 'r2', project_id: 'p1' },
 ];
 
-function mountSidebar(props = {}) {
+function mountSidebar(props = {}, entry = '/studio') {
     return render(
-        <MemoryRouter initialEntries={['/studio']}>
+        <MemoryRouter initialEntries={[entry]}>
             <ShellDataProvider>
                 <Routes>
                     <Route path="/studio" element={<AppSidebar railOpen onToggleRail={() => {}} {...props} />} />
+                    <Route path="/studio/project/:projectId/board" element={<><AppSidebar railOpen onToggleRail={() => {}} {...props} /><div>BOARD</div></>} />
                     <Route path="/forge/runs" element={<div>RUNS PAGE</div>} />
-                    <Route path="/studio/project/:projectId/board" element={<div>BOARD</div>} />
                 </Routes>
             </ShellDataProvider>
         </MemoryRouter>,
@@ -99,8 +99,14 @@ describe('AppSidebar — collapsible rail', () => {
         }
     });
 
-    it('lists projects with the active one highlighted and a live dot for running runs', async () => {
+    it('highlights no project on non-project pages like Home', async () => {
         mountSidebar();
+        expect((await screen.findByTitle('Atlas')).style.fontWeight).not.toBe('600');
+        expect(screen.getByTitle('Beacon').style.fontWeight).not.toBe('600');
+    });
+
+    it('lists projects with the active one highlighted and a live dot for running runs', async () => {
+        mountSidebar({}, '/studio/project/p1/board');
         const atlas = await screen.findByTitle('Atlas');
         expect(atlas.style.fontWeight).toBe('600');
         expect(screen.getByTitle('Beacon').style.fontWeight).not.toBe('600');
@@ -108,9 +114,8 @@ describe('AppSidebar — collapsible rail', () => {
         expect(within(screen.getByTitle('Beacon')).queryByText('2')).toBeNull();
     });
 
-    it('opens a project board on click and fires onNewProject', async () => {
-        const onNewProject = vi.fn();
-        mountSidebar({ onNewProject });
+    it('opens a project board on click', async () => {
+        mountSidebar();
         fireEvent.click(await screen.findByTitle('Beacon'));
         expect(await screen.findByText('BOARD')).toBeInTheDocument();
     });
