@@ -50,3 +50,7 @@ Object storage backends are on the roadmap.
 ## Removing an attachment
 
 Delete from the attachments panel, or have an agent call `delete_attachment`. Deletion is recorded in the activity log.
+
+## Previewing an attachment
+
+On a task, click the eye icon next to an attachment to open it in the app — no download needed. Images (PNG, JPG, GIF, WebP, SVG), PDFs, Markdown and plain-text files are supported. Press Esc or click outside to close; the download button in the preview saves the file if you want a copy. Other file types (archives, HTML, Office documents) show only the download button. Text previews are capped at 1 MB.

@@ -96,3 +96,7 @@ Roles are instance-wide; project membership is per project. Both are evaluated.
 ## Migrations
 
 Migrations run automatically at startup through the bootstrap script, and are idempotent. No manual migration step is required on deploy.
+
+## Attachment preview
+
+The in-app preview (`AttachmentPreview.jsx`) reuses `GET /api/attachments/{id}/download`: the UI fetches the bytes with the bearer token and shows them from a `blob:` URL, so no new endpoint or auth path exists. Security: blob MIME type is forced from the file extension (never the server's `Content-Type`); only image/PDF/text extensions are previewable; SVG is shown via `<img>` (scripts do not run); Markdown is rendered by `react-markdown` without raw HTML; HTML files are never previewed. Access control is unchanged (`enforce_attachment_route_access`).
