@@ -1,35 +1,150 @@
 import React from 'react';
 
-// Cartoon avatar presets: bg colour, skin colour, eyes, mouth. A profile with
-// no picture gets one picked deterministically from its name, so the same
-// person always looks the same everywhere.
-const BGS = ['#c9b8ff', '#9be7d8', '#ffd08a', '#ffa8b8', '#a8d4ff', '#c6f0a4', '#f6b3ff', '#ffc9a0'];
-const SKINS = ['#ffe0bd', '#f6c9a0', '#e0a878', '#b9814f', '#8a5a3a', '#fff0c8'];
+// Cartoon character avatars. A profile with no picture gets one picked
+// deterministically from its name, so the same person always looks the same.
+const BGS = ['#d9ccff', '#b8efe3', '#ffe0a8', '#ffc4d0', '#bfdcff', '#d3f2b8', '#f3c9ff', '#ffd6b8'];
+const INK = '#2b2140';
 
-const EYES = [
-    (c) => <><circle cx="21" cy="26" r="3" fill={c} /><circle cx="43" cy="26" r="3" fill={c} /></>,
-    (c) => <><path d="M17 27 q4 -6 8 0" stroke={c} strokeWidth="2.6" fill="none" strokeLinecap="round" /><path d="M39 27 q4 -6 8 0" stroke={c} strokeWidth="2.6" fill="none" strokeLinecap="round" /></>,
-    (c) => <><circle cx="21" cy="26" r="4.5" fill="#fff" /><circle cx="22" cy="27" r="2.4" fill={c} /><circle cx="43" cy="26" r="4.5" fill="#fff" /><circle cx="44" cy="27" r="2.4" fill={c} /></>,
-    (c) => <><rect x="17" y="25" width="8" height="2.6" rx="1.3" fill={c} /><rect x="39" y="25" width="8" height="2.6" rx="1.3" fill={c} /></>,
+const Eye = ({ x, y, r = 3.2 }) => (
+    <>
+        <circle cx={x} cy={y} r={r} fill={INK} />
+        <circle cx={x + r * 0.35} cy={y - r * 0.35} r={r * 0.36} fill="#fff" />
+    </>
+);
+const Eyes = ({ y = 33, gap = 11, r }) => <><Eye x={32 - gap} y={y} r={r} /><Eye x={32 + gap} y={y} r={r} /></>;
+const Cheeks = ({ y = 41, gap = 15 }) => (
+    <>
+        <circle cx={32 - gap} cy={y} r="3" fill="#ff8fa3" opacity=".5" />
+        <circle cx={32 + gap} cy={y} r="3" fill="#ff8fa3" opacity=".5" />
+    </>
+);
+const Smile = ({ y = 43, w = 5 }) => (
+    <path d={`M${32 - w} ${y} q${w} ${w * 0.9} ${w * 2} 0`} stroke={INK} strokeWidth="2" fill="none" strokeLinecap="round" />
+);
+
+const CHARACTERS = [
+    // cat
+    () => <>
+        <polygon points="13,30 15,8 30,19" fill="#f2994a" /><polygon points="51,30 49,8 34,19" fill="#f2994a" />
+        <polygon points="17,26 18,14 26,20" fill="#ffc2b0" /><polygon points="47,26 46,14 38,20" fill="#ffc2b0" />
+        <ellipse cx="32" cy="38" rx="21" ry="19" fill="#f2994a" />
+        <path d="M32 19 v8 M26 20 l1 6 M38 20 l-1 6" stroke="#c9732a" strokeWidth="2" strokeLinecap="round" />
+        <ellipse cx="32" cy="45" rx="9" ry="6.5" fill="#ffe9cf" />
+        <Eyes y={36} gap={10} /><polygon points="29.5,41 34.5,41 32,44" fill="#ff7a93" /><Smile y={45.5} w={3.5} />
+        <path d="M6 40 h10 M7 46 l9 -3 M58 40 h-10 M57 46 l-9 -3" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" opacity=".9" />
+    </>,
+    // dog
+    () => <>
+        <ellipse cx="13" cy="33" rx="7" ry="14" fill="#8a5a33" transform="rotate(14 13 33)" />
+        <ellipse cx="51" cy="33" rx="7" ry="14" fill="#8a5a33" transform="rotate(-14 51 33)" />
+        <ellipse cx="32" cy="37" rx="19" ry="20" fill="#d9a066" />
+        <path d="M32 17 q-6 6 -2 14 q4 -2 4 -14z" fill="#8a5a33" />
+        <ellipse cx="32" cy="46" rx="11" ry="8.5" fill="#fbe8cc" />
+        <Eyes y={34} gap={10} /><ellipse cx="32" cy="42" rx="4.2" ry="3" fill={INK} />
+        <path d="M32 45 v3 M27 48 q5 4 10 0" stroke={INK} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+        <path d="M30 49 q2 6 4 0z" fill="#ff7a93" />
+    </>,
+    // bear
+    () => <>
+        <circle cx="14" cy="17" r="8" fill="#7a4e2d" /><circle cx="50" cy="17" r="8" fill="#7a4e2d" />
+        <circle cx="14" cy="17" r="4" fill="#d9a77a" /><circle cx="50" cy="17" r="4" fill="#d9a77a" />
+        <ellipse cx="32" cy="37" rx="21" ry="20" fill="#8f5e38" />
+        <ellipse cx="32" cy="44" rx="10" ry="8" fill="#ecd2ab" />
+        <Eyes y={34} gap={11} r={3} /><ellipse cx="32" cy="41" rx="4" ry="3" fill={INK} />
+        <path d="M32 44 v2.5 M27.5 47 q4.5 3.5 9 0" stroke={INK} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+    </>,
+    // panda
+    () => <>
+        <circle cx="14" cy="17" r="8" fill="#2b2140" /><circle cx="50" cy="17" r="8" fill="#2b2140" />
+        <ellipse cx="32" cy="37" rx="21" ry="20" fill="#fff" />
+        <ellipse cx="21.5" cy="34" rx="6" ry="7.5" fill="#2b2140" transform="rotate(-18 21.5 34)" />
+        <ellipse cx="42.5" cy="34" rx="6" ry="7.5" fill="#2b2140" transform="rotate(18 42.5 34)" />
+        <circle cx="22" cy="34" r="2.6" fill="#fff" /><circle cx="42" cy="34" r="2.6" fill="#fff" />
+        <circle cx="22.4" cy="33.6" r="1.2" fill={INK} /><circle cx="41.6" cy="33.6" r="1.2" fill={INK} />
+        <ellipse cx="32" cy="44" rx="3.6" ry="2.6" fill={INK} /><Smile y={47} w={4} />
+    </>,
+    // rabbit
+    () => <>
+        <ellipse cx="22" cy="14" rx="6" ry="14" fill="#fff" transform="rotate(-8 22 14)" />
+        <ellipse cx="42" cy="14" rx="6" ry="14" fill="#fff" transform="rotate(8 42 14)" />
+        <ellipse cx="22" cy="15" rx="2.8" ry="9.5" fill="#ffb3c4" transform="rotate(-8 22 15)" />
+        <ellipse cx="42" cy="15" rx="2.8" ry="9.5" fill="#ffb3c4" transform="rotate(8 42 15)" />
+        <ellipse cx="32" cy="40" rx="20" ry="18" fill="#fff" />
+        <Eyes y={38} gap={10} /><Cheeks y={44} gap={14} />
+        <polygon points="29.5,42.5 34.5,42.5 32,45.5" fill="#ff7a93" />
+        <path d="M32 45.5 v2 M27 48 q5 3 10 0" stroke={INK} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+        <rect x="30" y="48" width="4" height="4" rx="1" fill="#fff" stroke={INK} strokeWidth="1" />
+    </>,
+    // fox
+    () => <>
+        <polygon points="11,28 14,6 30,19" fill="#e8662a" /><polygon points="53,28 50,6 34,19" fill="#e8662a" />
+        <polygon points="16,24 16,13 25,19" fill="#2b2140" /><polygon points="48,24 48,13 39,19" fill="#2b2140" />
+        <path d="M11 32 Q32 8 53 32 Q50 58 32 58 Q14 58 11 32z" fill="#e8662a" />
+        <path d="M11 36 Q22 40 32 52 Q42 40 53 36 Q50 58 32 58 Q14 58 11 36z" fill="#fff" />
+        <Eyes y={35} gap={10} /><ellipse cx="32" cy="50" rx="3.4" ry="2.6" fill={INK} />
+    </>,
+    // owl
+    () => <>
+        <polygon points="12,24 10,8 26,16" fill="#7a5a3c" /><polygon points="52,24 54,8 38,16" fill="#7a5a3c" />
+        <ellipse cx="32" cy="37" rx="22" ry="21" fill="#9b7653" />
+        <circle cx="22" cy="34" r="10" fill="#f6ead2" /><circle cx="42" cy="34" r="10" fill="#f6ead2" />
+        <circle cx="22" cy="34" r="5" fill="#fff" stroke="#e0b25a" strokeWidth="2" /><circle cx="42" cy="34" r="5" fill="#fff" stroke="#e0b25a" strokeWidth="2" />
+        <circle cx="22.5" cy="34.5" r="2.6" fill={INK} /><circle cx="41.5" cy="34.5" r="2.6" fill={INK} />
+        <polygon points="29,41 35,41 32,48" fill="#f5a623" />
+        <path d="M24 53 q3 3 6 0 M34 53 q3 3 6 0" stroke="#7a5a3c" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+    </>,
+    // robot
+    () => <>
+        <line x1="32" y1="6" x2="32" y2="15" stroke="#7a8699" strokeWidth="2.4" strokeLinecap="round" /><circle cx="32" cy="6" r="3.4" fill="#ff6b81" />
+        <rect x="8" y="30" width="5" height="12" rx="2.5" fill="#7a8699" /><rect x="51" y="30" width="5" height="12" rx="2.5" fill="#7a8699" />
+        <rect x="12" y="15" width="40" height="38" rx="11" fill="#cdd6e3" />
+        <rect x="17" y="24" width="30" height="14" rx="7" fill="#2b2140" />
+        <circle cx="25" cy="31" r="3.6" fill="#5ef2e0" /><circle cx="39" cy="31" r="3.6" fill="#5ef2e0" />
+        <circle cx="26" cy="30" r="1.1" fill="#fff" /><circle cx="40" cy="30" r="1.1" fill="#fff" />
+        <rect x="23" y="43" width="18" height="5" rx="2.5" fill="#7a8699" />
+        <path d="M27 43 v5 M32 43 v5 M37 43 v5" stroke="#cdd6e3" strokeWidth="1.2" />
+    </>,
+    // penguin
+    () => <>
+        <ellipse cx="32" cy="37" rx="21" ry="21" fill="#33425e" />
+        <path d="M32 24 Q14 26 14 41 Q16 56 32 56 Q48 56 50 41 Q50 26 32 24z" fill="#fff" />
+        <Eyes y={35} gap={8.5} r={2.9} />
+        <path d="M26 41 Q32 38 38 41 Q36 48 32 48 Q28 48 26 41z" fill="#ffa940" />
+        <Cheeks y={42} gap={14} />
+    </>,
+    // frog
+    () => <>
+        <circle cx="19" cy="20" r="9" fill="#5fbf4a" /><circle cx="45" cy="20" r="9" fill="#5fbf4a" />
+        <ellipse cx="32" cy="40" rx="23" ry="18" fill="#6fd058" />
+        <circle cx="19" cy="20" r="6" fill="#fff" /><circle cx="45" cy="20" r="6" fill="#fff" />
+        <circle cx="19.8" cy="20.6" r="3" fill={INK} /><circle cx="44.2" cy="20.6" r="3" fill={INK} />
+        <circle cx="20.8" cy="19.6" r="1" fill="#fff" /><circle cx="45.2" cy="19.6" r="1" fill="#fff" />
+        <circle cx="29" cy="37" r="1.1" fill="#3d8a2e" /><circle cx="35" cy="37" r="1.1" fill="#3d8a2e" />
+        <path d="M17 43 Q32 55 47 43" stroke={INK} strokeWidth="2.2" fill="none" strokeLinecap="round" />
+        <Cheeks y={45} gap={17} />
+    </>,
+    // lion
+    () => <>
+        <circle cx="32" cy="35" r="26" fill="#b9692b" />
+        <circle cx="12" cy="21" r="6" fill="#f0b968" /><circle cx="52" cy="21" r="6" fill="#f0b968" />
+        <circle cx="32" cy="37" r="17.5" fill="#f4c37a" />
+        <ellipse cx="32" cy="44" rx="9" ry="7" fill="#fdebc6" />
+        <Eyes y={34} gap={8.5} r={3} /><polygon points="29,40 35,40 32,44" fill="#7a3d1a" />
+        <path d="M32 44 v2.5 M27 47 q5 3.5 10 0" stroke={INK} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+    </>,
+    // monkey
+    () => <>
+        <circle cx="10" cy="35" r="7" fill="#8a5a33" /><circle cx="54" cy="35" r="7" fill="#8a5a33" />
+        <circle cx="10" cy="35" r="3.6" fill="#f1c9a0" /><circle cx="54" cy="35" r="3.6" fill="#f1c9a0" />
+        <ellipse cx="32" cy="34" rx="20" ry="20" fill="#8a5a33" />
+        <path d="M32 24 q-9 -4 -13 4 q-5 8 1 16 q5 8 12 8 q7 0 12 -8 q6 -8 1 -16 q-4 -8 -13 -4z" fill="#f1c9a0" />
+        <Eyes y={34} gap={7.5} r={3} />
+        <circle cx="29.5" cy="43" r="1" fill="#8a5a33" /><circle cx="34.5" cy="43" r="1" fill="#8a5a33" />
+        <path d="M25 47 q7 6 14 0" stroke={INK} strokeWidth="2" fill="none" strokeLinecap="round" />
+    </>,
 ];
-const MOUTHS = [
-    (c) => <path d="M22 40 q10 10 20 0" stroke={c} strokeWidth="2.8" fill="none" strokeLinecap="round" />,
-    (c) => <path d="M24 42 q8 5 16 0" stroke={c} strokeWidth="2.8" fill="none" strokeLinecap="round" />,
-    (c) => <ellipse cx="32" cy="42" rx="4.5" ry="3.5" fill={c} />,
-    (c) => <path d="M22 39 q10 12 20 0 z" fill={c} />,
-];
 
-function preset(key) {
-    const n = Number(key);
-    return {
-        bg: BGS[n % BGS.length],
-        skin: SKINS[(n >> 3) % SKINS.length],
-        eyes: EYES[(n >> 1) % EYES.length],
-        mouth: MOUTHS[(n >> 2) % MOUTHS.length],
-    };
-}
-
-export const PRESET_COUNT = 24;
+export const PRESET_COUNT = CHARACTERS.length * 2;
 export const presetValue = (i) => `preset:${i}`;
 
 function hash(str) {
@@ -39,15 +154,12 @@ function hash(str) {
 }
 
 export function CartoonFace({ index, size }) {
-    const { bg, skin, eyes, mouth } = preset(index);
+    const n = Math.abs(Number(index)) || 0;
+    const Character = CHARACTERS[n % CHARACTERS.length];
     return (
         <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" style={{ display: 'block' }}>
-            <rect width="64" height="64" fill={bg} />
-            <circle cx="32" cy="34" r="22" fill={skin} />
-            {eyes('#2b2140')}
-            {mouth('#2b2140')}
-            <circle cx="14" cy="36" r="3.5" fill="#ff8fa3" opacity=".45" />
-            <circle cx="50" cy="36" r="3.5" fill="#ff8fa3" opacity=".45" />
+            <rect width="64" height="64" fill={BGS[(n * 5) % BGS.length]} />
+            <Character />
         </svg>
     );
 }
