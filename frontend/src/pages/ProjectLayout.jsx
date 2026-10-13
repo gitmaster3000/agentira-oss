@@ -4,12 +4,13 @@ import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
+import { X, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
 import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
+import { BoardToolbar } from '../components/BoardToolbar';
 
 // Members control — design board-toolbar "Members [N] ▾" dropdown: lists
 // current members (remove on hover) + the addable profiles under "Add member".
@@ -83,47 +84,6 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
     );
 }
 
-// Filter Dropdown
-function FilterDropdown({ label, value, options, onChange }) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-    const selectedLabel = options.find(o => o.value === value)?.label || label;
-
-    useEffect(() => {
-        function handler(e) {
-            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-        }
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                onClick={() => setOpen(v => !v)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-label-lg transition-colors ${
-                    value ? 'border-accent-primary text-text-primary bg-bg-app' : 'text-text-secondary bg-bg-app hover:border-border-active hover:text-text-primary'
-                }`}
-            >
-                <span>{selectedLabel}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
-            {open && (
-                <div className="dropdown-menu top-full left-0 mt-1 min-w-[140px]">
-                    {options.map(opt => (
-                        <button
-                            key={opt.value}
-                            className={`dropdown-item ${value === opt.value ? 'text-accent-primary font-medium' : ''}`}
-                            onClick={() => { onChange(opt.value); setOpen(false); }}
-                        >
-                            {opt.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
 
 // Project tabs — replace the old PROJECT section of the sidebar. Calendar,
 // Epics and Reports have no page yet, so they render disabled.
@@ -391,22 +351,6 @@ export function ProjectLayout() {
                             onAdd={handleAddMember}
                             onRemove={handleRemoveMember}
                         />
-                        {isBoardView && (
-                            <>
-                                <div className="flex-1" />
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <div className="flex items-center relative group">
-                                        <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
-                                        <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                                    </div>
-                                    <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
-                                    <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
-                                    {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
-                                        <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
-                                    )}
-                                </div>
-                            </>
-                        )}
                     </div>
                     {isOverview && (
                         <div className="px-4 pt-2 pb-3">
@@ -415,6 +359,19 @@ export function ProjectLayout() {
                     )}
                     <ProjectTabs projectId={projectId} />
                 </header>
+
+                {isBoardView && (
+                    <BoardToolbar
+                        projectId={projectId}
+                        members={members}
+                        epics={epics}
+                        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                        filterPriority={filterPriority} setFilterPriority={setFilterPriority}
+                        filterAssignee={filterAssignee} setFilterAssignee={setFilterAssignee}
+                        filterEpic={filterEpic} setFilterEpic={setFilterEpic}
+                        onCreate={() => setShowCreate(true)}
+                    />
+                )}
 
                 <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
                     <Outlet context={filters} />
