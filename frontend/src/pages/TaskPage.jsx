@@ -36,6 +36,7 @@ import {
     Info,
     ListTree,
     Paperclip,
+    Users,
 } from 'lucide-react';
 
 const TABS = [
@@ -764,7 +765,7 @@ function PlanTab(props) {
 
     const [proofTick, setProofTick] = useState(0);
     const [openSections, setOpenSections] = useState({
-        details: true, relations: true, dod: true, git: true, files: false, dates: true,
+        details: true, people: true, relations: true, dod: true, git: true, files: false, dates: true,
     });
     const toggleSection = (id) => setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -859,24 +860,6 @@ function PlanTab(props) {
                         </div>
 
                         <div>
-                            <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
-                            <select
-                                id="task-assignee"
-                                aria-label="Assignee"
-                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
-                                value={isEditing ? formData.assignee : (task.assignee || '')}
-                                onChange={e => (isEditing
-                                    ? setFormData({ ...formData, assignee: e.target.value })
-                                    : saveField({ assignee: e.target.value }))}
-                            >
-                                <option value="">Unassigned</option>
-                                {profiles.map(p => (
-                                    <option key={p.id} value={p.name}>{p.display_name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
                             <label htmlFor="task-tags" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Labels</label>
                             {isEditing ? (
                                 <input
@@ -935,6 +918,44 @@ function PlanTab(props) {
                                 </div>
                             </div>
                         )}
+                    </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection
+                    title="People"
+                    icon={Users}
+                    open={openSections.people}
+                    onToggle={() => toggleSection('people')}
+                    separated
+                >
+                    <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
+                        <div>
+                            <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
+                            <select
+                                id="task-assignee"
+                                aria-label="Assignee"
+                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                value={isEditing ? formData.assignee : (task.assignee || '')}
+                                onChange={e => (isEditing
+                                    ? setFormData({ ...formData, assignee: e.target.value })
+                                    : saveField({ assignee: e.target.value }))}
+                            >
+                                <option value="">Unassigned</option>
+                                {profiles.map(p => (
+                                    <option key={p.id} value={p.name}>{p.display_name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <span className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Creator</span>
+                            <div className="flex items-center gap-2" data-testid="task-creator">
+                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
+                                    {task.creator ? task.creator[0].toUpperCase() : '?'}
+                                </div>
+                                <span className="text-sm text-text-secondary">{task.creator || 'Unknown'}</span>
+                            </div>
+                        </div>
                     </div>
                 </CollapsibleSection>
 

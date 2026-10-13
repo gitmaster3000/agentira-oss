@@ -77,6 +77,16 @@ describe('TaskPage — detail view (AP-353)', () => {
         ]);
     });
 
+    it('shows who created the task alongside the assignee', async () => {
+        api.getTask.mockResolvedValue(baseTask({ assignee: 'Alice', creator: 'Bob' }));
+        renderTaskPage();
+        await screen.findByText('My task');
+        const people = screen.getByRole('button', { name: /toggle people section/i }).closest('section');
+        expect(within(people).getByText('Assignee')).toBeInTheDocument();
+        expect(within(people).getByText('Creator')).toBeInTheDocument();
+        expect(screen.getByTestId('task-creator')).toHaveTextContent('Bob');
+    });
+
     it('offers a Run tab beside Activity', async () => {
         renderTaskPage();
         await screen.findByText('My task');
