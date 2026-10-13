@@ -58,16 +58,33 @@ def send_email(to: str, subject: str, body: str) -> bool:
     msg["Subject"] = subject
     msg.set_content(body)
 
+    stage = "connect"
     try:
         with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as s:
             if cfg["starttls"]:
+                stage = "starttls"
                 s.starttls()
             if cfg["user"]:
+                stage = "login"
                 s.login(cfg["user"], cfg["password"])
+            stage = "send"
             s.send_message(msg)
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        log.error(
+            "Email to %s failed: SMTP authentication rejected for %s@%s:%s (%s %s) — check SMTP_USER/SMTP_PASS",
+            to, cfg["user"], cfg["host"], cfg["port"], e.smtp_code, e.smtp_error,
+        )
+        return False
     except Exception as e:  # ponytail: broad catch — never fail a request on email
-        log.error("Failed to send email to %s: %s", to, e)
+        # smtplib retries AUTH LOGIN after a rejected AUTH PLAIN; Gmail then drops the
+        # connection, so a bad password surfaces as SMTPServerDisconnected at "login".
+        hint = " (likely rejected credentials: check SMTP_USER/SMTP_PASS)" if stage == "login" and isinstance(e, smtplib.SMTPServerDisconnected) else ""
+        log.error(
+            "Email to %s failed at stage=%s via %s:%s as %s: %s: %s%s",
+            to, stage, cfg["host"], cfg["port"], cfg["user"] or "(no auth)",
+            type(e).__name__, e, hint,
+        )
         return False
 
 
