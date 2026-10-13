@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { RunNotificationCard, isRunMeta } from '../components/RunNotification';
 
 // Inbox — the full-page notification centre (sidebar "Inbox"). The topbar/Pulse
 // bells show a peek; this is the complete list with read/unread filtering and
@@ -134,10 +135,14 @@ export function Inbox() {
                             }}
                         >
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, marginTop: '5px', background: n.read ? 'var(--border-default)' : typeColor(n.type) }} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: '13.5px', color: n.read ? 'var(--text-tertiary)' : 'var(--text-bright)', fontWeight: n.read ? 400 : 600, lineHeight: 1.35 }}>{n.title}</div>
-                                {n.type && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{n.type}</div>}
-                            </div>
+                            {isRunMeta(n.meta) ? (
+                                <RunNotificationCard meta={n.meta} read={n.read} />
+                            ) : (
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: '13.5px', color: n.read ? 'var(--text-tertiary)' : 'var(--text-bright)', fontWeight: n.read ? 400 : 600, lineHeight: 1.35 }}>{n.title}</div>
+                                    {n.type && <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{n.type}</div>}
+                                </div>
+                            )}
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0, marginTop: '2px' }}>{timeAgo(n.created_at)}</span>
                         </div>
                     ))}

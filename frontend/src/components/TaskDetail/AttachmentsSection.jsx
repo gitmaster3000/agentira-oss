@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../../api';
 import { useAuth } from '../../context/AuthContext';
-import { Paperclip, Download, Trash2, File as FileIcon, Loader2, Image as ImageIcon, FileText } from 'lucide-react';
+import { Paperclip, Download, Trash2, File as FileIcon, Loader2, Image as ImageIcon, FileText, Eye } from 'lucide-react';
 import { ConfirmModal } from '../ConfirmModal';
+import { AttachmentPreview, previewKind } from './AttachmentPreview';
 
 const KIND_OPTIONS = [
     ['other', 'General file'],
@@ -23,6 +24,7 @@ export function AttachmentsSection({ taskId, bare = false, onChanged }) {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadKind, setUploadKind] = useState('other');
     const [attachmentToDelete, setAttachmentToDelete] = useState(null);
+    const [previewing, setPreviewing] = useState(null);
     const fileInputRef = useRef(null);
     const folderInputRef = useRef(null);
 
@@ -239,6 +241,15 @@ export function AttachmentsSection({ taskId, bare = false, onChanged }) {
                             </div>
 
                             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
+                                {previewKind(attachment.filename) && (
+                                    <button
+                                        onClick={() => setPreviewing(attachment)}
+                                        className="p-1.5 text-text-tertiary hover:text-accent-primary hover:bg-bg-hover rounded-md transition-colors"
+                                        title="Preview"
+                                    >
+                                        <Eye className="w-4 h-4" />
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => handleDownload(attachment)}
                                     className="p-1.5 text-text-tertiary hover:text-accent-primary hover:bg-bg-hover rounded-md transition-colors"
@@ -259,6 +270,14 @@ export function AttachmentsSection({ taskId, bare = false, onChanged }) {
                         </div>
                     ))}
                 </div>
+            )}
+
+            {previewing && (
+                <AttachmentPreview
+                    attachment={previewing}
+                    onClose={() => setPreviewing(null)}
+                    onDownload={() => handleDownload(previewing)}
+                />
             )}
 
             {!!attachmentToDelete && (

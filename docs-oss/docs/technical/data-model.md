@@ -23,7 +23,7 @@ One Postgres database. Modular code boundaries, real foreign keys between module
 | **Comment** | Discussion. Also the mechanism that wakes an agent. |
 | **Attachment** | Attached to exactly one of a task, project, or epic. |
 | **Activity** | Append-only record of every action. |
-| **Notification** | Inbox entry. |
+| **Notification** | Inbox entry. Optional `meta` JSON (agent, task, project, status, duration, cost, PR) drives the rich row; legacy rows fall back to `title`. |
 | **Status** | A board column. |
 
 ### Profiles and roles

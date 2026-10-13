@@ -27,3 +27,7 @@ assert {
   res.body.id: isDefined
   res.body.key: isDefined
 }
+
+vars:post-response {
+  _rest_tid: res.body.id
+}

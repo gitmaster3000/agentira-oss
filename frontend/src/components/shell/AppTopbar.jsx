@@ -4,6 +4,7 @@ import { api } from '../../api';
 import { useCurrentProjectId, setCurrentProjectId } from '../../currentProject';
 import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
+import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
 // Exact port of the Agentira.dc.html top bar: blended into the canvas (no card
 // chrome), holding the logo lockup, the project switcher (moved out of the
@@ -246,8 +247,10 @@ export function AppTopbar({ onNewProject, onMenu }) {
                                     <div key={n.id} className="nav" onClick={() => onNotifClick(n)} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px', borderRadius: '11px', cursor: 'pointer', opacity: n.read ? 0.6 : 1 }}>
                                         <span style={{ marginTop: '1px', width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0, background: n.read ? 'transparent' : '#ef4444' }} />
                                         <div style={{ flex: 1, minWidth: 0 }}>
-                                            <div style={{ fontSize: '12.5px', color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.type}{n.created_at ? ` · ${new Date(n.created_at).toLocaleString()}` : ''}</div>
+                                            {isRunMeta(n.meta)
+                                                ? <RunNotificationLine meta={n.meta} />
+                                                : <div style={{ fontSize: '12.5px', color: 'var(--text-bright)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.title}</div>}
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{isRunMeta(n.meta) ? n.meta.project_name : n.type}{n.created_at ? ` · ${new Date(n.created_at).toLocaleString()}` : ''}</div>
                                         </div>
                                     </div>
                                 ))}

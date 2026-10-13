@@ -116,6 +116,7 @@ function GeneralTab({ projectId }) {
                 env_teardown_cmd: p.env_teardown_cmd || '',
                 env_db_admin_url: p.env_db_admin_url || '',
                 gates_enabled: !!p.gates_enabled,  // AP-158
+                workflow_enabled: !!p.workflow_enabled,
             });
         }).catch(() => setProject(null));
     }, [projectId]);
@@ -154,6 +155,7 @@ function GeneralTab({ projectId }) {
         || form.env_teardown_cmd !== (project.env_teardown_cmd || '')
         || form.env_db_admin_url !== (project.env_db_admin_url || '')
         || form.gates_enabled !== !!project.gates_enabled
+        || form.workflow_enabled !== !!project.workflow_enabled
     );
 
     const save = async () => {
@@ -183,6 +185,7 @@ function GeneralTab({ projectId }) {
                 env_teardown_cmd: form.env_teardown_cmd,
                 env_db_admin_url: form.env_db_admin_url,
                 gates_enabled: form.gates_enabled,
+                workflow_enabled: form.workflow_enabled,
             });
             setProject(updated);
             setMsg('Saved');
@@ -275,6 +278,17 @@ function GeneralTab({ projectId }) {
                         onChange={(e) => setForm({ ...form, gates_enabled: e.target.checked })}
                     />
                     Enforce column-exit gates on this project
+                </label>
+            </Field>
+            <Field label="Automation workflow"
+                hint="Master switch. When off, no automatic task moves, hand-offs or follow-up runs happen — tasks only move when you move them.">
+                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={form.workflow_enabled}
+                        onChange={(e) => setForm({ ...form, workflow_enabled: e.target.checked })}
+                    />
+                    Run automation workflow on this project
                 </label>
             </Field>
             <div className="flex items-center gap-3">

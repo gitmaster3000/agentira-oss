@@ -13,6 +13,10 @@ vi.mock('../api', () => ({
         getEpics: vi.fn(() => Promise.resolve([])),
         getProject: vi.fn(() => Promise.resolve({ id: 'P1', name: 'Acme Board' })),
         uploadAttachment: vi.fn(),
+        listTasks: vi.fn(() => Promise.resolve([
+            { id: 'T7', key: 'AP-7', title: 'Auth setup', tags: ['frontend', 'urgent'] },
+        ])),
+        addTaskLink: vi.fn(),
     },
 }));
 
@@ -88,5 +92,30 @@ describe('CreateTaskModal', () => {
         await waitFor(() => expect(api.createEpic).toHaveBeenCalledWith('P1', expect.objectContaining({ title: 'Launch', assignee: '' })));
         expect(api.createTask).not.toHaveBeenCalled();
         expect(await screen.findByText('EPIC DETAIL')).toBeInTheDocument();
+    });
+
+    it('suggests existing tags, links a task, sets due date and accepts dropped files', async () => {
+        api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-1' });
+        renderModal();
+        await waitFor(() => expect(api.listTasks).toHaveBeenCalledWith('P1'));
+
+        fireEvent.change(screen.getByLabelText('Tags'), { target: { value: 'fro' } });
+        fireEvent.click(await screen.findByRole('option', { name: 'frontend' }));
+
+        fireEvent.change(screen.getByLabelText('Link type'), { target: { value: 'depends_on' } });
+        fireEvent.change(screen.getByLabelText('Link task'), { target: { value: 'auth' } });
+        fireEvent.click(await screen.findByRole('option', { name: /Auth setup/ }));
+
+        fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
+        const file = new File(['x'], 'spec.txt', { type: 'text/plain' });
+        fireEvent.drop(screen.getByTestId('dropzone'), { dataTransfer: { files: [file] } });
+        expect(screen.getByText('spec.txt')).toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Ship' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+        await waitFor(() => expect(api.addTaskLink).toHaveBeenCalledWith('T1', 'T7', 'depends_on'));
+        expect(api.createTask.mock.calls[0][0]).toMatchObject({ tags: ['frontend'], due_date: '2026-12-01' });
+        expect(api.uploadAttachment).toHaveBeenCalledWith('T1', file);
     });
 });

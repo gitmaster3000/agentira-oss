@@ -19,6 +19,7 @@ from backend.forge.models import (
     _new_id,
 )
 
+from backend.forge.run_notify import run_meta as _run_meta
 import asyncio as _asyncio
 import logging as _logging
 
@@ -1534,7 +1535,8 @@ def complete_run(run_id: str, *, input_tokens: int = 0, output_tokens: int = 0,
     )
 
 
-def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
+def _notify_admins(db, *, type_: str, title: str, link: str,
+                   meta: dict | None = None) -> None:
     """Insert a Notification row for every profile with role=admin.
 
     Used by the forge layer to alert humans about agent run events.
@@ -1558,11 +1560,13 @@ def _notify_admins(db, *, type_: str, title: str, link: str) -> None:
             type=type_,
             title=title[:255],
             link=link[:255],
+            meta=json.dumps(meta) if meta else None,
         ))
 
 
 def _notify_project_members(db, *, project_id: str | None, type_: str,
-                            title: str, link: str) -> None:
+                            title: str, link: str,
+                            meta: dict | None = None) -> None:
     """Insert a Notification row for every member of the project.
 
     Used to notify users about run state changes.
@@ -1586,6 +1590,7 @@ def _notify_project_members(db, *, project_id: str | None, type_: str,
             type=type_,
             title=title[:255],
             link=link[:255],
+            meta=json.dumps(meta) if meta else None,
         ))
     from backend.notifications import broker
     for prof in members:
@@ -2825,6 +2830,7 @@ def prepare_task_run(*, task_id: str, agent_id: str,
                 type_="forge.run.ready",
                 title=f"{agent_name} run ready to start",
                 link=f"/forge/runs/{run_id}",
+                meta=_run_meta(db, r, r.agent, status="ready"),
             )
             db.commit()
             db.refresh(r)
