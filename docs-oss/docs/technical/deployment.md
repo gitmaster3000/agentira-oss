@@ -24,6 +24,10 @@ All three build from the same repository with different Dockerfiles:
 | MCP | `Dockerfile.mcp` |
 | Frontend | `frontend/Dockerfile` |
 
+In the Railway service settings, set the Frontend's **Root Directory** to `frontend`, the MCP service's **Dockerfile Path** to `Dockerfile.mcp`, and the Backend's **Healthcheck Path** to `/api/statuses`. Configure these in the dashboard rather than with `railway.toml` files: Railway has deprecated Config as Code.
+
+Keep the backend and MCP services off the public internet. Railway may generate a public domain when a service is created; delete it. Only the frontend needs one.
+
 ### 3. Wire the variables
 
 The backend needs the database address and a JWT secret.
@@ -43,7 +47,7 @@ Attach a volume to the backend at its data path, so attachments survive redeploy
 
 ### 5. Point the frontend at the backend
 
-Set `API_UPSTREAM` and `API_HOST` on the frontend service to your backend's address. They default to the Compose service name, which does not exist in a hosted deployment. `frontend/nginx.conf` substitutes them at container start.
+Set `API_UPSTREAM` and `API_HOST` on the frontend service to your backend's private address (for example `http://backend.railway.internal:8111` and `backend.railway.internal`). Railway's private DNS is IPv6-only, so also set `NGINX_RESOLVER=[fd12::10]`. Set `PORT=8111` on the backend so it listens where `API_UPSTREAM` points. They default to the Compose service name, which does not exist in a hosted deployment. `frontend/nginx.conf` substitutes them at container start.
 
 ### 6. Set `FRONTEND_URL`
 
