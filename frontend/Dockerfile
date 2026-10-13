@@ -15,5 +15,6 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 # Override both (service/env variables) to point at a hosted or staging API.
 # nginx:alpine envsubst's ${VAR} in the template at startup (only env-defined vars).
 ENV API_UPSTREAM=http://backend:8111 \
-    API_HOST=backend
+    API_HOST=backend \
+    NGINX_RESOLVER="127.0.0.11 ipv6=off"
 CMD ["nginx", "-g", "daemon off;"]
