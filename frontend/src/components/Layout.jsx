@@ -38,7 +38,7 @@ export function Layout() {
 
                 <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
                     {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
-                    <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
+                    <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} onNewProject={() => setShowCreate(true)} />
                     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface-base)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--shadow-panel)' }}>
                         <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                             <Outlet />

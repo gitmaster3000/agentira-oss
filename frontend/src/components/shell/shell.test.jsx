@@ -51,6 +51,7 @@ function mountSidebar(props = {}) {
                 <Routes>
                     <Route path="/studio" element={<AppSidebar railOpen onToggleRail={() => {}} {...props} />} />
                     <Route path="/forge/runs" element={<div>RUNS PAGE</div>} />
+                    <Route path="/studio/project/:projectId/board" element={<div>BOARD</div>} />
                 </Routes>
             </ShellDataProvider>
         </MemoryRouter>,
@@ -84,11 +85,41 @@ describe('AppSidebar — collapsible rail', () => {
         mountSidebar();
 
         const labels = ['Home', 'Inbox', 'My Work', 'Chat', 'Agents', 'Runs', 'Conductor',
-            'Agent Runtimes', 'MCP Servers', 'Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Settings'];
+            'Agent Runtimes', 'MCP Servers', 'New project'];
         for (const l of labels) expect(screen.getByText(l)).toBeInTheDocument();
 
         expect(screen.getByText('BUILD')).toBeInTheDocument();
-        expect(screen.getByText('PROJECT')).toBeInTheDocument();
+        expect(screen.getByText('PROJECTS')).toBeInTheDocument();
+    });
+
+    it('drops the per-project sub-nav (now header tabs)', () => {
+        mountSidebar();
+        for (const l of ['Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Deploy']) {
+            expect(screen.queryByText(l)).not.toBeInTheDocument();
+        }
+    });
+
+    it('lists projects with the active one highlighted and a live dot for running runs', async () => {
+        mountSidebar();
+        const atlas = await screen.findByTitle('Atlas');
+        expect(atlas.style.fontWeight).toBe('600');
+        expect(screen.getByTitle('Beacon').style.fontWeight).not.toBe('600');
+        await waitFor(() => expect(within(screen.getByTitle('Atlas')).getByText('2')).toBeInTheDocument());
+        expect(within(screen.getByTitle('Beacon')).queryByText('2')).toBeNull();
+    });
+
+    it('opens a project board on click and fires onNewProject', async () => {
+        const onNewProject = vi.fn();
+        mountSidebar({ onNewProject });
+        fireEvent.click(await screen.findByTitle('Beacon'));
+        expect(await screen.findByText('BOARD')).toBeInTheDocument();
+    });
+
+    it('calls onNewProject from the + New project row', () => {
+        const onNewProject = vi.fn();
+        mountSidebar({ onNewProject });
+        fireEvent.click(screen.getByTitle('New project'));
+        expect(onNewProject).toHaveBeenCalledTimes(1);
     });
 
     it('is 248px wide and un-collapsed when railOpen is true', () => {

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useCurrentProjectId } from '../../currentProject';
-import { useShellData } from './shellData';
+import { useShellData, projectKey } from './shellData';
 
 // Exact port of the Agentira.dc.html collapsible icon rail: a floating panel
 // (radius 16, hairline border, soft shadow) that animates between 248px and
@@ -63,13 +63,13 @@ const projectIcon = (
     <svg className="hdricon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
 );
 
-export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
+export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewProject }) {
     const navigate = useNavigate();
     const location = useLocation();
     const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
     const { user } = useAuth();
-    const { projects, runningTotal, agentCount, unread } = useShellData();
+    const { projects, runningByProject, runningTotal, agentCount, unread } = useShellData();
 
     const path = location.pathname;
     const [userOpen, setUserOpen] = useState(false);
@@ -84,8 +84,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
     }, []);
 
     const activeProjectId = urlProjectId || storedProjectId;
-    const active = projects.find((p) => p.id === activeProjectId) || projects[0] || null;
-    const projPath = (leaf) => (active ? `/studio/project/${active.id}/${leaf}` : '/studio');
 
     const is = {
         home: path === '/studio',
@@ -97,13 +95,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
         conductor: path.startsWith('/forge/conductor'),
         runtimes: path.startsWith('/forge/runtimes'),
         mcp: path === '/forge/settings',
-        overview: path.includes('/overview'),
-        board: path.includes('/board') || path.startsWith('/studio/tasks/'),
-        backlog: path.includes('/backlog'),
-        roadmap: path.includes('/roadmap'),
-        workflow: path.includes('/workflow'),
-        deploy: path.includes('/deploy'),
-        projSettings: path.includes('/project/') && path.includes('/settings'),
     };
 
     const userInitial = (user?.display_name || user?.name || 'U')[0].toUpperCase();
@@ -134,6 +125,16 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                     <NavRow active={is.chat} onClick={() => navigate('/chat')} label="Chat"
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
 
+                    {/* PROJECTS */}
+                    <RailHeader label="PROJECTS" icon={projectIcon} />
+                    {projects.map((p) => (
+                        <NavRow key={p.id} active={p.id === activeProjectId} onClick={() => navigate(`/studio/project/${p.id}/board`)} label={p.name}
+                            icon={<span className="ico" style={{ width: '17px', height: '17px', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '5px', background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)', fontSize: '9px', fontWeight: 700 }}>{projectKey(p)}</span>}
+                            badge={runningByProject[p.id] > 0 ? liveDot(runningByProject[p.id]) : null} />
+                    ))}
+                    <NavRow onClick={onNewProject} label="New project"
+                        icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
+
                     {/* BUILD */}
                     <RailHeader label="BUILD" icon={buildIcon} />
                     <NavRow active={is.agents} onClick={() => navigate('/forge/agents')} label="Agents"
@@ -149,26 +150,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                     <NavRow active={is.mcp} onClick={() => navigate('/forge/settings')} label="MCP Servers"
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>} />
 
-                    {/* PROJECT — the switcher itself now lives in the top bar. */}
-                    <RailHeader label="PROJECT" icon={projectIcon} />
-                    <div className="plangroup" style={{ margin: '8px 2px 0 9px', padding: '7px 0 2px' }}>
-                        <NavRow active={is.overview} onClick={() => navigate(projPath('overview'))} label="Overview"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z" /></svg>} />
-                        <NavRow active={is.board} onClick={() => navigate(projPath('board'))} label="Board"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="9" rx="1" /></svg>} />
-                        <NavRow active={is.backlog} onClick={() => navigate(projPath('backlog'))} label="Backlog"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>} />
-                        <NavRow active={is.roadmap} onClick={() => navigate(projPath('roadmap'))} label="Roadmap"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18" /><path d="m7 14 4-4 3 3 5-6" /></svg>} />
-                        <NavRow active={is.workflow} onClick={() => navigate(projPath('workflow'))} label="Workflow"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="6" height="6" rx="1" /><rect x="15" y="3" width="6" height="6" rx="1" /><rect x="9" y="15" width="6" height="6" rx="1" /><path d="M6 9v3a2 2 0 0 0 2 2h4M18 9v3a2 2 0 0 1-2 2h-1" /></svg>} />
-                        {/* Deploy is not in the design's rail, but the route is live — dropping
-                            the row would orphan /studio/project/:id/deploy. */}
-                        <NavRow active={is.deploy} onClick={() => navigate(projPath('deploy'))} label="Deploy"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>} />
-                        <NavRow active={is.projSettings} onClick={() => navigate(projPath('settings'))} label="Settings"
-                            icon={<svg className="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8 7 17M17 7l2.8-2.8" /></svg>} />
-                    </div>
                 </div>
 
                 {/* footer user */}
