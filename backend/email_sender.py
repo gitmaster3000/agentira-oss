@@ -77,6 +77,17 @@ def send_welcome_email(to: str, display_name: str) -> bool:
     )
 
 
+def send_invite_email(to: str, code: str) -> bool:
+    link = f"{app_base_url()}/signup?invite={code}"
+    return send_email(
+        to,
+        "You're invited to Agentira",
+        "You've been invited to join a workspace on Agentira.\n\n"
+        f"Create your account here (link valid for 14 days):\n{link}\n\n"
+        "— The Agentira team",
+    )
+
+
 def send_password_reset_email(to: str, display_name: str, token: str) -> bool:
     link = f"{app_base_url()}/reset-password?token={token}"
     return send_email(

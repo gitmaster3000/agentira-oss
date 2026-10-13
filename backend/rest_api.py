@@ -13,6 +13,7 @@ import httpx
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
+from backend import email_sender
 from backend import services
 from backend import task_batch
 from backend import task_graph
@@ -1922,11 +1923,14 @@ def api_create_member_invite(body: dict = None,
                              payload: dict = Depends(get_current_user_payload)):
     body = body or {}
     try:
-        return services.create_invite(
+        inv = services.create_invite(
             role="member", org_id=payload.get("org_id"),
             email=body.get("email"), invited_by=payload.get("sub"))
     except ValueError as e:
         raise HTTPException(400, str(e))
+    email = body.get("email")
+    inv["email_sent"] = bool(email) and email_sender.send_invite_email(email, inv["code"])
+    return inv
 
 search_router = APIRouter(prefix="/api/search", tags=["search"],
                           dependencies=[Depends(get_current_user)])
