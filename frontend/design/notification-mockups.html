@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Notification redesign — mockups</title>
+<style>
+:root{--bg:#0e1117;--panel:#161b22;--card:#1c2128;--hover:#272d36;--line:#30363d;--t1:#f0f3f6;--t2:#b1bac4;--t3:#768390;--accent:#c9b8ff;
+--ok:#81c995;--warn:#fdd663;--bad:#f28b82;--info:#8ab4f8;--review:#c58af9}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t1);font:14px -apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;padding:32px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;margin:36px 0 4px;color:var(--accent)}p.s{color:var(--t3);margin:0 0 14px;font-size:12.5px}
+.row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+.pop{width:380px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.hd{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12.5px}
+.badge{background:#ef4444;color:#fff;border-radius:999px;padding:1px 7px;font-size:11px}
+.list{padding:5px}
+.n{display:flex;gap:11px;padding:10px 9px;border-radius:11px}.n:hover{background:var(--hover)}.n.read{opacity:.6}
+.dot{width:8px;height:8px;border-radius:50%;background:#ef4444;margin-top:6px;flex-shrink:0}.read .dot{background:transparent}
+.ic{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:grid;place-items:center;font-size:14px;font-weight:700}
+.ok .ic{background:rgba(129,201,149,.15);color:var(--ok)}.run .ic{background:rgba(138,180,248,.15);color:var(--info)}
+.bad .ic{background:rgba(242,139,130,.15);color:var(--bad)}.rev .ic{background:rgba(197,138,249,.15);color:var(--review)}
+.b{flex:1;min-width:0}.top{display:flex;justify-content:space-between;gap:8px}
+.ttl{font-size:12.5px;font-weight:600}.tm{font-size:11px;color:var(--t3);white-space:nowrap}
+.task{font-size:12.5px;color:var(--t1);margin-top:2px}.key{color:var(--accent);font-weight:600;margin-right:5px}
+.meta{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.pill{font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--t2);background:var(--panel)}
+.pill.ok{color:var(--ok);border-color:rgba(129,201,149,.4)}.pill.run{color:var(--info);border-color:rgba(138,180,248,.4)}
+.pill.bad{color:var(--bad);border-color:rgba(242,139,130,.4)}.pill.rev{color:var(--review);border-color:rgba(197,138,249,.4)}
+.err{margin-top:6px;font-size:11.5px;color:var(--bad);background:rgba(242,139,130,.08);border-radius:7px;padding:5px 8px}
+.ft{text-align:center;padding:10px;border-top:1px solid var(--line);color:var(--accent);font-weight:600;font-size:12px}
+.old{opacity:.9}.old .n{align-items:center}.note{font-size:12px;color:var(--t3);max-width:380px;line-height:1.5}
+.note code{color:var(--t2)}
+.av{width:18px;height:18px;border-radius:50%;background:var(--accent);color:#2d1a6e;font-size:10px;font-weight:700;display:inline-grid;place-items:center;margin-right:5px;vertical-align:middle}
+</style></head><body>
+<h1>Notifications — redesign mockups</h1>
+<p class="s">Task 2dda885d · replaces “&lt;agent&gt; run started”. Dark theme, tokens from the existing design system.</p>
+
+<h2>A · Before (today)</h2>
+<p class="s">No task, no outcome, raw type string as subtitle.</p>
+<div class="row"><div class="pop old"><div class="hd">Notifications <span class="badge">3</span></div><div class="list">
+<div class="n"><span class="dot"></span><div class="b"><div class="ttl" style="font-weight:400">Frontend Developer run started</div><div class="tm" style="margin-top:2px">forge.run.started · 10/13/2026, 9:41:02 AM</div></div></div>
+<div class="n"><span class="dot"></span><div class="b"><div class="ttl" style="font-weight:400">Frontend Developer run completed</div><div class="tm" style="margin-top:2px">forge.run.completed · 10/13/2026, 9:12:40 AM</div></div></div>
+<div class="n read"><span class="dot"></span><div class="b"><div class="ttl" style="font-weight:400">QA Agent run failed</div><div class="tm" style="margin-top:2px">forge.run.failed · 10/12/2026, 6:03:11 PM</div></div></div>
+</div></div></div>
+
+<h2>B · Proposed (recommended) — status icon, task line, pills</h2>
+<p class="s">Line 1: agent + plain-language event + relative time. Line 2: task key + task name. Pills: project, duration/cost, outcome detail. Failures show the reason inline.</p>
+<div class="row"><div class="pop"><div class="hd">Notifications <span class="badge">4</span></div><div class="list">
+<div class="n run"><span class="dot"></span><span class="ic">▶</span><div class="b"><div class="top"><span class="ttl"><span class="av">F</span>Frontend Developer started working</span><span class="tm">just now</span></div>
+<div class="task"><span class="key">AP-612</span>Fix notification text/pills</div>
+<div class="meta"><span class="pill run">Running</span><span class="pill">Agentira Platform</span><span class="pill">Attempt 1</span></div></div></div>
+<div class="n ok"><span class="dot"></span><span class="ic">✓</span><div class="b"><div class="top"><span class="ttl"><span class="av">B</span>Backend Developer finished</span><span class="tm">29m ago</span></div>
+<div class="task"><span class="key">AP-598</span>Add run metadata to notifications</div>
+<div class="meta"><span class="pill ok">Completed</span><span class="pill">Agentira Platform</span><span class="pill">12 min</span><span class="pill">PR #41 opened</span><span class="pill">$0.84</span></div></div></div>
+<div class="n rev"><span class="dot"></span><span class="ic">◎</span><div class="b"><div class="top"><span class="ttl"><span class="av">R</span>Reviewer approved</span><span class="tm">1h ago</span></div>
+<div class="task"><span class="key">AP-590</span>Dark-mode contrast fixes</div>
+<div class="meta"><span class="pill rev">Approved</span><span class="pill">Agentira Platform</span><span class="pill">Ready to merge</span></div></div></div>
+<div class="n bad read"><span class="dot"></span><span class="ic">!</span><div class="b"><div class="top"><span class="ttl"><span class="av">Q</span>QA Agent hit a problem</span><span class="tm">Yesterday</span></div>
+<div class="task"><span class="key">AP-577</span>Checkout flow e2e tests</div>
+<div class="meta"><span class="pill bad">Failed</span><span class="pill">Agentira Platform</span><span class="pill">3 min</span></div>
+<div class="err">Couldn’t reach the test environment — no changes were made.</div></div></div>
+</div><div class="ft">Open Inbox →</div></div>
+<div class="note"><b>Rules</b><br>• Title = agent + plain verb (started working / finished / hit a problem / needs your input). No “run”, no raw type strings.<br>• Second line is always the task: key + name; falls back to “Chat session” when no task.<br>• Pills: status (colour-coded), project, then up to 3 facts (duration, PR, cost). Cost/attempt hide behind hover on narrow widths.<br>• Failure reason is the plain-language message, max 2 lines. Technical details (branch, run id) stay on the Run page behind “Advanced”.<br>• Click opens the Run page as today.<br>• Unread dot kept; read items dimmed.<br><br><b>Data needed</b>: store <code>task_id</code>, <code>run_id</code>, <code>agent_name</code>, <code>project_name</code> and a small <code>meta</code> JSON on Notification (additive migration); old rows fall back to the title.</div></div>
+
+<h2>C · Compact variant — one-line density</h2>
+<p class="s">For the topbar popover if B feels tall. Same info, pills collapse to a single status chip + task.</p>
+<div class="row"><div class="pop"><div class="hd">Notifications <span class="badge">3</span></div><div class="list">
+<div class="n run"><span class="dot"></span><span class="ic">▶</span><div class="b"><div class="top"><span class="ttl">Frontend Developer</span><span class="tm">just now</span></div><div class="task"><span class="key">AP-612</span>Fix notification text/pills</div></div><span class="pill run" style="align-self:center">Running</span></div>
+<div class="n ok"><span class="dot"></span><span class="ic">✓</span><div class="b"><div class="top"><span class="ttl">Backend Developer</span><span class="tm">29m ago</span></div><div class="task"><span class="key">AP-598</span>Add run metadata to notifications</div></div><span class="pill ok" style="align-self:center">Done · 12m</span></div>
+<div class="n bad read"><span class="dot"></span><span class="ic">!</span><div class="b"><div class="top"><span class="ttl">QA Agent</span><span class="tm">Yesterday</span></div><div class="task"><span class="key">AP-577</span>Checkout flow e2e tests</div></div><span class="pill bad" style="align-self:center">Failed</span></div>
+</div><div class="ft">Open Inbox →</div></div></div>
+</body></html>
