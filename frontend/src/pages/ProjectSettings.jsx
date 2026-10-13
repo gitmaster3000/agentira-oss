@@ -1,162 +1,168 @@
 /**
- * Project Settings — edit project metadata in place on the project itself.
+ * Project Settings — edit a project in place, laid out like account Settings:
+ * a section list on the left, one focused section on the right.
  *
- * Tabs:
- *   - General: name, description, primary repo path/url, conventions md.
- *   - Repos: add/remove repos via the AP-121 surface; mark one as primary.
+ *   Overview            name, description, goals, conventions
+ *   Repositories        attached repos, default repo location, where agents work
+ *   Checks & workflow   the command that proves the work, gates, run detection
+ *   Safety & isolation  sandbox level, per-run environment
+ *   Danger zone         delete the project
  *
- * Lives at /studio/project/:projectId/settings so it inherits the
- * project's left-bar nav and breadcrumbs, per the rule "settings live
- * with the entity."
+ * Every project field shares one form and one Save, so a change in any section
+ * is saved the same way. Repo attach/detach/token actions apply immediately.
+ *
+ * Lives at /studio/project/:projectId/settings so it inherits the project's
+ * left-bar nav and breadcrumbs, per the rule "settings live with the entity."
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import {
-    Folder, GitBranch, Save, Plus, Trash2, Star, Settings as SettingsIcon,
-    Link2, Pencil, Check, X, AlertTriangle, ChevronDown,
+    Folder, Plus, Trash2, Star, Link2, Pencil, Check, X,
+    AlertTriangle,
 } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { parseGitAddress, fetchRepoInfo } from '../lib/gitAddress';
 import { GitTokenField } from '../components/GitTokenField';
+import {
+    SettingsSection, SubLabel, Field, TextField, TextArea, Toggle, ChoiceList,
+    Card, Notice, Button, Advanced, InfoTip,
+} from '../components/settings/controls';
 
 
-export function ProjectSettings() {
-    const { projectId } = useParams();
-    const location = useLocation();
-    const initialTab = location.hash === '#repos' ? 'repos' : 'general';
-    const [tab, setTab] = useState(initialTab);
+// ── Option lists (plain labels first; technical detail in help/Advanced) ──────
 
-    return (
-        <div className="h-full overflow-y-auto">
-            <div className="max-w-3xl mx-auto p-6 space-y-4">
-                <div className="flex items-center gap-3">
-                    <SettingsIcon className="w-5 h-5 text-text-secondary" />
-                    <h2 className="text-xl font-semibold text-text-primary">
-                        Project Settings
-                    </h2>
-                </div>
+const WORK_SIGNALS = [
+    { value: 'working_tree', label: 'Any change in the working folder (recommended)',
+      help: 'Edits, new files and commits all count as work. Nothing an agent touches is lost.' },
+    { value: 'tracked', label: 'Edits to existing files only',
+      help: 'New files an agent creates are ignored until they are tracked.' },
+    { value: 'committed', label: 'Saved commits only',
+      help: 'A chat turn only counts once the agent commits.' },
+];
 
-                <div className="flex gap-2 border-b border-border-subtle">
-                    <TabButton active={tab === 'general'}
-                        onClick={() => setTab('general')}
-                        label="General" />
-                    <TabButton active={tab === 'repos'}
-                        onClick={() => setTab('repos')}
-                        label="Repos" />
-                </div>
+const SANDBOX_MODES = [
+    { value: '', label: 'Use each agent’s own setting (default)',
+      help: 'No project-wide rule; every agent keeps the containment it was configured with.' },
+    { value: 'off', label: 'None',
+      help: 'Agents start in the project folder and nothing is enforced.' },
+    { value: 'cwd', label: 'Stay in the project folder (best effort)',
+      help: 'Agents are asked not to touch files outside the project. Not a hard guarantee.' },
+    { value: 'strict', label: 'Locked to the project folder',
+      help: 'The operating system blocks access outside the project.' },
+    { value: 'container', label: 'Own container per agent (strongest)',
+      help: 'Each agent runs in its own Docker container, fully separated from your machine.' },
+];
 
-                {tab === 'general' && <GeneralTab projectId={projectId} />}
-                {tab === 'repos' && <ReposTab projectId={projectId} />}
-            </div>
-        </div>
-    );
-}
-
-
-function TabButton({ active, onClick, label }) {
-    return (
-        <button onClick={onClick}
-            className={`px-4 py-2 -mb-px border-b-2 transition-colors text-sm font-medium ${
-                active
-                    ? 'border-accent-primary text-accent-primary'
-                    : 'border-transparent text-text-secondary hover:text-text-primary'
-            }`}>
-            {label}
-        </button>
-    );
-}
-
-
-// ── General ──────────────────────────────────────────────────────────
-
-// AP-308: per-run environment isolation. Plain labels up front (audience:
-// non-infra founders); the technical mode name + setup/teardown commands live
-// behind the Advanced reveal. The worktree forks a run's source; this forks
-// the runtime environment its commands hit so concurrent runs can't collide
-// on the shared dev stack.
 const ENV_ISOLATION = [
     { value: 'auto', label: 'Automatic (recommended)',
       help: 'Agentira picks the safest, cheapest isolation for this project.' },
     { value: 'hermetic', label: 'No shared services',
       help: "Runs use a clean, empty environment. Best when tests don't need a live database." },
-    { value: 'per_run_db', label: 'Isolated database per run',
-      help: 'Each run gets its own throwaway database. Agents never share data. Needs a setup command below (any engine).' },
-    { value: 'per_run_compose', label: 'Isolated full stack per run',
-      help: 'Each run gets its own full set of services (docker compose). Heaviest, strongest isolation.' },
+    { value: 'per_run_db', label: 'Separate database for each run',
+      help: 'Each run gets its own throwaway database so agents never share data. Needs a setup command (Advanced).' },
+    { value: 'per_run_compose', label: 'Separate full stack for each run',
+      help: 'Each run gets its own set of services (docker compose). Heaviest, strongest isolation.' },
 ];
 
-function GeneralTab({ projectId }) {
-    const navigate = useNavigate();
+const FRESHNESS = [
+    { value: 'always_latest', label: 'Start from the latest code and keep branches up to date',
+      help: 'New branches start from the newest remote code; resumed branches are rebased onto it.' },
+    { value: 'new_only', label: 'Start from the latest code, leave existing branches alone',
+      help: 'Resumed branches can fall behind. Use on purpose.', tone: 'warn' },
+    { value: 'pinned', label: 'Use the code already on this machine',
+      help: 'No fetching or rebasing — agents may work from outdated code. Use on purpose.', tone: 'warn' },
+];
+
+const toForm = (p) => ({
+    name: p.name || '',
+    description: p.description || '',
+    repo_path: p.repo_path || '',
+    repo_url: p.repo_url || '',
+    conventions_md: p.conventions_md || '',
+    verify_cmd: p.verify_cmd || '',
+    direction_md: p.direction_md || '',
+    verify_timeout_minutes: p.verify_timeout_minutes || 30,
+    work_signal: p.work_signal || 'working_tree',
+    sandbox_mode: p.sandbox_mode || '',          // '' = inherit from agent
+    env_isolation: p.env_isolation || 'auto',    // '' stored = auto
+    env_setup_cmd: p.env_setup_cmd || '',
+    env_teardown_cmd: p.env_teardown_cmd || '',
+    env_db_admin_url: p.env_db_admin_url || '',
+    gates_enabled: !!p.gates_enabled,
+    workflow_enabled: !!p.workflow_enabled,
+    workspace_kind: p.workspace_kind || '',
+});
+
+const isDirty = (form, project) => !!project && JSON.stringify({
+    ...form, verify_timeout_minutes: Number(form.verify_timeout_minutes),
+}) !== JSON.stringify(toForm(project));
+
+
+// ── Page shell ───────────────────────────────────────────────────────────────
+
+const SECTIONS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'repos', label: 'Repositories' },
+    { id: 'checks', label: 'Checks & workflow' },
+    { id: 'safety', label: 'Safety & isolation' },
+];
+
+function NavSection({ label, children }) {
+    return (
+        <div style={{ marginBottom: 4 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.1em', color: 'var(--text-muted)', padding: '0 8px 10px' }}>
+                {label}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function NavItem({ active, onClick, danger, children }) {
+    return (
+        <div role="button" tabIndex={0} onClick={onClick}
+            onKeyDown={(e) => { if (e.key === 'Enter') onClick(); }}
+            style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '7px 10px', borderRadius: 9, marginBottom: 2, fontSize: 13, cursor: 'pointer',
+                color: danger ? '#f87171' : active ? 'var(--text-primary)' : 'var(--text-muted)',
+                background: active ? 'var(--bg-hover,var(--surface-hover))' : 'transparent',
+            }}>
+            {children}
+        </div>
+    );
+}
+
+export function ProjectSettings() {
+    const { projectId } = useParams();
+    const location = useLocation();
+    const [section, setSection] = useState(location.hash === '#repos' ? 'repos' : 'overview');
     const [project, setProject] = useState(null);
     const [form, setForm] = useState(null);
+    const [repos, setRepos] = useState(null);
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState('');
-    const [confirmingDelete, setConfirmingDelete] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-    const [deleteErr, setDeleteErr] = useState('');
 
     useEffect(() => {
         api.getProject(projectId).then((p) => {
             setProject(p);
-            setForm({
-                name: p.name || '',
-                description: p.description || '',
-                repo_path: p.repo_path || '',
-                repo_url: p.repo_url || '',
-                conventions_md: p.conventions_md || '',
-                verify_cmd: p.verify_cmd || '',
-                direction_md: p.direction_md || '',
-                verify_timeout_minutes: p.verify_timeout_minutes || 30,
-                work_signal: p.work_signal || 'working_tree',
-                sandbox_mode: p.sandbox_mode || '',  // '' = inherit from agent
-                env_isolation: p.env_isolation || 'auto',  // AP-308; '' = auto
-                env_setup_cmd: p.env_setup_cmd || '',
-                env_teardown_cmd: p.env_teardown_cmd || '',
-                env_db_admin_url: p.env_db_admin_url || '',
-                gates_enabled: !!p.gates_enabled,  // AP-158
-                workflow_enabled: !!p.workflow_enabled,
-            });
+            setForm(toForm(p));
         }).catch(() => setProject(null));
     }, [projectId]);
 
-    const remove = async () => {
-        setDeleting(true);
-        setDeleteErr('');
-        try {
-            await api.deleteProject(projectId);
-            // Navigating to the studio root remounts the dashboard and changes
-            // the active projectId, so the navbar + sidebar drop the deleted
-            // project from their lists.
-            navigate(ROUTES.STUDIO);
-        } catch (err) {
-            setDeleteErr('Delete failed: ' + (err.message || err));
-            setDeleting(false);
-            setConfirmingDelete(false);
-        }
-    };
+    const reloadRepos = async () => setRepos(await api.listProjectRepos(projectId).catch(() => []));
+    useEffect(() => { reloadRepos(); }, [projectId]);
 
-    if (!form) return <div className="text-text-tertiary text-sm">Loading…</div>;
+    if (!form) {
+        return <div style={{ padding: 32, textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>;
+    }
 
-    const dirty = project && (
-        form.name !== (project.name || '')
-        || form.description !== (project.description || '')
-        || form.repo_path !== (project.repo_path || '')
-        || form.repo_url !== (project.repo_url || '')
-        || form.conventions_md !== (project.conventions_md || '')
-        || form.verify_cmd !== (project.verify_cmd || '')
-        || form.direction_md !== (project.direction_md || '')
-        || Number(form.verify_timeout_minutes) !== (project.verify_timeout_minutes || 30)
-        || form.work_signal !== (project.work_signal || 'working_tree')
-        || form.sandbox_mode !== (project.sandbox_mode || '')
-        || form.env_isolation !== (project.env_isolation || 'auto')
-        || form.env_setup_cmd !== (project.env_setup_cmd || '')
-        || form.env_teardown_cmd !== (project.env_teardown_cmd || '')
-        || form.env_db_admin_url !== (project.env_db_admin_url || '')
-        || form.gates_enabled !== !!project.gates_enabled
-        || form.workflow_enabled !== !!project.workflow_enabled
-    );
+    const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+    const bind = (key) => ({ value: form[key], onChange: (e) => set(key)(e.target.value) });
+    const dirty = isDirty(form, project);
 
     const save = async () => {
         setSaving(true);
@@ -165,8 +171,8 @@ function GeneralTab({ projectId }) {
             const updated = await api.updateProject(projectId, {
                 name: form.name,
                 description: form.description,
-                // "" clears; null would mean "don't change" and the field
-                // could never be emptied.
+                // "" clears; null would mean "don't change", so a field could
+                // never be emptied.
                 repo_path: form.repo_path,
                 repo_url: form.repo_url,
                 conventions_md: form.conventions_md,
@@ -174,21 +180,20 @@ function GeneralTab({ projectId }) {
                 direction_md: form.direction_md,
                 verify_timeout_minutes: Number(form.verify_timeout_minutes) || 30,
                 work_signal: form.work_signal || null,
-                // AP-155: send the literal empty string to clear an
-                // override back to "inherit from agent". null means
-                // "don't change" in the PATCH; "" is the explicit
-                // clear value the backend recognizes.
+                // "" is the explicit clear back to "inherit from agent".
                 sandbox_mode: form.sandbox_mode,
-                // AP-308: "auto" round-trips as "" (the backend stores NULL).
+                // "auto" round-trips as "" (the backend stores NULL).
                 env_isolation: form.env_isolation === 'auto' ? '' : form.env_isolation,
                 env_setup_cmd: form.env_setup_cmd,
                 env_teardown_cmd: form.env_teardown_cmd,
                 env_db_admin_url: form.env_db_admin_url,
                 gates_enabled: form.gates_enabled,
                 workflow_enabled: form.workflow_enabled,
+                workspace_kind: form.workspace_kind,
             });
             setProject(updated);
-            setMsg('Saved');
+            setForm(toForm(updated));
+            setMsg('saved');
             setTimeout(() => setMsg(''), 2000);
         } catch (err) {
             setMsg('Error: ' + (err.message || err));
@@ -197,438 +202,200 @@ function GeneralTab({ projectId }) {
         }
     };
 
+    const saveBar = (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
+            {msg === 'saved' && <span style={{ fontSize: 12, color: '#4ade80' }}>Changes saved.</span>}
+            {msg.startsWith('Error') && <span style={{ fontSize: 12, color: '#f87171' }}>{msg}</span>}
+            {dirty && !msg && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Unsaved changes</span>}
+            <Button onClick={save} disabled={!dirty || saving}>
+                {saving ? 'Saving…' : 'Save changes'}
+            </Button>
+        </div>
+    );
+
     return (
-        <div className="space-y-4">
-            <Field label="Name">
-                <input className="input" value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </Field>
-            <Field label="Description">
-                <textarea className="input" rows="2" value={form.description}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })} />
-            </Field>
-            <Field label="Primary repo path"
-                hint="Absolute filesystem path the daemon worktrees off (same-machine default).">
-                <input className="input" placeholder="/path/to/repo"
-                    value={form.repo_path}
-                    onChange={(e) => setForm({ ...form, repo_path: e.target.value })} />
-            </Field>
-            <Field label="Primary repo URL"
-                hint="Optional — daemon clones from here when repo_path isn't accessible.">
-                <input className="input" placeholder="https://github.com/org/repo.git"
-                    value={form.repo_url}
-                    onChange={(e) => setForm({ ...form, repo_url: e.target.value })} />
-            </Field>
-            <Field label="Goals & direction"
-                hint="What this project is for and what matters most right now, in plain words. The Conductor plans each sprint from this — and may draft it if it's empty.">
-                <textarea className="input text-sm" rows="5" aria-label="Goals & direction"
-                    value={form.direction_md}
-                    placeholder="e.g. Make the agent loop run on its own before any UI work."
-                    onChange={(e) => setForm({ ...form, direction_md: e.target.value })} />
-            </Field>
-            <Field label="Conventions (markdown)"
-                hint="Materialized as .agentira/CONVENTIONS.md in the agent workdir.">
-                <textarea className="input font-mono text-xs" rows="6"
-                    value={form.conventions_md}
-                    placeholder={'# Conventions\nUse ruff. All commits on a feature branch.'}
-                    onChange={(e) => setForm({ ...form, conventions_md: e.target.value })} />
-            </Field>
-            <Field label="Command that proves the project works"
-                hint="Runs on the merged code before anything is pushed. If it fails, the work goes back to the agent with the output. Leave empty and merges are refused.">
-                <input className="input font-mono text-xs" aria-label="Command that proves the project works"
-                    placeholder="e.g. make test"
-                    value={form.verify_cmd}
-                    onChange={(e) => setForm({ ...form, verify_cmd: e.target.value })} />
-            </Field>
-            <Field label="Time limit for that command (minutes)">
-                <input className="input w-28" type="number" min="1" max="240"
-                    aria-label="Time limit for that command (minutes)"
-                    value={form.verify_timeout_minutes}
-                    onChange={(e) => setForm({ ...form, verify_timeout_minutes: e.target.value })} />
-            </Field>
-            <Field label="Run detection (work signal)"
-                hint="When a chat turn in a task counts as work and becomes a tracked run. 'Working tree' is the most thorough — nothing the agent touches is lost.">
-                <select className="input" value={form.work_signal}
-                    onChange={(e) => setForm({ ...form, work_signal: e.target.value })}>
-                    <option value="working_tree">Working tree — any tracked change or new untracked file (default)</option>
-                    <option value="tracked">Tracked changes only — edits to tracked files</option>
-                    <option value="committed">Committed only — a new commit</option>
-                </select>
-            </Field>
-            <Field label="Sandbox (project override)"
-                hint="Containment level for runs in this project. Overrides each agent's own setting. Leave blank to inherit. Phase 1: backend logs the resolved mode; per-adapter enforcement lands next.">
-                <select className="input" value={form.sandbox_mode}
-                    onChange={(e) => setForm({ ...form, sandbox_mode: e.target.value })}>
-                    <option value="">(inherit from agent)</option>
-                    <option value="off">Off — cwd set, nothing enforced</option>
-                    <option value="cwd">cwd — claude --add-dir / --disallowedTools (best-effort)</option>
-                    <option value="strict">strict — OS sandbox (bwrap / sandbox-exec)</option>
-                    <option value="container">container — per-agent Docker (strongest)</option>
-                </select>
-            </Field>
-            <EnvIsolationField form={form} setForm={setForm} />
-            <Field label="Gated transitions (AP-158)"
-                hint={
-                    "Block column moves when evidence is missing — DoD on the task, assignee, branch/PR linked, all DoD items checked before done. Off by default; turn on for strict workflows."
-                }>
-                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={form.gates_enabled}
-                        onChange={(e) => setForm({ ...form, gates_enabled: e.target.checked })}
-                    />
-                    Enforce column-exit gates on this project
-                </label>
-            </Field>
-            <Field label="Automation workflow"
-                hint="Master switch. When off, no automatic task moves, hand-offs or follow-up runs happen — tasks only move when you move them.">
-                <label className="flex items-center gap-2 text-sm text-text-secondary cursor-pointer">
-                    <input
-                        type="checkbox"
-                        checked={form.workflow_enabled}
-                        onChange={(e) => setForm({ ...form, workflow_enabled: e.target.checked })}
-                    />
-                    Run automation workflow on this project
-                </label>
-            </Field>
-            <div className="flex items-center gap-3">
-                <button className="btn btn-primary" onClick={save}
-                    disabled={!dirty || saving}>
-                    <Save className="w-4 h-4" />
-                    {saving ? 'Saving…' : 'Save'}
-                </button>
-                {msg && (
-                    <span className={`text-xs ${msg.startsWith('Error') ? 'text-red-400' : 'text-text-secondary'}`}>
-                        {msg}
-                    </span>
+        <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+            <aside style={{ width: 200, flexShrink: 0, borderRight: '1px solid var(--border-default)', background: 'var(--bg-card,var(--surface-nav))', padding: '20px 12px', overflowY: 'auto' }}>
+                <NavSection label="PROJECT SETTINGS">
+                    {SECTIONS.map((s) => (
+                        <NavItem key={s.id} active={section === s.id} onClick={() => setSection(s.id)}>
+                            {s.label}
+                        </NavItem>
+                    ))}
+                    <NavItem active={section === 'danger'} danger onClick={() => setSection('danger')}>
+                        Danger zone
+                    </NavItem>
+                </NavSection>
+            </aside>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
+                {section === 'overview' && (
+                    <SettingsSection title="Overview"
+                        description="What this project is, where it’s heading, and the rules agents follow in it.">
+                        <Field label="Project name" htmlFor="ps-name">
+                            <TextField id="ps-name" {...bind('name')} />
+                        </Field>
+                        <Field label="Description" htmlFor="ps-desc"
+                            hint="Shown at the top of the project.">
+                            <TextArea id="ps-desc" rows={6} {...bind('description')} />
+                        </Field>
+                        <Field label="Goals & direction" htmlFor="ps-direction"
+                            hint="What this project is for and what matters most right now, in plain words. The Conductor plans each sprint from this — and may draft it if it's empty.">
+                            <TextArea id="ps-direction" rows={5}
+                                placeholder="e.g. Make the agent loop run on its own before any UI work."
+                                {...bind('direction_md')} />
+                        </Field>
+                        <Field label="Conventions" htmlFor="ps-conventions"
+                            hint="Markdown. Agents read it as .agentira/CONVENTIONS.md in their working folder.">
+                            <TextArea id="ps-conventions" rows={6} mono
+                                placeholder={'# Conventions\nUse ruff. All commits on a feature branch.'}
+                                {...bind('conventions_md')} />
+                        </Field>
+                        {saveBar}
+                    </SettingsSection>
+                )}
+
+                {section === 'repos' && (
+                    <SettingsSection title="Repositories"
+                        description="The code agents work on.">
+                        <ReposList projectId={projectId} project={project} repos={repos} reload={reloadRepos} />
+                        <Advanced label="Advanced">
+                            <Toggle id="ps-own-folder"
+                                checked={form.workspace_kind === 'local_folder'}
+                                onChange={(on) => set('workspace_kind')(on ? 'local_folder' : '')}
+                                label="Work directly in my own folder"
+                                hint="Normally each agent gets its own fresh copy of the repo, so your folder is never touched. Turn this on to have agents edit the repo folder on this machine directly instead. Only works for folders the daemon can read — macOS blocks Desktop, Documents and Downloads." />
+                        </Advanced>
+                        {saveBar}
+                    </SettingsSection>
+                )}
+
+                {section === 'checks' && (
+                    <SettingsSection title="Checks & workflow"
+                        description="How work is proven before it ships, and how strictly it moves through the board.">
+                        <SubLabel>PROOF BEFORE MERGE</SubLabel>
+                        <Field label="Command that proves the project works" htmlFor="ps-verify"
+                            hint="Runs on the merged code before anything is pushed. If it fails, the work goes back to the agent with the output. Leave empty and merges are refused.">
+                            <TextField id="ps-verify" mono placeholder="e.g. make test" {...bind('verify_cmd')} />
+                        </Field>
+                        <Field label="Time limit for that command (minutes)" htmlFor="ps-verify-timeout">
+                            <TextField id="ps-verify-timeout" type="number" min="1" max="240" style={{ width: 120 }} {...bind('verify_timeout_minutes')} />
+                        </Field>
+
+                        <SubLabel>BOARD RULES</SubLabel>
+                        <Toggle id="ps-gates" checked={form.gates_enabled} onChange={set('gates_enabled')}
+                            label="Require evidence before a task moves on"
+                            hint="Blocks column moves until the task has a definition of done, an assignee, a linked branch or PR, and every done-item checked. Off by default; turn on for strict workflows." />
+                        <Toggle id="ps-workflow" checked={form.workflow_enabled} onChange={set('workflow_enabled')}
+                            label="Run automation workflow on this project"
+                            hint="Master switch. When off, no automatic task moves, hand-offs or follow-up runs happen — tasks only move when you move them." />
+
+                        <SubLabel hint="When a chat turn on a task counts as work and becomes a tracked run.">RUN DETECTION</SubLabel>
+                        <ChoiceList name="work_signal" value={form.work_signal} onChange={set('work_signal')} options={WORK_SIGNALS} />
+                        {saveBar}
+                    </SettingsSection>
+                )}
+
+                {section === 'safety' && (
+                    <SettingsSection title="Safety & isolation"
+                        description="How tightly agents are contained, and whether concurrent runs share an environment.">
+                        <SubLabel hint="Overrides each agent’s own setting for runs in this project.">CONTAINMENT</SubLabel>
+                        <ChoiceList name="sandbox_mode" value={form.sandbox_mode} onChange={set('sandbox_mode')} options={SANDBOX_MODES} />
+
+                        <SubLabel hint="Forks the environment a run’s commands hit, so concurrent runs can’t collide on a shared dev stack.">RUN ENVIRONMENT</SubLabel>
+                        <ChoiceList name="env_isolation" value={form.env_isolation} onChange={set('env_isolation')} options={ENV_ISOLATION} />
+                        <EnvAdvanced form={form} bind={bind} />
+                        {saveBar}
+                    </SettingsSection>
+                )}
+
+                {section === 'danger' && (
+                    <DangerZone projectId={projectId} projectName={project?.name} />
                 )}
             </div>
-
-            <DangerZone
-                projectName={project?.name}
-                deleting={deleting}
-                error={deleteErr}
-                onDelete={() => setConfirmingDelete(true)}
-            />
-
-            {confirmingDelete && (
-                <ConfirmModal
-                    isDanger
-                    title={`Delete "${project?.name || 'this project'}"?`}
-                    message={
-                        'This permanently deletes the project and everything in it — '
-                        + 'all tasks, runs, chats, and attached files. This cannot be undone.'
-                    }
-                    confirmText={deleting ? 'Deleting…' : 'Delete permanently'}
-                    cancelText="Cancel"
-                    onConfirm={remove}
-                    onCancel={() => setConfirmingDelete(false)}
-                />
-            )}
         </div>
     );
 }
 
 
-// AP-332: destructive project delete. Cordoned off in a red "Danger zone" so
-// it's never confused with the Save action above; the actual delete goes
-// through ConfirmModal (the standard destructive-confirmation surface).
-function DangerZone({ projectName, deleting, error, onDelete }) {
-    return (
-        <div className="mt-8 border border-red-500/30 rounded-xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
-                <AlertTriangle className="w-4 h-4" />
-                Danger zone
-            </div>
-            <p className="text-xs text-text-secondary">
-                Deleting <strong className="text-text-primary">{projectName || 'this project'}</strong> permanently
-                removes it and everything inside — all tasks, runs, chats, and
-                attached files. This cannot be undone.
-            </p>
-            <button
-                onClick={onDelete}
-                disabled={deleting}
-                className="btn btn-ghost text-red-400 hover:bg-red-500/10 disabled:opacity-50">
-                <Trash2 className="w-4 h-4" />
-                {deleting ? 'Deleting…' : 'Delete project'}
-            </button>
-            {error && <p className="text-xs text-red-400">{error}</p>}
-        </div>
-    );
-}
+// ── Repositories ─────────────────────────────────────────────────────────────
 
-
-// AP-308: the env-isolation control. Plain-label select; the technical mode
-// name and the setup/teardown commands (how this project provisions its DB —
-// any engine — and what to inject) live behind the Advanced reveal.
-function EnvIsolationField({ form, setForm }) {
-    const [advanced, setAdvanced] = useState(false);
-    const sel = ENV_ISOLATION.find((m) => m.value === form.env_isolation)
-        || ENV_ISOLATION[0];
-    const showCmds = form.env_isolation === 'per_run_db'
-        || form.env_isolation === 'per_run_compose';
-
-    return (
-        <Field label="Environment isolation (AP-308)" hint={sel.help}>
-            <select className="input" value={form.env_isolation}
-                onChange={(e) => setForm({ ...form, env_isolation: e.target.value })}>
-                {ENV_ISOLATION.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-            </select>
-            <button type="button" onClick={() => setAdvanced((s) => !s)}
-                className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary mt-2">
-                <ChevronDown className={`w-3 h-3 transition-transform ${advanced ? '' : '-rotate-90'}`} />
-                Advanced
-            </button>
-            {advanced && (
-                <div className="mt-2 pl-1 space-y-3 border-l border-border-subtle">
-                    <p className="text-xs text-text-tertiary pl-2">
-                        Technical mode: <code className="text-text-secondary">
-                        {form.env_isolation === 'auto' ? 'auto (resolved at dispatch)' : form.env_isolation}</code>
-                    </p>
-                    {showCmds && (
-                        <div className="pl-2 space-y-3">
-                            <Field label="Setup command"
-                                hint="Run before each run, in the worktree. Provisions this run's environment (any DB engine / language) and prints KEY=VALUE connection vars on stdout — e.g. AGENTIRA_DB_URL=… — which are injected into the agent. $AGENTIRA_RUN_SCOPE and $AGENTIRA_DB_ADMIN_URL are available. Required for 'Isolated database per run'.">
-                                <textarea className="input font-mono text-xs" rows="2"
-                                    placeholder={'createdb "$AGENTIRA_RUN_SCOPE" && echo "AGENTIRA_DB_URL=postgres://localhost/$AGENTIRA_RUN_SCOPE"'}
-                                    value={form.env_setup_cmd}
-                                    onChange={(e) => setForm({ ...form, env_setup_cmd: e.target.value })} />
-                            </Field>
-                            <Field label="Teardown command"
-                                hint="Run when the run finishes (any exit). Drops what setup created. Left blank for compose uses 'docker compose down -v'.">
-                                <textarea className="input font-mono text-xs" rows="2"
-                                    placeholder={'dropdb --if-exists "$AGENTIRA_RUN_SCOPE"'}
-                                    value={form.env_teardown_cmd}
-                                    onChange={(e) => setForm({ ...form, env_teardown_cmd: e.target.value })} />
-                            </Field>
-                            <Field label="DB admin URL (optional)"
-                                hint="Passed to the setup/teardown commands as $AGENTIRA_DB_ADMIN_URL — the admin connection they use to create/drop the per-run database. Stored as-is.">
-                                <input className="input font-mono text-xs"
-                                    placeholder="postgres://admin@localhost:5432/postgres"
-                                    value={form.env_db_admin_url}
-                                    onChange={(e) => setForm({ ...form, env_db_admin_url: e.target.value })} />
-                            </Field>
-                        </div>
-                    )}
-                </div>
-            )}
-        </Field>
-    );
-}
-
-
-// ── Repos ────────────────────────────────────────────────────────────
-
-function ReposTab({ projectId }) {
-    const [repos, setRepos] = useState(null);
+function ReposList({ projectId, project, repos, reload }) {
     const [busy, setBusy] = useState('');
-    const [msg, setMsg] = useState('');
+    const [err, setErr] = useState('');
 
-    const reload = async () => {
-        const r = await api.listProjectRepos(projectId).catch(() => []);
-        setRepos(r);
-    };
-    useEffect(() => { reload(); }, [projectId]);
+    if (repos === null) return <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading…</div>;
 
-    if (repos === null) return <div className="text-text-tertiary text-sm">Loading…</div>;
-
-    const add = async (data) => {
-        setBusy('add');
-        setMsg('');
+    const run = async (key, label, fn) => {
+        setBusy(key);
+        setErr('');
         try {
-            await api.addProjectRepo(projectId, data);
+            await fn();
             await reload();
-        } catch (err) {
-            setMsg('Add failed: ' + (err.message || err));
+        } catch (e) {
+            setErr(`${label} failed: ${e.message || e}`);
         } finally {
             setBusy('');
         }
     };
 
-    const remove = async (name) => {
+    const remove = (name) => {
         if (!confirm(`Detach repo "${name}" from this project?`)) return;
-        setBusy(name);
-        try {
-            await api.removeProjectRepo(projectId, name);
-            await reload();
-        } catch (err) {
-            setMsg('Remove failed: ' + (err.message || err));
-        } finally {
-            setBusy('');
-        }
+        run(name, 'Remove', () => api.removeProjectRepo(projectId, name));
     };
 
-    const update = async (name, data) => {
-        setBusy(name);
-        setMsg('');
-        try {
-            await api.updateProjectRepo(projectId, name, data);
-            await reload();
-        } catch (err) {
-            setMsg('Update failed: ' + (err.message || err));
-        } finally {
-            setBusy('');
-        }
-    };
+    // Older projects stored one repo on the project itself. It still works,
+    // but it never shows in the list — offer to turn it into a real repo.
+    const legacy = repos.length === 0 && (project?.repo_url || project?.repo_path);
 
     return (
-        <div className="space-y-4">
-            <p className="text-xs text-text-secondary">
-                Attach git repos so tasks can target the right codebase.
-                The primary repo is the default when a task doesn't specify
-                a <code className="text-text-primary">repo_name</code>.
-            </p>
-            <p className="text-xs text-text-tertiary">
-                Set a <strong className="text-text-secondary">git remote URL</strong> on
-                a repo and the daemon clones it into its own workspace
-                (<code className="text-text-primary">~/.agentira/sources</code>) — it
-                never touches your local folders. This is required for repos under
-                Desktop / Documents / Downloads, which macOS blocks the daemon from
-                reading.
-            </p>
-
-            {repos.length === 0 ? (
-                <div className="card text-text-tertiary text-sm">
+        <>
+            {repos.length === 0 && !legacy && (
+                <Card style={{ fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic', textAlign: 'center' }}>
                     No repos attached yet.
-                </div>
-            ) : (
-                <div className="space-y-2">
+                </Card>
+            )}
+            {legacy && (
+                <Card>
+                    <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                        This project uses an older single-repo setup
+                        <InfoTip>The repo was saved on the project itself instead of in this list. It still works. Convert it to manage its access token and branch handling here.</InfoTip>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'ui-monospace,monospace', margin: '6px 0 12px', wordBreak: 'break-all' }}>
+                        {project.repo_url || project.repo_path}
+                    </div>
+                    <Button variant="secondary" disabled={busy === 'legacy'}
+                        onClick={() => run('legacy', 'Convert', () => api.addProjectRepo(projectId, {
+                            name: 'main', repo_url: project.repo_url || '', repo_path: project.repo_path || '',
+                            default_branch: 'main', is_primary: true,
+                        }))}>
+                        {busy === 'legacy' ? 'Converting…' : 'Convert to a repo'}
+                    </Button>
+                </Card>
+            )}
+            {repos.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {repos.map((r) => (
-                        <RepoRow key={r.id || r.name} repo={r}
-                            projectId={projectId}
-                            onReload={reload}
+                        <RepoRow key={r.id || r.name} repo={r} projectId={projectId}
+                            busy={busy === r.name} onReload={reload}
                             onRemove={() => remove(r.name)}
-                            onUpdate={(data) => update(r.name, data)}
-                            busy={busy === r.name} />
+                            onUpdate={(data) => run(r.name, 'Update', () => api.updateProjectRepo(projectId, r.name, data))} />
                     ))}
                 </div>
             )}
-
-            <AddRepoForm onSubmit={add} busy={busy === 'add'} />
-
-            <WorkspaceModeDanger projectId={projectId} repos={repos} />
-
-            {msg && (
-                <div className={`text-xs ${msg.startsWith('Add') || msg.startsWith('Remove') ? 'text-red-400' : 'text-text-secondary'}`}>
-                    {msg}
-                </div>
-            )}
-        </div>
+            <div style={{ marginTop: 12 }}>
+                <AddRepoForm busy={busy === 'add'} hasRepos={repos.length > 0}
+                    onSubmit={(data) => run('add', 'Add', () => api.addProjectRepo(projectId, data))} />
+            </div>
+            {err && <div style={{ marginTop: 10 }}><Notice tone="error">{err}</Notice></div>}
+        </>
     );
 }
 
-
-// AP-414: where an agent's working copy comes from. Normally derived — a
-// project with an attached repo IS a git workspace, whatever the stored value
-// says (a stale "sandbox" used to drop agents into an empty folder). Exposed
-// here so the value is visible and overridable, in the danger zone because
-// getting it wrong means agents run against the wrong code (or none).
-const WORKSPACE_MODES = [
-    { value: '', label: 'Automatic (recommended)',
-      help: 'Agentira decides from the repos above: a repo attached means agents get a fresh copy of it; no repo means an empty scratch folder.' },
-    { value: 'git', label: 'Always use the attached repo',
-      help: 'Agents get their own fresh copy of the repo, checked out on the task branch. Agentira picks and manages the folder.' },
-    { value: 'local_folder', label: 'Use my own folder on this machine',
-      help: "Agents work off the repo folder path set above instead of a fresh copy. Only for repos the daemon can read — macOS blocks Desktop/Documents/Downloads." },
-    { value: 'sandbox', label: 'Empty scratch folder (no repo)',
-      help: 'Agents start in an empty folder with no code. Ignored while a repo is attached — the repo wins, so agents are never dropped into an empty directory.' },
-];
-
-function effectiveWorkspaceMode(project, repos) {
-    const stored = (project?.workspace_kind || '').trim().toLowerCase();
-    if (stored === 'git' || stored === 'local_folder') return stored;
-    const has = (field) => !!(project?.[field] || '').trim()
-        || (repos || []).some((r) => (r[field] || '').trim());
-    if (has('repo_url')) return 'git';
-    if (has('repo_path')) return 'local_folder';
-    return 'sandbox';
-}
-
-function WorkspaceModeDanger({ projectId, repos }) {
-    const [project, setProject] = useState(null);
-    const [value, setValue] = useState('');
-    const [saving, setSaving] = useState(false);
-    const [msg, setMsg] = useState('');
-
-    useEffect(() => {
-        api.getProject(projectId).then((p) => {
-            setProject(p);
-            setValue(p.workspace_kind || '');
-        }).catch(() => setProject(null));
-    }, [projectId]);
-
-    if (!project) return null;
-
-    const stored = project.workspace_kind || '';
-    const effective = effectiveWorkspaceMode({ ...project, workspace_kind: value }, repos);
-    const overridden = value === 'sandbox' && effective !== 'sandbox';
-    const sel = WORKSPACE_MODES.find((m) => m.value === value) || WORKSPACE_MODES[0];
-    const effLabel = WORKSPACE_MODES.find((m) => m.value === effective)?.label;
-
-    const save = async () => {
-        setSaving(true);
-        setMsg('');
-        try {
-            const updated = await api.updateProject(projectId, { workspace_kind: value });
-            setProject(updated);
-            setMsg('Saved');
-            setTimeout(() => setMsg(''), 2000);
-        } catch (err) {
-            setMsg('Error: ' + (err.message || err));
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    return (
-        <div className="mt-8 border border-red-500/30 rounded-xl p-4 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
-                <AlertTriangle className="w-4 h-4" />
-                Danger zone — where agents work
-            </div>
-            <p className="text-xs text-text-secondary">
-                Right now agents on this project get:{' '}
-                <strong className="text-text-primary">{effLabel}</strong>.
-                Changing this changes what every future run sees — pick the wrong
-                one and agents work on the wrong code, or on no code at all.
-            </p>
-            <select className="input" value={value}
-                onChange={(e) => setValue(e.target.value)}>
-                {WORKSPACE_MODES.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                ))}
-            </select>
-            <p className="text-xs text-text-tertiary">{sel.help}</p>
-            {overridden && (
-                <p className="text-xs text-amber-400">
-                    A repo is attached to this project, so this setting is ignored —
-                    agents still get a copy of the repo. Detach every repo above to
-                    really run with an empty folder.
-                </p>
-            )}
-            <div className="flex items-center gap-3">
-                <button className="btn btn-ghost text-red-400 hover:bg-red-500/10 disabled:opacity-50"
-                    onClick={save} disabled={saving || value === stored}>
-                    <Save className="w-4 h-4" />
-                    {saving ? 'Saving…' : 'Change workspace mode'}
-                </button>
-                {msg && (
-                    <span className={`text-xs ${msg.startsWith('Error') ? 'text-red-400' : 'text-text-secondary'}`}>
-                        {msg}
-                    </span>
-                )}
-            </div>
-            <p className="text-[11px] text-text-tertiary">
-                Technical: <code className="text-text-secondary">
-                workspace_kind = {stored || '(automatic)'}</code>, resolved to{' '}
-                <code className="text-text-secondary">{effective}</code>.
-            </p>
-        </div>
-    );
-}
-
+const badge = (color, bg) => ({
+    display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700,
+    letterSpacing: '.06em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 6, color, background: bg,
+});
 
 function RepoRow({ repo, projectId, onReload, onRemove, onUpdate, busy }) {
     const [editing, setEditing] = useState(false);
@@ -637,160 +404,113 @@ function RepoRow({ repo, projectId, onReload, onRemove, onUpdate, busy }) {
     const commit = () => {
         const next = url.trim();
         setEditing(false);
-        if (next === (repo.repo_url || '')) return;   // no-op
+        if (next === (repo.repo_url || '')) return;
         onUpdate({ repo_url: next });
     };
     const cancel = () => { setUrl(repo.repo_url || ''); setEditing(false); };
 
     return (
-        <div className="card space-y-3">
-            <div className="flex items-center gap-3">
-            <Folder className="w-4 h-4 text-text-secondary flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <div className="text-sm font-medium text-text-primary">{repo.name}</div>
-                    {repo.is_primary && (
-                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary flex items-center gap-1">
-                            <Star className="w-3 h-3" /> primary
-                        </span>
-                    )}
-                    {repo.repo_url ? (
-                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-green-500/15 text-green-500 flex items-center gap-1"
-                            title="Daemon clones this remote into its own workspace">
-                            <Link2 className="w-3 h-3" /> git remote
-                        </span>
-                    ) : (
-                        <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-hover text-text-tertiary"
-                            title="No remote — daemon worktrees off the local path (blocked under Desktop/Documents/Downloads)">
-                            local only
-                        </span>
-                    )}
-                </div>
-                {repo.repo_path && (
-                    <div className="text-xs text-text-tertiary font-mono truncate">{repo.repo_path}</div>
-                )}
-                {/* AP-197: inline-editable git remote URL */}
-                {editing ? (
-                    <div className="flex items-center gap-1 mt-1">
-                        <input autoFocus value={url} onChange={(e) => setUrl(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
-                            placeholder="https://github.com/org/repo"
-                            className="input text-xs py-1 px-2 flex-1 font-mono" />
-                        <button onClick={commit} className="p-0.5 text-green-500" title="Save"><Check className="w-3.5 h-3.5" /></button>
-                        <button onClick={cancel} className="p-0.5 text-text-tertiary" title="Cancel"><X className="w-3.5 h-3.5" /></button>
+        <Card>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11 }}>
+                <Folder style={{ width: 16, height: 16, marginTop: 2, color: 'var(--text-muted)', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{repo.name}</span>
+                        {repo.is_primary && (
+                            <span style={badge('var(--accent-primary)', 'var(--accent-subtle)')}><Star style={{ width: 10, height: 10 }} /> default</span>
+                        )}
+                        {!repo.repo_url && (
+                            <span style={badge('var(--text-muted)', 'var(--surface-hover)')}>local only</span>
+                        )}
+                        <InfoTip>
+                            {repo.is_primary ? 'The default repo is used for tasks that don’t name one. ' : ''}
+                            {repo.repo_url
+                                ? 'Connected to a git address: agents clone it into their own workspace and never touch your folders.'
+                                : 'No git address yet, so agents branch from a folder on this machine. Add the address below — macOS blocks agents from reading Desktop, Documents and Downloads.'}
+                        </InfoTip>
                     </div>
-                ) : (
-                    <button onClick={() => setEditing(true)}
-                        className="flex items-center gap-1 text-xs text-text-tertiary hover:text-text-secondary mt-0.5 font-mono truncate max-w-full"
-                        title="Set the git remote so the daemon clones it">
-                        <Pencil className="w-3 h-3 flex-shrink-0" />
-                        <span className="truncate">{repo.repo_url || 'Connect git remote…'}</span>
-                    </button>
-                )}
-                {repo.default_branch && repo.default_branch !== 'main' && (
-                    <div className="text-[10px] text-text-tertiary mt-0.5">
-                        default branch: {repo.default_branch}
-                    </div>
-                )}
-                <FreshnessControl
-                    value={repo.worktree_freshness || 'always_latest'}
-                    baseBranch={repo.default_branch || 'main'}
-                    busy={busy}
-                    onChange={(v) => onUpdate({ worktree_freshness: v })}
-                />
-            </div>
-            <button onClick={onRemove} disabled={busy}
-                className="btn btn-ghost text-red-400 hover:bg-red-500/10"
-                title="Detach this repo from the project">
-                <Trash2 className="w-4 h-4" />
-            </button>
-            </div>
-            <div className="border-t border-border-subtle pt-3">
-                {/* AP-302: per-repo git access token. */}
-                <GitTokenField
-                    hasToken={repo.has_token}
-                    valid={repo.token_valid}
-                    checkedAt={repo.token_checked_at}
-                    label="Repo access token"
-                    hint="Stored on this repo. Agents working it clone/push with this token."
-                    onSave={async (t) => {
-                        await api.setProjectRepoToken(projectId, repo.name, t);
-                        await onReload();
-                    }}
-                    onCheck={async () => {
-                        await api.checkProjectRepoToken(projectId, repo.name);
-                        await onReload();
-                    }} />
-            </div>
-        </div>
-    );
-}
-
-
-// How worktrees start relative to the base branch. Git terms straight up —
-// fuller explanations belong in a tooltip later, not in invented analogies.
-// (danger = builds on a stale base; warn before allowing it.)
-const FRESHNESS = {
-    always_latest: {
-        label: (b) => `Branch from latest origin/${b}, rebase on resume`,
-        danger: false,
-    },
-    new_only: {
-        label: (b) => `Branch from latest origin/${b}; don't rebase existing branches`,
-        danger: true,
-    },
-    pinned: {
-        label: () => `Pinned — branch from local HEAD, no fetch/rebase`,
-        danger: true,
-    },
-};
-
-function FreshnessControl({ value, baseBranch, busy, onChange }) {
-    const [open, setOpen] = useState(false);
-    const cfg = FRESHNESS[value] || FRESHNESS.always_latest;
-
-    return (
-        <div className="mt-2 text-xs">
-            <button type="button" onClick={() => setOpen((s) => !s)}
-                className={`flex items-center gap-1.5 ${cfg.danger ? 'text-yellow-500' : 'text-green-500'} hover:opacity-80`}>
-                {cfg.danger ? <AlertTriangle className="w-3.5 h-3.5" /> : <GitBranch className="w-3.5 h-3.5" />}
-                <span className="font-mono">{cfg.label(baseBranch)}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${open ? '' : '-rotate-90'}`} />
-            </button>
-            {open && (
-                <div className="mt-1.5 pl-1 space-y-1.5">
-                    {Object.entries(FRESHNESS).map(([key, c]) => (
-                        <label key={key} className="flex items-start gap-2 cursor-pointer">
-                            <input type="radio" name={`fresh-${baseBranch}`} className="mt-0.5"
-                                checked={value === key} disabled={busy}
-                                onChange={() => value !== key && onChange(key)} />
-                            <span className={`font-mono ${c.danger ? 'text-yellow-300/90' : 'text-text-secondary'}`}>
-                                {c.label(baseBranch)}
-                            </span>
-                        </label>
-                    ))}
-                    {cfg.danger && (
-                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded p-2 text-yellow-300/90">
-                            Builds on a stale base — agents may work off outdated code. Use on purpose.
+                    {editing ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                            <TextField autoFocus mono value={url} placeholder="https://github.com/org/repo"
+                                onChange={(e) => setUrl(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }} />
+                            <Button variant="secondary" aria-label="Save address" onClick={commit} icon={Check} style={{ padding: '9px 10px' }} />
+                            <Button variant="secondary" aria-label="Cancel" onClick={cancel} icon={X} style={{ padding: '9px 10px' }} />
                         </div>
+                    ) : (
+                        <button type="button" onClick={() => setEditing(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'ui-monospace,monospace', maxWidth: '100%' }}>
+                            <Pencil style={{ width: 11, height: 11, flexShrink: 0 }} />
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.repo_url || 'Add git address…'}</span>
+                        </button>
                     )}
                 </div>
-            )}
-        </div>
+                <Button variant="danger" onClick={onRemove} disabled={busy} icon={Trash2}
+                    title="Detach this repo from the project" aria-label={`Detach ${repo.name}`} style={{ padding: '7px 10px' }} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border-subtle)', marginTop: 12, paddingTop: 12 }}>
+                <GitTokenField
+                    hasToken={repo.has_token} valid={repo.token_valid} checkedAt={repo.token_checked_at}
+                    label="Access token"
+                    hint="Lets agents clone and push this repo."
+                    onSave={async (t) => { await api.setProjectRepoToken(projectId, repo.name, t); await onReload(); }}
+                    onCheck={async () => { await api.checkProjectRepoToken(projectId, repo.name); await onReload(); }} />
+            </div>
+
+            <Advanced label="Advanced">
+                {repo.repo_path && (
+                    <Field label="Folder on this machine">
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'ui-monospace,monospace', wordBreak: 'break-all' }}>{repo.repo_path}</div>
+                    </Field>
+                )}
+                <Field label="Keep branches up to date"
+                    hint={`Main branch: ${repo.default_branch || 'main'}. Controls whether agents start from, and stay on top of, the newest code.`}>
+                    <ChoiceList name={`fresh-${repo.name}`} disabled={busy}
+                        value={repo.worktree_freshness || 'always_latest'}
+                        onChange={(v) => onUpdate({ worktree_freshness: v })}
+                        options={FRESHNESS} />
+                </Field>
+            </Advanced>
+        </Card>
     );
 }
 
-
-function AddRepoForm({ onSubmit, busy }) {
+function AddRepoForm({ onSubmit, busy, hasRepos }) {
+    const [open, setOpen] = useState(false);
     const [name, setName] = useState('');
-    const [repoPath, setRepoPath] = useState('');
     const [repoUrl, setRepoUrl] = useState('');
+    const [repoPath, setRepoPath] = useState('');
     const [defaultBranch, setDefaultBranch] = useState('main');
     const [isPrimary, setIsPrimary] = useState(false);
+    const [info, setInfo] = useState(null);
+    const edited = useRef({ name: false, branch: false });
 
+    // Paste an address → fill in the name, and on GitHub the main branch too.
+    // Anything the user typed themselves is never overwritten.
+    useEffect(() => {
+        const parsed = parseGitAddress(repoUrl);
+        setInfo(null);
+        if (!parsed) return undefined;
+        if (!edited.current.name) setName(parsed.name);
+        let cancelled = false;
+        const t = setTimeout(async () => {
+            const found = await fetchRepoInfo(parsed);
+            if (cancelled || !found) return;
+            setInfo(found);
+            if (found.defaultBranch && !edited.current.branch) setDefaultBranch(found.defaultBranch);
+        }, 400);
+        return () => { cancelled = true; clearTimeout(t); };
+    }, [repoUrl]);
+
+    if (!open) {
+        return <Button variant="secondary" icon={Plus} onClick={() => setOpen(true)}>Attach a repo</Button>;
+    }
+
+    const valid = name.trim() && (repoPath.trim() || repoUrl.trim());
     const submit = async (e) => {
         e.preventDefault();
-        if (!name.trim() || (!repoPath.trim() && !repoUrl.trim())) return;
+        if (!valid) return;
         await onSubmit({
             name: name.trim(),
             repo_path: repoPath.trim(),
@@ -799,57 +519,148 @@ function AddRepoForm({ onSubmit, busy }) {
             is_primary: isPrimary,
         });
         setName(''); setRepoPath(''); setRepoUrl('');
-        setDefaultBranch('main'); setIsPrimary(false);
+        setDefaultBranch('main'); setIsPrimary(false); setOpen(false);
+        edited.current = { name: false, branch: false };
     };
 
     return (
-        <form onSubmit={submit} className="card space-y-3 border border-dashed">
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Plus className="w-4 h-4" /> Attach a repo
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Name" hint="Short identifier — e.g. 'backend', 'frontend'.">
-                    <input className="input" value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="backend" />
+        <form onSubmit={submit}>
+            <Card>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 14 }}>Attach a repo</div>
+                <Field label="Git address" htmlFor="ar-url" hint="Where the code lives, e.g. a GitHub link. Paste it and the name and main branch fill in by themselves. Agents clone it into their own workspace.">
+                    <TextField id="ar-url" mono autoFocus value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/org/repo.git" />
+                    {info && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+                            {info.language && <span style={badge('var(--accent-primary)', 'var(--accent-subtle)')}>{info.language}</span>}
+                            <span style={badge('var(--text-muted)', 'var(--surface-hover)')}>{info.isPrivate ? 'private' : 'public'}</span>
+                            {info.description && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{info.description}</span>}
+                        </div>
+                    )}
                 </Field>
-                <Field label="Default branch">
-                    <input className="input" value={defaultBranch}
-                        onChange={(e) => setDefaultBranch(e.target.value)}
-                        placeholder="main" />
+                <Field label="Name" htmlFor="ar-name" hint="A short label, e.g. “backend” or “website”. Filled in from the address; change it if you like. Tasks use it to say which repo they’re about.">
+                    <TextField id="ar-name" value={name} onChange={(e) => { edited.current.name = true; setName(e.target.value); }} placeholder="backend" />
                 </Field>
-                <Field label="Repo path">
-                    <input className="input" value={repoPath}
-                        onChange={(e) => setRepoPath(e.target.value)}
-                        placeholder="/path/to/repo" />
-                </Field>
-                <Field label="Repo URL">
-                    <input className="input" value={repoUrl}
-                        onChange={(e) => setRepoUrl(e.target.value)}
-                        placeholder="https://github.com/org/repo.git" />
-                </Field>
-            </div>
-            <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-                <input type="checkbox" checked={isPrimary}
-                    onChange={(e) => setIsPrimary(e.target.checked)} />
-                Mark as primary (tasks without an explicit repo_name target this one)
-            </label>
-            <button type="submit" className="btn btn-primary"
-                disabled={busy || !name.trim() || (!repoPath.trim() && !repoUrl.trim())}>
-                <Plus className="w-4 h-4" />
-                {busy ? 'Attaching…' : 'Attach repo'}
-            </button>
+                {hasRepos && (
+                    <Toggle id="ar-primary" checked={isPrimary} onChange={setIsPrimary}
+                        label="Make this the default repo"
+                        hint="Tasks that don’t name a repo use the default one." />
+                )}
+                <Advanced label="Advanced">
+                    <Field label="Folder on this machine" htmlFor="ar-path"
+                        hint="Only if there is no git address: a folder the daemon can read and branch from.">
+                        <TextField id="ar-path" mono value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="/path/to/repo" />
+                    </Field>
+                    <Field label="Main branch" htmlFor="ar-branch" hint="The branch new work starts from. Filled in from GitHub when it can be.">
+                        <TextField id="ar-branch" value={defaultBranch} onChange={(e) => { edited.current.branch = true; setDefaultBranch(e.target.value); }} placeholder="main" />
+                    </Field>
+                </Advanced>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+                    <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+                    <Button type="submit" onClick={submit} disabled={busy || !valid} icon={Plus}>
+                        {busy ? 'Attaching…' : 'Attach repo'}
+                    </Button>
+                </div>
+            </Card>
         </form>
     );
 }
 
 
-function Field({ label, hint, children }) {
+// ── Run environment (Advanced) ───────────────────────────────────────────────
+
+// How a project provisions its per-run DB (any engine) lives behind Advanced.
+function EnvAdvanced({ form, bind }) {
+    const showCmds = form.env_isolation === 'per_run_db' || form.env_isolation === 'per_run_compose';
     return (
-        <div>
-            <label className="block text-xs text-text-tertiary mb-1">{label}</label>
-            {children}
-            {hint && <p className="text-xs text-text-tertiary mt-1">{hint}</p>}
-        </div>
+        <Advanced label="Advanced">
+            <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '0 0 14px' }}>
+                Technical mode: <code>{form.env_isolation === 'auto' ? 'auto (resolved at dispatch)' : form.env_isolation}</code>
+            </p>
+            {showCmds ? (
+                <>
+                    <Field label="Setup command" htmlFor="ps-env-setup"
+                        hint="Runs before each run, in the worktree. Provisions the run’s environment (any DB engine or language) and prints KEY=VALUE connection vars on stdout — e.g. AGENTIRA_DB_URL=… — which are injected into the agent. $AGENTIRA_RUN_SCOPE and $AGENTIRA_DB_ADMIN_URL are available. Required for “Separate database for each run”.">
+                        <TextArea id="ps-env-setup" rows={2} mono
+                            placeholder={'createdb "$AGENTIRA_RUN_SCOPE" && echo "AGENTIRA_DB_URL=postgres://localhost/$AGENTIRA_RUN_SCOPE"'}
+                            {...bind('env_setup_cmd')} />
+                    </Field>
+                    <Field label="Teardown command" htmlFor="ps-env-teardown"
+                        hint="Runs when the run finishes, however it ends. Drops what setup created. Blank for compose uses “docker compose down -v”.">
+                        <TextArea id="ps-env-teardown" rows={2} mono
+                            placeholder={'dropdb --if-exists "$AGENTIRA_RUN_SCOPE"'}
+                            {...bind('env_teardown_cmd')} />
+                    </Field>
+                    <Field label="Database admin URL (optional)" htmlFor="ps-env-admin"
+                        hint="Passed to setup and teardown as $AGENTIRA_DB_ADMIN_URL — the admin connection they use to create and drop the per-run database. Stored as-is.">
+                        <TextField id="ps-env-admin" mono placeholder="postgres://admin@localhost:5432/postgres"
+                            {...bind('env_db_admin_url')} />
+                    </Field>
+                </>
+            ) : (
+                <p style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: 0 }}>
+                    Setup and teardown commands only apply to the “separate database” and “separate full stack” modes.
+                </p>
+            )}
+        </Advanced>
+    );
+}
+
+
+// ── Danger zone ──────────────────────────────────────────────────────────────
+
+// AP-332: destructive project delete, in its own section so it is never
+// confused with Save; the delete goes through ConfirmModal.
+function DangerZone({ projectId, projectName }) {
+    const navigate = useNavigate();
+    const [confirming, setConfirming] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [error, setError] = useState('');
+
+    const remove = async () => {
+        setDeleting(true);
+        setError('');
+        try {
+            await api.deleteProject(projectId);
+            // Navigating to the studio root remounts the dashboard and changes
+            // the active projectId, so the navbar + sidebar drop the project.
+            navigate(ROUTES.STUDIO);
+        } catch (err) {
+            setError('Delete failed: ' + (err.message || err));
+            setDeleting(false);
+            setConfirming(false);
+        }
+    };
+
+    return (
+        <SettingsSection title="Danger zone" description="Actions here can’t be undone.">
+            <Card tone="danger">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: '#f87171', marginBottom: 6 }}>
+                    <AlertTriangle style={{ width: 14, height: 14 }} /> Delete this project
+                </div>
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+                    Deleting <strong style={{ color: 'var(--text-primary)' }}>{projectName || 'this project'}</strong> permanently
+                    removes it and everything inside — all tasks, runs, chats, and attached files.
+                </p>
+                <Button variant="danger" icon={Trash2} onClick={() => setConfirming(true)} disabled={deleting}>
+                    {deleting ? 'Deleting…' : 'Delete project'}
+                </Button>
+                {error && <div style={{ marginTop: 12 }}><Notice tone="error">{error}</Notice></div>}
+            </Card>
+
+            {confirming && (
+                <ConfirmModal
+                    isDanger
+                    title={`Delete "${projectName || 'this project'}"?`}
+                    message={
+                        'This permanently deletes the project and everything in it — '
+                        + 'all tasks, runs, chats, and attached files. This cannot be undone.'
+                    }
+                    confirmText={deleting ? 'Deleting…' : 'Delete permanently'}
+                    cancelText="Cancel"
+                    onConfirm={remove}
+                    onCancel={() => setConfirming(false)}
+                />
+            )}
+        </SettingsSection>
     );
 }

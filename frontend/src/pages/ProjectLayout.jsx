@@ -6,6 +6,7 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
+import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 
@@ -13,7 +14,15 @@ import { setCurrentProjectId } from '../currentProject';
 // current members (remove on hover) + the addable profiles under "Add member".
 function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
     const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState('');
     const ref = useRef(null);
+    useEffect(() => { if (!open) setQuery(''); }, [open]);
+    // Nobody is listed until the user starts typing; then only matches show.
+    const q = query.trim().toLowerCase();
+    const matches = q
+        ? availableProfiles.filter(p => [p.name, p.display_name, p.role]
+            .some(v => (v || '').toLowerCase().includes(q))).slice(0, 8)
+        : [];
     useEffect(() => {
         function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
         document.addEventListener('mousedown', handler);
@@ -51,8 +60,16 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
                     {availableProfiles.length > 0 && (
                         <>
                             <div className="px-2 pt-2 pb-1 mt-1 border-t border-border-subtle text-[9.5px] font-bold uppercase tracking-wider text-text-tertiary">Add member</div>
-                            {availableProfiles.map(p => (
-                                <div key={p.id} onClick={() => onAdd(p.name)} role="button" tabIndex={0} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover cursor-pointer">
+                            <input
+                                type="text" value={query} onChange={e => setQuery(e.target.value)}
+                                placeholder="Search by name…" aria-label="Search people to add"
+                                className="input w-full mb-1" style={{ padding: '6px 10px', fontSize: 12.5 }}
+                            />
+                            {q && matches.length === 0 && (
+                                <div className="px-2 py-2 text-text-tertiary" style={{ fontSize: 12 }}>No one matches “{query.trim()}”.</div>
+                            )}
+                            {matches.map(p => (
+                                <div key={p.id} onClick={() => { onAdd(p.name); setQuery(''); }} role="button" tabIndex={0} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-bg-hover cursor-pointer">
                                     {avatar(p.display_name || p.name)}
                                     <div className="flex-1 min-w-0">
                                         <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{p.display_name || p.name}</div>
@@ -356,7 +373,7 @@ export function ProjectLayout() {
                     <header className="px-4 py-3 flex flex-col md:flex-row justify-between items-start md:items-center shrink-0 gap-4 border-b">
                         <div className="flex-1 min-w-0">
                             <h2 className="text-title-lg font-medium truncate">{board.project.name}</h2>
-                            <p className="text-body-sm truncate text-text-secondary">{board.project.description || "No description"}</p>
+                            <ProjectDescription text={board.project.description} />
                         </div>
                     </header>
                 )}
@@ -394,6 +411,28 @@ export function ProjectLayout() {
 
             {showCreate && <CreateTaskModal projectId={projectId} onClose={() => setShowCreate(false)} onCreated={loadBoard} />}
             {showCreateEpic && <CreateEpicModal projectId={projectId} onClose={() => setShowCreateEpic(false)} onCreated={loadEpics} />}
+        </div>
+    );
+}
+
+
+// Project description is Markdown: render it, clamp to two lines, and let the
+// reader expand the rest instead of cutting it off.
+function ProjectDescription({ text }) {
+    const [open, setOpen] = useState(false);
+    if (!text) return <p className="text-body-sm text-text-secondary">No description</p>;
+    const long = text.length > 160 || text.includes('\n');
+    return (
+        <div className="text-body-sm text-text-secondary">
+            <div style={open ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                <Markdown>{text}</Markdown>
+            </div>
+            {long && (
+                <button type="button" onClick={() => setOpen((o) => !o)}
+                    className="text-xs text-text-tertiary hover:text-text-primary mt-0.5">
+                    {open ? 'Show less' : 'Show more'}
+                </button>
+            )}
         </div>
     );
 }
