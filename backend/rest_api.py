@@ -14,6 +14,7 @@ from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
 from backend import email_sender
+from backend import invites
 from backend import services
 from backend import task_batch
 from backend import task_graph
@@ -1918,6 +1919,11 @@ async def _http_request_logger(request: Request, call_next):
 admin_invites = APIRouter(prefix="/api/invites", tags=["invites"],
                           dependencies=[Depends(require_admin)])
 
+@admin_invites.get("")
+def api_list_member_invites(payload: dict = Depends(get_current_user_payload)):
+    return invites.list_org_invites(payload.get("org_id"))
+
+
 @admin_invites.post("")
 def api_create_member_invite(body: dict = None,
                              payload: dict = Depends(get_current_user_payload)):
@@ -1929,7 +1935,14 @@ def api_create_member_invite(body: dict = None,
     except ValueError as e:
         raise HTTPException(400, str(e))
     email = body.get("email")
-    inv["email_sent"] = bool(email) and email_sender.send_invite_email(email, inv["code"])
+    if not email:
+        status = "none"
+    elif not email_sender.is_configured():
+        status = "not_configured"
+    else:
+        status = "sent" if email_sender.send_invite_email(email, inv["code"]) else "failed"
+    inv["email_status"] = status
+    inv["email_sent"] = status == "sent"
     return inv
 
 search_router = APIRouter(prefix="/api/search", tags=["search"],

@@ -435,6 +435,8 @@ export function Settings() {
     const [newBotKey, setNewBotKey] = useState(null);
     const [copied, setCopied] = useState(false);
     const [promptState, setPromptState] = useState(null);
+    const [invites, setInvites] = useState([]);
+    const [inviteModal, setInviteModal] = useState(null);
     const [confirmState, setConfirmState] = useState(null);
     const [managing, setManaging] = useState(null);
 
@@ -462,6 +464,7 @@ export function Settings() {
         try { setBots(await api.listServiceAccounts()); } catch { /* ignore */ }
         if (isAdmin) {
             try { setProfiles(await api.getProfiles()); } catch { /* ignore */ }
+            try { setInvites(await api.listInvites()); } catch { /* ignore */ }
         }
         setLoading(false);
     }
@@ -519,19 +522,30 @@ export function Settings() {
     }
 
     // ── Members / Accounts actions ─────────────────────────────────────────
-    async function handleInviteMember() {
+    function handleInviteMember() {
+        setInviteModal({ email: '', busy: false, error: '', result: null });
+    }
+
+    async function submitInvite() {
+        const email = inviteModal.email.trim();
+        setInviteModal({ ...inviteModal, busy: true, error: '' });
         try {
-            const email = (window.prompt("Email to send the invite to (leave blank to just get a link):") || "").trim();
             const inv = await api.createInvite(email);
             const link = `${window.location.origin}/signup?invite=${inv.code}`;
             try { await navigator.clipboard.writeText(link); } catch { /* ignore */ }
-            const note = inv.email_sent
-                ? `Invite emailed to ${email}. Link (copied to clipboard):`
-                : email ? "Couldn't send the email. Share this link instead (copied to clipboard):"
-                : "Invite link (copied to clipboard) — share it:";
-            window.prompt(note, link);
-        } catch (err) { alert(err.message || "Failed to create invite"); }
+            setInviteModal({ email, busy: false, error: '', result: { status: inv.email_status, email, link } });
+            try { setInvites(await api.listInvites()); } catch { /* ignore */ }
+        } catch (err) {
+            setInviteModal({ ...inviteModal, email, busy: false, error: err.message || 'Could not create the invite.' });
+        }
     }
+
+    const INVITE_RESULT = {
+        sent: { ok: true, text: email => `Invite email sent to ${email}.` },
+        not_configured: { ok: false, text: () => "Email isn't set up on this server, so nothing was sent. The invite was created — share the link below yourself." },
+        failed: { ok: false, text: email => `We couldn't send the email to ${email}. The invite was created — share the link below yourself.` },
+        none: { ok: true, text: () => 'Invite created. Share the link below.' },
+    };
 
     function handleCreateBot() {
         setPromptState({
@@ -863,6 +877,36 @@ export function Settings() {
                                 </Row>
                             );
                         })}
+                        {invites.length > 0 && (
+                            <div style={{ marginTop: 22 }}>
+                                <SubLabel>INVITES</SubLabel>
+                                <div style={{ height: 8 }} />
+                                {invites.map(i => {
+                                    const label = { pending: 'Pending', accepted: 'Accepted', expired: 'Expired' }[i.status] || i.status;
+                                    const color = { pending: '#fbbf24', accepted: '#4ade80', expired: 'var(--text-muted)' }[i.status];
+                                    return (
+                                        <Row key={i.id}>
+                                            <span style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(118,131,144,.14)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 12.5, fontWeight: 600 }}>
+                                                {(i.email || '?')[0].toUpperCase()}
+                                            </span>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{i.email || 'Link invite (no email)'}</div>
+                                                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+                                                    Invited {new Date(i.created_at).toLocaleDateString()}
+                                                </div>
+                                            </div>
+                                            {i.code && (
+                                                <button onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/signup?invite=${i.code}`); } catch { /* ignore */ } }}
+                                                    style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid var(--border-default)', background: 'transparent', color: 'var(--text-tertiary)', fontSize: 11, cursor: 'pointer' }}>
+                                                    Copy link
+                                                </button>
+                                            )}
+                                            <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 10.5, fontWeight: 600, color, border: `1px solid ${color}` }}>{label}</span>
+                                        </Row>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1118,6 +1162,52 @@ export function Settings() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                         <GhostBtn onClick={() => setNewBotKey(null)}>Done</GhostBtn>
                     </div>
+                </Modal>
+            )}
+
+            {/* ── Invite modal ─────────────────────────────────────────────── */}
+            {inviteModal && (
+                <Modal onClose={() => setInviteModal(null)}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>Invite a member</div>
+                    {!inviteModal.result ? (
+                        <>
+                            <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                                Enter an email and we'll send them the signup link. Leave it blank to just get a link to share.
+                            </div>
+                            <SettingsInput
+                                autoFocus
+                                type="email"
+                                placeholder="name@company.com"
+                                value={inviteModal.email}
+                                onChange={e => setInviteModal({ ...inviteModal, email: e.target.value })}
+                                onKeyDown={e => { if (e.key === 'Enter' && !inviteModal.busy) submitInvite(); }}
+                            />
+                            {inviteModal.error && <div style={{ fontSize: 12, color: '#f87171' }}>{inviteModal.error}</div>}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                                <GhostBtn onClick={() => setInviteModal(null)}>Cancel</GhostBtn>
+                                <button disabled={inviteModal.busy} onClick={submitInvite} style={{ padding: '8px 18px', borderRadius: 9, background: 'var(--brand-lavender)', color: 'var(--accent-on)', border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: inviteModal.busy ? 0.6 : 1 }}>
+                                    {inviteModal.busy ? 'Sending…' : inviteModal.email.trim() ? 'Send invite' : 'Create link'}
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            {(() => {
+                                const r = INVITE_RESULT[inviteModal.result.status] || INVITE_RESULT.none;
+                                return (
+                                    <div style={{ fontSize: 12.5, padding: '10px 12px', borderRadius: 9, color: r.ok ? '#4ade80' : '#fbbf24', background: r.ok ? 'rgba(74,222,128,.10)' : 'rgba(251,191,36,.10)' }}>
+                                        {r.text(inviteModal.result.email)}
+                                    </div>
+                                );
+                            })()}
+                            <input readOnly value={inviteModal.result.link} onClick={e => e.target.select()}
+                                style={{ padding: '10px 13px', borderRadius: 10, background: 'var(--surface-card)', border: '1px solid var(--border-default)', fontSize: 12, fontFamily: 'ui-monospace,monospace', color: 'var(--text-tertiary)', outline: 'none' }} />
+                            <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Link copied to your clipboard. It works for 14 days.</div>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <GhostBtn onClick={() => setInviteModal(null)}>Done</GhostBtn>
+                            </div>
+                        </>
+                    )}
                 </Modal>
             )}
 
