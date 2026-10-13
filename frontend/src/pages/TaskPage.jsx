@@ -827,7 +827,7 @@ function PlanTab(props) {
                             <select
                                 id="task-status"
                                 aria-label="Status"
-                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                className="input py-1.5 text-sm"
                                 value={isEditing ? formData.status : task.status}
                                 onChange={e => (isEditing
                                     ? setFormData({ ...formData, status: e.target.value })
@@ -846,7 +846,7 @@ function PlanTab(props) {
                                 <select
                                     id="task-priority"
                                     aria-label="Priority"
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full capitalize"
+                                    className="input py-1.5 text-sm capitalize"
                                     value={isEditing ? formData.priority : task.priority}
                                     onChange={e => (isEditing
                                         ? setFormData({ ...formData, priority: e.target.value })
@@ -865,7 +865,7 @@ function PlanTab(props) {
                                 <input
                                     id="task-tags"
                                     aria-label="Tags"
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    className="input py-1.5 text-sm"
                                     placeholder="comma, separated, tags"
                                     value={(formData.tags || []).join(', ')}
                                     onChange={e => setFormData({
@@ -891,7 +891,7 @@ function PlanTab(props) {
                                 <select
                                     id="task-epic"
                                     aria-label="Epic"
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    className="input py-1.5 text-sm"
                                     value={task.epic_id || ''}
                                     onChange={e => saveField({ epic_id: e.target.value })}
                                 >
@@ -934,7 +934,7 @@ function PlanTab(props) {
                             <select
                                 id="task-assignee"
                                 aria-label="Assignee"
-                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                className="input py-1.5 text-sm"
                                 value={isEditing ? formData.assignee : (task.assignee || '')}
                                 onChange={e => (isEditing
                                     ? setFormData({ ...formData, assignee: e.target.value })
