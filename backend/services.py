@@ -1124,7 +1124,7 @@ def _epic_to_dict(e: Epic, task_count: Optional[int] = None) -> dict:
         "created_at": e.created_at.isoformat(),
     }
 
-def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", actor: str = "system") -> dict:
+def create_epic(project_id: str, title: str, description: str = "", color: str = "#7c4dff", actor: str = "system", assignee: str = "") -> dict:
     with _session() as db:
         require_project_access(db, actor, project_id, "write")
         project = db.get(Project, project_id)
@@ -1135,6 +1135,7 @@ def create_epic(project_id: str, title: str, description: str = "", color: str =
             title=title,
             description=description,
             color=color,
+            assignee=assignee,
             creator=actor,
         )
         db.add(epic)
