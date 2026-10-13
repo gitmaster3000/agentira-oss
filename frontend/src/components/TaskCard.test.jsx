@@ -5,12 +5,12 @@ import { MemoryRouter } from 'react-router-dom';
 import { TaskCard } from './TaskCard';
 import { api } from '../api';
 
-vi.mock('../api', () => ({ api: { deleteTask: vi.fn(), updateTask: vi.fn(), getEpics: vi.fn() } }));
+vi.mock('../api', () => ({ api: { deleteTask: vi.fn(), updateTask: vi.fn(), } }));
 
-function renderCard(task) {
+function renderCard(task, epics = []) {
     return render(
         <MemoryRouter>
-            <TaskCard task={task} onUpdate={() => {}} onDelete={() => {}} />
+            <TaskCard task={task} epics={epics} onUpdate={() => {}} onDelete={() => {}} />
         </MemoryRouter>,
     );
 }
@@ -37,12 +37,12 @@ describe('TaskCard', () => {
     describe('epic dropdown', () => {
         const epicTask = { ...base, project_id: 'P1', epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' };
         const epics = [{ id: 'E1', title: 'Onboarding', color: '#7c4dff' }, { id: 'E2', title: 'Billing', color: '#2ecc71' }];
-        beforeEach(() => { vi.clearAllMocks(); api.getEpics.mockResolvedValue(epics); });
+        beforeEach(() => { vi.clearAllMocks() });
 
         it('changes epic optimistically and saves via updateTask', async () => {
             let resolve;
             api.updateTask.mockReturnValue(new Promise(r => { resolve = r; }));
-            renderCard(epicTask);
+            renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
             fireEvent.click(await screen.findByRole('menuitem', { name: 'Billing' }));
             // Shown before the request settles.
@@ -54,15 +54,26 @@ describe('TaskCard', () => {
         it('rolls back when the save fails', async () => {
             vi.spyOn(window, 'alert').mockImplementation(() => {});
             api.updateTask.mockRejectedValue(new Error('nope'));
-            renderCard(epicTask);
+            renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
             fireEvent.click(await screen.findByRole('menuitem', { name: 'Billing' }));
             await waitFor(() => expect(screen.getByLabelText('Epic')).toHaveTextContent('Onboarding'));
         });
 
+        it('closes on Escape and on outside click', () => {
+            renderCard(epicTask, epics);
+            fireEvent.click(screen.getByLabelText('Epic'));
+            expect(screen.getByRole('menu')).toBeInTheDocument();
+            fireEvent.keyDown(document, { key: 'Escape' });
+            expect(screen.queryByRole('menu')).toBeNull();
+            fireEvent.click(screen.getByLabelText('Epic'));
+            fireEvent.mouseDown(document.body);
+            expect(screen.queryByRole('menu')).toBeNull();
+        });
+
         it('No epic clears the epic; Open epic links to it', async () => {
             api.updateTask.mockResolvedValue({});
-            renderCard(epicTask);
+            renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
             expect(screen.getByRole('menuitem', { name: 'Open epic' })).toHaveAttribute('href', expect.stringContaining('E1'));
             fireEvent.click(await screen.findByRole('menuitem', { name: 'No epic' }));

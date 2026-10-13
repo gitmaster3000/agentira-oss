@@ -328,7 +328,7 @@ export function ProjectLayout() {
 
     // Filters context
     const filters = {
-        searchQuery, filterPriority, filterAssignee, filterEpic, board,
+        searchQuery, filterPriority, filterAssignee, filterEpic, board, epics,
         reloadBoard: loadBoard,
         applyMove,
         requestSelectTask,

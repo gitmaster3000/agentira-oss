@@ -22,7 +22,7 @@ const COLUMNS = [
 ];
 
 export function Board() {
-    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, reloadBoard, applyMove, requestSelectTask } = useOutletContext();
+    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, epics, reloadBoard, applyMove, requestSelectTask } = useOutletContext();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const handleDrop = async (e, status) => {
@@ -89,6 +89,7 @@ export function Board() {
                                 <TaskCard
                                     key={task.id}
                                     task={task}
+                                    epics={epics}
                                     onUpdate={(t) => requestSelectTask(t.key || t.id)}
                                     onDelete={reloadBoard}
                                     onEpicChange={reloadBoard}
