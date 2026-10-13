@@ -1,0 +1,28 @@
+meta {
+  name: Preview - Create task
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/api/tasks
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_prev_token}}
+}
+
+body:json {
+  { "project_id": "{{_prev_pid}}", "title": "Preview task", "status": "backlog", "priority": "low" }
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+}
+
+vars:post-response {
+  _prev_tid: res.body.id
+}

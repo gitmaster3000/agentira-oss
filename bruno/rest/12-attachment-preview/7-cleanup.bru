@@ -1,0 +1,19 @@
+meta {
+  name: Preview - Cleanup
+  type: http
+  seq: 7
+}
+
+delete {
+  url: {{base_url}}/api/projects/{{_prev_pid}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_prev_token}}
+}
+
+assert {
+  res.status: eq 200
+}

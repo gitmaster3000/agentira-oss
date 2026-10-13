@@ -1,0 +1,24 @@
+meta {
+  name: Preview - Download returns the file bytes
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/api/attachments/{{_prev_aid}}/download
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_prev_token}}
+}
+
+assert {
+  res.status: eq 200
+  res.body: contains hello preview
+}
+
+docs {
+  The in-app preview fetches exactly this route with the bearer token.
+}

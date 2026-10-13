@@ -1,0 +1,28 @@
+meta {
+  name: Preview - Create project
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/api/projects
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_prev_token}}
+}
+
+body:json {
+  { "name": "Attachment Preview (bruno)" }
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+}
+
+vars:post-response {
+  _prev_pid: res.body.id
+}

@@ -1,0 +1,29 @@
+meta {
+  name: Preview - Upload markdown attachment
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/api/tasks/{{_prev_tid}}/attachments
+  body: multipartForm
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{_prev_token}}
+}
+
+body:multipart-form {
+  file: @file(rest/12-attachment-preview/preview.md)
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+  res.body.filename: eq preview.md
+}
+
+vars:post-response {
+  _prev_aid: res.body.id
+}

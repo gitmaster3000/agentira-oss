@@ -457,8 +457,6 @@ export const api = {
         });
     },
     deleteAttachment: (id) => request(`/attachments/${id}`, { method: 'DELETE' }),
-    // The download route requires the bearer token, which a plain <a href>
-    // can't carry — fetch with the header, then save the blob.
     // Same auth dance as download, but hands back the raw blob so the UI can
     // preview it in-app instead of saving it.
     fetchAttachmentBlob: async (id) => {
@@ -469,6 +467,8 @@ export const api = {
         if (!res.ok) throw new Error(`Preview failed (${res.status})`);
         return res.blob();
     },
+    // The download route requires the bearer token, which a plain <a href>
+    // can't carry — fetch with the header, then save the blob.
     downloadAttachment: async (id, filename) => {
         const token = getToken();
         const headers = {};
