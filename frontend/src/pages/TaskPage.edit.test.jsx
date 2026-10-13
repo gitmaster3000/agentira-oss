@@ -81,8 +81,9 @@ describe('TaskPage — detail view (AP-353)', () => {
         api.getTask.mockResolvedValue(baseTask({ assignee: 'Alice', creator: 'Bob' }));
         renderTaskPage();
         await screen.findByText('My task');
-        expect(screen.getByText('Assignee')).toBeInTheDocument();
-        expect(screen.getByText('Creator')).toBeInTheDocument();
+        const people = screen.getByRole('button', { name: /toggle people section/i }).closest('section');
+        expect(within(people).getByText('Assignee')).toBeInTheDocument();
+        expect(within(people).getByText('Creator')).toBeInTheDocument();
         expect(screen.getByTestId('task-creator')).toHaveTextContent('Bob');
     });
 
