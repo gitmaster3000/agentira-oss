@@ -353,11 +353,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                 style={{ width: 6, marginLeft: -3, cursor: 'col-resize', zIndex: 10 }}
             />
             {/* Header: key + epic · open full / edit / delete / close.
-                Fixed 53px height matches the board toolbar so the panel's top
-                divider lines up with the board header's bottom border. While
-                editing, the edit/delete pair swaps to Save/Cancel — the same
+                The panel sits below the project header, so no height matching
+                is needed. While editing, the edit/delete pair swaps to Save/Cancel — the same
                 standard used on the Epic page. */}
-            <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '0 18px', height: 53, borderBottom: '1px solid var(--border-subtle)' }}>
+            <div className="flex items-center gap-2 flex-shrink-0" style={{ padding: '10px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
                 <span style={{ fontSize: 12, fontFamily: 'ui-monospace,monospace', fontWeight: 600, color: 'var(--accent-mono-blue)', whiteSpace: 'nowrap' }}>
                     {task.key || task.id}
                 </span>

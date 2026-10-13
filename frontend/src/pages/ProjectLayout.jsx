@@ -346,55 +346,55 @@ export function ProjectLayout() {
     const isDeployView = /\/deploy(\/|$)/.test(location.pathname);
 
     return (
-        <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
-            <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
-                <header className="shrink-0 border-b">
-                    <nav aria-label="Breadcrumb" className="px-4 pt-3 flex items-center gap-2 text-[13px] text-text-tertiary">
-                        <Link to={ROUTES.STUDIO} className="hover:text-accent-primary">Home</Link>
-                        <span>/</span>
-                        <span className="truncate">{board.project.name}</span>
-                    </nav>
-                    <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
-                        <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
-                        <MembersControl
-                            members={members}
-                            availableProfiles={availableProfiles}
-                            onAdd={handleAddMember}
-                            onRemove={handleRemoveMember}
-                        />
-                    </div>
-                    <ProjectTabs projectId={projectId} />
-                </header>
-
-                {isBoardView && (
-                    <BoardToolbar
-                        projectId={projectId}
+        <div className={`flex flex-col h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
+            <header className="shrink-0 border-b">
+                <nav aria-label="Breadcrumb" className="px-4 pt-3 flex items-center gap-2 text-[13px] text-text-tertiary">
+                    <Link to={ROUTES.STUDIO} className="hover:text-accent-primary">Home</Link>
+                    <span>/</span>
+                    <span className="truncate">{board.project.name}</span>
+                </nav>
+                <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
+                    <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
+                    <MembersControl
                         members={members}
-                        epics={epics}
-                        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
-                        filterPriority={filterPriority} setFilterPriority={setFilterPriority}
-                        filterAssignee={filterAssignee} setFilterAssignee={setFilterAssignee}
-                        filterEpic={filterEpic} setFilterEpic={setFilterEpic}
-                        onCreate={() => setShowCreate(true)}
+                        availableProfiles={availableProfiles}
+                        onAdd={handleAddMember}
+                        onRemove={handleRemoveMember}
                     />
-                )}
-
-                <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
-                    <Outlet context={filters} />
                 </div>
-            </div>
+                <ProjectTabs projectId={projectId} />
+            </header>
 
-            {selectedTask && (
-                <TaskDetailPanel
-                    task={selectedTask}
-                    isEditing={isEditing}
-                    setIsEditing={setIsEditing}
-                    onSelectTask={requestSelectTask}
-                    onClose={() => requestSelectTask(null)}
-                    onUpdate={loadBoard}
+            {isBoardView && (
+                <BoardToolbar
+                    projectId={projectId}
+                    members={members}
+                    epics={epics}
+                    searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                    filterPriority={filterPriority} setFilterPriority={setFilterPriority}
+                    filterAssignee={filterAssignee} setFilterAssignee={setFilterAssignee}
+                    filterEpic={filterEpic} setFilterEpic={setFilterEpic}
+                    onCreate={() => setShowCreate(true)}
                 />
             )}
+
+            <div className="flex flex-row flex-1 min-h-0 min-w-0">
+                <div className={`flex-1 min-w-0 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
+                    <Outlet context={filters} />
+                </div>
+
+                {selectedTask && (
+                    <TaskDetailPanel
+                        task={selectedTask}
+                        isEditing={isEditing}
+                        setIsEditing={setIsEditing}
+                        onSelectTask={requestSelectTask}
+                        onClose={() => requestSelectTask(null)}
+                        onUpdate={loadBoard}
+                    />
+                )}
+            </div>
 
             {pendingAction && (
                 <ConfirmModal
