@@ -901,6 +901,15 @@ export function Settings() {
                                                     Copy link
                                                 </button>
                                             )}
+                                            {i.status !== 'accepted' && (
+                                                <button onClick={async () => {
+                                                    if (!window.confirm(`Cancel the invite${i.email ? ` for ${i.email}` : ''}? The link will stop working.`)) return;
+                                                    try { await api.cancelInvite(i.id); setInvites(await api.listInvites()); } catch (err) { window.alert(err.message || 'Could not cancel the invite.'); }
+                                                }}
+                                                    style={{ padding: '3px 9px', borderRadius: 7, border: '1px solid var(--border-default)', background: 'transparent', color: '#f87171', fontSize: 11, cursor: 'pointer' }}>
+                                                    Cancel
+                                                </button>
+                                            )}
                                             <span style={{ padding: '2px 8px', borderRadius: 20, fontSize: 10.5, fontWeight: 600, color, border: `1px solid ${color}` }}>{label}</span>
                                         </Row>
                                     );

@@ -32,3 +32,17 @@ def list_org_invites(org_id: str, limit: int = 50) -> list[dict]:
                 item["code"] = inv.code
             out.append(item)
         return out
+
+
+def cancel_org_invite(org_id: str, invite_id: str) -> str:
+    """Delete an unaccepted invite of this org. Returns 'ok', 'not_found' or 'accepted'."""
+    with privileged(), SessionLocal() as db:
+        inv = (db.query(Invite)
+               .filter(Invite.id == invite_id, Invite.org_id == org_id).first())
+        if not inv:
+            return "not_found"
+        if inv.accepted_at:
+            return "accepted"
+        db.delete(inv)
+        db.commit()
+        return "ok"

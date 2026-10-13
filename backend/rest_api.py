@@ -1945,6 +1945,16 @@ def api_create_member_invite(body: dict = None,
     inv["email_sent"] = status == "sent"
     return inv
 
+@admin_invites.delete("/{invite_id}")
+def api_cancel_member_invite(invite_id: str,
+                             payload: dict = Depends(get_current_user_payload)):
+    result = invites.cancel_org_invite(payload.get("org_id"), invite_id)
+    if result == "not_found":
+        raise HTTPException(404, "Invite not found")
+    if result == "accepted":
+        raise HTTPException(409, "This invite was already accepted and can't be cancelled.")
+    return {"ok": True}
+
 search_router = APIRouter(prefix="/api/search", tags=["search"],
                           dependencies=[Depends(get_current_user)])
 
