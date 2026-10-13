@@ -2,7 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
+import { Bug, CheckSquare, Zap } from 'lucide-react';
 import { TASK_TEMPLATES, DOD_TEMPLATES, getTaskTemplate, getDodTemplate } from '../lib/taskTemplates';
+
+const TYPES = [
+    { id: 'task', label: 'Task', Icon: CheckSquare, color: 'var(--accent-primary)' },
+    { id: 'bug', label: 'Bug', Icon: Bug, color: '#e74c3c' },
+    { id: 'epic', label: 'Epic', Icon: Zap, color: '#7c4dff' },
+];
+const BUG_TEMPLATE = 'What happened:\n\nExpected:\n\nSteps to reproduce:\n1. ';
+const EPIC_COLORS = ['#7c4dff', '#00bcd4', '#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#3498db', '#9b59b6'];
 
 export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const navigate = useNavigate();
@@ -17,6 +26,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         epic_id: '',
         tags: ''
     });
+    const [type, setType] = useState('task');
     const [dodItems, setDodItems] = useState([]);
     const [newDodText, setNewDodText] = useState('');
     const [files, setFiles] = useState([]);
@@ -25,6 +35,15 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
         api.getEpics(projectId).then(setEpics).catch(console.error);
     }, [projectId]);
+
+    // Switching type keeps what was typed. A bug seeds a "what/expected/steps"
+    // outline only into an empty description.
+    const changeType = (next) => {
+        setType(next);
+        if (next === 'bug') {
+            setFormData(prev => prev.description.trim() ? prev : { ...prev, description: BUG_TEMPLATE });
+        }
+    };
 
     const addDodItem = () => {
         if (!newDodText.trim()) return;
@@ -75,9 +94,21 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         e.preventDefault();
         setLoading(true);
         try {
+            if (type === 'epic') {
+                const epic = await api.createEpic(projectId, {
+                    title: formData.title.trim(),
+                    description: formData.description.trim(),
+                    color: EPIC_COLORS[epics.length % EPIC_COLORS.length]
+                });
+                if (onCreated) onCreated(epic);
+                onClose();
+                if (epic?.id) navigate(ROUTES.STUDIO_EPIC(epic.id));
+                return;
+            }
             const task = await api.createTask({
                 project_id: projectId,
                 ...formData,
+                type,
                 epic_id: formData.epic_id || undefined,
                 tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
                 dod_items: dodItems.length ? dodItems.map(({ text, checked }) => ({ text, checked })) : undefined
@@ -108,13 +139,36 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                 style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
             >
                 <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <h2 className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>New task</h2>
+                    <h2 className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>New {type}</h2>
                     <div className="flex-1" />
                     <button type="button" aria-label="Close" onClick={onClose} className="btn btn-ghost px-2 py-0.5 text-base leading-none">×</button>
                 </div>
 
                 <div className="p-4 flex flex-col gap-4 overflow-y-auto">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div role="radiogroup" aria-label="Type" className="grid grid-cols-3 gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--bg-hover)' }}>
+                        {TYPES.map(({ id, label, Icon, color }) => {
+                            const active = type === id;
+                            return (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    aria-label={label}
+                                    onClick={() => changeType(id)}
+                                    className="inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-colors"
+                                    style={active
+                                        ? { backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', boxShadow: '0 1px 2px rgba(0,0,0,.2)' }
+                                        : { color: 'var(--text-tertiary)' }}
+                                >
+                                    <Icon className="w-4 h-4" style={{ color: active ? color : undefined }} />
+                                    {label}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {type === 'task' && <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[10px] font-bold uppercase" style={lbl}>Start from</span>
                         {TASK_TEMPLATES.map(t => (
                             <button
@@ -128,14 +182,14 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 {t.name}
                             </button>
                         ))}
-                    </div>
+                    </div>}
 
                     <div>
                         <input
                             autoFocus
                             aria-label="Title"
                             className="input text-sm font-semibold"
-                            placeholder="Task title"
+                            placeholder={type === 'epic' ? 'What are we aiming for?' : `${type === 'bug' ? 'Bug' : 'Task'} title`}
                             value={formData.title}
                             onChange={e => setFormData({ ...formData, title: e.target.value })}
                             maxLength={255}
@@ -150,6 +204,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         />
                     </div>
 
+                    {type !== 'epic' && (<>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className={labelCls} style={lbl}>Epic</label>
@@ -274,6 +329,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                             onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
                         />
                     </div>
+                    </>)}
                 </div>
 
                 <div className="flex items-center justify-end gap-2 px-4 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>

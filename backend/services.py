@@ -1349,13 +1349,14 @@ def update_task(
     parent_id: Optional[str] = None,
     milestone_id: Optional[str] = None,
     actor: str = "system",
+    type: Optional[str] = None,
 ) -> dict:
     """Update a task. Delegates to backend.tasks."""
     from backend import tasks
     return tasks.TaskService().update(
         task_id, title, description, priority, assignee, tags, start_date,
         due_date, dod_items, branch, pr_url, epic_id, repos,
-        parent_id=parent_id, milestone_id=milestone_id, actor=actor,
+        parent_id=parent_id, milestone_id=milestone_id, actor=actor, type=type,
     )
 
 

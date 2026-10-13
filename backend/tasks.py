@@ -37,6 +37,18 @@ logger = logging.getLogger("agentira.tasks")
 # ponytail: no speculative empty subclasses — the factory is the polymorphism
 # seam, subclasses land when bug/feature/etc. need different DoD or status flow.
 VALID_TYPES = {"task", "bug"}
+
+
+class InvalidTaskType(ValueError):
+    pass
+
+
+def _coerce_type(v: str) -> str:
+    if v not in VALID_TYPES:
+        raise InvalidTaskType(f"unknown task type '{v}' (expected one of {sorted(VALID_TYPES)})")
+    return v
+
+
 _OVERRIDES: dict[str, type["TaskService"]] = {}
 
 # Declarative spec for the scalar fields update() can change. Adding a new
@@ -72,6 +84,7 @@ _UPDATE_FIELDS = (
     {"name": "pr_url",
      "current": lambda t: t.pr_url or "",
      "label": lambda raw, val: "PR linked" if val else "PR unlinked"},
+    {"name": "type", "coerce": _coerce_type, "current": lambda t: t.type or "task"},
     {"name": "epic_id",
      "coerce": lambda v: v if v.strip() else None,
      "label": lambda raw, val: f"epic_id → {val}"},
@@ -307,6 +320,7 @@ class TaskService:
         parent_id: Optional[str] = None,
         milestone_id: Optional[str] = None,
         actor: str = "system",
+        type: Optional[str] = None,
     ) -> dict:
         with services._session() as db:
             task = tasks_repo.resolve_ref(db, task_id)
@@ -320,7 +334,7 @@ class TaskService:
             incoming = {
                 "title": title, "description": description, "priority": priority,
                 "assignee": assignee, "start_date": start_date, "due_date": due_date,
-                "branch": branch, "pr_url": pr_url, "epic_id": epic_id,
+                "branch": branch, "pr_url": pr_url, "epic_id": epic_id, "type": type,
             }
             # Data-driven scalar updates — see _UPDATE_FIELDS. A new scalar field
             # is a row there + an entry above, not another branch here.
