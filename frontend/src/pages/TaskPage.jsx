@@ -877,6 +877,16 @@ function PlanTab(props) {
                         </div>
 
                         <div>
+                            <span className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Creator</span>
+                            <div className="flex items-center gap-2" data-testid="task-creator">
+                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
+                                    {task.creator ? task.creator[0].toUpperCase() : '?'}
+                                </div>
+                                <span className="text-sm text-text-secondary">{task.creator || 'Unknown'}</span>
+                            </div>
+                        </div>
+
+                        <div>
                             <label htmlFor="task-tags" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Labels</label>
                             {isEditing ? (
                                 <input
