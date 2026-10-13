@@ -84,11 +84,22 @@ describe('AppSidebar — collapsible rail', () => {
         mountSidebar();
 
         const labels = ['Home', 'Inbox', 'My Work', 'Chat', 'Agents', 'Runs', 'Conductor',
-            'Agent Runtimes', 'MCP Servers', 'Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Settings'];
+            'Agent Runtimes', 'MCP Servers'];
         for (const l of labels) expect(screen.getByText(l)).toBeInTheDocument();
 
         expect(screen.getByText('BUILD')).toBeInTheDocument();
-        expect(screen.getByText('PROJECT')).toBeInTheDocument();
+    });
+
+    it('has no PROJECTS section or project sub-nav (project switcher lives in the top bar)', async () => {
+        mountSidebar();
+        await screen.findByText('Runs');
+        expect(screen.queryByText('PROJECT')).not.toBeInTheDocument();
+        expect(screen.queryByText('PROJECTS')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Atlas')).not.toBeInTheDocument();
+        expect(screen.queryByText('New project')).not.toBeInTheDocument();
+        for (const l of ['Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Deploy']) {
+            expect(screen.queryByText(l)).not.toBeInTheDocument();
+        }
     });
 
     it('is 248px wide and un-collapsed when railOpen is true', () => {
