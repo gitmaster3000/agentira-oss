@@ -33,43 +33,6 @@ function renderModal(props = {}) {
 describe('CreateTaskModal', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('task template button prefills task fields but not the DoD', async () => {
-        renderModal();
-
-        fireEvent.click(await screen.findByRole('button', { name: 'Task template: Professionalization' }));
-
-        expect(screen.getByLabelText('Description').value).toMatch(/production/i);
-        expect(screen.getByLabelText('Priority').value).toBe('high');
-        // No DoD items added by a task template.
-        expect(screen.queryByText('Unit tests')).not.toBeInTheDocument();
-    });
-
-    it('does not overwrite a description the user already typed', async () => {
-        renderModal();
-        const description = screen.getByLabelText('Description');
-        fireEvent.change(description, { target: { value: 'my own notes' } });
-
-        fireEvent.click(await screen.findByRole('button', { name: 'Task template: Professionalization' }));
-
-        expect(description.value).toBe('my own notes');
-    });
-
-    it('DoD template toggles its items on and off and stays out of task fields', async () => {
-        renderModal();
-        const btn = await screen.findByRole('button', { name: 'DoD template: Professionalization' });
-
-        fireEvent.click(btn);
-        expect(screen.getByText('Unit tests')).toBeInTheDocument();
-        expect(screen.getByText('Bruno integration tests')).toBeInTheDocument();
-        expect(btn).toHaveAttribute('aria-pressed', 'true');
-        // DoD template must not fill task content.
-        expect(screen.getByLabelText('Description').value).toBe('');
-
-        fireEvent.click(btn);
-        expect(screen.queryByText('Unit tests')).not.toBeInTheDocument();
-        expect(btn).toHaveAttribute('aria-pressed', 'false');
-    });
-
     it('navigates to the new task detail page (by key) after creation', async () => {
         api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-9' });
         renderModal();
@@ -89,7 +52,7 @@ describe('CreateTaskModal', () => {
         const onCreated = vi.fn();
         renderModal({ onCreated });
 
-        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'bug' } });
         fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Crash on save' } });
         fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
@@ -98,27 +61,24 @@ describe('CreateTaskModal', () => {
         await waitFor(() => expect(onCreated).toHaveBeenCalled());
     });
 
-    it('bug prefills description once, without clobbering typed text', async () => {
+    it('has no template pills and bug does not prefill the description', () => {
         renderModal();
-        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
-        expect(screen.getByLabelText('Description').value).toMatch(/Expected/);
-        fireEvent.click(screen.getByRole('radio', { name: 'Task' }));
-        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'mine' } });
-        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
-        expect(screen.getByLabelText('Description').value).toBe('mine');
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'bug' } });
+        expect(screen.getByLabelText('Description').value).toBe('');
+        expect(screen.queryByRole('button', { name: /template/i })).not.toBeInTheDocument();
     });
 
     it('epic type hides task-only fields and creates an epic', async () => {
         api.createEpic.mockResolvedValue({ id: 'E1' });
         renderModal();
 
-        fireEvent.click(screen.getByRole('radio', { name: 'Epic' }));
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'epic' } });
         expect(screen.queryByLabelText('Priority')).not.toBeInTheDocument();
-        expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('Assignee')).toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch' } });
         fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
-        await waitFor(() => expect(api.createEpic).toHaveBeenCalledWith('P1', expect.objectContaining({ title: 'Launch' })));
+        await waitFor(() => expect(api.createEpic).toHaveBeenCalledWith('P1', expect.objectContaining({ title: 'Launch', assignee: '' })));
         expect(api.createTask).not.toHaveBeenCalled();
         expect(await screen.findByText('EPIC DETAIL')).toBeInTheDocument();
     });

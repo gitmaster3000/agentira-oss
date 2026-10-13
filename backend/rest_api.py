@@ -250,6 +250,7 @@ class EpicCreate(BaseModel):
     description: str = ""
     status: str = "backlog"
     color: str = "#7c4dff"
+    assignee: str = ""
 
 class EpicUpdate(BaseModel):
     title: Optional[str] = None
@@ -996,7 +997,7 @@ def api_list_epics(project_id: str, actor: str = Depends(get_current_user)):
 @projects.post("/{project_id}/epics")
 def api_create_epic(project_id: str, body: EpicCreate, actor: str = Depends(get_current_user)):
     try:
-        return services.create_epic(project_id, title=body.title, description=body.description, color=body.color, actor=actor)
+        return services.create_epic(project_id, title=body.title, description=body.description, color=body.color, assignee=body.assignee, actor=actor)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
