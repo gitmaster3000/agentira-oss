@@ -1317,10 +1317,14 @@ def list_tasks(
     assignee: Optional[str] = None,
     priority: Optional[str] = None,
     actor: str = "system",
+    tag: Optional[str] = None,
+    epic_id: Optional[str] = None,
+    milestone_id: Optional[str] = None,
 ) -> list[dict]:
     """List tasks scoped by visibility. Delegates to backend.tasks."""
     from backend import tasks
-    return tasks.TaskService().list(project_id, status, assignee, priority, actor)
+    return tasks.TaskService().list(project_id, status, assignee, priority, actor,
+                                    tag=tag, epic_id=epic_id, milestone_id=milestone_id)
 
 
 def get_task(task_id: str, actor: str = "system") -> dict | None:

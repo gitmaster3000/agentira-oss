@@ -332,11 +332,15 @@ async def list_tasks(
     status: str = None,
     assignee: str = None,
     priority: str = None,
+    tag: str = None,
+    epic_id: str = None,
+    milestone_id: str = None,
     ctx: Context = None,
 ) -> list[dict]:
-    """List tasks matching filters."""
+    """List tasks matching filters (project_id, status, assignee, priority, tag, epic_id, milestone_id; all optional, ANDed)."""
     actor = actor_ctx.get()
-    return services.list_tasks(project_id, status, assignee, priority, actor=actor)
+    return services.list_tasks(project_id, status, assignee, priority, actor=actor,
+                               tag=tag, epic_id=epic_id, milestone_id=milestone_id)
 
 @mcp.tool()
 async def get_task(task_id: str, ctx: Context = None) -> dict | None:

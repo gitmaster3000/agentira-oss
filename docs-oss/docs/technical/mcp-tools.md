@@ -37,7 +37,7 @@ To connect a client, see [MCP server](./mcp-server.md).
 
 | Tool | Purpose |
 |---|---|
-| `list_tasks` | List tasks, with filters |
+| `list_tasks` | List tasks. Optional filters, all ANDed: `project_id`, `status`, `assignee`, `priority`, `tag` (exact tag), `epic_id`, `milestone_id` |
 | `get_task` | Fetch one task |
 | `create_task` | Create a task |
 | `create_tasks` | Create a whole plan atomically: many tasks plus dependencies between them, in one all-or-nothing call |
