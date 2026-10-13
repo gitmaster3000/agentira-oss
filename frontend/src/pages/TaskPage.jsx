@@ -763,6 +763,7 @@ function PlanTab(props) {
         loadTask,
     } = props;
 
+    const assigneeName = isEditing ? formData.assignee : task.assignee;
     const [proofTick, setProofTick] = useState(0);
     const [openSections, setOpenSections] = useState({
         details: true, people: true, relations: true, dod: true, git: true, files: false, dates: true,
@@ -827,7 +828,7 @@ function PlanTab(props) {
                             <select
                                 id="task-status"
                                 aria-label="Status"
-                                className="input py-1.5 text-sm"
+                                className="ghost-select text-sm"
                                 value={isEditing ? formData.status : task.status}
                                 onChange={e => (isEditing
                                     ? setFormData({ ...formData, status: e.target.value })
@@ -846,7 +847,7 @@ function PlanTab(props) {
                                 <select
                                     id="task-priority"
                                     aria-label="Priority"
-                                    className="input py-1.5 text-sm capitalize"
+                                    className="ghost-select text-sm capitalize"
                                     value={isEditing ? formData.priority : task.priority}
                                     onChange={e => (isEditing
                                         ? setFormData({ ...formData, priority: e.target.value })
@@ -865,7 +866,7 @@ function PlanTab(props) {
                                 <input
                                     id="task-tags"
                                     aria-label="Tags"
-                                    className="input py-1.5 text-sm"
+                                    className="ghost-select text-sm"
                                     placeholder="comma, separated, tags"
                                     value={(formData.tags || []).join(', ')}
                                     onChange={e => setFormData({
@@ -891,7 +892,7 @@ function PlanTab(props) {
                                 <select
                                     id="task-epic"
                                     aria-label="Epic"
-                                    className="input py-1.5 text-sm"
+                                    className="ghost-select text-sm"
                                     value={task.epic_id || ''}
                                     onChange={e => saveField({ epic_id: e.target.value })}
                                 >
@@ -931,10 +932,14 @@ function PlanTab(props) {
                     <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
                         <div>
                             <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
+                            <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0" data-testid="task-assignee-avatar">
+                                {assigneeName ? assigneeName[0].toUpperCase() : '?'}
+                            </div>
                             <select
                                 id="task-assignee"
                                 aria-label="Assignee"
-                                className="input py-1.5 text-sm"
+                                className="ghost-select text-sm"
                                 value={isEditing ? formData.assignee : (task.assignee || '')}
                                 onChange={e => (isEditing
                                     ? setFormData({ ...formData, assignee: e.target.value })
@@ -945,6 +950,7 @@ function PlanTab(props) {
                                     <option key={p.id} value={p.name}>{p.display_name}</option>
                                 ))}
                             </select>
+                            </div>
                         </div>
 
                         <div>
