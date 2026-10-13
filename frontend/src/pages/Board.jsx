@@ -91,6 +91,7 @@ export function Board() {
                                     task={task}
                                     onUpdate={(t) => requestSelectTask(t.key || t.id)}
                                     onDelete={reloadBoard}
+                                    onEpicChange={reloadBoard}
                                 />
                             ))}
                         </div>

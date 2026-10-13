@@ -1,6 +1,6 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { Link } from 'react-router-dom';
-import { Trash2 } from 'lucide-react';
+import { Trash2, ChevronDown } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { ConfirmModal } from './ConfirmModal';
@@ -14,7 +14,95 @@ const PRIORITY = {
     low:      { color: 'var(--text-muted)', bg: 'rgba(118,131,144,.14)' },
 };
 
-export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
+const LAVENDER = 'var(--brand-lavender)';
+
+// Epic chip doubling as a dropdown: reassign the task's epic from the board.
+// Optimistic — shows the new epic at once, rolls back if the save fails.
+function EpicChip({ task, onChanged }) {
+    const [open, setOpen] = useState(false);
+    const [epics, setEpics] = useState(null);
+    const [override, setOverride] = useState(null);
+
+    // Fresh server data supersedes the optimistic value.
+    useEffect(() => { setOverride(null); }, [task.epic_id]);
+
+    const current = override || (task.epic_id ? { id: task.epic_id, name: task.epic_name, color: task.epic_color } : null);
+    const color = current?.color || LAVENDER;
+
+    const toggle = (e) => {
+        e.stopPropagation();
+        const next = !open;
+        setOpen(next);
+        if (next && epics === null) {
+            api.getEpics(task.project_id)
+                .then(d => setEpics(Array.isArray(d) ? d : []))
+                .catch(() => setEpics([]));
+        }
+    };
+
+    const choose = async (e, epic) => {
+        e.stopPropagation();
+        setOpen(false);
+        const prev = override;
+        setOverride(epic ? { id: epic.id, name: epic.title, color: epic.color } : { id: null });
+        try {
+            await api.updateTask(task.id, { epic_id: epic ? epic.id : '' });
+            if (onChanged) onChanged();
+        } catch (err) {
+            setOverride(prev);
+            alert(err.message);
+        }
+    };
+
+    const itemStyle = { display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left', padding: '5px 8px', fontSize: 11, color: 'var(--text-primary)' };
+    const dot = (c) => <span style={{ width: 8, height: 8, borderRadius: '50%', background: c, flexShrink: 0 }} />;
+
+    return (
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+                type="button"
+                aria-label="Epic"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+                className="flex items-center"
+                style={{ gap: 4, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${color}22`, color: current?.name ? color : 'var(--text-muted)' }}
+                title={current?.name ? `Epic: ${current.name}` : 'Add to an epic'}
+            >
+                {dot(current?.name ? color : 'transparent')}
+                {current?.name || 'No epic'}
+                <ChevronDown className="w-2.5 h-2.5" />
+            </button>
+            {open && (
+                <div
+                    role="menu"
+                    className="absolute z-20"
+                    style={{ top: '100%', left: 0, marginTop: 2, minWidth: 140, background: 'var(--bg-panel)', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: 3 }}
+                >
+                    {epics === null && <div style={{ ...itemStyle, color: 'var(--text-muted)' }}>Loading…</div>}
+                    {(epics || []).map(ep => (
+                        <button key={ep.id} role="menuitem" type="button" style={itemStyle} onClick={(e) => choose(e, ep)}>
+                            {dot(ep.color || LAVENDER)}{ep.title}
+                        </button>
+                    ))}
+                    <button role="menuitem" type="button" style={itemStyle} onClick={(e) => choose(e, null)}>No epic</button>
+                    {current?.id && (
+                        <Link
+                            role="menuitem"
+                            to={ROUTES.STUDIO_EPIC(current.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={itemStyle}
+                        >
+                            Open epic
+                        </Link>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete, onEpicChange }) {
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
     const handleDragStart = (e) => {
@@ -98,26 +186,7 @@ export const TaskCard = memo(function TaskCard({ task, onUpdate, onDelete }) {
             {/* Epic + priority · assignee */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center" style={{ gap: 5 }}>
-                    {task.epic_name && (
-                        task.epic_id ? (
-                            <Link
-                                to={ROUTES.STUDIO_EPIC(task.epic_id)}
-                                onClick={(e) => e.stopPropagation()}
-                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || 'var(--brand-lavender)'}22`, color: task.epic_color || 'var(--brand-lavender)' }}
-                                className="hover:underline"
-                                title={`Open epic: ${task.epic_name}`}
-                            >
-                                {task.epic_name}
-                            </Link>
-                        ) : (
-                            <span
-                                style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '.03em', background: `${task.epic_color || 'var(--brand-lavender)'}22`, color: task.epic_color || 'var(--brand-lavender)' }}
-                                title={`Epic: ${task.epic_name}`}
-                            >
-                                {task.epic_name}
-                            </span>
-                        )
-                    )}
+                    <EpicChip task={task} onChanged={onEpicChange} />
                     {task.priority && (
                         <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 3, textTransform: 'capitalize', background: prio.bg, color: prio.color }}>
                             {task.priority}
