@@ -238,13 +238,17 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
     );
 }
 
-function EmptyState() {
+export function EmptyState() {
     return (
         <div className="card text-center py-16">
             <Bot className="w-12 h-12 mx-auto mb-4 text-text-tertiary opacity-50" />
-            <h3 className="text-lg font-semibold text-text-primary mb-2">No agents found</h3>
+            <h3 className="text-lg font-semibold text-text-primary mb-2">No managed agents yet</h3>
             <p className="text-sm text-text-secondary mb-2 max-w-md mx-auto">
-                Agents are auto-synced from bot profiles. Create a service account in Settings to add an agent.
+                This page lists managed agents: agents that run on a machine where the Agentira daemon is connected.
+                Connect a daemon and they will appear here.
+            </p>
+            <p className="text-sm text-text-secondary mb-2 max-w-md mx-auto">
+                Bots and service accounts that connect with an API key do not need a daemon and are listed in Settings.
             </p>
         </div>
     );
