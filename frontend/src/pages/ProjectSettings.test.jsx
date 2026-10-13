@@ -116,3 +116,21 @@ describe('ProjectSettings — goals & direction (Loop v1)', () => {
         expect(api.updateProject.mock.calls[0][1].direction_md).toBe('Ship Loop v1 first');
     });
 });
+
+describe('ProjectSettings — automation workflow switch', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getProject.mockResolvedValue({ id: 'p1', name: 'P', workflow_enabled: true });
+        api.updateProject.mockImplementation(async (_id, body) => ({ id: 'p1', name: 'P', ...body }));
+    });
+
+    it('turning automation off saves workflow_enabled=false', async () => {
+        render(<ProjectSettings />);
+        const box = await screen.findByLabelText(/run automation workflow/i);
+        expect(box).toBeChecked();
+        fireEvent.click(box);
+        fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+        await waitFor(() => expect(api.updateProject).toHaveBeenCalled());
+        expect(api.updateProject.mock.calls[0][1].workflow_enabled).toBe(false);
+    });
+});
