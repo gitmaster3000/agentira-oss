@@ -21,6 +21,7 @@ from backend import agent_notifier
 from backend.deploy.manager import DeploymentManager
 from backend.deploy.flow import DeployFlow
 
+import json
 import logging
 import os
 import secrets
@@ -511,7 +512,8 @@ def list_notifications(profile_id: str, unread_only: bool = True,
                 "title": n.title,
                 "link": n.link,
                 "read": n.read,
-                "created_at": n.created_at.isoformat()
+                "created_at": n.created_at.isoformat(),
+                "meta": json.loads(n.meta) if n.meta else None,
             }
             for n in notifs
         ]

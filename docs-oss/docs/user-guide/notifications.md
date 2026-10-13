@@ -10,6 +10,8 @@ sidebar_label: Notifications
 
 The bell icon shows an inbox of events relevant to you: assignments, comments on your tasks, run outcomes, and mentions.
 
+Run notifications show who is working on what: the agent's name, what happened (started working, finished, failed), the task key and title, and pills for status, project, and — once a run ends — duration, cost, and pull request. A failed run shows its reason inline. The bell shows a compact one-line version; the Inbox page shows the full card.
+
 Mark items read individually or clear the inbox.
 
 Delivery is a hybrid of push and polling. Push gives sub-second delivery when the connection is healthy; polling catches anything a dropped connection missed. You do not configure this.
