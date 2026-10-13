@@ -21,6 +21,7 @@ function mount(path) {
             <Routes>
                 <Route path="/studio/project/:projectId" element={<ProjectLayout />}>
                     <Route path="board" element={<div>board-body</div>} />
+                    <Route path="overview" element={<div>overview-body</div>} />
                     <Route path="deploy" element={<div>deploy-body</div>} />
                 </Route>
             </Routes>
@@ -53,5 +54,11 @@ describe('ProjectLayout header', () => {
         mount('/studio/project/p1/deploy');
         expect(await screen.findByRole('link', { name: 'Deploy' })).toHaveAttribute('aria-current', 'page');
         expect(screen.queryByPlaceholderText('Search tasks…')).not.toBeInTheDocument();
+    });
+
+    it('shows the project description under the header on Overview only', async () => {
+        api.getBoard.mockResolvedValue({ project: { id: 'p1', name: 'Atlas', key_prefix: 'ATL', description: 'Maps for everyone' }, columns: {} });
+        mount('/studio/project/p1/overview');
+        expect(await screen.findByText('Maps for everyone')).toBeInTheDocument();
     });
 });

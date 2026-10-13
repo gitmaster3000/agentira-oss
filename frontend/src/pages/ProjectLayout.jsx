@@ -6,6 +6,7 @@ import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
+import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
@@ -374,6 +375,7 @@ export function ProjectLayout() {
     // Every project page gets the key/name/tabs header; search + filters only on board views.
     const isBoardView = /\/(board|backlog|roadmap)(\/|$)/.test(location.pathname)
         || /\/project\/[^/]+\/?$/.test(location.pathname);
+    const isOverview = /\/overview(\/|$)/.test(location.pathname);
     const isDeployView = /\/deploy(\/|$)/.test(location.pathname);
 
     return (
@@ -406,6 +408,11 @@ export function ProjectLayout() {
                             </>
                         )}
                     </div>
+                    {isOverview && (
+                        <div className="px-4 pt-2 pb-3">
+                            <ProjectDescription text={board.project.description} />
+                        </div>
+                    )}
                     <ProjectTabs projectId={projectId} />
                 </header>
 
@@ -446,3 +453,24 @@ export function ProjectLayout() {
     );
 }
 
+
+// Project description is Markdown: render it, clamp to two lines, and let the
+// reader expand the rest instead of cutting it off.
+function ProjectDescription({ text }) {
+    const [open, setOpen] = useState(false);
+    if (!text) return <p className="text-body-sm text-text-secondary">No description</p>;
+    const long = text.length > 160 || text.includes('\n');
+    return (
+        <div className="text-body-sm text-text-secondary">
+            <div style={open ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                <Markdown>{text}</Markdown>
+            </div>
+            {long && (
+                <button type="button" onClick={() => setOpen((o) => !o)}
+                    className="text-xs text-text-tertiary hover:text-text-primary mt-0.5">
+                    {open ? 'Show less' : 'Show more'}
+                </button>
+            )}
+        </div>
+    );
+}
