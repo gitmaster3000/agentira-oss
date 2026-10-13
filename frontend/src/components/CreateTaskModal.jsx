@@ -15,6 +15,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const [loading, setLoading] = useState(false);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
+    const [projectName, setProjectName] = useState('');
     const [formData, setFormData] = useState({
         title: '',
         description: '',
@@ -31,6 +32,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     useEffect(() => {
         api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
         api.getEpics(projectId).then(setEpics).catch(console.error);
+        api.getProject(projectId).then(p => setProjectName(p.name)).catch(console.error);
     }, [projectId]);
 
     const addDodItem = () => {
@@ -98,6 +100,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
             >
                 <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <h2 className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>New {type}</h2>
+                    {projectName && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>in {projectName}</span>}
                     <div className="flex-1" />
                     <button type="button" aria-label="Close" onClick={onClose} className="btn btn-ghost px-2 py-0.5 text-base leading-none">×</button>
                 </div>

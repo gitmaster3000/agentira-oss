@@ -10,6 +10,7 @@ vi.mock('../api', () => ({
         getTask: vi.fn(),
         getActivity: vi.fn(() => Promise.resolve([])),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
+        getProject: vi.fn(() => Promise.resolve({ name: 'Proj' })),
         getEpics: vi.fn(() => Promise.resolve([])),
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         listProjectRepos: vi.fn(() => Promise.resolve([])),
