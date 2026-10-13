@@ -17,6 +17,7 @@ from backend import services
 from backend import task_batch
 from backend import task_graph
 from backend import task_links
+from backend import tasks as tasks_domain
 from backend.password_service import password_service
 from backend.dev_mode import is_dev
 from backend.jwt_auth import (create_token, get_current_user, require_admin,
@@ -168,8 +169,10 @@ class TaskCreate(BaseModel):
     # AP-496: create a task already nested / already counted towards a milestone.
     parent_id: Optional[str] = None
     milestone_id: Optional[str] = None
+    type: str = "task"   # task | bug
 
 class TaskUpdate(BaseModel):
+    type: Optional[str] = None   # task | bug
     title: Optional[str] = None
     description: Optional[str] = None
     priority: Optional[str] = None
@@ -1314,6 +1317,7 @@ def api_create_task(body: TaskCreate, actor: str = Depends(get_current_user)):
             tags=body.tags, start_date=body.start_date, due_date=body.due_date,
             dod_items=body.dod_items, epic_id=body.epic_id, actor=actor,
             parent_id=body.parent_id, milestone_id=body.milestone_id,
+            type=body.type,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -1335,7 +1339,7 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
             dod_items=body.dod_items, branch=body.branch, pr_url=body.pr_url,
             epic_id=body.epic_id, repos=body.repos,
             parent_id=body.parent_id, milestone_id=body.milestone_id,
-            actor=actor,
+            type=body.type, actor=actor,
         )
         if body.assignee:
             try:
@@ -1345,6 +1349,8 @@ def api_update_task(task_id: str, body: TaskUpdate, actor: str = Depends(get_cur
                 pass  # never break task update due to WS dispatch
         return result
     except task_graph.GraphError as e:   # invalid parent/milestone → bad request
+        raise HTTPException(400, str(e))
+    except tasks_domain.InvalidTaskType as e:
         raise HTTPException(400, str(e))
     except ValueError as e:
         raise HTTPException(404, str(e))

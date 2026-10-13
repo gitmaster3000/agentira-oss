@@ -8,6 +8,7 @@ import { api } from '../api';
 vi.mock('../api', () => ({
     api: {
         createTask: vi.fn(),
+        createEpic: vi.fn(),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
         getEpics: vi.fn(() => Promise.resolve([])),
         uploadAttachment: vi.fn(),
@@ -23,6 +24,7 @@ function renderModal(props = {}) {
                     element={<CreateTaskModal projectId="P1" onClose={() => {}} onCreated={() => {}} {...props} />}
                 />
                 <Route path="/studio/tasks/:id" element={<div>TASK DETAIL</div>} />
+                <Route path="/studio/epics/:id" element={<div>EPIC DETAIL</div>} />
             </Routes>
         </MemoryRouter>,
     );
@@ -80,5 +82,44 @@ describe('CreateTaskModal', () => {
         expect(api.createTask).toHaveBeenCalledWith(
             expect.objectContaining({ project_id: 'P1', title: 'Build it' }),
         );
+    });
+
+    it('type switch creates a bug with type=bug', async () => {
+        api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-1' });
+        const onCreated = vi.fn();
+        renderModal({ onCreated });
+
+        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Crash on save' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+        await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+        expect(api.createTask.mock.calls[0][0]).toMatchObject({ type: 'bug', title: 'Crash on save' });
+        await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    });
+
+    it('bug prefills description once, without clobbering typed text', async () => {
+        renderModal();
+        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
+        expect(screen.getByLabelText('Description').value).toMatch(/Expected/);
+        fireEvent.click(screen.getByRole('radio', { name: 'Task' }));
+        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'mine' } });
+        fireEvent.click(screen.getByRole('radio', { name: 'Bug' }));
+        expect(screen.getByLabelText('Description').value).toBe('mine');
+    });
+
+    it('epic type hides task-only fields and creates an epic', async () => {
+        api.createEpic.mockResolvedValue({ id: 'E1' });
+        renderModal();
+
+        fireEvent.click(screen.getByRole('radio', { name: 'Epic' }));
+        expect(screen.queryByLabelText('Priority')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Assignee')).not.toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+        await waitFor(() => expect(api.createEpic).toHaveBeenCalledWith('P1', expect.objectContaining({ title: 'Launch' })));
+        expect(api.createTask).not.toHaveBeenCalled();
+        expect(await screen.findByText('EPIC DETAIL')).toBeInTheDocument();
     });
 });

@@ -17,14 +17,14 @@ export function CollapsibleSection({ title, icon: Icon, sectionRef, open, onTogg
                 aria-label={`Toggle ${title} section`}
                 onClick={onToggle}
                 className="w-full flex items-center text-text-secondary hover:text-text-primary transition-colors"
-                style={{ gap: 7, marginBottom: open ? 12 : 0, padding: '4px 0', textAlign: 'left' }}
+                style={{ gap: 8, marginBottom: open ? 12 : 0, padding: '6px 0', minHeight: 32, textAlign: 'left' }}
             >
                 <Icon className="w-3.5 h-3.5" />
-                <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>
                     {title}
                 </span>
                 <ChevronDown
-                    className="w-3.5 h-3.5 ml-auto transition-transform"
+                    className="w-5 h-5 ml-auto transition-transform"
                     style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}
                 />
             </button>
