@@ -512,6 +512,9 @@ export const api = {
     getNotifications: (unreadOnly = true) => request(`/notifications?unread_only=${unreadOnly}`),
     markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'PATCH' }),
 
+    // Global search
+    search: (q) => request(`/search?q=${encodeURIComponent(q)}`),
+
     // Generic
     request,
 

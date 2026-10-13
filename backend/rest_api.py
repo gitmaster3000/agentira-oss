@@ -1921,8 +1921,16 @@ def api_create_member_invite(body: dict = None,
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+search_router = APIRouter(prefix="/api/search", tags=["search"],
+                          dependencies=[Depends(get_current_user)])
+
+@search_router.get("")
+def api_search(q: str = Query("", max_length=100), actor: str = Depends(get_current_user)):
+    from backend import search as search_mod
+    return search_mod.search(q, actor)
+
 # Register all routers
-for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router]:
+for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router, search_router]:
     app.include_router(r)
 
 # Public CLI distribution (no auth — install/update from the instance URL)

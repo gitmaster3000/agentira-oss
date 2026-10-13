@@ -3,6 +3,7 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { api } from '../../api';
 import { useCurrentProjectId, setCurrentProjectId } from '../../currentProject';
 import { useShellData } from './shellData';
+import { GlobalSearch } from './GlobalSearch';
 
 // Exact port of the Agentira.dc.html top bar: blended into the canvas (no card
 // chrome), holding the logo lockup, the project switcher (moved out of the
@@ -183,12 +184,7 @@ export function AppTopbar({ onNewProject, onMenu }) {
             {/* Breadcrumb */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0, flex: 1 }}>{crumb}</div>
 
-            {/* Search — moved out of the sidebar. */}
-            <div className="hoverline" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 11px', borderRadius: '10px', background: 'var(--overlay-tint-soft)', border: '1px solid var(--overlay-line)', color: 'var(--text-muted)', cursor: 'text', width: '210px', flexShrink: 0 }}>
-                <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
-                <span style={{ fontSize: '12.5px', flex: 1 }}>Search or jump…</span>
-                <span style={{ fontSize: '10px', fontFamily: 'ui-monospace,monospace', background: 'var(--overlay-tint)', border: '1px solid var(--overlay-line)', borderRadius: '6px', padding: '2px 5px', color: 'var(--text-tertiary)' }}>⌘K</span>
-            </div>
+            <GlobalSearch />
 
             {/* Right controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>

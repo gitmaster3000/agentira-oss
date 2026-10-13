@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Global search — mockup (AP-622)</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:rgba(255,255,255,.09);--tint:rgba(255,255,255,.05);--text:#f0f3f6;--muted:#8b949e;--lav:#c9b8ff;--teal:#80cbc4;--blue:#38bdf8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,Inter,sans-serif;padding:32px}
+h2{font-size:12px;letter-spacing:.1em;color:var(--muted);margin:36px 0 12px}
+.frame{display:flex;gap:40px;flex-wrap:wrap;align-items:flex-start}
+.col{width:520px}
+.bar{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:10px;background:var(--tint);border:1px solid var(--line);color:var(--muted);width:100%}
+.bar.focus{border-color:var(--lav);box-shadow:0 0 0 3px rgba(201,184,255,.15);color:var(--text)}
+.kbd{font:10px ui-monospace,monospace;background:var(--tint);border:1px solid var(--line);border-radius:6px;padding:2px 5px;color:#adb5bd}
+.pop{margin-top:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden}
+.grp{font-size:9.5px;font-weight:700;letter-spacing:.1em;color:var(--muted);padding:10px 14px 4px}
+.row{display:flex;align-items:center;gap:11px;padding:8px 14px;margin:0 5px;border-radius:10px}
+.row.sel{background:rgba(201,184,255,.12)}
+.ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+.t{flex:1;min-width:0}.t b{font-weight:600;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.t i{font-style:normal;color:var(--muted);font-size:11px}
+mark{background:rgba(201,184,255,.25);color:var(--lav);border-radius:3px;padding:0 1px}
+.pill{font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.foot{display:flex;gap:14px;padding:9px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;margin-top:6px}
+.empty{padding:30px 14px;text-align:center;color:var(--muted)}
+.sk{height:10px;border-radius:5px;background:linear-gradient(90deg,var(--tint),rgba(255,255,255,.1),var(--tint));width:60%}
+</style>
+<h1 style="font-size:18px;margin:0">Global search — top bar</h1>
+<p style="color:var(--muted)">Replaces the cosmetic "Search or jump…" pill. Click it or press ⌘K / Ctrl+K. Debounced (200 ms) query to <code>GET /api/search?q=</code>; only projects the user can read are searched. ↑/↓ moves, ↵ opens, Esc closes.</p>
+
+<div class="frame">
+ <div class="col"><h2>1 · IDLE (pill, as today but live)</h2>
+  <div class="bar">🔍 <span style="flex:1">Search or jump…</span><span class="kbd">⌘K</span></div></div>
+
+ <div class="col"><h2>2 · FOCUSED, EMPTY QUERY</h2>
+  <div class="bar focus">🔍 <span style="flex:1;color:var(--muted)">Search tasks, projects, agents…</span><span class="kbd">Esc</span></div>
+  <div class="pop"><div class="empty">Type to search across tasks, epics, projects and agents.</div></div></div>
+
+ <div class="col"><h2>3 · RESULTS, GROUPED</h2>
+  <div class="bar focus">🔍 <span style="flex:1">login</span><span class="kbd">Esc</span></div>
+  <div class="pop">
+   <div class="grp">TASKS</div>
+   <div class="row sel"><span class="ico" style="background:rgba(128,203,196,.14)">▦</span><div class="t"><b>Fix <mark>login</mark> redirect loop</b><i>AP-412 · Atlas</i></div><span class="pill">In progress</span></div>
+   <div class="row"><span class="ico" style="background:rgba(128,203,196,.14)">▦</span><div class="t"><b>Add SSO <mark>login</mark> for teams</b><i>AP-377 · Atlas</i></div><span class="pill">Todo</span></div>
+   <div class="grp">EPICS</div>
+   <div class="row"><span class="ico" style="background:rgba(197,138,249,.14)">≡</span><div class="t"><b>Auth &amp; <mark>login</mark> revamp</b><i>Epic · Atlas</i></div></div>
+   <div class="grp">AGENTS</div>
+   <div class="row"><span class="ico" style="background:rgba(56,189,248,.14)">◉</span><div class="t"><b>Implementer-1</b><i>Agent · claude</i></div></div>
+   <div class="foot"><span><span class="kbd">↑↓</span> navigate</span><span><span class="kbd">↵</span> open</span><span><span class="kbd">Esc</span> close</span></div>
+  </div></div>
+
+ <div class="col"><h2>4 · LOADING</h2>
+  <div class="bar focus">🔍 <span style="flex:1">dashb</span></div>
+  <div class="pop" style="padding:14px"><div class="sk"></div><br><div class="sk" style="width:42%"></div></div></div>
+
+ <div class="col"><h2>5 · NO RESULTS</h2>
+  <div class="bar focus">🔍 <span style="flex:1">zzzq</span></div>
+  <div class="pop"><div class="empty">No matches for “zzzq”.<br><span style="font-size:11px">Try a task key like AP-412 or part of a title.</span></div></div></div>
+</div>
