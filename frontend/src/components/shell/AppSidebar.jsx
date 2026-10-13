@@ -56,6 +56,9 @@ function RailHeader({ label, icon }) {
     );
 }
 
+const PROJECTS_CAP = 5;
+const ALL_PROJECTS_KEY = 'agentira.sidebarAllProjects';
+
 const buildIcon = (
     <svg className="hdricon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="m14.5 5.5 4 4L21 7a5 5 0 0 1-6.9 6.9l-6.6 6.6a2.1 2.1 0 0 1-3-3l6.6-6.6A5 5 0 0 1 18 4z" /></svg>
 );
@@ -72,6 +75,13 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewP
 
     const path = location.pathname;
     const [userOpen, setUserOpen] = useState(false);
+    const [showAll, setShowAll] = useState(() => {
+        try { return localStorage.getItem(ALL_PROJECTS_KEY) === 'true'; } catch { return false; }
+    });
+    const toggleShowAll = () => setShowAll((v) => {
+        try { localStorage.setItem(ALL_PROJECTS_KEY, String(!v)); } catch { /* ignore */ }
+        return !v;
+    });
     const userRef = useRef(null);
 
     useEffect(() => {
@@ -98,6 +108,10 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewP
         runtimes: path.startsWith('/forge/runtimes'),
         mcp: path === '/forge/settings',
     };
+
+    // Active project first, then shellData's order; capped so BUILD stays in view.
+    const ordered = [...projects.filter((p) => p.id === activeProjectId), ...projects.filter((p) => p.id !== activeProjectId)];
+    const visibleProjects = showAll ? projects : ordered.slice(0, PROJECTS_CAP);
 
     const userInitial = (user?.display_name || user?.name || 'U')[0].toUpperCase();
     const rc = railOpen ? '' : ' rc';
@@ -129,11 +143,15 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail, onNewP
 
                     {/* PROJECTS */}
                     <RailHeader label="PROJECTS" icon={projectIcon} />
-                    {projects.map((p) => (
+                    {visibleProjects.map((p) => (
                         <NavRow key={p.id} active={p.id === activeProjectId} onClick={() => navigate(`/studio/project/${p.id}/board`)} label={p.name}
-                            icon={<span className="ico" style={{ width: '17px', height: '17px', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '5px', background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)', fontSize: '9px', fontWeight: 700 }}>{projectKey(p)}</span>}
+                            icon={<span className="ico" style={{ width: '17px', height: '17px', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '5px', background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)', fontSize: '9px', fontWeight: 700 }}>{p.key_prefix || projectKey(p)}</span>}
                             badge={runningByProject[p.id] > 0 ? liveDot(runningByProject[p.id]) : null} />
                     ))}
+                    {projects.length > PROJECTS_CAP && (
+                        <NavRow onClick={toggleShowAll} label={showAll ? 'Show less' : `Show all (${projects.length})`}
+                            icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="5.01" y2="12" /><line x1="12" y1="12" x2="12.01" y2="12" /><line x1="19" y1="12" x2="19.01" y2="12" /></svg>} />
+                    )}
                     <NavRow onClick={onNewProject} label="New project"
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>} />
 

@@ -120,6 +120,26 @@ describe('AppSidebar — collapsible rail', () => {
         expect(await screen.findByText('BOARD')).toBeInTheDocument();
     });
 
+    it('caps the list at 5 (active first), expands via Show all, and remembers it', async () => {
+        const many = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, name: `Proj${i}`, key_prefix: i === 0 ? 'ZZ' : undefined }));
+        api.getProjects.mockResolvedValue(many);
+        localStorage.clear();
+        mountSidebar({}, '/studio/project/q7/board');
+        expect(await screen.findByTitle('Proj7')).toBeInTheDocument();
+        expect(screen.getByTitle('Proj7').style.fontWeight).toBe('600');
+        expect(screen.queryByTitle('Proj5')).toBeNull();
+        expect(screen.getByTitle('Proj3')).toBeInTheDocument();
+        expect(screen.queryByTitle('Proj4')).toBeNull();
+        expect(screen.getByText('ZZ')).toBeInTheDocument();
+        expect(screen.getAllByText('PRO').length).toBeGreaterThan(0);
+
+        fireEvent.click(screen.getByTitle('Show all (8)'));
+        expect(screen.getByTitle('Proj5')).toBeInTheDocument();
+        expect(localStorage.getItem('agentira.sidebarAllProjects')).toBe('true');
+        expect(screen.getByTitle('New project')).toBeInTheDocument();
+        localStorage.clear();
+    });
+
     it('calls onNewProject from the + New project row', () => {
         const onNewProject = vi.fn();
         mountSidebar({ onNewProject });
