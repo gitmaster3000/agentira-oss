@@ -14,6 +14,8 @@ import smtplib
 import logging
 from email.message import EmailMessage
 
+from backend import email_templates
+
 log = logging.getLogger("agentira.email")
 
 
@@ -40,8 +42,8 @@ def app_base_url() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8111").rstrip("/")
 
 
-def send_email(to: str, subject: str, body: str) -> bool:
-    """Send a plain-text email. Returns True if handed to the SMTP server.
+def send_email(to: str, subject: str, body: str, html: str | None = None) -> bool:
+    """Send an email (plain text, plus an HTML alternative if given). Returns True if handed to the SMTP server.
 
     Never raises on delivery failure — logs and returns False so the caller
     (signup, password reset) doesn't break on a flaky mail server."""
@@ -57,6 +59,8 @@ def send_email(to: str, subject: str, body: str) -> bool:
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")
 
     stage = "connect"
     try:
@@ -89,12 +93,18 @@ def send_email(to: str, subject: str, body: str) -> bool:
 
 
 def send_welcome_email(to: str, display_name: str) -> bool:
+    link = f"{app_base_url()}/login"
     return send_email(
         to,
         "Welcome to Agentira",
         f"Hi {display_name},\n\n"
-        f"Your Agentira account is ready. Sign in at {app_base_url()}/login\n\n"
+        f"Your Agentira account is ready. Sign in at {link}\n\n"
         "— The Agentira team",
+        html=email_templates.render(
+            heading=f"Welcome, {display_name}!",
+            paragraphs=["Your Agentira account is ready. Sign in to get started."],
+            button_label="Sign in", button_url=link,
+        ),
     )
 
 
@@ -106,6 +116,13 @@ def send_invite_email(to: str, code: str) -> bool:
         "You've been invited to join a workspace on Agentira.\n\n"
         f"Create your account here (link valid for 14 days):\n{link}\n\n"
         "— The Agentira team",
+        html=email_templates.render(
+            heading="You're invited to Agentira",
+            paragraphs=["You've been invited to join a workspace on Agentira. "
+                        "Create your account to get started."],
+            button_label="Accept invite", button_url=link,
+            footnote="This invite link is valid for 14 days.",
+        ),
     )
 
 
@@ -118,4 +135,12 @@ def send_password_reset_email(to: str, display_name: str, token: str) -> bool:
         f"Reset your password using this link (valid for 1 hour):\n{link}\n\n"
         "If you didn't request this, you can ignore this email.\n\n"
         "— The Agentira team",
+        html=email_templates.render(
+            heading="Reset your password",
+            paragraphs=[f"Hi {display_name},",
+                        "We received a request to reset your Agentira password. "
+                        "Use the button below to choose a new one."],
+            button_label="Reset password", button_url=link,
+            footnote="This link is valid for 1 hour. If you didn't request a reset, you can ignore this email.",
+        ),
     )
