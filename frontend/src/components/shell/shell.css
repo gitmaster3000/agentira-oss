@@ -73,7 +73,7 @@
     .shell-hamburger { display: inline-flex; }
     .shell-sidebar,
     .shell-sidebar.rc {
-        position: fixed;
+        position: fixed !important; /* beats the aside's inline position:relative */
         /* The preview banner (PreviewBanner) sets --app-top-offset; fixed
            overlays must clear it. */
         top: calc(12px + var(--app-top-offset, 0px));
