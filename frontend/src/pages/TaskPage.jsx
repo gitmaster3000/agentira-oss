@@ -151,6 +151,7 @@ export function TaskPage() {
     const [copiedField, setCopiedField] = useState(null);
     const [profiles, setProfiles] = useState([]);
     const [scheduling, setScheduling] = useState(false);
+    const [epics, setEpics] = useState([]);
 
     // Edit mode for the core task fields (title + description). Status,
     // priority and assignee stay inline-editable in the Plan tab.
@@ -200,6 +201,7 @@ export function TaskPage() {
                 setPrUrlValue(data.pr_url || '');
                 if (data.project_id) setCurrentProjectId(data.project_id);
                 api.getProjectMembers(data.project_id).then(setProfiles).catch(() => {});
+                api.getEpics(data.project_id).then(d => setEpics(Array.isArray(d) ? d : [])).catch(() => {});
                 const actData = await api.getActivity(taskId);
                 setActivities(actData);
                 const commitData = await api.listTaskCommits(taskId);
@@ -277,6 +279,17 @@ export function TaskPage() {
         if (task && val !== (task.pr_url || '')) {
             await api.updateTask(taskId, { pr_url: val });
             loadTask();
+        }
+    };
+
+    // Dropdown fields save on change when the page is not in edit mode.
+    const saveField = async (patch) => {
+        try {
+            if (patch.status !== undefined) await api.moveTask(taskId, patch.status);
+            else await api.updateTask(taskId, patch);
+            loadTask();
+        } catch (err) {
+            alert(err.message);
         }
     };
 
@@ -455,6 +468,8 @@ export function TaskPage() {
                     <PlanTab
                         task={task}
                         isEditing={isEditing}
+                        epics={epics}
+                        saveField={saveField}
                         formData={formData}
                         setFormData={setFormData}
                         profiles={profiles}
@@ -738,7 +753,7 @@ function CommentsSection({ user, comment, setComment, handleComment, activities,
 
 function PlanTab(props) {
     const {
-        task, isEditing, formData, setFormData, profiles, priorityColors, dodItems, newDodText, setNewDodText,
+        task, isEditing, epics, saveField, formData, setFormData, profiles, priorityColors, dodItems, newDodText, setNewDodText,
         toggleDodItem, addDodItem, removeDodItem, projectRepos,
         branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
         prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
@@ -808,72 +823,57 @@ function PlanTab(props) {
                     <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
                         <div>
                             <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
-                            {isEditing ? (
-                                <select
-                                    id="task-status"
-                                    aria-label="Status"
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
-                                    value={formData.status}
-                                    onChange={e => setFormData({ ...formData, status: e.target.value })}
-                                >
-                                    {STATUS_OPTIONS.map(s => (
-                                        <option key={s.value} value={s.value}>{s.label}</option>
-                                    ))}
-                                </select>
-                            ) : (
-                                <span className={`text-xs px-2.5 py-1 rounded font-bold uppercase tracking-wider
-                                    ${task.status === 'done' ? 'bg-green-500/20 text-green-400' : 'bg-accent-subtle text-accent-primary'}
-                                `}>
-                                    {task.status.replace('_', ' ')}
-                                </span>
-                            )}
+                            <select
+                                id="task-status"
+                                aria-label="Status"
+                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                value={isEditing ? formData.status : task.status}
+                                onChange={e => (isEditing
+                                    ? setFormData({ ...formData, status: e.target.value })
+                                    : saveField({ status: e.target.value }))}
+                            >
+                                {STATUS_OPTIONS.map(s => (
+                                    <option key={s.value} value={s.value}>{s.label}</option>
+                                ))}
+                            </select>
                         </div>
 
                         <div>
                             <label htmlFor="task-priority" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Priority</label>
-                            {isEditing ? (
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: priorityColors[isEditing ? formData.priority : task.priority] }} />
                                 <select
                                     id="task-priority"
                                     aria-label="Priority"
                                     className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full capitalize"
-                                    value={formData.priority}
-                                    onChange={e => setFormData({ ...formData, priority: e.target.value })}
+                                    value={isEditing ? formData.priority : task.priority}
+                                    onChange={e => (isEditing
+                                        ? setFormData({ ...formData, priority: e.target.value })
+                                        : saveField({ priority: e.target.value }))}
                                 >
                                     {PRIORITY_OPTIONS.map(p => (
                                         <option key={p} value={p}>{p}</option>
                                     ))}
                                 </select>
-                            ) : (
-                                <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priorityColors[task.priority] }} />
-                                    <span className="text-sm text-text-secondary capitalize">{task.priority}</span>
-                                </div>
-                            )}
+                            </div>
                         </div>
 
                         <div>
                             <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
-                            {isEditing ? (
-                                <select
-                                    id="task-assignee"
-                                    aria-label="Assignee"
-                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
-                                    value={formData.assignee}
-                                    onChange={e => setFormData({ ...formData, assignee: e.target.value })}
-                                >
-                                    <option value="">Unassigned</option>
-                                    {profiles.map(p => (
-                                        <option key={p.id} value={p.name}>{p.display_name}</option>
-                                    ))}
-                                </select>
-                            ) : (
-                                <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
-                                        {task.assignee ? task.assignee[0].toUpperCase() : '?'}
-                                    </div>
-                                    <span className="text-sm text-text-secondary">{task.assignee || 'Unassigned'}</span>
-                                </div>
-                            )}
+                            <select
+                                id="task-assignee"
+                                aria-label="Assignee"
+                                className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                value={isEditing ? formData.assignee : (task.assignee || '')}
+                                onChange={e => (isEditing
+                                    ? setFormData({ ...formData, assignee: e.target.value })
+                                    : saveField({ assignee: e.target.value }))}
+                            >
+                                <option value="">Unassigned</option>
+                                {profiles.map(p => (
+                                    <option key={p.id} value={p.name}>{p.display_name}</option>
+                                ))}
+                            </select>
                         </div>
 
                         <div>
@@ -902,26 +902,25 @@ function PlanTab(props) {
                         </div>
 
                         <div>
-                            <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Epic</label>
-                            {task.epic_name ? (
-                                task.epic_id ? (
-                                    <Link
-                                        to={ROUTES.STUDIO_EPIC(task.epic_id)}
-                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider hover:underline"
-                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                                        title={`Open epic: ${task.epic_name}`}
-                                    >
-                                        {task.epic_name}
-                                    </Link>
-                                ) : (
-                                    <span
-                                        className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider"
-                                        style={{ backgroundColor: `${task.epic_color || '#7c4dff'}20`, color: task.epic_color || '#7c4dff' }}
-                                    >
-                                        {task.epic_name}
-                                    </span>
-                                )
-                            ) : <span className="text-xs text-text-tertiary italic">None</span>}
+                            <label htmlFor="task-epic" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Epic</label>
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: task.epic_id ? (task.epic_color || '#7c4dff') : 'transparent' }} />
+                                <select
+                                    id="task-epic"
+                                    aria-label="Epic"
+                                    className="bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded-lg w-full"
+                                    value={task.epic_id || ''}
+                                    onChange={e => saveField({ epic_id: e.target.value })}
+                                >
+                                    <option value="">No epic</option>
+                                    {epics.map(ep => <option key={ep.id} value={ep.id}>{ep.title}</option>)}
+                                </select>
+                            </div>
+                            {task.epic_id && (
+                                <Link to={ROUTES.STUDIO_EPIC(task.epic_id)} className="text-[10px] text-text-tertiary hover:underline mt-1 inline-block">
+                                    Open epic
+                                </Link>
+                            )}
                         </div>
 
                         {projectRepos.length > 0 && (

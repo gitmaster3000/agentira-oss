@@ -9,7 +9,8 @@ vi.mock('../api', () => ({
     api: {
         getTask: vi.fn(),
         getActivity: vi.fn(() => Promise.resolve([])),
-        getProjectMembers: vi.fn(() => Promise.resolve([])),
+        getProjectMembers: vi.fn(() => Promise.resolve([{ id: 'u1', name: 'alice', display_name: 'Alice' }])),
+        getEpics: vi.fn(() => Promise.resolve([{ id: 'E1', title: 'Epic One' }])),
         listTaskCommits: vi.fn(() => Promise.resolve([])),
         listProjectRepos: vi.fn(() => Promise.resolve([])),
         listAttachments: vi.fn(() => Promise.resolve([])),
@@ -168,6 +169,21 @@ describe('TaskPage — detail view (AP-353)', () => {
             screen.getByTestId('task-overview-section')
                 .compareDocumentPosition(collaboration) & Node.DOCUMENT_POSITION_FOLLOWING,
         ).toBeTruthy();
+    });
+
+    it('saves dropdown fields immediately outside edit mode', async () => {
+        renderTaskPage();
+        await screen.findByText('My task');
+        api.updateTask.mockClear();
+
+        fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'alice' } });
+        expect(api.updateTask).toHaveBeenCalledWith('T1', { assignee: 'alice' });
+        fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'high' } });
+        expect(api.updateTask).toHaveBeenCalledWith('T1', { priority: 'high' });
+        fireEvent.change(screen.getByLabelText('Epic'), { target: { value: 'E1' } });
+        expect(api.updateTask).toHaveBeenCalledWith('T1', { epic_id: 'E1' });
+        fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'in_progress' } });
+        expect(api.moveTask).toHaveBeenCalledWith('T1', 'in_progress');
     });
 
     it('exposes an Edit affordance and reveals editable core + detail fields', async () => {
