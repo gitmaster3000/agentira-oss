@@ -44,13 +44,12 @@ const RUNS = [
     { id: 'r2', project_id: 'p1' },
 ];
 
-function mountSidebar(props = {}, entry = '/studio') {
+function mountSidebar(props = {}) {
     return render(
-        <MemoryRouter initialEntries={[entry]}>
+        <MemoryRouter initialEntries={['/studio']}>
             <ShellDataProvider>
                 <Routes>
                     <Route path="/studio" element={<AppSidebar railOpen onToggleRail={() => {}} {...props} />} />
-                    <Route path="/studio/project/:projectId/board" element={<><AppSidebar railOpen onToggleRail={() => {}} {...props} /><div>BOARD</div></>} />
                     <Route path="/forge/runs" element={<div>RUNS PAGE</div>} />
                 </Routes>
             </ShellDataProvider>
@@ -85,66 +84,22 @@ describe('AppSidebar — collapsible rail', () => {
         mountSidebar();
 
         const labels = ['Home', 'Inbox', 'My Work', 'Chat', 'Agents', 'Runs', 'Conductor',
-            'Agent Runtimes', 'MCP Servers', 'New project'];
+            'Agent Runtimes', 'MCP Servers'];
         for (const l of labels) expect(screen.getByText(l)).toBeInTheDocument();
 
         expect(screen.getByText('BUILD')).toBeInTheDocument();
-        expect(screen.getByText('PROJECTS')).toBeInTheDocument();
     });
 
-    it('drops the per-project sub-nav (now header tabs)', () => {
+    it('has no PROJECTS section or project sub-nav (project switcher lives in the top bar)', async () => {
         mountSidebar();
+        await screen.findByText('Runs');
+        expect(screen.queryByText('PROJECT')).not.toBeInTheDocument();
+        expect(screen.queryByText('PROJECTS')).not.toBeInTheDocument();
+        expect(screen.queryByTitle('Atlas')).not.toBeInTheDocument();
+        expect(screen.queryByText('New project')).not.toBeInTheDocument();
         for (const l of ['Overview', 'Board', 'Backlog', 'Roadmap', 'Workflow', 'Deploy']) {
             expect(screen.queryByText(l)).not.toBeInTheDocument();
         }
-    });
-
-    it('highlights no project on non-project pages like Home', async () => {
-        mountSidebar();
-        expect((await screen.findByTitle('Atlas')).style.fontWeight).not.toBe('600');
-        expect(screen.getByTitle('Beacon').style.fontWeight).not.toBe('600');
-    });
-
-    it('lists projects with the active one highlighted and a live dot for running runs', async () => {
-        mountSidebar({}, '/studio/project/p1/board');
-        const atlas = await screen.findByTitle('Atlas');
-        expect(atlas.style.fontWeight).toBe('600');
-        expect(screen.getByTitle('Beacon').style.fontWeight).not.toBe('600');
-        await waitFor(() => expect(within(screen.getByTitle('Atlas')).getByText('2')).toBeInTheDocument());
-        expect(within(screen.getByTitle('Beacon')).queryByText('2')).toBeNull();
-    });
-
-    it('opens a project board on click', async () => {
-        mountSidebar();
-        fireEvent.click(await screen.findByTitle('Beacon'));
-        expect(await screen.findByText('BOARD')).toBeInTheDocument();
-    });
-
-    it('caps the list at 5 (active first), expands via Show all, and remembers it', async () => {
-        const many = Array.from({ length: 8 }, (_, i) => ({ id: `q${i}`, name: `Proj${i}`, key_prefix: i === 0 ? 'ZZ' : undefined }));
-        api.getProjects.mockResolvedValue(many);
-        localStorage.clear();
-        mountSidebar({}, '/studio/project/q7/board');
-        expect(await screen.findByTitle('Proj7')).toBeInTheDocument();
-        expect(screen.getByTitle('Proj7').style.fontWeight).toBe('600');
-        expect(screen.queryByTitle('Proj5')).toBeNull();
-        expect(screen.getByTitle('Proj3')).toBeInTheDocument();
-        expect(screen.queryByTitle('Proj4')).toBeNull();
-        expect(screen.getByText('ZZ')).toBeInTheDocument();
-        expect(screen.getAllByText('PRO').length).toBeGreaterThan(0);
-
-        fireEvent.click(screen.getByTitle('Show all (8)'));
-        expect(screen.getByTitle('Proj5')).toBeInTheDocument();
-        expect(localStorage.getItem('agentira.sidebarAllProjects')).toBe('true');
-        expect(screen.getByTitle('New project')).toBeInTheDocument();
-        localStorage.clear();
-    });
-
-    it('calls onNewProject from the + New project row', () => {
-        const onNewProject = vi.fn();
-        mountSidebar({ onNewProject });
-        fireEvent.click(screen.getByTitle('New project'));
-        expect(onNewProject).toHaveBeenCalledTimes(1);
     });
 
     it('is 248px wide and un-collapsed when railOpen is true', () => {
