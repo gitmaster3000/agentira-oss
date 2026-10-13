@@ -109,6 +109,7 @@ export const api = {
     },
     // Admin: create a member invite for the caller's org.
     listInvites: () => request('/invites'),
+    cancelInvite: (id) => request(`/invites/${id}`, { method: 'DELETE' }),
     createInvite: (email) => request('/invites', { method: 'POST', body: JSON.stringify(email ? { email } : {}) }),
 
     // Admin: approve a daemon browser-login (device code).

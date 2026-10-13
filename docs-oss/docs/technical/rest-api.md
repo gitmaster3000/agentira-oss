@@ -36,7 +36,7 @@ Two mechanisms:
 | `/api/attachments` | File attachments |
 | `/api/profiles` | Accounts and profiles |
 | `/api/notifications` | Notification inbox |
-| `/api/invites` | Invite minting and redemption |
+| `/api/invites` | Invite minting, cancelling (`DELETE /api/invites/{id}`) and redemption |
 | `/api/service-accounts` | API-key identities |
 | `/api/webhooks` | Outbound webhook configuration |
 | `/api/forge/*` | Agents, runs, conversations, dispatch |

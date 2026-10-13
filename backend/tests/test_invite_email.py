@@ -89,3 +89,43 @@ def test_list_invites_shows_status(client, monkeypatch):
     assert by_email["old@x.io"]["status"] == "expired"
     assert by_email["done@x.io"]["status"] == "accepted"
     assert "code" not in by_email["done@x.io"]
+
+
+def _invite_id(client, email):
+    return next(i["id"] for i in client.get("/api/invites").json() if i["email"] == email)
+
+
+def test_cancel_pending_invite_removes_it_and_voids_link(client, monkeypatch):
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    code = client.post("/api/invites", json={"email": "gone@x.io"}).json()["code"]
+    r = client.delete(f"/api/invites/{_invite_id(client, 'gone@x.io')}")
+    assert r.status_code == 200
+    assert all(i["email"] != "gone@x.io" for i in client.get("/api/invites").json())
+    assert client.get(f"/api/auth/invites/{code}").status_code == 404
+
+
+def test_cancel_unknown_invite_404(client):
+    assert client.delete("/api/invites/nope").status_code == 404
+
+
+def test_cannot_cancel_accepted_invite(client, monkeypatch):
+    from backend import services
+    from backend.db import privileged, SessionLocal
+    from backend.models import Invite
+
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    code = client.post("/api/invites", json={"email": "done@x.io"}).json()["code"]
+    with privileged(), SessionLocal() as db:
+        db.query(Invite).filter(Invite.code == code).one().accepted_at = services._utcnow()
+        db.commit()
+    assert client.delete(f"/api/invites/{_invite_id(client, 'done@x.io')}").status_code == 409
+
+
+def test_cannot_cancel_other_orgs_invite(client, monkeypatch):
+    from backend import services
+    inv = services.create_invite(role="admin", org_id=None, email="other@x.io")
+    from backend.db import privileged, SessionLocal
+    from backend.models import Invite
+    with privileged(), SessionLocal() as db:
+        iid = db.query(Invite).filter(Invite.code == inv["code"]).one().id
+    assert client.delete(f"/api/invites/{iid}").status_code == 404
