@@ -5,6 +5,8 @@
 /** @typedef {import('./agentira.types').Run} Run */
 /** @typedef {import('./agentira.types').Notification} Notification */
 
+import { recordApi } from './telemetry';
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 const IS_PREVIEW = Boolean(import.meta.env.VITE_PREVIEW_PR);
@@ -71,10 +73,19 @@ async function _send(endpoint, options) {
         headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const res = await fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        headers,
-    });
+    const method = (options.method || 'GET').toUpperCase();
+    const started = performance.now();
+    let res;
+    try {
+        res = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers,
+        });
+    } catch (e) {
+        recordApi(method, endpoint, 0, performance.now() - started);
+        throw e;
+    }
+    recordApi(method, endpoint, res.status, performance.now() - started);
 
     if (res.status === 401) {
         // Token expired or invalid — force re-login

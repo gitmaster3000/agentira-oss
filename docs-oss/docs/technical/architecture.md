@@ -152,6 +152,11 @@ Dispatch is at-least-once, not fire-and-forget:
 
 React 18, Vite 6, TailwindCSS, React Router. Built to a static bundle and served by nginx, which proxies the API using addresses substituted at container start.
 
+- **One request path.** Every API call goes through `request()` in `frontend/src/api.js`. Identical GETs fired at the same time share one network call, and a result is reused for 2 seconds (each caller gets its own copy). Any write clears that reuse, so reads after a save are fresh. Components can fetch what they need without multiplying round trips — which matter most for users far from the server.
+- **Shared shell data.** Projects, running/waiting runs and notifications are polled once (every 30s) by `ShellDataProvider` (`components/shell/shellData.jsx`); the sidebar, topbar bell and Pulse read from it instead of polling themselves.
+- **Telemetry.** `frontend/src/telemetry.js` reports crashes, slow interactions, freezes, API timings and page loads to the backend log; an error boundary replaces a crashed page with a reload screen. See [Browser telemetry](client-telemetry.md).
+- **Backend bind.** In production the backend listens dual-stack (IPv6 + IPv4): Railway's private network resolves services to IPv6 first.
+
 ## Design rules
 
 Four rules shape the codebase. They are enforced in review.

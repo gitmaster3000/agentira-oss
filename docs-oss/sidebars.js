@@ -83,6 +83,7 @@ const sidebars = {
         'technical/self-hosting',
         'technical/deployment',
         'technical/configuration',
+        'technical/client-telemetry',
       ],
     },
   ],
