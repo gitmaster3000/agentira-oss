@@ -126,14 +126,14 @@ function FilterDropdown({ label, value, options, onChange }) {
 }
 
 // Project tabs — replace the old PROJECT section of the sidebar. Calendar,
-// Epics and Reports have no page yet, so they render disabled.
+// Epics have pages; Reports has none yet, so it renders disabled.
 const PROJECT_TABS = [
     { label: 'Overview', leaf: 'overview' },
     { label: 'Backlog', leaf: 'backlog' },
     { label: 'Board', leaf: 'board' },
     { label: 'Roadmap', leaf: 'roadmap' },
-    { label: 'Calendar' },
-    { label: 'Epics' },
+    { label: 'Calendar', leaf: 'calendar' },
+    { label: 'Epics', leaf: 'epics' },
     { label: 'Reports' },
     { label: 'Workflow', leaf: 'workflow' },
     { label: 'Deploy', leaf: 'deploy' },

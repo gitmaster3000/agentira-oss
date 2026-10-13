@@ -468,7 +468,7 @@ function TimelineStrip({ epics, milestones = [], rangeStart = null, rangeEnd = n
     );
 }
 
-export function RoadmapView({ projectId: projectIdProp }) {
+export function RoadmapView({ projectId: projectIdProp, calendarOnly = false }) {
     const outletContext = useOutletContext() || {};
     const { requestSelectTask } = outletContext;
     const { projectId: projectIdParam } = useParams();
@@ -478,7 +478,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
     const [error, setError] = useState(null);
     const [groupBy, setGroupBy] = useState('epic');
     const [view, setView] = useState('schedule');
-    const [scheduleMode, setScheduleMode] = useState('timeline');
+    const [scheduleMode, setScheduleMode] = useState(calendarOnly ? 'month' : 'timeline');
     // AP-501: filter the plan by due date so owners can focus overdue / this week.
     const [dueFilter, setDueFilter] = useState('all');
     const [[rangeStart, rangeEnd], setScheduleRange] = useState([null, null]);
@@ -578,7 +578,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
             <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                 <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
                     <CalendarDays className="w-5 h-5 text-text-tertiary" />
-                    Roadmap — {data?.project?.name}
+                    {calendarOnly ? 'Calendar' : `Roadmap — ${data?.project?.name}`}
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
                     <label htmlFor="roadmap-due-filter" className="text-xs text-text-secondary sr-only">
@@ -613,7 +613,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
             </div>
 
             {/* View switcher — distinct planning questions, not display scales. */}
-            <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit">
+            {!calendarOnly && <div className="flex bg-bg-panel p-1 rounded-lg border border-border-subtle w-fit">
                 {VIEWS.map(({ key, label, icon: Icon }) => (
                     <button
                         key={key}
@@ -626,7 +626,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                         {label}
                     </button>
                 ))}
-            </div>
+            </div>}
 
             {/* Summary */}
             <SummaryBar summary={data.summary} groupBy={groupBy} />
@@ -671,7 +671,7 @@ export function RoadmapView({ projectId: projectIdProp }) {
                                 aria-label="Schedule display"
                                 role="group"
                             >
-                                {SCHEDULE_MODES.map(({ key, label }) => (
+                                {SCHEDULE_MODES.filter(m => !calendarOnly || m.key !== 'timeline').map(({ key, label }) => (
                                     <button
                                         key={key}
                                         type="button"
