@@ -11,6 +11,7 @@ vi.mock('../api', () => ({
         createEpic: vi.fn(),
         getProjectMembers: vi.fn(() => Promise.resolve([])),
         getEpics: vi.fn(() => Promise.resolve([])),
+        getProject: vi.fn(() => Promise.resolve({ id: 'P1', name: 'Acme Board' })),
         uploadAttachment: vi.fn(),
         listTasks: vi.fn(() => Promise.resolve([
             { id: 'T7', key: 'AP-7', title: 'Auth setup', tags: ['frontend', 'urgent'] },
@@ -36,6 +37,12 @@ function renderModal(props = {}) {
 
 describe('CreateTaskModal', () => {
     beforeEach(() => vi.clearAllMocks());
+
+    it('shows the project name in the header', async () => {
+        renderModal();
+        expect(await screen.findByText('in Acme Board')).toBeInTheDocument();
+        expect(api.getProject).toHaveBeenCalledWith('P1');
+    });
 
     it('navigates to the new task detail page (by key) after creation', async () => {
         api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-9' });
