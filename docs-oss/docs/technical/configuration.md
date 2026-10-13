@@ -121,3 +121,5 @@ These are gated on `AGENTIRA_ENV=dev` and do nothing elsewhere.
 | `SMTP_FROM` | Sender address |
 
 With these set, Agentira emails a welcome message on signup, password-reset links, and invite links (Settings → Members → Invite, when an email address is entered). Without `SMTP_HOST`, emails are skipped and the invite link is shown for manual sharing.
+
+In Settings → Members → Invite, the admin sees whether the email was sent, not sent because email is not set up, or failed; the invite link is always shown for manual sharing. Sent invites are listed under Members with their status (Pending, Accepted, Expired).

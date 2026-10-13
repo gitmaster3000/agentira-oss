@@ -32,6 +32,10 @@ def _cfg() -> dict | None:
     }
 
 
+def is_configured() -> bool:
+    return _cfg() is not None
+
+
 def app_base_url() -> str:
     return os.getenv("APP_BASE_URL", "http://localhost:8111").rstrip("/")
 
