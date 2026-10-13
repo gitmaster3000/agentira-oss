@@ -5,6 +5,9 @@ COPY package.json package-lock.json* ./
 RUN npm ci
 
 COPY . .
+# Railway passes the deployed commit; telemetry tags every event with it.
+ARG RAILWAY_GIT_COMMIT_SHA=local
+ENV VITE_RELEASE=$RAILWAY_GIT_COMMIT_SHA
 RUN npm run build
 
 FROM nginx:alpine

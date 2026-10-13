@@ -776,3 +776,19 @@ class TaskDependency(Base):
                                            nullable=False, index=True)
     creator: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class ClientDebugSession(Base):
+    """Debug-level browser telemetry switched on for one user for a while —
+    by an admin, or automatically when info-level telemetry shows trouble.
+    See backend/client_telemetry.py."""
+    __tablename__ = "client_debug_sessions"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(String(12), ForeignKey("orgs.id"), nullable=False, index=True)
+    profile_name: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="debug")
+    until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
