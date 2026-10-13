@@ -5,7 +5,8 @@ import { ROUTES } from '../routes';
 import { useNavigate } from 'react-router-dom';
 import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, RefreshCw, Cog, X } from 'lucide-react';
 import { AppearanceSettings } from '../components/settings/AppearanceSettings';
-import { UserAvatar, CartoonFace, PRESET_COUNT, presetValue, resizeImageToDataUrl } from '../components/UserAvatar';
+import { UserAvatar } from '../components/UserAvatar';
+import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
@@ -418,6 +419,7 @@ export function Settings() {
     const [displayName, setDisplayName] = useState('');
     const [profileEmail, setProfileEmail] = useState('');
     const [avatarDraft, setAvatarDraft] = useState('');
+    const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
     const [profileSaving, setProfileSaving] = useState(false);
     const [profileMsg, setProfileMsg] = useState('');
 
@@ -483,14 +485,6 @@ export function Settings() {
         displayName !== (me.display_name || '') || profileEmail !== (me.email || '')
         || avatarDraft !== (me.avatar_url || '')
     );
-
-    async function pickAvatarFile(e) {
-        const file = e.target.files?.[0];
-        e.target.value = '';
-        if (!file) return;
-        try { setAvatarDraft(await resizeImageToDataUrl(file)); setProfileMsg(''); }
-        catch (err) { setProfileMsg(err.message); }
-    }
 
     async function saveProfile() {
         const patch = {};
@@ -725,32 +719,17 @@ export function Settings() {
                         <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 18px', color: 'var(--text-primary)' }}>My profile</h2>
 
                         {/* Avatar row */}
-                        <div style={{ marginBottom: 22 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
-                                <UserAvatar profile={{ ...me, avatar_url: avatarDraft }} size={54} />
-                                <label style={{ fontSize: 12.5, color: 'var(--accent-primary)', cursor: 'pointer' }}>
-                                    Upload a picture
-                                    <input type="file" accept="image/*" data-testid="avatar-upload" style={{ display: 'none' }} onChange={pickAvatarFile} />
-                                </label>
-                                {avatarDraft && (
-                                    <button type="button" onClick={() => setAvatarDraft('')}
-                                        style={{ fontSize: 12.5, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}>
-                                        Use default
-                                    </button>
-                                )}
-                            </div>
-                            <FL>Or pick a character</FL>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                {Array.from({ length: PRESET_COUNT }, (_, i) => (
-                                    <button key={i} type="button" aria-label={`Avatar ${i + 1}`} aria-pressed={avatarDraft === presetValue(i)}
-                                        onClick={() => setAvatarDraft(presetValue(i))}
-                                        style={{ padding: 0, borderRadius: '50%', overflow: 'hidden', cursor: 'pointer', lineHeight: 0,
-                                            border: avatarDraft === presetValue(i) ? '2px solid var(--accent-primary)' : '2px solid transparent' }}>
-                                        <CartoonFace index={i} size={34} />
-                                    </button>
-                                ))}
-                            </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
+                            <UserAvatar profile={{ ...me, avatar_url: avatarDraft }} size={54} />
+                            <button type="button" onClick={() => setAvatarPickerOpen(true)}
+                                style={{ fontSize: 12.5, color: 'var(--accent-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                                Change picture
+                            </button>
                         </div>
+                        {avatarPickerOpen && (
+                            <AvatarPickerDialog value={avatarDraft} onClose={() => setAvatarPickerOpen(false)}
+                                onSelect={(v) => { setAvatarDraft(v); setProfileMsg(''); setAvatarPickerOpen(false); }} />
+                        )}
 
                         {/* Display name */}
                         <div style={{ marginBottom: 14 }}>
