@@ -124,6 +124,6 @@ describe('TaskPage — full detail view bugs', () => {
 
         fireEvent(window, new CustomEvent('open-create-task'));
 
-        expect(await screen.findByRole('heading', { name: 'New Task' })).toBeInTheDocument();
+        expect(await screen.findByRole('heading', { name: 'New task' })).toBeInTheDocument();
     });
 });

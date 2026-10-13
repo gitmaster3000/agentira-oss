@@ -74,7 +74,7 @@ describe('CreateTaskModal', () => {
 
         const titleInput = (await screen.findAllByRole('textbox'))[0];
         fireEvent.change(titleInput, { target: { value: 'Build it' } });
-        fireEvent.click(screen.getByRole('button', { name: /create task/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^create$/i }));
 
         await waitFor(() => expect(screen.getByText('TASK DETAIL')).toBeInTheDocument());
         expect(api.createTask).toHaveBeenCalledWith(
