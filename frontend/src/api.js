@@ -29,7 +29,39 @@ function extractError(err, status) {
     return `Request failed (${status})`;
 }
 
-export async function request(endpoint, options = {}) {
+// GET de-duplication. Several components on one screen ask for the same data
+// (project layout + overview + sidebar), so identical GETs share one in-flight
+// request and a result reused for a couple of seconds. Every caller gets its
+// own copy, so mutating a result never leaks into another component. Any
+// write (POST/PUT/PATCH/DELETE) clears the cache so reads after it are fresh.
+const GET_REUSE_MS = 2000;
+const _getCache = new Map(); // key -> { promise, at }
+
+export function clearRequestCache() {
+    _getCache.clear();
+}
+
+const _copy = (v) => (v === null || typeof v !== 'object' ? v : structuredClone(v));
+
+export function request(endpoint, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET') {
+        _getCache.clear();
+        return _send(endpoint, options);
+    }
+    const key = `${getToken()} ${endpoint}`;
+    const hit = _getCache.get(key);
+    if (hit && Date.now() - hit.at < GET_REUSE_MS) return hit.promise.then(_copy);
+    const promise = _send(endpoint, options);
+    const entry = { promise, at: Date.now() };
+    _getCache.set(key, entry);
+    // Failures are never reused; settled results age out by `at`.
+    promise.catch(() => { if (_getCache.get(key) === entry) _getCache.delete(key); });
+    promise.then(() => { entry.at = Date.now(); }, () => {});
+    return promise.then(_copy);
+}
+
+async function _send(endpoint, options) {
     const token = getToken();
     const headers = {
         'Content-Type': 'application/json',
