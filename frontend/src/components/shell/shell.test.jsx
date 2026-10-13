@@ -17,6 +17,7 @@ vi.mock('../../api', () => ({
     api: {
         getProjects: vi.fn(),
         getNotifications: vi.fn(),
+        search: vi.fn(),
         markNotificationRead: vi.fn(),
         forge: { listAgents: vi.fn(), listRuns: vi.fn() },
     },
@@ -63,6 +64,7 @@ function mountTopbar(props = {}) {
                 <Routes>
                     <Route path="/studio" element={<AppTopbar {...props} />} />
                     <Route path="/studio/project/:projectId/board" element={<div>BOARD</div>} />
+                    <Route path="/studio/tasks/:taskId" element={<div>TASK PAGE</div>} />
                 </Routes>
             </ShellDataProvider>
         </MemoryRouter>,
@@ -163,8 +165,33 @@ describe('AppTopbar — blended bar', () => {
         mountTopbar();
         expect(screen.getByText('Agentira')).toBeInTheDocument();
         expect(screen.queryByText('Acme Inc')).not.toBeInTheDocument();
-        expect(screen.getByText('Search or jump…')).toBeInTheDocument();
+        expect(screen.getByPlaceholderText('Search or jump…')).toBeInTheDocument();
         expect(screen.getByText('⌘K')).toBeInTheDocument();
+    });
+
+    it('searches as you type, groups results, and navigates on click', async () => {
+        api.search.mockResolvedValue({
+            tasks: [{ id: 't1', key: 'AP-1', title: 'Fix login loop', status: 'Todo', project_id: 'p2', project_name: 'Beacon' }],
+            epics: [], projects: [], agents: [],
+        });
+        mountTopbar();
+        const input = screen.getByPlaceholderText('Search or jump…');
+        fireEvent.focus(input);
+        fireEvent.change(input, { target: { value: 'login' } });
+        await waitFor(() => expect(api.search).toHaveBeenCalledWith('login'));
+        expect(await screen.findByText('TASKS')).toBeInTheDocument();
+        expect(screen.getByText('AP-1 · Beacon')).toBeInTheDocument();
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(await screen.findByText('TASK PAGE')).toBeInTheDocument();
+    });
+
+    it('shows a no-results message', async () => {
+        api.search.mockResolvedValue({ tasks: [], epics: [], projects: [], agents: [] });
+        mountTopbar();
+        const input = screen.getByPlaceholderText('Search or jump…');
+        fireEvent.focus(input);
+        fireEvent.change(input, { target: { value: 'zzzq' } });
+        expect(await screen.findByText('No matches for “zzzq”.')).toBeInTheDocument();
     });
 
     it('hosts the project switcher (moved out of the sidebar) and shows the active project', async () => {
