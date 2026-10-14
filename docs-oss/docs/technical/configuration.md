@@ -68,6 +68,7 @@ Evidence providers need GitHub App credentials. Without them, `github_pr`, `ci`,
 | `FORGE_LIMIT_BACKOFF_S` | Usage limit with no reset time: wait after each further hit (default 3600) |
 | `FORGE_LIMIT_RESET_GRACE_S` | Added to a parsed reset time before resuming (default 60) |
 | `FORGE_LIMIT_MAX_PAUSES` | Consecutive limit pauses before the run fails for real (default 48) |
+| `FORGE_RESTART_MAX_RESUMES` | Times the reconciler relaunches a run (same session) after its daemon/backend restarted, before failing and notifying admins (default 3) |
 
 An agent may set `{"fallback_model": "<id>"}` in its `config_json`; a run that hits a usage limit then resumes at once on that model (same runtime). None by default.
 
