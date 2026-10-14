@@ -2,68 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { api } from '../../api';
 import { useAuth } from '../../context/AuthContext';
-import { useCurrentProjectId, setCurrentProjectId } from '../../currentProject';
+import { useCurrentProjectId } from '../../currentProject';
 import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
 import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
-// Exact port of the Agentira.dc.html top bar: blended into the canvas (no card
-// chrome), holding the logo lockup, the project switcher (moved out of the
-// sidebar), the breadcrumb, the search pill, and the right-hand controls.
-// Work | Build switch, global New menu, breadcrumb and bell are wired to real
-// data / real actions — no prototype mock rows. The "N running" pulse pill
-// only shows in Build; Work has no sidebar.
-
-const crumbSeg = (txt, dim) => (
-    <span style={{ color: dim ? 'var(--text-muted)' : 'var(--text-primary)', fontWeight: dim ? 400 : 600 }}>{txt}</span>
-);
-const Chev = () => (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-muted)' }} strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
-);
-
-// Derive a real breadcrumb from the current route + active project name.
-function useBreadcrumb(activeProjectName) {
-    const path = useLocation().pathname;
-    const seg = (leaf) => {
-        const map = {
-            board: 'Board', backlog: 'Backlog', roadmap: 'Roadmap',
-            overview: 'Overview', settings: 'Settings', workflow: 'Workflow',
-            deploy: 'Deploy',
-        };
-        return map[leaf];
-    };
-    if (path === '/studio' || path === '/') return [crumbSeg('Home')];
-    if (path.startsWith('/studio/settings')) return [crumbSeg('Settings')];
-    if (path.startsWith('/studio/project/')) {
-        const leaf = path.split('/').pop();
-        const label = seg(leaf) || 'Project';
-        // The workflow page nests deeper than the board — lead with a "Project"
-        // segment so it reads Project → {name} → Workflow.
-        if (leaf === 'workflow') {
-            return [crumbSeg('Project', true), <Chev key="c0" />, crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg(label)];
-        }
-        return [crumbSeg('Home', true), <Chev key="c0" />, crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg(label)];
-    }
-    if (path.startsWith('/studio/tasks/')) return [crumbSeg(activeProjectName || 'Project', true), <Chev key="c" />, crumbSeg('Board', true), <Chev key="c2" />, crumbSeg('Task')];
-    if (path.startsWith('/forge/agents')) return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Agents')];
-    if (path.startsWith('/forge/runs')) return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Runs')];
-    if (path.startsWith('/forge/conductor')) return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Conductor')];
-    if (path.startsWith('/forge/runtimes')) return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Runtimes')];
-    if (path.startsWith('/forge/settings')) return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Build Settings')];
-    if (path === '/forge') return [crumbSeg('Build', true), <Chev key="c" />, crumbSeg('Overview')];
-    return [crumbSeg('Home')];
-}
-
-const liveDot = (n) => (
-    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-        <span style={{ position: 'relative', display: 'inline-flex' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--pulse-blue)' }} />
-            <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--pulse-blue)', animation: 'livedot 1.8s ease-out infinite' }} />
-        </span>
-        <span style={{ fontSize: '10px', color: 'var(--pulse-blue)', fontWeight: 600 }}>{n}</span>
-    </span>
-);
-
+// Top bar per home-dashboard.html: logo, Work | Build, spacer, search, New,
+// bell, avatar. Project identity lives in the page header, not here.
 const NEW_ITEMS = [
     { kind: 'task', title: 'Task', sub: 'File work on the board', tint: 'rgba(128,203,196,.14)', stroke: 'var(--brand-teal)', icon: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></> },
     { kind: 'project', title: 'Project', sub: 'Guided 5-step wizard', tint: 'rgba(201,184,255,.14)', stroke: 'var(--brand-lavender)', icon: <path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18" /> },
@@ -85,26 +30,21 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
     const { user } = useAuth();
     const { projectId: urlProjectId } = useParams();
     const storedProjectId = useCurrentProjectId();
-    const { projects, runningByProject, runningTotal, pulseOpen, togglePulse, recentNotifs: notifs, markNotifRead } = useShellData();
+    const { projects, recentNotifs: notifs, markNotifRead } = useShellData();
     const activeProjectId = urlProjectId || storedProjectId;
     const activeProject = projects.find((p) => p.id === activeProjectId) || projects[0] || null;
-    const crumb = useBreadcrumb(activeProject?.name);
 
-    const [projMenuOpen, setProjMenuOpen] = useState(false);
     const [newOpen, setNewOpen] = useState(false);
     const [bellOpen, setBellOpen] = useState(false);
     const [userOpen, setUserOpen] = useState(false);
-    const projRef = useRef(null);
     const newRef = useRef(null);
     const bellRef = useRef(null);
     const userRef = useRef(null);
 
     const unread = notifs.filter((n) => !n.read).length;
-    const activeLive = activeProject ? runningByProject[activeProject.id] || 0 : 0;
 
     useEffect(() => {
         const onDown = (e) => {
-            if (projRef.current && !projRef.current.contains(e.target)) setProjMenuOpen(false);
             if (newRef.current && !newRef.current.contains(e.target)) setNewOpen(false);
             if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false);
             if (userRef.current && !userRef.current.contains(e.target)) setUserOpen(false);
@@ -112,12 +52,6 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
         document.addEventListener('mousedown', onDown);
         return () => document.removeEventListener('mousedown', onDown);
     }, []);
-
-    const selectProject = (p) => {
-        setCurrentProjectId(p.id);
-        setProjMenuOpen(false);
-        navigate(`/studio/project/${p.id}/board`);
-    };
 
     const onNotifClick = async (n) => {
         try {
@@ -161,7 +95,7 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
     );
 
     return (
-        <header style={{ flexShrink: 0, height: '40px', display: 'flex', alignItems: 'center', gap: '12px', padding: '0 6px 0 2px', fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
+        <header className="shell-topbar" style={{ flexShrink: 0, height: '40px', display: 'flex', alignItems: 'center', gap: '12px', padding: 0, fontFamily: 'var(--font-sans)', WebkitFontSmoothing: 'antialiased' }}>
             {/* Hamburger — opens the off-canvas rail. CSS hides it on desktop. */}
             {isBuild && <button onClick={onMenu} className="shell-hamburger" title="Menu" aria-label="Open navigation"
                 style={{ background: 'none', border: 'none', padding: '6px', color: 'var(--text-tertiary)', cursor: 'pointer', alignItems: 'center', flexShrink: 0 }}>
@@ -182,72 +116,12 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                 <button onClick={() => navigate('/forge')} aria-pressed={isBuild} style={SWITCH_BTN(isBuild)}>Build</button>
             </div>
 
-            {/* Project switcher — only inside a project. */}
-            {inProject && <span className="shell-hide-sm" style={{ width: '1px', height: '20px', background: 'var(--overlay-line)', flexShrink: 0 }} />}
-            {inProject && <div className="shell-hide-sm" style={{ display: 'flex', alignItems: 'center', gap: '9px', flexShrink: 0 }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.12em', color: 'var(--text-muted)', flexShrink: 0 }}>PROJECT</span>
-                <div style={{ position: 'relative', flexShrink: 0 }} ref={projRef}>
-                    <div className="hoverline" onClick={() => setProjMenuOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '10px', cursor: 'pointer', background: 'var(--overlay-tint-soft)', border: '1px solid var(--overlay-line)' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: activeProject ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: activeProject ? 'var(--text-primary)' : 'var(--text-muted)' }}>{activeProject ? activeProject.name : 'No project'}</span>
-                        {activeLive > 0 ? liveDot(activeLive) : null}
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" strokeWidth="2.2" style={{ stroke: 'var(--text-muted)', marginLeft: '1px' }}><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
-                    </div>
-                    {projMenuOpen && (
-                        <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '6px', width: '264px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 50, padding: '5px', maxHeight: '340px', overflowY: 'auto' }}>
-                            <div style={{ fontSize: '9.5px', fontWeight: 700, letterSpacing: '.1em', color: 'var(--text-muted)', padding: '6px 8px 4px' }}>SWITCH PROJECT</div>
-                            {projects.map((p) => {
-                                const live = runningByProject[p.id] || 0;
-                                return (
-                                    <div key={p.id} className="nav" onClick={() => selectProject(p)} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 8px', borderRadius: '10px', cursor: 'pointer' }}>
-                                        <span style={{ width: '8px', height: '8px', borderRadius: '2px', flexShrink: 0, background: 'var(--accent-primary)' }} />
-                                        <span style={{ fontSize: '13px', flex: 1, color: 'var(--text-bright)' }}>{p.name}</span>
-                                        {live > 0 ? <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--pulse-blue)' }} /><span style={{ fontSize: '10px', color: 'var(--pulse-blue)', fontWeight: 600 }}>{live}</span></span> : null}
-                                        {activeProject && p.id === activeProject.id ? <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--brand-lavender)' }} strokeWidth="2.4"><path d="M20 6 9 17l-5-5" /></svg> : null}
-                                    </div>
-                                );
-                            })}
-                            <div className="nav" onClick={() => { setProjMenuOpen(false); onNewProject && onNewProject(); }} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 8px', borderRadius: '10px', cursor: 'pointer', color: 'var(--text-muted)', borderTop: '1px solid var(--overlay-tint)', marginTop: '4px' }}>
-                                <svg className="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
-                                <span style={{ fontSize: '12.5px' }}>New project</span>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>}
-
-            {/* Breadcrumb */}
-            <div className="shell-hide-sm" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', minWidth: 0, flex: 1 }}>{crumb}</div>
-            <div className="shell-spacer-sm" />
+            <div style={{ flex: 1 }} />
 
             <div className="shell-hide-sm"><GlobalSearch /></div>
 
             {/* Right controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-                {/* Pulse pill — toggles the full-height Pulse drawer (PulseDock).
-                    Pulse blue when something is running; muted "All quiet" otherwise.
-                    Always clickable so the drawer can be pulled out / dismissed. */}
-                {isBuild && <div
-                    onClick={togglePulse}
-                    title={pulseOpen ? 'Hide Pulse' : 'Show Pulse'}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '999px', background: runningTotal > 0 ? 'rgba(56,189,248,.08)' : (pulseOpen ? 'var(--overlay-tint)' : 'transparent'), border: `1px solid ${runningTotal > 0 ? 'rgba(56,189,248,.3)' : 'var(--overlay-line)'}`, cursor: 'pointer' }}
-                >
-                    {runningTotal > 0 ? (
-                        <>
-                            <span style={{ position: 'relative', display: 'inline-flex' }}>
-                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--pulse-blue)' }} />
-                                <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'var(--pulse-blue)', animation: 'livedot 1.8s ease-out infinite' }} />
-                            </span>
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--pulse-blue)' }}>{runningTotal} running</span>
-                        </>
-                    ) : (
-                        <>
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--text-muted)' }} />
-                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)' }}>Live status</span>
-                        </>
-                    )}
-                </div>}
-
                 {/* New menu */}
                 <div style={{ position: 'relative' }} ref={newRef}>
                     <div onClick={() => setNewOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 13px', borderRadius: '10px', background: 'var(--brand-lavender)', color: 'var(--accent-on)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ProjectLayout } from './ProjectLayout';
 import { api } from '../api';
@@ -41,7 +41,8 @@ describe('ProjectLayout header', () => {
     it('shows key badge, name, members and the tab bar with the active tab marked', async () => {
         mount('/studio/project/p1/board');
         expect(await screen.findByText('ATL')).toBeInTheDocument();
-        expect(screen.getByText('Atlas')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Atlas' })).toBeInTheDocument();
+        expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Home')).toBeInTheDocument();
         expect(screen.getByText('Members')).toBeInTheDocument();
         const nav = screen.getByRole('navigation', { name: 'Project sections' });
         expect(nav.querySelectorAll('a, [aria-disabled]')).toHaveLength(10);

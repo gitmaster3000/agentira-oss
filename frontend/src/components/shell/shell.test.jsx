@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { AppSidebar } from './AppSidebar';
 import { AppTopbar } from './AppTopbar';
@@ -65,7 +65,7 @@ function mountTopbar(props = {}, entry = '/studio/project/p1/board') {
                     <Route path="/studio" element={<AppTopbar {...props} />} />
                     <Route path="/studio/project/:projectId/board" element={<><AppTopbar {...props} /><div>BOARD</div></>} />
                     <Route path="/studio/project/:projectId/roadmap" element={<div>ROADMAP</div>} />
-                    <Route path="/forge" element={<AppTopbar isBuild {...props} />} />
+                    <Route path="/forge" element={<><AppTopbar isBuild {...props} /><div>BUILD HOME</div></>} />
                     <Route path="/forge/agents" element={<div>AGENTS PAGE</div>} />
                     <Route path="/studio/tasks/:taskId" element={<div>TASK PAGE</div>} />
                 </Routes>
@@ -74,8 +74,8 @@ function mountTopbar(props = {}, entry = '/studio/project/p1/board') {
     );
 }
 
-// Project name appears in the switcher and the breadcrumb; wait for projects, take the switcher.
-const switcher = async () => (await screen.findAllByText('Atlas'))[0];
+// Flush the shell's project fetch so the New menu knows the active project.
+const switcher = () => act(async () => {});
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -201,51 +201,23 @@ describe('AppTopbar — blended bar', () => {
         expect(await screen.findByText('No matches for “zzzq”.')).toBeInTheDocument();
     });
 
-    it('hosts the project switcher (moved out of the sidebar) and shows the active project', async () => {
-        mountTopbar();
-        expect(screen.getByText('PROJECT')).toBeInTheDocument();
-        expect(await switcher()).toBeInTheDocument();
-    });
-
-    it('names the project in plain readable text, not a per-project colour', async () => {
-        mountTopbar();
-        expect((await switcher()).style.color).toBe('var(--text-primary)');
-    });
-
-    it('opens the SWITCH PROJECT dropdown and switches project on select', async () => {
-        mountTopbar();
-
-        fireEvent.click(await switcher());
-        expect(screen.getByText('SWITCH PROJECT')).toBeInTheDocument();
-
-        fireEvent.click(screen.getByText('Beacon'));
-
-        await waitFor(() => expect(setCurrentProjectId).toHaveBeenCalledWith('p2'));
-        expect(await screen.findByText('BOARD')).toBeInTheDocument();
-    });
-
-    it('does not show the N running chip in Work', async () => {
+    it('has no project switcher, breadcrumb, or running chip in the bar', async () => {
         mountTopbar();
         await switcher();
+        for (const t of ['PROJECT', 'SWITCH PROJECT', 'Atlas', 'Board']) expect(screen.queryByText(t)).not.toBeInTheDocument();
         expect(screen.queryByText(/running/)).not.toBeInTheDocument();
-    });
-
-    it('shows the pulse pill with the live running total in Build', async () => {
-        mountTopbar({}, '/forge');
-        expect(await screen.findByText('2 running')).toBeInTheDocument();
     });
 
     it('has a Work | Build switch; Build goes to /forge', async () => {
         mountTopbar();
         expect(screen.getByRole('button', { name: 'Work' })).toHaveAttribute('aria-pressed', 'true');
         fireEvent.click(screen.getByRole('button', { name: 'Build' }));
-        expect(await screen.findByText('Overview')).toBeInTheDocument();
+        expect(await screen.findByText('BUILD HOME')).toBeInTheDocument();
     });
 
-    it('hides the hamburger outside Build and the project switcher outside a project', async () => {
+    it('hides the hamburger outside Build', () => {
         mountTopbar({}, '/studio');
         expect(screen.queryByLabelText('Open navigation')).not.toBeInTheDocument();
-        expect(screen.queryByText('PROJECT')).not.toBeInTheDocument();
     });
 
     it('lists Task, Project, Epic, Milestone and Agent in the New menu', async () => {
