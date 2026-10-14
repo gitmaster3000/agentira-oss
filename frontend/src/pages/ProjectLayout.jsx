@@ -357,12 +357,14 @@ export function ProjectLayout() {
                     <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
                         <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
-                        <MembersControl
-                            members={members}
-                            availableProfiles={availableProfiles}
-                            onAdd={handleAddMember}
-                            onRemove={handleRemoveMember}
-                        />
+                        {!isOverview && (
+                            <MembersControl
+                                members={members}
+                                availableProfiles={availableProfiles}
+                                onAdd={handleAddMember}
+                                onRemove={handleRemoveMember}
+                            />
+                        )}
                     </div>
                     <ProjectTabs projectId={projectId} />
                 </header>

@@ -1,12 +1,14 @@
 .home{padding:28px 32px 56px;width:100%;font-family:var(--font-sans);color:var(--text-primary)}
+/* Dark theme: muted grey is too faint on Home; lift it to the light secondary tone. */
+:root:not([data-theme="light"]) .home{--text-muted:var(--text-secondary)}
 .home button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
 .home :focus-visible{outline:2px solid var(--brand-lavender);outline-offset:2px;border-radius:6px}
 .home .tnum{font-variant-numeric:tabular-nums}
-.home-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-default)!important;border-radius:9px;padding:6px 12px;color:var(--text-tertiary);font-size:13px;white-space:nowrap;background:var(--surface-raised)!important}
-.home-btn:hover{border-color:var(--border-strong)!important;color:var(--text-primary)}
-.home-btn.primary{background:var(--brand-lavender)!important;border-color:transparent!important;color:var(--surface-base);font-weight:600}
-.home-btn.link{border-color:transparent!important;background:none!important;padding:4px 0;color:var(--brand-lavender)}
-.home-btn.link.quiet{color:var(--text-muted)}
+.home .home-btn{display:inline-flex;align-items:center;gap:var(--space-3);border:1px solid var(--border-default)!important;border-radius:var(--radius-lg);padding:var(--space-3) var(--space-5);color:var(--text-secondary);font-size:12.5px;white-space:nowrap;background:var(--surface-base)!important;transition:color var(--dur-fast),filter var(--dur-fast)}
+.home .home-btn:hover{border-color:var(--border-strong)!important;color:var(--text-primary)}
+.home .home-btn.primary{background:var(--accent-primary)!important;border-color:transparent!important;color:var(--accent-on);font-weight:var(--weight-semibold)}
+.home-btn.primary:hover{filter:brightness(1.1)}
+.home .home-btn.link{border-color:transparent!important;background:none!important;padding:4px 0;color:var(--brand-lavender)}
 .home-grow{flex:1}
 .home-state{padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px}
 
@@ -45,8 +47,9 @@
 .home-tile.over::before{border-color:var(--brand-lavender)!important;border-style:solid!important}
 .home-tile.dragging{opacity:.35}
 
-.home-feed{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:start;padding:10px 0;border-bottom:1px solid var(--border-default)}
-.home-feed:first-child{padding-top:0}.home-feed:last-of-type{border-bottom:0}
+.home .home-feed{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:12px;align-items:start;width:100%;padding:10px var(--space-4);margin:0 calc(-1 * var(--space-4));box-sizing:content-box;text-align:left;border-radius:var(--radius-lg);border-bottom:1px solid var(--border-default)}
+.home .home-feed:hover{background:var(--surface-hover)}
+.home-feed:last-of-type{border-bottom:0}
 .home-feed .what{min-width:0}
 .home-feed .what small{display:block;color:var(--text-muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .home-feed time{font-size:12px;color:var(--text-muted);white-space:nowrap}
@@ -59,6 +62,12 @@
 .home-dots i{width:6px;height:16px;border-radius:var(--radius-xs);background:var(--border-default)}
 .home-dots i.on{background:var(--status-done)}
 
+.home-thead{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6)}
+.home-thead h3{margin:0!important;flex:1}
+.home-pager{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-12);color:var(--text-muted)}
+.home-icon{display:grid;place-items:center;width:var(--control-sm);height:var(--control-sm);border-radius:var(--radius-lg);color:var(--text-secondary)!important}
+.home-icon:hover:not(:disabled){background:var(--surface-hover)!important;color:var(--text-primary)!important}
+.home-icon:disabled{opacity:.35;cursor:default}
 .home-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-7)}
 .home-pcard{display:flex;flex-direction:column;gap:var(--space-6);width:100%;padding:var(--space-8) var(--space-10);text-align:left;background:var(--surface-nav)!important;border:1px solid var(--border-default)!important;border-radius:16px;transition:border-color var(--dur-fast),background var(--dur-fast)}
 .home-pcard:hover{border-color:var(--border-strong)!important;background:var(--surface-hover)!important}

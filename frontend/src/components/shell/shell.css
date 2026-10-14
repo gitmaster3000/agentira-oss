@@ -58,14 +58,23 @@
    fixed drawer that slides in over the content, toggled by the topbar
    hamburger; a backdrop dismisses it. Route changes close it (Layout).
    The drawer always shows labels, so the collapsed width is overridden. */
+.shell-topbar { position: relative; }
 .shell-hamburger { display: none; }
 .shell-backdrop { display: none; }
 
 @media (max-width: 768px) {
     .shell-hamburger { display: inline-flex; padding: 2px !important; }
     .shell-topbar { gap: 8px !important; }
-    /* 375px: keep logo, Work | Build, New and avatar; drop the rest. */
+    /* The bar never drops controls: the wordmark hides, search folds to an
+       icon that opens full-bar on focus, New shrinks to "+" (≤480px). */
     .shell-hide-sm { display: none !important; }
+    .shell-search { width: 34px !important; }
+    .shell-search-box { gap: 0 !important; padding: 8px !important; }
+    .shell-search-box input { flex: 0 0 0 !important; width: 0; }
+    .shell-search-kbd { display: none; }
+    .shell-search:focus-within { position: absolute !important; inset: 0; width: auto !important; z-index: 70; }
+    .shell-search:focus-within .shell-search-box { height: 100%; box-sizing: border-box; gap: 8px !important; padding: 0 12px !important; background: var(--surface-card) !important; }
+    .shell-search:focus-within input { flex: 1 1 auto !important; width: auto; }
     .shell-sidebar,
     .shell-sidebar.rc {
         position: fixed !important; /* beats the aside's inline position:relative */
@@ -92,6 +101,14 @@
         z-index: 55;
         background: rgba(0, 0, 0, .5);
     }
+}
+
+@media (max-width: 480px) {
+    .shell-new-label { display: none; }
+    .shell-new { padding: 7px 9px !important; }
+    .shell-topbar { gap: 4px !important; }
+    .shell-actions { gap: 2px !important; }
+    .shell-switch button { padding: 5px 9px !important; }
 }
 
 @keyframes livedot {

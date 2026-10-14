@@ -85,14 +85,14 @@ export function GlobalSearch() {
     let idx = -1;
 
     return (
-        <div ref={wrapRef} style={{ position: 'relative', width: '210px', flexShrink: 0 }}>
-            <div className="hoverline" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 11px', borderRadius: '10px', background: 'var(--overlay-tint-soft)', border: `1px solid ${open ? 'var(--brand-lavender)' : 'var(--overlay-line)'}`, color: 'var(--text-muted)' }}>
+        <div ref={wrapRef} className="shell-search" style={{ position: 'relative', width: '210px', flexShrink: 0 }}>
+            <label className="hoverline shell-search-box" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 11px', borderRadius: '10px', background: 'var(--overlay-tint-soft)', border: `1px solid ${open ? 'var(--brand-lavender)' : 'var(--overlay-line)'}`, color: 'var(--text-muted)' }}>
                 <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
                 <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onFocus={() => setOpen(true)} onKeyDown={onKeyDown}
                     placeholder="Search or jump…" aria-label="Search"
                     style={{ flex: 1, minWidth: 0, background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontSize: '12.5px', fontFamily: 'inherit', padding: 0 }} />
-                <span style={{ fontSize: '10px', fontFamily: 'ui-monospace,monospace', background: 'var(--overlay-tint)', border: '1px solid var(--overlay-line)', borderRadius: '6px', padding: '2px 5px', color: 'var(--text-tertiary)' }}>⌘K</span>
-            </div>
+                <span className="shell-search-kbd" style={{ fontSize: '10px', fontFamily: 'ui-monospace,monospace', background: 'var(--overlay-tint)', border: '1px solid var(--overlay-line)', borderRadius: '6px', padding: '2px 5px', color: 'var(--text-tertiary)' }}>⌘K</span>
+            </label>
             {open && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '420px', maxWidth: '90vw', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 60, overflow: 'hidden', paddingBottom: '5px' }}>
                     {!term ? hint('Type to search tasks, epics, projects and agents.')

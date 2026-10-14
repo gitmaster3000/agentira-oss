@@ -38,6 +38,12 @@ describe('ProjectLayout header', () => {
         api.getProjectActivity.mockResolvedValue([]);
     });
 
+    it('hides the Members control on Overview, which has its own People panel', async () => {
+        mount('/studio/project/p1/overview');
+        expect(await screen.findByText('ATL')).toBeInTheDocument();
+        expect(screen.queryByText('Members')).toBeNull();
+    });
+
     it('shows key badge, name, members and the tab bar with the active tab marked', async () => {
         mount('/studio/project/p1/board');
         expect(await screen.findByText('ATL')).toBeInTheDocument();

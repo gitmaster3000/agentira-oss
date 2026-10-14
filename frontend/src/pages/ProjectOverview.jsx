@@ -230,11 +230,19 @@ export function ProjectOverview() {
         <div className="h-full overflow-y-auto">
             <div className="p-4 sm:p-6 lg:px-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-7">
                 <section className="min-w-0">
-                    {project.description ? (
-                        <div className="mb-5 text-base leading-relaxed text-text-secondary max-w-[62ch]"><Markdown>{project.description}</Markdown></div>
-                    ) : (
-                        <p className="mb-5 text-text-tertiary">No description yet.</p>
-                    )}
+                    <SectionTitle first>Project description</SectionTitle>
+                    <Panel>
+                        {project.description
+                            ? <div className="text-[15px] leading-relaxed text-text-secondary max-w-[75ch]"><Markdown>{project.description}</Markdown></div>
+                            : <p className="m-0 text-text-tertiary">No description yet. Add one in <Link to={ROUTES.STUDIO_PROJECT_SETTINGS(projectId)} className="text-accent-primary hover:underline">project settings</Link>.</p>}
+                    </Panel>
+
+                    <SectionTitle>Recent activity</SectionTitle>
+                    <Panel>
+                        <RecentActivity activity={activity} board={board} members={members} />
+                    </Panel>
+
+                    <SectionTitle>Progress</SectionTitle>
                     <div className="flex flex-wrap gap-6">
                         <Ring value={stats.done} of={stats.total} color={TEAL} label="Done" />
                         <Ring value={stats.open} of={stats.total} color={LAV} label="Open" />
@@ -254,13 +262,6 @@ export function ProjectOverview() {
                         </Link>
                     </Panel>
 
-                    <SectionTitle>Recent activity</SectionTitle>
-                    <Panel>
-                        <RecentActivity activity={activity} board={board} members={members} />
-                    </Panel>
-
-                    <SectionTitle>Attachments</SectionTitle>
-                    <Panel><ProjectAttachments projectId={projectId} /></Panel>
                 </section>
 
                 <aside className="min-w-0">
@@ -279,6 +280,8 @@ export function ProjectOverview() {
                     <SectionTitle>People</SectionTitle>
                     <PeopleCard members={members} leadName={lead?.name}
                         availableProfiles={availableProfiles} onAddMember={onAddMember} />
+                    <SectionTitle>Project files</SectionTitle>
+                    <Panel><ProjectAttachments projectId={projectId} /></Panel>
                 </aside>
             </div>
         </div>
