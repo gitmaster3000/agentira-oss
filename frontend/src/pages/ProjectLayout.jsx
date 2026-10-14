@@ -10,6 +10,8 @@ import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
+import { FilterPopover } from '../components/FilterPopover';
+import { emptyFilters, activeFilterCount, countFilterOptions } from '../lib/taskFilters';
 
 // Members control — design board-toolbar "Members [N] ▾" dropdown: lists
 // current members (remove on hover) + the addable profiles under "Add member".
@@ -184,8 +186,7 @@ export function ProjectLayout() {
     const [isPanelEditing, setIsPanelEditing] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [filterPriority, setFilterPriority] = useState('');
-    const [filterAssignee, setFilterAssignee] = useState('');
+    const [taskFilters, setTaskFilters] = useState(emptyFilters);
     const [filterEpic, setFilterEpic] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const panelEditingRef = useRef(false);
@@ -366,11 +367,13 @@ export function ProjectLayout() {
 
     // Filters context
     const filters = {
-        searchQuery, filterPriority, filterAssignee, filterEpic, board, epics,
+        searchQuery, taskFilters, filterEpic, board, epics,
         reloadBoard: loadBoard,
         applyMove,
         requestSelectTask,
     };
+
+    const filterCounts = countFilterOptions(Object.values(board.columns).flat());
 
     // Every project page gets the key/name/tabs header; search + filters only on board views.
     const isBoardView = /\/(board|backlog|roadmap)(\/|$)/.test(location.pathname)
@@ -399,10 +402,10 @@ export function ProjectLayout() {
                                         <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
                                         <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
                                     </div>
-                                    <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
+                                    <FilterPopover filters={taskFilters} counts={filterCounts} onChange={setTaskFilters} />
                                     <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
-                                    {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
-                                        <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
+                                    {(searchQuery || activeFilterCount(taskFilters) || filterEpic) && (
+                                        <button onClick={() => { setSearchQuery(''); setTaskFilters(emptyFilters()); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
                                     )}
                                 </div>
                             </>

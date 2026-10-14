@@ -3,6 +3,7 @@ import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { TaskCard } from '../components/TaskCard';
 import { matchesTaskSearch } from '../lib/taskSearch';
+import { matchesTaskFilters } from '../lib/taskFilters';
 
 // Board status dot colors — from the design system (guidelines/colors-semantic.html).
 const STATUS_COLORS = {
@@ -22,7 +23,7 @@ const COLUMNS = [
 ];
 
 export function Board() {
-    const { searchQuery, filterPriority, filterAssignee, filterEpic, board, epics, reloadBoard, applyMove, requestSelectTask } = useOutletContext();
+    const { searchQuery, taskFilters, filterEpic, board, epics, reloadBoard, applyMove, requestSelectTask } = useOutletContext();
     const [searchParams, setSearchParams] = useSearchParams();
 
     const handleDrop = async (e, status) => {
@@ -51,14 +52,13 @@ export function Board() {
         for (const [colId, tasks] of Object.entries(board.columns)) {
             filtered[colId] = tasks.filter(task => {
                 if (!matchesTaskSearch(task, searchQuery)) return false;
-                if (filterPriority && task.priority !== filterPriority) return false;
-                if (filterAssignee && task.assignee !== filterAssignee) return false;
+                if (!matchesTaskFilters(task, taskFilters)) return false;
                 if (filterEpic && String(task.epic_id) !== String(filterEpic)) return false;
                 return true;
             });
         }
         return filtered;
-    }, [board, searchQuery, filterPriority, filterAssignee, filterEpic]);
+    }, [board, searchQuery, taskFilters, filterEpic]);
 
     return (
         <div className="h-full overflow-x-auto overflow-y-hidden p-3.5">
