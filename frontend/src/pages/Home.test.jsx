@@ -52,10 +52,11 @@ describe('Home', () => {
     it('renders hero headline, summary, rings and makes one data request', async () => {
         renderHome();
         expect(await screen.findByText(/, Alex$/)).toBeInTheDocument();
-        expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('17 tasks done this week. 9 due, 3 late.');
+        expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/^Good (morning|afternoon|evening)/);
+        expect(screen.getByText('3 tasks past due. Start there.')).toBeInTheDocument();
         expect(screen.getByText('Going well.')).toBeInTheDocument();
         expect(screen.getByLabelText('Done: 17 of 29 tasks this week')).toBeInTheDocument();
-        expect(screen.getByText('of 29 tasks planned this week')).toBeInTheDocument();
+        expect(screen.getByText('29 planned')).toBeInTheDocument();
         expect(api.getHome).toHaveBeenCalledTimes(1);
         expect(api.getHomeLayout).toHaveBeenCalledTimes(1);
     });

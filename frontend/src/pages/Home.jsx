@@ -40,24 +40,36 @@ const ACTION_VERB = {
 };
 const verbOf = (action) => ACTION_VERB[action] || action.replace(/^task\./, '').replace(/_/g, ' ');
 
+function weekMessage({ due, late, planned }) {
+    if (late > 0) return `${plural(late, 'task')} past due. Start there.`;
+    if (due > 0) return `Nothing late. ${plural(due, 'task')} still due this week.`;
+    if (planned > 0) return 'Everything planned this week is done.';
+    return 'Nothing planned this week yet.';
+}
+
 function WeekRings({ week }) {
     const r = 46;
     const C = 2 * Math.PI * r;
     const rings = [['Done', week.done, 'var(--brand-teal)'], ['Due', week.due, 'var(--warning)'], ['Late', week.late, 'var(--danger)']];
     return (
-        <div className="home-rings">
-            {rings.map(([label, n, colour], i) => (
-                <figure className="home-wr" style={{ '--i': i }} key={label}>
-                    <svg viewBox="0 0 110 110" width="110" height="110" role="img" aria-label={`${label}: ${n} of ${week.planned} tasks this week`}>
-                        <circle cx="55" cy="55" r={r} fill="none" stroke="var(--surface-card)" strokeWidth="9" />
-                        <circle className="home-arc" cx="55" cy="55" r={r} fill="none" stroke={colour} strokeWidth="9" strokeLinecap="round"
-                            strokeDasharray={`${week.planned ? C * Math.min(n / week.planned, 1) : 0} ${C}`} transform="rotate(-90 55 55)" />
-                        <text x="55" y="61" textAnchor="middle" className="home-rn">{n}</text>
-                    </svg>
-                    <figcaption>{label}</figcaption>
-                </figure>
-            ))}
-            <p className="home-of">of {plural(week.planned, 'task')} planned this week</p>
+        <div className="home-rings-card">
+            <div className="home-rings-head">
+                <span>This week</span>
+                <span className="home-of">{week.planned} planned</span>
+            </div>
+            <div className="home-rings">
+                {rings.map(([label, n, colour], i) => (
+                    <figure className="home-wr" style={{ '--i': i }} key={label}>
+                        <svg viewBox="0 0 110 110" width="110" height="110" role="img" aria-label={`${label}: ${n} of ${week.planned} tasks this week`}>
+                            <circle cx="55" cy="55" r={r} fill="none" stroke="var(--border-default)" strokeWidth="9" />
+                            <circle className="home-arc" cx="55" cy="55" r={r} fill="none" stroke={colour} strokeWidth="9" strokeLinecap="round"
+                                strokeDasharray={`${week.planned ? C * Math.min(n / week.planned, 1) : 0} ${C}`} transform="rotate(-90 55 55)" />
+                            <text x="55" y="61" textAnchor="middle" className="home-rn">{n}</text>
+                        </svg>
+                        <figcaption>{label}<span>{week.planned ? Math.round((n / week.planned) * 100) : 0}%</span></figcaption>
+                    </figure>
+                ))}
+            </div>
         </div>
     );
 }
@@ -214,7 +226,8 @@ export function Home() {
     if (!data) return <div className="home"><div className="home-state">Loading…</div></div>;
 
     const name = (user?.display_name || user?.name || '').trim();
-    const firstName = name ? name.split(/[\s@]/)[0] : null;
+    const first = name ? name.split(/[\s@._]/)[0] : '';
+    const firstName = first ? first[0].toUpperCase() + first.slice(1) : null;
     const { week } = data;
     const used = new Set(layout.map(([id]) => id));
     const available = Object.keys(TILES).filter((id) => !used.has(id));
@@ -223,11 +236,9 @@ export function Home() {
         <div className={`home${editing ? ' home-editing' : ''}`}>
             <section className="home-week" aria-label="This week">
                 <div>
-                    <p className="home-greet">{greeting()}{firstName ? `, ${firstName}` : ''}</p>
-                    <h1 className="home-sentence">
-                        <b className="tnum">{week.done}</b> {week.done === 1 ? 'task' : 'tasks'} done this week.{' '}
-                        <b className="tnum">{week.due}</b> due, <b className="tnum late">{week.late}</b> late.
-                    </h1>
+                    <p className="home-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                    <h1 className="home-greet">{greeting()}{firstName ? `, ${firstName}` : ''}</h1>
+                    <p className="home-message">{weekMessage(week)}</p>
                     {data.week_summary && <p className="home-summary">{data.week_summary}</p>}
                 </div>
                 <WeekRings week={week} />
