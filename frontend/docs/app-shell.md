@@ -50,29 +50,23 @@ the sidebar. `Layout` decides with `pathname.startsWith('/forge')`.
 
 ## Top bar
 
-Left to right:
+Per `home-dashboard.html`, left to right: **logo** (to Home), **Work | Build**
+switch, spacer, **search** (⌘K), **New** menu, **bell**, **avatar**. Nothing
+else — no project switcher, no breadcrumb, no "N running" chip. The bar is one
+40px row flush with the page edges. Below 768px the hamburger (Build only) opens
+the sidebar drawer, and the wordmark, search and bell are hidden
+(`.shell-hide-sm`) so logo, switch, New and avatar fit at 375px.
 
-1. **Hamburger** — Build only, below 768px (opens the Build sidebar drawer).
-2. **Logo lockup** — gradient "A" tile + "Agentira". Clicks through to Home.
-3. **Work | Build switch** — Work goes to `/studio`, Build to `/forge`.
-4. **Project switcher** (inside a project only) — a `PROJECT` caption plus a
-   pill with the active project's name and live-run badge. Opens a
-   `SWITCH PROJECT` dropdown.
-5. **Breadcrumb** — derived from the route (`useBreadcrumb`); inside a project
-   it reads Home / Project / page.
-6. **Search pill** — `⌘K` affordance.
-7. **Pulse pill** — Build only: "N running" when runs are live, "Live status"
-   when quiet. Toggles the Pulse drawer. Work has no "N running" chip.
-8. **New menu** — Task, Project, Epic, Milestone, divider, Agent. Each opens the
-   existing create flow: Task/Epic fire `open-create-task` / `open-create-epic`
-   inside a project, otherwise navigate to the active project's board with
-   route state `{ create }` that `ProjectLayout` reads; Milestone goes to the
-   roadmap with `{ create: 'milestone' }` (opens the add form); Agent goes to
-   `/forge/agents` with `{ create: 'agent' }`; Project opens the wizard.
-9. **Bell** and **avatar** — the avatar menu holds Inbox, My Work, Chat,
-   Settings and Sign out (they used to be sidebar rows).
-
-At 375px only the logo tile, Work | Build, New and the avatar stay (`.shell-hide-sm`).
+- **New menu** — Task, Project, Epic, Milestone, divider, Agent. Each opens the
+  existing create flow: Task/Epic fire `open-create-task` / `open-create-epic`
+  inside a project, otherwise navigate to the active project's board with route
+  state `{ create }` that `ProjectLayout` reads; Milestone goes to the roadmap
+  with `{ create: 'milestone' }`; Agent goes to `/forge/agents` with
+  `{ create: 'agent' }`; Project opens the wizard.
+- **Avatar menu** — Inbox, My Work, Chat, Settings, Sign out.
+- **Project identity** lives only in the project page header: a
+  `Home / Project name` breadcrumb, the title, members, then the tabs. Switch
+  projects from Home or with search / ⌘K.
 
 The project board toolbar has a **New task** button (opens the same task modal).
 
