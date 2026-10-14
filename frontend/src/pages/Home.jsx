@@ -134,19 +134,14 @@ function ActivityTile({ data }) {
     return (
         <div className="home-panel">
             {data.activity.map((e) => (
-                <div className="home-feed" key={e.id}>
+                <button type="button" className="home-feed" key={e.id} onClick={() => navigate(ROUTES.STUDIO_TASK(e.task_key))}>
                     <UserAvatar name={e.actor} size={30} />
                     <div className="what">
                         <div><b>{e.actor}</b> {verbOf(e.action)}</div>
-                        <small>
-                            <button type="button" className="home-btn link" style={{ padding: 0, color: 'inherit' }}
-                                onClick={() => navigate(ROUTES.STUDIO_PROJECT_BOARD(e.project_id))}>
-                                {e.task_key} {e.task_title}
-                            </button> in {e.project_name}
-                        </small>
+                        <small>{e.task_key} {e.task_title} in {e.project_name}</small>
                     </div>
                     <time dateTime={e.at}>{timeAgo(e.at)}</time>
-                </div>
+                </button>
             ))}
         </div>
     );

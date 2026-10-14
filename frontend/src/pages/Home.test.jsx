@@ -36,6 +36,7 @@ function renderHome() {
             <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/studio/project/:id/overview" element={<div>overview page</div>} />
+                <Route path="/studio/tasks/:taskId" element={<div>task page</div>} />
             </Routes>
         </MemoryRouter>,
     );
@@ -125,6 +126,12 @@ describe('Home', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Done' }));
         expect(screen.queryByText('Reset to default')).toBeNull();
+    });
+
+    it('an activity row opens its task', async () => {
+        renderHome();
+        fireEvent.click(await screen.findByText(/KE-28 Quiz rules/));
+        expect(screen.getByText('task page')).toBeInTheDocument();
     });
 
     it('New project opens the wizard', async () => {
