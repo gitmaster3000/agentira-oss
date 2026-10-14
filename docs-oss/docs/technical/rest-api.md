@@ -36,6 +36,7 @@ Two mechanisms:
 | `/api/attachments` | File attachments |
 | `/api/profiles` | Accounts and profiles |
 | `/api/notifications` | Notification inbox |
+| `/api/home` | Home page data in one response, plus the per-user tile layout |
 | `/api/invites` | Invite minting, cancelling (`DELETE /api/invites/{id}`) and redemption |
 | `/api/service-accounts` | API-key identities |
 | `/api/webhooks` | Outbound webhook configuration |
@@ -100,3 +101,20 @@ Migrations run automatically at startup through the bootstrap script, and are id
 ## Attachment preview
 
 The in-app preview (`AttachmentPreview.jsx`) reuses `GET /api/attachments/{id}/download`: the UI fetches the bytes with the bearer token and shows them from a `blob:` URL, so no new endpoint or auth path exists. Security: blob MIME type is forced from the file extension (never the server's `Content-Type`); only image/PDF/text extensions are previewable; SVG is shown via `<img>` (scripts do not run); Markdown is rendered by `react-markdown` without raw HTML; HTML files are never previewed. Access control is unchanged (`enforce_attachment_route_access`).
+
+
+## Home page
+
+`GET /api/home` returns everything the Home page renders in a single response, scoped to the projects you are a member of:
+
+| Field | Contents |
+|---|---|
+| `week` | `done` (finished this week), `due` (open, due this week), `late` (open, past due), `planned` (all tasks) |
+| `projects` | Per project: id, name, key, colour, description, `pct_done`, `open`, `due_this_week`, `late`, first 5 member avatars plus `member_count`, `last_updated`, `done_per_week` (last 6 weeks, oldest first) |
+| `activity` | The last 20 task events across those projects: actor, action, task key and title, project, time |
+| `people` | Each member across those projects: `open` tasks and `days_done_this_week` |
+| `week_summary` | Latest week summary text, or `null` |
+
+Weeks start on Monday (UTC). "Finished" uses the task's last update time while in `done`. The endpoint issues a fixed number of queries regardless of project or task count (asserted in `backend/tests/test_home_api.py`); date filters are backed by indexes on `tasks.due_date`, `tasks.updated_at` and `activities.created_at`.
+
+`GET /api/home/layout` and `PUT /api/home/layout` read and replace the caller's tile layout, stored on their profile. The body is `{"layout": [["tile_id", "size"], ...]}` (at most 50 tiles).

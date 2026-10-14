@@ -654,6 +654,16 @@ def run_migrations():
             ))
             conn.commit()
 
+        # Home page date-filter indexes (create_all won't add them to old tables)
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS ix_tasks_due_date ON tasks(due_date)",
+            "CREATE INDEX IF NOT EXISTS ix_tasks_updated_at ON tasks(updated_at)",
+            "CREATE INDEX IF NOT EXISTS ix_activities_created_at ON activities(created_at)",
+        ):
+            if ddl.split(" ON ")[1].split("(")[0] in tables:
+                conn.execute(text(ddl))
+        conn.commit()
+
         # profiles
         if "profiles" in tables:
             added = False
@@ -712,6 +722,8 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "git_token", "VARCHAR(500)")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_valid", "BOOLEAN")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_checked_at", "TIMESTAMP")
+            runtime_added |= _ensure_column(conn, "profiles", "home_layout", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "home_week_summary", "TEXT")
             # Uploaded avatars are stored inline as small data URLs; widen from VARCHAR(500).
             if _dialect_name() == "postgresql":
                 conn.execute(text("ALTER TABLE profiles ALTER COLUMN avatar_url TYPE TEXT"))

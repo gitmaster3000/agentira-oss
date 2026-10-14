@@ -1967,6 +1967,9 @@ def api_search(q: str = Query("", max_length=100), actor: str = Depends(get_curr
 for r in [auth, admin_invites, profiles, svc_accounts, projects, tasks, attachments, workflow, notifications, webhooks, epics_router, search_router]:
     app.include_router(r)
 
+from backend.home import router as home_router
+app.include_router(home_router)
+
 # Browser telemetry intake (auth optional — crashes before login count too)
 from backend.client_telemetry import router as client_telemetry_router
 app.include_router(client_telemetry_router)

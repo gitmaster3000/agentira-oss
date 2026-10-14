@@ -262,6 +262,10 @@ class Profile(Base):
     git_token_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     git_token_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None)
+    # Home page: JSON tile layout [[tile_id, size], ...] and the latest
+    # week-summary text (written by the AP Guide; read-only for the API).
+    home_layout: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    home_week_summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     roles: Mapped[list["Role"]] = relationship(secondary=profile_roles, back_populates="profiles")
     extra_permissions: Mapped[list["ProfilePermission"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
@@ -576,7 +580,12 @@ class Milestone(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (UniqueConstraint("project_id", "key", name="uq_tasks_project_key"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "key", name="uq_tasks_project_key"),
+        # Home page date filters (due this week / late / done this week).
+        Index("ix_tasks_due_date", "due_date"),
+        Index("ix_tasks_updated_at", "updated_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
@@ -677,6 +686,7 @@ event.listen(Task.assignee, "set", _guard_task_write, retval=True)
 class Activity(Base):
     __tablename__ = "activities"
     __table_args__ = (
+        Index("ix_activities_created_at", "created_at"),
         Index(
             "uq_activities_org_idempotency_key",
             "org_id",
