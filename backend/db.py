@@ -654,6 +654,15 @@ def run_migrations():
             ))
             conn.commit()
 
+        # Home page date-filter indexes (create_all won't add them to old tables)
+        for ddl in (
+            "CREATE INDEX IF NOT EXISTS ix_tasks_due_date ON tasks(due_date)",
+            "CREATE INDEX IF NOT EXISTS ix_activities_created_at ON activities(created_at)",
+        ):
+            if ddl.split(" ON ")[1].split("(")[0] in tables:
+                conn.execute(text(ddl))
+        conn.commit()
+
         # profiles
         if "profiles" in tables:
             added = False
@@ -712,6 +721,8 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "git_token", "VARCHAR(500)")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_valid", "BOOLEAN")
             runtime_added |= _ensure_column(conn, "profiles", "git_token_checked_at", "TIMESTAMP")
+            runtime_added |= _ensure_column(conn, "profiles", "home_layout", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "home_week_summary", "TEXT")
             # Uploaded avatars are stored inline as small data URLs; widen from VARCHAR(500).
             if _dialect_name() == "postgresql":
                 conn.execute(text("ALTER TABLE profiles ALTER COLUMN avatar_url TYPE TEXT"))
@@ -804,6 +815,17 @@ def run_migrations():
         if "tasks" in tables:
             _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")
             _ensure_column(conn, "tasks", "repos_json", "TEXT")
+            # Home page: when a task entered "done". Backfill once from the
+            # latest move into done, falling back to updated_at.
+            if _ensure_column(conn, "tasks", "completed_at", "TIMESTAMPTZ"):
+                conn.execute(text(
+                    "UPDATE tasks SET completed_at = COALESCE((SELECT max(a.created_at) "
+                    "FROM activities a WHERE a.task_id = tasks.id AND a.action = 'task.move' "
+                    "AND a.detail LIKE '% → done'), updated_at) "
+                    "WHERE status_id IN (SELECT id FROM statuses WHERE name = 'done')"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_completed_at ON tasks(completed_at)"))
+            conn.commit()
         # AP-121: backfill — for every project with a legacy repo_path /
         # repo_url and no project_repos rows, insert one primary row.
         # Runs after `Base.metadata.create_all` has created project_repos.

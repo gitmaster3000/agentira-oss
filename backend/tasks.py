@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import literal
@@ -206,6 +206,7 @@ class TaskService:
             due_date=due_dt,
             dod_items=json.dumps(services._normalize_dod(dod_items)) if dod_items else None,
             epic_id=epic_id if epic_id and epic_id.strip() else None,
+            completed_at=datetime.now(timezone.utc) if status == "done" else None,
         )
         db.add(task)
         db.flush()
@@ -481,6 +482,7 @@ class TaskService:
 
             with allow_task_write():
                 task.status_id = services._get_status_id(db, new_status)
+            task.completed_at = datetime.now(timezone.utc) if new_status == "done" else None
 
             services._log_activity(
                 db, actor, "task.move", f"{old} → {new_status}",
