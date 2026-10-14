@@ -56,7 +56,7 @@ describe('Home', () => {
         expect(screen.getByText('3 tasks past due. Start there.')).toBeInTheDocument();
         expect(screen.getByText('Going well.')).toBeInTheDocument();
         expect(screen.getByLabelText('Done: 17 of 29 tasks this week')).toBeInTheDocument();
-        expect(screen.getByText('29 planned')).toBeInTheDocument();
+        expect(screen.getByText('29 tasks')).toBeInTheDocument();
         expect(api.getHome).toHaveBeenCalledTimes(1);
         expect(api.getHomeLayout).toHaveBeenCalledTimes(1);
     });

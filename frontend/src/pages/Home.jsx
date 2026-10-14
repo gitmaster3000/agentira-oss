@@ -41,52 +41,40 @@ const ACTION_VERB = {
 };
 const verbOf = (action) => ACTION_VERB[action] || action.replace(/^task\./, '').replace(/_/g, ' ');
 
-function weekMessage({ due, late, planned }) {
+function weekMessage({ done, due, late }) {
     if (late > 0) return `${plural(late, 'task')} past due. Start there.`;
     if (due > 0) return `Nothing late. ${plural(due, 'task')} still due this week.`;
-    if (planned > 0) return 'Everything planned this week is done.';
-    return 'Nothing planned this week yet.';
+    if (done > 0) return 'Everything due this week is done.';
+    return 'Nothing due this week.';
 }
 
+// The week's load is what was finished this week plus what is still due or overdue.
+const weekLoad = ({ done, due, late }) => done + due + late;
+
 function WeekRings({ week }) {
-    const r = 46;
+    const r = 40;
     const C = 2 * Math.PI * r;
-    const rings = [['Done', week.done, 'var(--brand-teal)'], ['Due', week.due, 'var(--warning)'], ['Late', week.late, 'var(--danger)']];
+    const load = weekLoad(week);
+    const rings = [['Done', week.done, 'var(--status-done)'], ['Due', week.due, 'var(--warn-amber)'], ['Late', week.late, 'var(--late-coral)']];
     return (
-        <div className="home-rings-card">
-            <div className="home-rings-head">
-                <span>This week</span>
-                <span className="home-of">{week.planned} planned</span>
-            </div>
-            <div className="home-rings">
-                {rings.map(([label, n, colour], i) => (
-                    <figure className="home-wr" style={{ '--i': i }} key={label}>
-                        <svg viewBox="0 0 110 110" width="110" height="110" role="img" aria-label={`${label}: ${n} of ${week.planned} tasks this week`}>
-                            <circle cx="55" cy="55" r={r} fill="none" stroke="var(--border-default)" strokeWidth="9" />
-                            <circle className="home-arc" cx="55" cy="55" r={r} fill="none" stroke={colour} strokeWidth="9" strokeLinecap="round"
-                                strokeDasharray={`${week.planned ? C * Math.min(n / week.planned, 1) : 0} ${C}`} transform="rotate(-90 55 55)" />
-                            <text x="55" y="61" textAnchor="middle" className="home-rn">{n}</text>
-                        </svg>
-                        <figcaption>{label}<span>{week.planned ? Math.round((n / week.planned) * 100) : 0}%</span></figcaption>
-                    </figure>
-                ))}
-            </div>
+        <div className="home-rings">
+            {rings.map(([label, n, colour], i) => (
+                <figure className="home-wr" style={{ '--i': i }} key={label}>
+                    <svg viewBox="0 0 96 96" width="96" height="96" role="img" aria-label={`${label}: ${n} of ${load} tasks this week`}>
+                        <circle cx="48" cy="48" r={r} fill="none" stroke="var(--border-default)" strokeWidth="8" />
+                        <circle className="home-arc" cx="48" cy="48" r={r} fill="none" stroke={colour} strokeWidth="8" strokeLinecap="round"
+                            strokeDasharray={`${load ? C * Math.min(n / load, 1) : 0} ${C}`} transform="rotate(-90 48 48)" />
+                        <text x="48" y="55" textAnchor="middle" className="home-rn">{n}</text>
+                    </svg>
+                    <figcaption>{label}</figcaption>
+                </figure>
+            ))}
         </div>
     );
 }
 
-function ProgressRing({ pct, colour }) {
-    const r = 17;
-    const C = 2 * Math.PI * r;
-    return (
-        <svg className="home-ring" width="44" height="44" viewBox="0 0 44 44" role="img" aria-label={`${pct}% done`}>
-            <circle cx="22" cy="22" r={r} fill="none" stroke="var(--surface-base)" strokeWidth="5" />
-            <circle cx="22" cy="22" r={r} fill="none" stroke={colour} strokeWidth="5" strokeLinecap="round"
-                strokeDasharray={`${C * pct / 100} ${C}`} transform="rotate(-90 22 22)" />
-            <text x="22" y="26" textAnchor="middle">{pct}</text>
-        </svg>
-    );
-}
+// Card previews show plain text; descriptions are markdown.
+const plainText = (md) => (md || '').replace(/[*_`#>~]|\[|\]\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 
 function ProjectsTile({ data, onNew }) {
     const navigate = useNavigate();
@@ -101,17 +89,18 @@ function ProjectsTile({ data, onNew }) {
                     <button type="button" key={p.id} className="home-pcard" style={{ '--pc': p.colour }} aria-label={`Open ${p.name}`}
                         onClick={() => navigate(ROUTES.STUDIO_PROJECT_OVERVIEW(p.id))}>
                         <div className="home-pc-top">
-                            <ProgressRing pct={p.pct_done} colour={p.colour} />
-                            <div style={{ minWidth: 0 }}>
-                                <div className="name">{p.name}</div>
-                                <span className="home-pc-key">{p.key}</span>
-                            </div>
+                            <span className="name">{p.name}</span>
+                            <span className="home-pc-key">{p.key}</span>
                         </div>
-                        <p className="home-pc-desc">{p.description}</p>
+                        <p className="home-pc-desc">{plainText(p.description) || 'No description yet.'}</p>
                         <div className="home-pc-stats">
                             <span><b className="tnum">{p.open}</b> open</span>
                             <span><b className="tnum">{p.due_this_week}</b> due this week</span>
                             {p.late > 0 && <span className="late"><b className="tnum">{p.late}</b> late</span>}
+                        </div>
+                        <div className="home-pc-progress" role="img" aria-label={`${p.pct_done}% done`}>
+                            <span className="bar"><i style={{ width: `${p.pct_done}%` }} /></span>
+                            <span className="tnum">{p.pct_done}% done</span>
                         </div>
                         <div className="home-pc-foot">
                             <div className="home-stack">
@@ -236,20 +225,21 @@ export function Home() {
     return (
         <div className={`home${editing ? ' home-editing' : ''}`}>
             <section className="home-week" aria-label="This week">
-                <div>
-                    <p className="home-date">
-                        {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
-                        {!editing && (
-                            <button type="button" className="home-gear" aria-label="Customize home" title="Customize home" onClick={() => setEditing(true)}>
-                                <Settings2 size={14} />
-                            </button>
-                        )}
-                    </p>
+                <div className="home-hello">
+                    <p className="home-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
                     <h1 className="home-greet">{greeting()}{firstName ? `, ${firstName}` : ''}</h1>
                     <p className="home-message">{weekMessage(week)}</p>
                     {data.week_summary && <p className="home-summary">{data.week_summary}</p>}
                 </div>
-                <WeekRings week={week} />
+                <div className="home-weekbox">
+                    <p className="home-weekcap">This week <span className="tnum">{plural(weekLoad(week), 'task')}</span></p>
+                    <WeekRings week={week} />
+                </div>
+                {!editing && (
+                    <button type="button" className="home-gear" aria-label="Customize home" title="Customize home" onClick={() => setEditing(true)}>
+                        <Settings2 size={15} />
+                    </button>
+                )}
             </section>
 
             {editing && (
