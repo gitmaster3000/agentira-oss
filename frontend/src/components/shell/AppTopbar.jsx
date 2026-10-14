@@ -18,6 +18,9 @@ const NEW_ITEMS = [
     { kind: 'agent', title: 'Agent', sub: 'Add an AI teammate', tint: 'rgba(56,189,248,.14)', stroke: 'var(--pulse-blue)', icon: <><rect x="3" y="11" width="18" height="10" rx="2" /><circle cx="12" cy="5" r="2" /><path d="M12 7v4" /></> },
 ];
 
+// Only task creation is offered for now; add kinds here to re-enable the rest.
+const ENABLED_KINDS = ['task'];
+
 const SWITCH_BTN = (on) => ({
     padding: '5px 14px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, fontFamily: 'inherit',
     background: on ? 'var(--surface-card)' : 'transparent', color: on ? 'var(--text-primary)' : 'var(--text-muted)',
@@ -130,7 +133,7 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                     </div>
                     {newOpen && (
                         <div className="dropdown-menu" style={{ top: '100%', right: 0, marginTop: '8px', width: '250px' }}>
-                            {NEW_ITEMS.map((it) => it.divider
+                            {NEW_ITEMS.filter((it) => ENABLED_KINDS.includes(it.kind)).map((it) => it.divider
                                 ? <div key="div" style={{ height: '1px', background: 'var(--overlay-tint)', margin: '5px 4px' }} />
                                 : <React.Fragment key={it.kind}>{createItem(it.tint, it.stroke, it.icon, it.title, it.sub, () => startCreate(it.kind))}</React.Fragment>)}
                         </div>
