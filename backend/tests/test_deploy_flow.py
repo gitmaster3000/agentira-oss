@@ -369,3 +369,98 @@ def test_github_deployments_ledger_called_on_deploy(client, fake_railway, monkey
 def r_text(obj) -> str:
     import json
     return json.dumps(obj)
+
+
+# ── provider sync: Railway-style PR previews + status refresh ──────────────
+
+class _PreviewRailway(_FakeRailway):
+    """Fake for a provider that builds PR previews itself and can be asked
+    for fresh status (`previews` / `observe`, like RailwayAdapter)."""
+
+    _SERVICES = [{**s, "project_id": "rw_proj"} for s in _FakeRailway._SERVICES]
+
+    def __init__(self):
+        self.targets = []
+        self.built = {}
+        self.observed = {}
+        self.observe_error = None
+
+    def deploy(self, target, ref) -> DeploymentResult:
+        self.targets.append(target)
+        return super().deploy(target, ref)
+
+    def previews(self, target):
+        return dict(self.built)
+
+    def observe(self, deployment_id):
+        if self.observe_error:
+            raise self.observe_error
+        status, url = self.observed.get(deployment_id, (DeploymentStatus.RUNNING, None))
+        return DeploymentResult(deployment_id=deployment_id, status=status, url=url)
+
+
+@pytest.fixture
+def preview_railway():
+    original = registry.get_adapter(TargetKind.RAILWAY)
+    fake = _PreviewRailway()
+    registry.register(TargetKind.RAILWAY, fake)
+    try:
+        yield fake
+    finally:
+        registry.register(TargetKind.RAILWAY, original)
+
+
+def _branch(client, pid, name):
+    branches = client.get(f"/api/projects/{pid}/deployments").json()["branches"]
+    return next(b for b in branches if b["branch"] == name)
+
+
+def test_connect_stores_provider_project_and_deploys_by_branch(client, preview_railway):
+    pid = _project(client)
+    _connect(client, pid)
+    target = preview_railway.targets[-1]
+    assert target.config["project_id"] == "rw_proj"
+    assert target.config["branch"] == "main"
+
+    client.post(f"/api/projects/{pid}/deployments", json={"branch": "feat/x"})
+    assert preview_railway.targets[-1].config["branch"] == "feat/x"
+
+
+def test_previews_built_by_the_provider_show_up_in_the_branch_list(client, preview_railway):
+    pid = _project(client)
+    _connect(client, pid)
+    preview_railway.built = {"feat/login": DeploymentResult(
+        deployment_id="dep_pr_12", status=DeploymentStatus.LIVE,
+        url="https://pr-12.up.railway.app", detail="Preview of pull request #12")}
+
+    entry = _branch(client, pid, "feat/login")
+    dep = entry["deployment"]
+    assert dep["status"] == "live"
+    assert dep["url"] == "https://pr-12.up.railway.app"
+    assert dep["trigger"] == "preview"
+    assert "pull request #12" in dep["status_reason"]
+
+    # the same build seen again is not a second deployment
+    again = _branch(client, pid, "feat/login")["deployment"]
+    assert again["id"] == dep["id"]
+
+
+def test_in_flight_deployments_refresh_from_the_provider(client, preview_railway):
+    pid = _project(client)
+    _connect(client, pid)
+    assert _branch(client, pid, "main")["deployment"]["status"] == "building"
+
+    preview_railway.observed["rw_main"] = (DeploymentStatus.LIVE, "https://app.up.railway.app")
+    dep = _branch(client, pid, "main")["deployment"]
+    assert dep["status"] == "live"
+    assert dep["url"] == "https://app.up.railway.app"
+
+
+def test_provider_hiccup_never_marks_a_build_failed(client, preview_railway):
+    pid = _project(client)
+    _connect(client, pid)
+    preview_railway.observe_error = RuntimeError("railway unreachable")
+
+    r = client.get(f"/api/projects/{pid}/deployments")
+    assert r.status_code == 200
+    assert _branch(client, pid, "main")["deployment"]["status"] == "building"

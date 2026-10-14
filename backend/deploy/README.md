@@ -47,11 +47,31 @@ useless symptom — *"your key is invalid"* for a key that was perfectly good:
 2. **`me` is a personal-token-only query.** A workspace/team key authenticates
    fine but has no user behind it, so Railway answers `Not Authorized`.
    Verification probes `me` first and falls back to `projects`, which every
-   token type can run.
+   account/workspace token can run.
 3. **"We couldn't check" is not "your key is bad."** `verify_credential`
    returns `None` (not `False`) when Railway was unreachable or an edge blocked
    us, and the UI must say so rather than blaming the user's key. That is what
    `AuthError` vs `TransportError`/`BlockedError` exist to separate.
+4. **Project tokens use a different header.** A token from Project → Settings →
+   Tokens is refused as `Authorization: Bearer` (both `me` and `projects` say
+   `Not Authorized`); Railway wants it in `Project-Access-Token`. After both
+   Bearer probes fail, verification retries `projectToken { projectId
+   environmentId }` with that header. The adapter remembers the kind per token
+   (by hash), lists only that project's services in the wizard, and deploys to
+   the token's own environment.
+5. **Branch previews are Railway PR Environments.** Turn on PR Environments in
+   the Railway project: Railway then creates and builds an ephemeral
+   environment per pull request. `main` deploys to the base environment; any
+   other branch deploys into its PR environment (or fails with "open a pull
+   request" when there is none). `previews()` reports what Railway built, and
+   the flow mirrors it onto the branch list on every `GET /deployments`, so a
+   PR's live URL appears without a click. A project token can't see PR
+   environments and would overwrite its own (often production) environment,
+   so it is refused for anything but `main` — use a workspace token.
+6. **Status is pulled, not pushed.** Railway doesn't call us back. While a
+   deployment is queued/building, `GET /deployments` asks `observe()` for a
+   fresh status and URL. `observe()` raises when Railway can't be asked, so a
+   network blip never turns a building deployment into "failed".
 
 A mocked test cannot catch (1) — the transport is the thing that's broken. The
 regression gate is `bruno/rest/11-deploy`, which probes a **real** key against

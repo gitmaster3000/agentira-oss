@@ -23,6 +23,7 @@ from backend.deploy.railway import (
 from backend.deploy.registry import get_adapter
 
 DEPLOYMENT_ID = "dep_backend_1"
+SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
 class FakeApi:
@@ -31,8 +32,15 @@ class FakeApi:
 
     def __init__(self, state="SUCCESS", url="agentira-test.up.railway.app",
                  services=("backend", "frontend"), environments=("test", "production"),
-                 raise_on=None):
+                 raise_on=None, project_scope=None, base_environment=None,
+                 pr_environments=()):
         self.state = state
+        # Set = this fake is a Railway *project* token scoped to that
+        # {projectId, environmentId}: it only works via Project-Access-Token.
+        self.project_scope = project_scope
+        self.base_environment = base_environment
+        # [{"id", "branch", "pr", "deployment": {id, status, staticUrl}}]
+        self.pr_environments = pr_environments
         self.url = url
         self.services = services
         self.environments = environments
@@ -41,14 +49,22 @@ class FakeApi:
         self.removed: set[str] = set()
         self._deployed = 0
 
-    def call(self, query: str, variables: dict, *, token: str) -> dict:
+    def call(self, query: str, variables: dict, *, token: str,
+             project_token: bool = False) -> dict:
         operation = _operation(query)
-        self.calls.append({"op": operation, "vars": variables, "token": token})
+        self.calls.append({"op": operation, "vars": variables, "token": token,
+                           "project_token": project_token})
         if operation in self.raise_on:
             raise self.raise_on[operation]
+        # Like Railway: a token sent in the wrong header is "Not Authorized".
+        if project_token != (self.project_scope is not None):
+            raise AuthError("railway API error: Not Authorized")
         return getattr(self, f"_{operation}")(variables)
 
     # one method per operation the adapter issues
+    def _projectToken(self, _):  # noqa: N802 — mirrors the GraphQL name
+        return {"projectToken": self.project_scope}
+
     def _me(self, _):
         return {"me": {"id": "u1", "email": "ops@agentira.dev"}}
 
@@ -60,9 +76,21 @@ class FakeApi:
 
     def _project(self, _):
         return {"project": {
+            "name": "easy esg",
+            "baseEnvironmentId": self.base_environment,
             "services": _edges(self.services, "svc"),
             "environments": _edges(self.environments, "env"),
         }}
+
+    def _previews(self, _):
+        return {"project": {"environments": {"edges": [{"node": {
+            "id": env["id"],
+            "meta": {"branch": env.get("branch"), "prNumber": env.get("pr")},
+            "serviceInstances": {"edges": [{"node": {
+                "serviceName": env.get("service", "backend"),
+                "latestDeployment": env.get("deployment"),
+            }}]},
+        }} for env in self.pr_environments]}}}
 
     def _serviceInstanceDeployV2(self, variables):  # noqa: N802 — mirrors the GraphQL name
         self._deployed += 1
@@ -94,6 +122,8 @@ def _operation(query: str) -> str:
     """Which operation a query string is. Longest/most specific marker first —
     "deployment" is a substring of deploymentLogs/deploymentRemove."""
     markers = [
+        ("projectToken", "projectToken"),
+        ("isEphemeral: true", "previews"),
         ("serviceInstanceDeployV2(", "serviceInstanceDeployV2"),
         ("projects(", "projects"),
         ("buildLogs(", "logs"),
@@ -167,11 +197,34 @@ def test_deploy_without_project_id_fails_cleanly(token):
 def test_deploy_maps_each_compose_service_one_to_one_and_deploys_the_ref(token):
     api = FakeApi()
 
-    RailwayAdapter(api=api).deploy(_target(), ref="abc123")
+    RailwayAdapter(api=api).deploy(_target(), ref=SHA)
 
     deploys = [call["vars"] for call in api.calls if call["op"] == "serviceInstanceDeployV2"]
     assert [d["serviceId"] for d in deploys] == ["svc_backend", "svc_frontend"]
-    assert {d["commitSha"] for d in deploys} == {"abc123"}
+    assert {d["commitSha"] for d in deploys} == {SHA}
+
+
+def test_deploy_of_a_branch_name_sends_no_commit_sha(token):
+    """A branch name is not a commit: Railway then builds the latest commit of
+    the branch that environment tracks."""
+    api = FakeApi()
+
+    RailwayAdapter(api=api).deploy(_target(branch="main"), ref="main")
+
+    deploys = [call["vars"] for call in api.calls if call["op"] == "serviceInstanceDeployV2"]
+    assert {d["commitSha"] for d in deploys} == {None}
+
+
+def test_main_without_env_mapping_goes_to_the_base_environment(token):
+    """The wizard stores no test/prod mapping. When the default name isn't a
+    Railway environment, `main` deploys to the project's base environment."""
+    api = FakeApi(environments=("production",), base_environment="env_production")
+
+    result = RailwayAdapter(api=api).deploy(_target(branch="main"), ref="main")
+
+    deploy_call = next(c for c in api.calls if c["op"] == "serviceInstanceDeployV2")
+    assert deploy_call["vars"]["environmentId"] == "env_production"
+    assert "-> production" in result.detail
 
 
 def test_test_and_prod_select_railway_environments(token):
@@ -333,6 +386,7 @@ def test_probe_key_lists_deployable_services():
     by_name = {s["name"]: s for s in result["services"]}
     assert by_name["flowty-api"]["deployable"] is True
     assert by_name["flowty-api"]["type"] == "web service"
+    assert by_name["flowty-api"]["project_id"] == "proj_flowty"  # stored on connect
     # a Postgres add-on hosts no code of ours — the wizard renders it disabled
     assert by_name["Postgres"]["deployable"] is False
     assert by_name["Postgres"]["type"] == "database"
@@ -360,6 +414,168 @@ def test_probe_key_distinguishes_unreachable_from_rejected():
     assert result["valid"] is False
     assert result["error"]["headline"] == "Couldn't reach Railway to check this key"
     assert "not a problem with your key" in result["error"]["detail"]
+
+
+# ── branch previews (Railway PR environments) ────────────────────────────
+
+PR_ENV = {"id": "env_pr_12", "branch": "feat/login", "pr": 12,
+          "deployment": {"id": "dep_pr_12", "status": "SUCCESS",
+                         "staticUrl": "easy-esg-pr-12.up.railway.app"}}
+
+
+def test_branch_deploys_into_its_pr_environment(token):
+    api = FakeApi(pr_environments=[PR_ENV])
+
+    result = RailwayAdapter(api=api).deploy(_target(branch="feat/login"), ref="feat/login")
+
+    deploys = [c["vars"] for c in api.calls if c["op"] == "serviceInstanceDeployV2"]
+    assert {d["environmentId"] for d in deploys} == {"env_pr_12"}
+    assert {d["commitSha"] for d in deploys} == {None}
+    assert "pull request #12" in result.detail
+
+
+def test_branch_without_pr_environment_explains_what_to_do(token):
+    api = FakeApi(pr_environments=[PR_ENV])
+
+    result = RailwayAdapter(api=api).deploy(_target(branch="feat/other"), ref="feat/other")
+
+    assert result.status == DeploymentStatus.FAILED
+    assert "Open a pull request" in result.detail
+    assert "serviceInstanceDeployV2" not in [c["op"] for c in api.calls]
+
+
+def test_project_token_never_deploys_a_branch_preview(monkeypatch):
+    """A project token reaches one environment — often production. Deploying a
+    PR branch with it would overwrite that environment, so it is refused."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "rw_project_token")
+    api = FakeApi(project_scope=PROJECT_SCOPE, pr_environments=[PR_ENV])
+
+    result = RailwayAdapter(api=api).deploy(_target(branch="feat/login"), ref="feat/login")
+
+    assert result.status == DeploymentStatus.FAILED
+    assert "workspace token" in result.detail
+    assert "serviceInstanceDeployV2" not in [c["op"] for c in api.calls]
+
+
+def test_previews_reports_what_railway_built_per_branch(token):
+    no_branch = {"id": "env_x", "branch": None, "deployment": {"id": "dep_x", "status": "SUCCESS"}}
+    other_service = {**PR_ENV, "id": "env_pr_13", "branch": "feat/db", "service": "worker"}
+    api = FakeApi(pr_environments=[PR_ENV, no_branch, other_service])
+
+    previews = RailwayAdapter(api=api).previews(_target())
+
+    assert list(previews) == ["feat/login"]
+    preview = previews["feat/login"]
+    assert preview.deployment_id == "dep_pr_12"
+    assert preview.status == DeploymentStatus.LIVE
+    assert preview.url == "https://easy-esg-pr-12.up.railway.app"
+    assert "#12" in preview.detail
+
+
+def test_previews_is_empty_for_a_project_token(monkeypatch):
+    monkeypatch.setenv("RAILWAY_TOKEN", "rw_project_token")
+    api = FakeApi(project_scope=PROJECT_SCOPE, pr_environments=[PR_ENV])
+
+    assert RailwayAdapter(api=api).previews(_target()) == {}
+    assert "previews" not in [c["op"] for c in api.calls]
+
+
+def test_observe_raises_when_railway_cannot_be_asked(token):
+    """`status()` says FAILED on any error; `observe()` must not, or a
+    transient blip would mark a building deployment failed."""
+    api = FakeApi(raise_on={"deployment": TransportError("timed out")})
+
+    with pytest.raises(ApiError):
+        RailwayAdapter(api=api).observe(DEPLOYMENT_ID)
+
+    observed = RailwayAdapter(api=FakeApi()).observe(DEPLOYMENT_ID)
+    assert observed.status == DeploymentStatus.LIVE
+    assert observed.url == "https://agentira-test.up.railway.app"
+
+
+# ── project tokens (Project → Settings → Tokens) ─────────────────────────
+
+PROJECT_SCOPE = {"projectId": "proj_esg", "environmentId": "env_production"}
+
+
+def test_verify_credential_accepts_project_token():
+    """A project token fails both Bearer probes; it must be retried with the
+    Project-Access-Token header before it is called bad."""
+    api = FakeApi(project_scope=PROJECT_SCOPE)
+
+    valid, detail = RailwayAdapter(api=api).verify_credential("rw_project_token")
+
+    assert valid is True
+    assert "project token" in detail
+    assert [(c["op"], c["project_token"]) for c in api.calls] == [
+        ("me", False), ("projects", False), ("projectToken", True)]
+
+
+def test_verify_credential_project_token_unreachable_is_unknown():
+    api = FakeApi(project_scope=PROJECT_SCOPE,
+                  raise_on={"projectToken": TransportError("timed out")})
+
+    valid, _detail = RailwayAdapter(api=api).verify_credential("rw_project_token")
+
+    assert valid is None
+
+
+def test_probe_key_project_token_lists_its_projects_services():
+    """`projects` is closed to a project token — the probe lists the services
+    of the token's own project, in the wizard's usual shape."""
+    api = FakeApi(project_scope=PROJECT_SCOPE, services=("esg-api", "Postgres"))
+
+    result = RailwayAdapter(api=api).probe_key("rw_project_token")
+
+    assert result["valid"] is True
+    assert result["account"] == "easy esg · production"
+    assert result["services"] == [
+        {"id": "svc_esg-api", "name": "esg-api", "project": "easy esg",
+         "project_id": "proj_esg", "type": "web service", "region": None,
+         "deployable": True},
+        {"id": "svc_Postgres", "name": "Postgres", "project": "easy esg",
+         "project_id": "proj_esg", "type": "database", "region": None,
+         "deployable": False},
+    ]
+    project_call = next(c for c in api.calls if c["op"] == "project")
+    assert project_call["vars"] == {"id": "proj_esg"}
+    assert project_call["project_token"] is True
+    assert "projects" not in [c["op"] for c in api.calls if c["project_token"]]
+
+
+def test_deploy_with_project_token_uses_its_environment_and_header(monkeypatch):
+    """Runtime calls send Project-Access-Token and deploy to the token's own
+    environment — even though the target says `test` and has no project_id."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "rw_project_token")
+    api = FakeApi(project_scope=PROJECT_SCOPE, services=("backend",))
+    adapter = RailwayAdapter(api=api)
+    target = DeployTargetConfig(kind=TargetKind.RAILWAY, environment="test",
+                                config={"service": "backend"})
+
+    result = adapter.deploy(target, ref="abc123")
+
+    assert result.status == DeploymentStatus.LIVE
+    assert "-> production" in result.detail
+    deploy_call = next(c for c in api.calls if c["op"] == "serviceInstanceDeployV2")
+    assert deploy_call["vars"]["environmentId"] == "env_production"
+    assert next(c for c in api.calls if c["op"] == "project")["vars"] == {"id": "proj_esg"}
+    assert all(c["project_token"] for c in api.calls)
+
+    adapter.logs(result.deployment_id)
+    adapter.teardown(result.deployment_id)
+    assert adapter.status(result.deployment_id) == DeploymentStatus.ROLLED_BACK
+    assert [c["op"] for c in api.calls].count("projectToken") == 1  # detected once
+
+
+def test_bearer_token_runtime_calls_keep_bearer_header(token):
+    api = FakeApi()
+
+    RailwayAdapter(api=api).deploy(_target(), ref="abc123")
+
+    assert [c["op"] for c in api.calls if c["project_token"]] == ["projectToken"]
+    deploy_call = next(c for c in api.calls if c["op"] == "serviceInstanceDeployV2")
+    assert deploy_call["project_token"] is False
+    assert deploy_call["vars"]["environmentId"] == "env_test"
 
 
 def test_verify_credential_rejects_empty_token():

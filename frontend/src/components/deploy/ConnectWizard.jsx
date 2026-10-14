@@ -8,6 +8,11 @@ const KEY_HELP = {
     railway: 'https://railway.app/account/tokens',
 };
 
+// Which kinds of key the provider accepts, in plain words.
+const KEY_KINDS = {
+    railway: 'For a live preview of every pull request, use a workspace token and turn on PR Environments in your Railway project. A project token also works, but it only deploys main to its one environment.',
+};
+
 function StepBar({ step }) {
     const seg = (i) => ({
         width: step === i ? 18 : 8, height: 4, borderRadius: 2,
@@ -90,7 +95,7 @@ function KeyStep({ provider, apiKey, setApiKey, verify, state, result, error, on
 
             {state === 'idle' && (
                 <div style={{ fontSize: 10.5, color: C.textFaint, marginTop: 8, lineHeight: 1.5 }}>
-                    Stored encrypted. We probe it once to verify, then never show it again.
+                    {KEY_KINDS[provider] && <>{KEY_KINDS[provider]} </>}Stored encrypted. We probe it once to verify, then never show it again.
                 </div>
             )}
 
