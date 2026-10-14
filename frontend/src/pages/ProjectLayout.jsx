@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
+import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink, Link } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
-import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
@@ -175,6 +174,9 @@ export function ProjectLayout() {
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
+    // Recent feed: the same request the 30s change-check already makes (limit 20
+    // instead of 1), shared with the Overview tab so it needs no call of its own.
+    const [activity, setActivity] = useState([]);
     const [showCreate, setShowCreate] = useState(false);
     const [showCreateEpic, setShowCreateEpic] = useState(false);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -275,10 +277,11 @@ export function ProjectLayout() {
     const checkForUpdates = useCallback(async () => {
         if (document.visibilityState !== 'visible' || !projectId) return;
         try {
-            const activities = await api.getProjectActivity(projectId, 1);
+            const activities = await api.getProjectActivity(projectId, 20);
             const latest = activities[0];
             if (latest && latest.id !== lastActivityIdRef.current) {
                 lastActivityIdRef.current = latest.id;
+                setActivity(activities);
                 loadBoard();
                 loadMembers();
                 loadEpics();
@@ -290,8 +293,9 @@ export function ProjectLayout() {
         const init = async () => {
             await Promise.all([loadBoard(), loadMembers(), loadProfiles(), loadEpics()]);
             try {
-                const activities = await api.getProjectActivity(projectId, 1);
+                const activities = await api.getProjectActivity(projectId, 20);
                 if (activities[0]) lastActivityIdRef.current = activities[0].id;
+                setActivity(activities || []);
             } catch (e) {}
         };
         init();
@@ -367,6 +371,7 @@ export function ProjectLayout() {
     // Filters context
     const filters = {
         searchQuery, filterPriority, filterAssignee, filterEpic, board, epics,
+        members, activity, availableProfiles, onAddMember: handleAddMember,
         reloadBoard: loadBoard,
         applyMove,
         requestSelectTask,
@@ -382,6 +387,13 @@ export function ProjectLayout() {
         <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
             <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
                 <header className="shrink-0 border-b">
+                    {isOverview && (
+                        <nav aria-label="Breadcrumb" className="px-4 pt-3 flex items-center gap-2 text-[13px] text-text-tertiary">
+                            <Link to={ROUTES.STUDIO} className="hover:text-accent-primary">Home</Link>
+                            <span>/</span>
+                            <span className="truncate">{board.project.name}</span>
+                        </nav>
+                    )}
                     <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
                         <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
@@ -408,11 +420,6 @@ export function ProjectLayout() {
                             </>
                         )}
                     </div>
-                    {isOverview && (
-                        <div className="px-4 pt-2 pb-3">
-                            <ProjectDescription text={board.project.description} />
-                        </div>
-                    )}
                     <ProjectTabs projectId={projectId} />
                 </header>
 
@@ -449,28 +456,6 @@ export function ProjectLayout() {
 
             {showCreate && <CreateTaskModal projectId={projectId} onClose={() => setShowCreate(false)} onCreated={loadBoard} />}
             {showCreateEpic && <CreateEpicModal projectId={projectId} onClose={() => setShowCreateEpic(false)} onCreated={loadEpics} />}
-        </div>
-    );
-}
-
-
-// Project description is Markdown: render it, clamp to two lines, and let the
-// reader expand the rest instead of cutting it off.
-function ProjectDescription({ text }) {
-    const [open, setOpen] = useState(false);
-    if (!text) return <p className="text-body-sm text-text-secondary">No description</p>;
-    const long = text.length > 160 || text.includes('\n');
-    return (
-        <div className="text-body-sm text-text-secondary">
-            <div style={open ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                <Markdown>{text}</Markdown>
-            </div>
-            {long && (
-                <button type="button" onClick={() => setOpen((o) => !o)}
-                    className="text-xs text-text-tertiary hover:text-text-primary mt-0.5">
-                    {open ? 'Show less' : 'Show more'}
-                </button>
-            )}
         </div>
     );
 }

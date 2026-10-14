@@ -56,9 +56,19 @@ describe('ProjectLayout header', () => {
         expect(screen.queryByPlaceholderText('Search tasks…')).not.toBeInTheDocument();
     });
 
-    it('shows the project description under the header on Overview only', async () => {
+    it('shows a Home / project breadcrumb on Overview only, and the description moves to the page', async () => {
         api.getBoard.mockResolvedValue({ project: { id: 'p1', name: 'Atlas', key_prefix: 'ATL', description: 'Maps for everyone' }, columns: {} });
         mount('/studio/project/p1/overview');
-        expect(await screen.findByText('Maps for everyone')).toBeInTheDocument();
+        const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+        expect(crumb).toHaveTextContent('Home');
+        expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/studio');
+        expect(screen.queryByText('Maps for everyone')).not.toBeInTheDocument();
+    });
+
+    it('shares one recent-activity request (limit 20) instead of a separate limit-1 poll', async () => {
+        mount('/studio/project/p1/board');
+        await screen.findByText('ATL');
+        expect(api.getProjectActivity).toHaveBeenCalledWith('p1', 20);
+        expect(api.getProjectActivity).not.toHaveBeenCalledWith('p1', 1);
     });
 });

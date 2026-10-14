@@ -1,21 +1,12 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, Outlet } from 'react-router-dom';
 import { ProjectOverview } from './ProjectOverview';
 import { api } from '../api';
 
 vi.mock('../api', () => ({
-    api: {
-        getProject: vi.fn(),
-        getProjectMembers: vi.fn(),
-        listProjectRepos: vi.fn(),
-        getBoard: vi.fn(),
-        getProjectActivity: vi.fn(),
-        listProjectAttachments: vi.fn(),
-        // ProjectActivityPanel (live board strip) polls this.
-        forge: { getProjectActivity: vi.fn(() => Promise.resolve(null)) },
-    },
+    api: { listMilestones: vi.fn() },
 }));
 
 const ACTIVITY = [
@@ -40,31 +31,127 @@ const ACTIVITY = [
     },
 ];
 
-function renderOverview() {
-    return render(
-        <MemoryRouter initialEntries={['/studio/project/P1/overview']}>
-            <Routes>
-                <Route path="/studio/project/:projectId/overview" element={<ProjectOverview />} />
-            </Routes>
-        </MemoryRouter>,
-    );
+const DAY = 86400000;
+const iso = (offsetDays) => new Date(Date.now() + offsetDays * DAY).toISOString();
+
+const BOARD = {
+    project: {
+        id: 'P1', name: 'Proj', key_prefix: 'PR', description: 'Self-hosted **backlog** for the team.',
+        repo_url: 'https://github.com/acme/agentira-oss.git', created_at: '2026-05-05T10:00:00',
+    },
+    columns: {
+        backlog: [{ id: 't1', status: 'backlog', due_date: iso(-3), epic_id: 'E1' }],
+        todo: [{ id: 't2', due_date: iso(2), epic_id: 'E1' }, { id: 't3' }],
+        in_progress: [],
+        review: [],
+        done: [{ id: 't4', epic_id: 'E1' }, { id: 't5' }],
+    },
+};
+const MEMBERS = [
+    { id: 'm1', name: 'ali', display_name: 'Ali Faraz', roles: ['admin'], account_type: 'human' },
+    { id: 'm2', name: 'impl', display_name: 'implementer-1', roles: ['member'], account_type: 'agentira_agent' },
+    { id: 'm3', name: 'mo', display_name: 'Mohsin', roles: ['member'], account_type: 'human' },
+];
+const EPICS = [{ id: 'E1', title: 'Board UX', status: 'in_progress' }];
+
+function renderOverview(ctx = {}) {
+    const context = {
+        board: BOARD, members: MEMBERS, epics: EPICS, activity: ACTIVITY,
+        availableProfiles: [{ id: 'p9', name: 'newbie', display_name: 'Newbie' }],
+        onAddMember: vi.fn(), ...ctx,
+    };
+    return {
+        context,
+        ...render(
+            <MemoryRouter initialEntries={['/studio/project/P1/overview']}>
+                <Routes>
+                    <Route path="/studio/project/:projectId" element={<Outlet context={context} />}>
+                        <Route path="overview" element={<ProjectOverview />} />
+                    </Route>
+                    <Route path="/studio/project/:projectId/settings" element={<div>settings-page</div>} />
+                </Routes>
+            </MemoryRouter>,
+        ),
+    };
 }
+
+describe('ProjectOverview', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.listMilestones.mockResolvedValue([
+            { id: 'M1', title: 'Deploy that works', status: 'open', due_date: iso(5), total: 10, done: 2, progress: 20 },
+            { id: 'M2', title: 'Seedbox', status: 'open', due_date: iso(60), total: 10, done: 6, progress: 60 },
+        ]);
+    });
+
+    it('makes exactly one request of its own (milestones)', async () => {
+        renderOverview();
+        await screen.findByText('Milestones and epics');
+        await waitFor(() => expect(api.listMilestones).toHaveBeenCalledTimes(1));
+        expect(api.listMilestones).toHaveBeenCalledWith('P1');
+    });
+
+    it('shows the description at the top, rendered as markdown', async () => {
+        renderOverview();
+        expect(await screen.findByText('backlog', { selector: 'strong' })).toBeInTheDocument();
+    });
+
+    it('draws the four rings and the one-line summary from the loaded board', async () => {
+        renderOverview();
+        // 2 done, 3 open (backlog counts as open), 1 due this week, 1 late
+        expect(await screen.findByRole('img', { name: 'Done: 2' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Open: 3' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Due this week: 1' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Late: 1' })).toBeInTheDocument();
+        expect(screen.getByText(/40% of 5 tasks done\. 1 task is late, and 1 is due this week\./)).toBeInTheDocument();
+    });
+
+    it('lists milestones and epics with progress, marking the at-risk ones', async () => {
+        renderOverview();
+        const risky = await screen.findByRole('progressbar', { name: 'Deploy that works' });
+        expect(risky).toHaveAttribute('aria-valuenow', '20');
+        expect(screen.getByText(/At risk · 2 of 10 done/)).toBeInTheDocument();
+        expect(screen.queryByText(/At risk · 6 of 10/)).toBeNull();
+        // epic has a late task, so it is at risk too; progress = 1 of 3 tasks done
+        expect(screen.getByRole('progressbar', { name: 'Board UX' })).toHaveAttribute('aria-valuenow', '33');
+        expect(screen.getByRole('link', { name: 'Board UX' })).toHaveAttribute('href', '/studio/epics/E1');
+    });
+
+    it('shows About facts and routes Edit details to settings', async () => {
+        renderOverview();
+        expect(await screen.findByText('agentira-oss')).toBeInTheDocument();
+        expect(screen.getByText('PR')).toBeInTheDocument();
+        expect(screen.getAllByText('Ali Faraz').length).toBeGreaterThan(0);
+        fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
+        expect(await screen.findByText('settings-page')).toBeInTheDocument();
+    });
+
+    it('labels people Lead / Agent / Member', async () => {
+        renderOverview();
+        await screen.findByText('implementer-1');
+        expect(screen.getAllByText('Lead')).toHaveLength(2); // About label + Ali's role
+        expect(screen.getByText('Agent')).toBeInTheDocument();
+        expect(screen.getByText('Member')).toBeInTheDocument();
+    });
+
+    it('Add people searches available profiles and adds via the layout handler', async () => {
+        const { context } = renderOverview();
+        fireEvent.click(await screen.findByRole('button', { name: 'Add people' }));
+        fireEvent.change(screen.getByLabelText('Search people to add'), { target: { value: 'new' } });
+        fireEvent.click(await screen.findByRole('button', { name: /Newbie/ }));
+        expect(context.onAddMember).toHaveBeenCalledWith('newbie');
+    });
+});
 
 describe('ProjectOverview — recent activity feed', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        api.getProject.mockResolvedValue({ id: 'P1', name: 'Proj' });
-        api.getProjectMembers.mockResolvedValue([]);
-        api.listProjectRepos.mockResolvedValue([]);
-        api.getBoard.mockResolvedValue({ columns: {} });
-        api.listProjectAttachments.mockResolvedValue([]);
-        api.getProjectActivity.mockResolvedValue(ACTIVITY);
+        api.listMilestones.mockResolvedValue([]);
     });
 
     it('renders activity entries with actor and human action label', async () => {
         renderOverview();
         expect(await screen.findByText('Frontend Developer')).toBeInTheDocument();
-        // raw action "task.move" is shown as the friendly label "moved task"
         expect(screen.getByText('moved task')).toBeInTheDocument();
     });
 
@@ -87,60 +174,5 @@ describe('ProjectOverview — recent activity feed', () => {
             name: /github\.com\/acme\/agentira-frontend\/pull\/70/i,
         });
         expect(prLink).toHaveAttribute('target', '_blank');
-        expect(prLink.getAttribute('href')).toContain('/pull/70');
-    });
-
-    it('fetches a fuller activity window (limit 20)', async () => {
-        renderOverview();
-        await waitFor(() => expect(api.getProjectActivity).toHaveBeenCalled());
-        expect(api.getProjectActivity).toHaveBeenCalledWith('P1', 20);
-    });
-
-    it('does not render the old redundant quick-link nav (Board/Backlog/Roadmap cards)', async () => {
-        renderOverview();
-        await screen.findByText('Frontend Developer');
-        expect(screen.queryByRole('link', { name: /^Board$/i })).toBeNull();
-        expect(screen.queryByRole('link', { name: /^Roadmap$/i })).toBeNull();
-    });
-
-    it('renders status counts as clickable navigation', async () => {
-        renderOverview();
-        // Backlog count → Backlog page
-        const backlogStat = await screen.findByRole('link', { name: /Backlog/i });
-        expect(backlogStat).toHaveAttribute('href', '/studio/project/P1/backlog');
-        // In progress count → Board
-        const inProgressStat = screen.getByRole('link', { name: /In progress/i });
-        expect(inProgressStat).toHaveAttribute('href', '/studio/project/P1/board');
-    });
-});
-
-describe('ProjectOverview — Team & roles', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        api.getProject.mockResolvedValue({ id: 'P1', name: 'Proj' });
-        api.getProjectMembers.mockResolvedValue([
-            { id: 'm1', name: 'Frontend Developer', display_name: 'Frontend Developer', role: 'member' },
-            { id: 'm2', name: 'planner', display_name: 'planner', role: 'member' },
-        ]);
-        api.listProjectRepos.mockResolvedValue([]);
-        api.getBoard.mockResolvedValue({ columns: {} });
-        api.listProjectAttachments.mockResolvedValue([]);
-        api.getProjectActivity.mockResolvedValue([]);
-    });
-
-    it('infers a function badge per member', async () => {
-        renderOverview();
-        // "Frontend Developer" → Frontend, "planner" → Planner
-        expect(await screen.findByText('Frontend')).toBeInTheDocument();
-        expect(screen.getByText('Planner')).toBeInTheDocument();
-    });
-
-    it('expands a member to reveal their responsibilities', async () => {
-        renderOverview();
-        const planner = await screen.findByText('Planner');
-        // blurb hidden until expanded
-        expect(screen.queryByText(/shapes the backlog/i)).toBeNull();
-        fireEvent.click(planner.closest('button'));
-        expect(await screen.findByText(/shapes the backlog/i)).toBeInTheDocument();
     });
 });

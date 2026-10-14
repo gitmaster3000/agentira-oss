@@ -1,47 +1,32 @@
 /**
- * Project Overview — the landing page for a project.
+ * Project Overview — the landing tab of a project (mockup: home-dashboard.html).
  *
- * Top-to-bottom, the page is a one-screen snapshot:
- *   1. Task counts by status — clickable: Backlog → Backlog page, the
- *      four board statuses (To do / In progress / Review / Done) → Board.
- *   2. Activity (one container):
- *        - Live strip: the board's <ProjectActivityPanel>, polling
- *          in-flight runs + the Conductor every 5s.
- *        - Recent feed: runs / comments / task changes rendered as
- *          markdown with clickable links — internal app links (e.g.
- *          /forge/runs/<id>) navigate in-app, external URLs open in a
- *          new tab. Each row also links to its task.
- *   3. Repos + Team & roles (members expand to show an inferred function
- *      and a short responsibility blurb — UI-only until the backend
- *      exposes real role data).
- *   4. Project attachments (drag-and-drop upload, list, download, delete).
+ * Main column: description, four rings (Done / Open / Due this week / Late)
+ * with a one-line summary, Milestones and epics, Recent activity.
+ * Right column: About (key, lead, repository, started, Edit details) and
+ * People with roles (Lead / Agent / Member) + Add people.
  *
- * Navigation lives in the left sidebar; the page intentionally does not
- * duplicate it. Pulls from existing /api/projects/{id}/... + /forge
- * endpoints; no new backend.
+ * No data of its own except milestones: board, members, epics and the recent
+ * activity feed all come from ProjectLayout via outlet context. Milestones is
+ * the single extra request this page makes.
  */
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useParams, Link, useOutletContext, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-    Folder, GitBranch, Users, Activity, ChevronDown,
-    Paperclip, Upload, FileText, Trash2, Download,
-    MessageSquare, Plus, ArrowRight, Pencil, ArrowUpRight,
-} from 'lucide-react';
+import { Activity, MessageSquare, Plus, ArrowRight, Pencil, ArrowUpRight } from 'lucide-react';
 import { api } from '../api';
 import { ROUTES } from '../routes';
-import { ProjectActivityPanel } from '../components/ProjectActivityPanel';
+import { Markdown } from '../components/Markdown';
+import { UserAvatar } from '../components/UserAvatar';
 
-
-function formatSize(bytes) {
-    if (!bytes) return '0 B';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
+const TEAL = 'var(--status-done)';
+const LAV = 'var(--accent-primary)';
+const AMBER = 'var(--warn-amber)';
+const CORAL = 'var(--late-coral)';
+const DAY = 86400000;
+const BTN = 'inline-flex items-center border rounded-lg px-3 py-1.5 text-[12.5px] text-text-secondary hover:text-text-primary transition-colors';
 
 function timeAgo(iso) {
     if (!iso) return '';
@@ -57,267 +42,238 @@ function timeAgo(iso) {
 }
 
 
+
+// A task is "open" until it lands in the done column.
+function summarize(board, epics, milestones) {
+    const cols = board?.columns || {};
+    const done = (cols.done || []).length;
+    const openTasks = Object.entries(cols).filter(([k]) => k !== 'done').flatMap(([, v]) => v);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const weekEnd = today.getTime() + 7 * DAY;
+    let due = 0; let late = 0;
+    const lateByEpic = {};
+    for (const t of openTasks) {
+        if (!t.due_date) continue;
+        const ms = new Date(t.due_date).getTime();
+        if (ms < today.getTime()) { late += 1; if (t.epic_id) lateByEpic[t.epic_id] = true; }
+        else if (ms < weekEnd) due += 1;
+    }
+    const doneByEpic = {}; const totalByEpic = {};
+    for (const [col, list] of Object.entries(cols)) {
+        for (const t of list) {
+            if (!t.epic_id) continue;
+            totalByEpic[t.epic_id] = (totalByEpic[t.epic_id] || 0) + 1;
+            if (col === 'done') doneByEpic[t.epic_id] = (doneByEpic[t.epic_id] || 0) + 1;
+        }
+    }
+    const items = [
+        ...(milestones || []).filter((m) => m.status !== 'done').map((m) => {
+            const ms = m.due_date ? new Date(m.due_date).getTime() : null;
+            const atRisk = m.progress < 100 && ms != null
+                && (ms < today.getTime() || (ms < today.getTime() + 14 * DAY && m.progress < 50));
+            return {
+                key: `m-${m.id}`, title: m.title, progress: m.progress, atRisk,
+                sub: atRisk && ms < today.getTime() ? 'Overdue'
+                    : m.due_date ? `${m.done} of ${m.total} done · due ${new Date(m.due_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+                        : `${m.done} of ${m.total} done`,
+                atRiskLabel: atRisk,
+            };
+        }),
+        ...(epics || []).filter((e) => e.status !== 'done' && totalByEpic[e.id]).map((e) => {
+            const d = doneByEpic[e.id] || 0; const n = totalByEpic[e.id];
+            const atRisk = !!lateByEpic[e.id];
+            return {
+                key: `e-${e.id}`, title: e.title, progress: Math.round((d / n) * 100), atRisk,
+                sub: `${atRisk ? 'Has late tasks · ' : ''}${d} of ${n} done`, epicId: e.id,
+            };
+        }),
+    ];
+    return { done, open: openTasks.length, total: done + openTasks.length, due, late, items };
+}
+
+
+function Ring({ value, of, color, label }) {
+    const r = 40; const C = 2 * Math.PI * r;
+    const frac = of > 0 ? Math.min(value, of) / of : 0;
+    return (
+        <figure className="m-0 flex flex-col items-center gap-1.5">
+            <svg viewBox="0 0 96 96" width="96" height="96" role="img" aria-label={`${label}: ${value}`}>
+                <circle cx="48" cy="48" r={r} fill="none" stroke="var(--border-subtle)" strokeWidth="8" />
+                <circle cx="48" cy="48" r={r} fill="none" stroke={color} strokeWidth="8" strokeLinecap="round"
+                    strokeDasharray={`${C * frac} ${C}`} transform="rotate(-90 48 48)" />
+                <text x="48" y="55" textAnchor="middle" fontSize="22" fontWeight="600" fill="var(--text-primary)">{value}</text>
+            </svg>
+            <figcaption className="text-[13px] font-semibold text-text-secondary">{label}</figcaption>
+        </figure>
+    );
+}
+
+
+function Panel({ children, className = '' }) {
+    return <div className={`rounded-2xl border bg-bg-panel p-4 ${className}`}>{children}</div>;
+}
+
+
+function SectionTitle({ children, first }) {
+    return <h3 className={`text-[15px] font-semibold text-text-primary mb-2.5 ${first ? '' : 'mt-6'}`}>{children}</h3>;
+}
+
+
+function ProgressRow({ item }) {
+    const color = item.atRisk ? AMBER : LAV;
+    const title = item.epicId
+        ? <Link to={ROUTES.STUDIO_EPIC(item.epicId)} className="font-semibold text-text-primary hover:text-accent-primary flex-1 truncate">{item.title}</Link>
+        : <b className="font-semibold text-text-primary flex-1 truncate">{item.title}</b>;
+    return (
+        <div className="py-2">
+            <div className="flex gap-2 items-baseline">
+                {title}
+                <span className="text-[12.5px] shrink-0" style={{ color: item.atRisk ? AMBER : 'var(--text-tertiary)' }}>
+                    {item.atRisk ? 'At risk · ' : ''}{item.sub}
+                </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-bg-app overflow-hidden mt-1.5"
+                role="progressbar" aria-label={item.title} aria-valuenow={item.progress} aria-valuemin={0} aria-valuemax={100}>
+                <span className="block h-full rounded-full" style={{ width: `${item.progress}%`, background: color }} />
+            </div>
+        </div>
+    );
+}
+
+
+function roleOf(m, leadName) {
+    if (m.name === leadName) return 'Lead';
+    return m.account_type && m.account_type !== 'human' ? 'Agent' : 'Member';
+}
+
+
+function PeopleCard({ members, leadName, availableProfiles, onAddMember }) {
+    const [adding, setAdding] = useState(false);
+    const [query, setQuery] = useState('');
+    const q = query.trim().toLowerCase();
+    const matches = q
+        ? (availableProfiles || []).filter((p) => [p.name, p.display_name]
+            .some((v) => (v || '').toLowerCase().includes(q))).slice(0, 6)
+        : [];
+    return (
+        <Panel>
+            {members.length === 0 && <div className="text-xs text-text-tertiary pb-2">No members yet.</div>}
+            {members.map((m) => (
+                <div key={m.id || m.name} className="flex items-center gap-3 py-2 border-b last:border-b-0 min-w-0">
+                    <UserAvatar profile={m} size={28} />
+                    <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{m.display_name || m.name}</span>
+                    <span className="text-[12.5px] text-text-tertiary shrink-0">{roleOf(m, leadName)}</span>
+                </div>
+            ))}
+            {adding ? (
+                <div className="mt-2.5">
+                    <input type="text" autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search by name…" aria-label="Search people to add"
+                        className="input w-full" style={{ padding: '6px 10px', fontSize: 12.5 }} />
+                    {q && matches.length === 0 && (
+                        <div className="px-1 py-2 text-xs text-text-tertiary">No one matches “{query.trim()}”.</div>
+                    )}
+                    {matches.map((p) => (
+                        <button key={p.id} type="button"
+                            onClick={() => { onAddMember(p.name); setQuery(''); setAdding(false); }}
+                            className="w-full flex items-center gap-2.5 px-1 py-1.5 rounded-lg hover:bg-bg-hover text-left">
+                            <UserAvatar profile={p} size={24} />
+                            <span className="flex-1 truncate text-sm text-text-primary">{p.display_name || p.name}</span>
+                            <Plus className="w-3.5 h-3.5 text-text-tertiary" />
+                        </button>
+                    ))}
+                </div>
+            ) : (
+                <button type="button" onClick={() => setAdding(true)} className={`${BTN} mt-2.5`}>Add people</button>
+            )}
+        </Panel>
+    );
+}
+
+
 export function ProjectOverview() {
     const { projectId } = useParams();
-    const [project, setProject] = useState(null);
-    const [members, setMembers] = useState([]);
-    const [repos, setRepos] = useState([]);
-    const [board, setBoard] = useState(null);
-    const [activity, setActivity] = useState([]);
-    const [attachments, setAttachments] = useState([]);
-    const [loading, setLoading] = useState(true);
-
-    const reloadAttachments = useCallback(async () => {
-        try {
-            const list = await api.listProjectAttachments(projectId);
-            setAttachments(list || []);
-        } catch { /* keep prior */ }
-    }, [projectId]);
+    const navigate = useNavigate();
+    const { board, members = [], epics = [], activity = [], availableProfiles, onAddMember } = useOutletContext() || {};
+    const [milestones, setMilestones] = useState([]);
 
     useEffect(() => {
         let alive = true;
-        (async () => {
-            try {
-                const [p, m, r, b, a, att] = await Promise.all([
-                    api.getProject(projectId).catch(() => null),
-                    api.getProjectMembers(projectId).catch(() => []),
-                    api.listProjectRepos(projectId).catch(() => []),
-                    api.getBoard(projectId).catch(() => null),
-                    api.getProjectActivity(projectId, 20).catch(() => []),
-                    api.listProjectAttachments(projectId).catch(() => []),
-                ]);
-                if (!alive) return;
-                setProject(p);
-                setMembers(m || []);
-                setRepos(r || []);
-                setBoard(b);
-                setActivity(a || []);
-                setAttachments(att || []);
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
+        api.listMilestones(projectId)
+            .then((m) => { if (alive) setMilestones(m || []); })
+            .catch(() => {});
         return () => { alive = false; };
     }, [projectId]);
 
-    if (loading) {
-        return <div className="p-8 text-text-tertiary">Loading…</div>;
-    }
-    if (!project) {
-        return <div className="p-8 text-text-secondary">Project not found.</div>;
-    }
+    const stats = useMemo(() => summarize(board, epics, milestones), [board, epics, milestones]);
 
-    const statusCounts = countByStatus(board);
+    const project = board?.project;
+    if (!project) return <div className="p-8 text-text-secondary">Project not found.</div>;
 
-    // Outer is a flex column so the live strip can pin at the top
-    // (shrink-0) while the rest of the page is the scrollable child.
-    // `h-full overflow-hidden` is required because the parent Outlet
-    // wrapper is plain block layout — `flex-1` alone wouldn't give the
-    // scroll container a constrained height and overflow-y-auto would
-    // never trigger (the page-scroll regression that motivated this).
-    const boardHref = ROUTES.STUDIO_PROJECT_BOARD(projectId);
-    const backlogHref = ROUTES.STUDIO_PROJECT_BACKLOG(projectId);
+    const lead = members.find((m) => (m.roles || [m.role]).includes('admin') && m.account_type === 'human')
+        || members.find((m) => m.account_type === 'human') || members[0];
+    const repo = (project.repo_url || project.repo_path || '').replace(/\.git$/, '').split('/').filter(Boolean).pop();
+    const pct = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
+    const summary = stats.total === 0
+        ? 'No tasks yet.'
+        : `${pct}% of ${stats.total} tasks done. ${stats.late
+            ? `${stats.late} ${stats.late === 1 ? 'task is' : 'tasks are'} late, and`
+            : 'Nothing is late, and'} ${stats.due} ${stats.due === 1 ? 'is' : 'are'} due this week.`;
 
     return (
-        <div className="flex flex-col h-full overflow-hidden">
-            <div className="flex-1 overflow-y-auto">
-                <div className="max-w-5xl mx-auto p-6 space-y-6">
-                    {/* Status counts — clickable: Backlog → Backlog page;
-                        the four board statuses → Board. Per admin feedback
-                        these were the "tabs"; making them navigate matches
-                        the role they were already trying to play. */}
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                        <Stat label="Backlog" value={statusCounts.backlog} to={backlogHref} />
-                        <Stat label="To do" value={statusCounts.todo} to={boardHref} />
-                        <Stat label="In progress" value={statusCounts.in_progress} to={boardHref} accent />
-                        <Stat label="Review" value={statusCounts.review} to={boardHref} />
-                        <Stat label="Done" value={statusCounts.done} to={boardHref} />
-                    </div>
-
-                    {/* Activity — one container, live panel on top (in-flight
-                        runs + Conductor, 5s poll) and the clickable recent
-                        feed below. */}
-                    <div className="card p-0 overflow-hidden">
-                        <ProjectActivityPanel projectId={projectId} />
-                        <div className="p-4">
-                            <ActivityCard items={activity} projectId={projectId} bare />
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <ReposCard repos={repos} projectId={projectId} />
-                        <TeamCard members={members} />
-                    </div>
-
-                    <AttachmentsCard
-                        projectId={projectId}
-                        attachments={attachments}
-                        onChange={reloadAttachments}
-                    />
-                </div>
-            </div>
-        </div>
-    );
-}
-
-
-function Stat({ label, value, accent, to }) {
-    const inner = (
-        <>
-            <div className={`text-2xl font-bold ${accent ? 'text-accent-primary' : 'text-text-primary'}`}>
-                {value}
-            </div>
-            <div className="text-xs text-text-tertiary uppercase tracking-wider mt-1">
-                {label}
-            </div>
-        </>
-    );
-    if (to) {
-        return (
-            <Link
-                to={to}
-                className="card text-center hover:bg-bg-hover hover:border-accent-primary/30 transition-colors block"
-            >
-                {inner}
-            </Link>
-        );
-    }
-    return <div className="card text-center">{inner}</div>;
-}
-
-
-function ReposCard({ repos, projectId }) {
-    return (
-        <div className="card space-y-3">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                    <Folder className="w-4 h-4" /> Repositories
-                    <span className="text-text-tertiary text-xs">{repos.length}</span>
-                </div>
-                <Link to={ROUTES.STUDIO_PROJECT_SETTINGS(projectId) + '#repos'}
-                    className="text-xs text-accent-primary hover:underline">
-                    Manage
-                </Link>
-            </div>
-            {repos.length === 0 ? (
-                <div className="text-xs text-text-tertiary">
-                    No repos attached. Add one in Settings → Repos.
-                </div>
-            ) : (
-                <div className="space-y-1.5">
-                    {repos.map((r) => (
-                        <div key={r.id || r.name}
-                            className="flex items-center gap-2 px-2 py-1.5 rounded bg-bg-hover">
-                            <GitBranch className="w-3.5 h-3.5 text-text-tertiary" />
-                            <span className="text-sm text-text-primary">{r.name}</span>
-                            {r.is_primary && (
-                                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-subtle text-accent-primary">
-                                    primary
-                                </span>
-                            )}
-                            <span className="text-xs text-text-tertiary font-mono truncate ml-auto">
-                                {r.repo_path || r.repo_url}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-
-// UI-only role/responsibility profiles. The platform doesn't yet expose a
-// per-member "what they do" field, so we infer a function from the member's
-// name/role and show a short responsibility blurb. Placeholder copy — to be
-// replaced once the backend exposes real role definitions.
-const ROLE_PROFILES = [
-    { match: /front.?end|^fe\b|web|ui/i,        function: 'Frontend',      blurb: 'Builds and refines the product UI — pages, components, and client-side behavior.' },
-    { match: /back.?end|^be\b|api|server/i,     function: 'Backend',       blurb: 'Owns API endpoints, data models, and server-side business logic.' },
-    { match: /implement|engineer|dev|coder/i,   function: 'Implementer',   blurb: 'Picks up scoped tasks and turns them into working, tested code.' },
-    { match: /plan(ner)?|pm|product/i,          function: 'Planner',       blurb: 'Breaks goals into tasks, sets priorities, and shapes the backlog.' },
-    { match: /review|qa|critic/i,               function: 'Reviewer',      blurb: 'Reviews changes for correctness and quality before they merge.' },
-    { match: /test|qe/i,                        function: 'Test',          blurb: 'Writes and runs tests; verifies behavior and guards against regressions.' },
-    { match: /admin|owner|lead/i,               function: 'Admin',         blurb: 'Manages the project, members, and overall workflow.' },
-    { match: /bot|agent|conductor/i,            function: 'Automation',    blurb: 'Automated agent that runs scheduled or triggered work.' },
-];
-
-const FUNCTION_COLORS = {
-    Frontend: '#00bcd4', Backend: '#7c4dff', Implementer: '#2ecc71',
-    Planner: '#f1c40f', Reviewer: '#ff9800', Test: '#e91e63',
-    Admin: '#e74c3c', Automation: '#9aa0a6', Contributor: '#9aa0a6',
-};
-
-function memberProfile(m) {
-    const key = `${m.name || ''} ${m.display_name || ''} ${m.role || ''}`;
-    const found = ROLE_PROFILES.find((p) => p.match.test(key));
-    return found || {
-        function: 'Contributor',
-        blurb: 'Contributes to the project. Responsibilities to be defined.',
-    };
-}
-
-
-function TeamMemberRow({ member }) {
-    const [open, setOpen] = useState(false);
-    const profile = memberProfile(member);
-    const color = FUNCTION_COLORS[profile.function] || FUNCTION_COLORS.Contributor;
-    const name = member.display_name || member.name || '?';
-    return (
-        <div className="rounded-md bg-bg-hover/60 overflow-hidden">
-            <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-bg-hover transition-colors"
-            >
-                <div className="w-7 h-7 rounded-full bg-accent-subtle text-accent-primary flex items-center justify-center text-xs font-bold flex-shrink-0">
-                    {name[0]?.toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                    <div className="text-sm text-text-primary truncate">{name}</div>
-                    <div className="text-[11px] text-text-tertiary truncate">@{member.name}</div>
-                </div>
-                <span
-                    className="ml-auto text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded flex-shrink-0"
-                    style={{ backgroundColor: color + '22', color }}
-                >
-                    {profile.function}
-                </span>
-                <ChevronDown
-                    className={`w-4 h-4 text-text-tertiary flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-                />
-            </button>
-            {open && (
-                <div className="px-3 pb-2.5 pt-0.5 text-xs text-text-secondary leading-relaxed border-t border-border-subtle/60">
-                    {profile.blurb}
-                    {member.role && (
-                        <div className="mt-1 text-text-tertiary">
-                            Access role: <span className="text-text-secondary">{member.role}</span>
-                        </div>
+        <div className="h-full overflow-y-auto">
+            <div className="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-7">
+                <section className="min-w-0">
+                    {project.description ? (
+                        <div className="mb-5 text-base leading-relaxed text-text-secondary max-w-[62ch]"><Markdown>{project.description}</Markdown></div>
+                    ) : (
+                        <p className="mb-5 text-text-tertiary">No description yet.</p>
                     )}
-                </div>
-            )}
-        </div>
-    );
-}
+                    <div className="flex flex-wrap gap-6">
+                        <Ring value={stats.done} of={stats.total} color={TEAL} label="Done" />
+                        <Ring value={stats.open} of={stats.total} color={LAV} label="Open" />
+                        <Ring value={stats.due} of={Math.max(stats.open, 1)} color={AMBER} label="Due this week" />
+                        <Ring value={stats.late} of={Math.max(stats.open, 1)} color={CORAL} label="Late" />
+                    </div>
+                    <p className="mt-3.5 mb-1 text-[15px] text-text-secondary max-w-[60ch]">{summary}</p>
 
+                    <SectionTitle>Milestones and epics</SectionTitle>
+                    <Panel>
+                        {stats.items.length === 0
+                            ? <div className="text-xs text-text-tertiary py-1">No milestones or epics with tasks yet.</div>
+                            : stats.items.map((it) => <ProgressRow key={it.key} item={it} />)}
+                    </Panel>
 
-function TeamCard({ members }) {
-    return (
-        <div className="card space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Users className="w-4 h-4" /> Team &amp; roles
-                <span className="text-text-tertiary text-xs">{members.length}</span>
+                    <SectionTitle>Recent activity</SectionTitle>
+                    <Panel>
+                        {activity.length === 0 ? (
+                            <div className="text-xs text-text-tertiary py-1">Nothing yet.</div>
+                        ) : (
+                            <div className="divide-y divide-border-subtle/60">
+                                {activity.map((a, i) => <ActivityRow key={a.id || i} entry={a} />)}
+                            </div>
+                        )}
+                    </Panel>
+                </section>
+
+                <aside className="min-w-0">
+                    <SectionTitle first>About</SectionTitle>
+                    <Panel>
+                        <dl className="grid grid-cols-[90px_1fr] gap-x-2.5 gap-y-1.5 m-0 text-[13px]">
+                            <dt className="text-text-tertiary">Key</dt><dd className="m-0">{project.key_prefix}</dd>
+                            <dt className="text-text-tertiary">Lead</dt><dd className="m-0">{lead ? (lead.display_name || lead.name) : '—'}</dd>
+                            <dt className="text-text-tertiary">Repository</dt><dd className="m-0 truncate">{repo || '—'}</dd>
+                            <dt className="text-text-tertiary">Started</dt>
+                            <dd className="m-0">{project.created_at ? new Date(project.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</dd>
+                        </dl>
+                        <button type="button" className={`${BTN} mt-3`}
+                            onClick={() => navigate(ROUTES.STUDIO_PROJECT_SETTINGS(projectId))}>Edit details</button>
+                    </Panel>
+                    <SectionTitle>People</SectionTitle>
+                    <PeopleCard members={members} leadName={lead?.name}
+                        availableProfiles={availableProfiles} onAddMember={onAddMember} />
+                </aside>
             </div>
-            {members.length === 0 ? (
-                <div className="text-xs text-text-tertiary">No members yet.</div>
-            ) : (
-                <div className="space-y-1.5">
-                    {members.map((m) => (
-                        <TeamMemberRow key={m.id || m.name} member={m} />
-                    ))}
-                </div>
-            )}
         </div>
     );
 }
@@ -413,139 +369,3 @@ function ActivityRow({ entry, projectId }) {
 }
 
 
-// `bare` — render without the .card wrapper so the parent container
-// (e.g. the unified Activity container on Overview) provides the shell.
-function ActivityCard({ items, projectId, bare = false }) {
-    const wrapperClass = bare ? 'space-y-1' : 'card space-y-1';
-    return (
-        <div className={wrapperClass}>
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary mb-1">
-                <Activity className="w-4 h-4 text-accent-primary" /> Recent activity
-            </div>
-            {items.length === 0 ? (
-                <div className="text-xs text-text-tertiary py-2">Nothing yet.</div>
-            ) : (
-                <div className="divide-y divide-border-subtle/60">
-                    {items.map((a, i) => (
-                        <ActivityRow key={a.id || i} entry={a} projectId={projectId} />
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-
-// AP-152: project-level attachments — drag-and-drop, list, download, delete.
-// Lives on the dashboard (NOT Settings) because briefs/designs are
-// project content the team works with daily, not a one-time config.
-function AttachmentsCard({ projectId, attachments, onChange }) {
-    const fileInputRef = useRef(null);
-    const [dragActive, setDragActive] = useState(false);
-    const [uploading, setUploading] = useState(false);
-
-    const uploadFiles = async (fileList) => {
-        const files = Array.from(fileList || []);
-        if (!files.length) return;
-        setUploading(true);
-        try {
-            for (const f of files) {
-                await api.uploadProjectAttachment(projectId, f);
-            }
-            await onChange();
-        } catch (err) {
-            alert('Upload failed: ' + (err.message || err));
-        } finally {
-            setUploading(false);
-        }
-    };
-
-    const handleDelete = async (att) => {
-        if (!window.confirm(`Delete ${att.filename}?`)) return;
-        try {
-            await api.deleteAttachment(att.id);
-            await onChange();
-        } catch (err) {
-            alert('Delete failed: ' + (err.message || err));
-        }
-    };
-
-    return (
-        <div className="card space-y-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                <Paperclip className="w-4 h-4" /> Attachments
-                <span className="text-text-tertiary text-xs">{attachments.length}</span>
-            </div>
-            <div
-                className="rounded-lg p-4 text-center cursor-pointer transition-all"
-                style={{
-                    border: `2px dashed ${dragActive ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
-                    backgroundColor: dragActive ? 'var(--accent-subtle)' : 'var(--bg-app)',
-                }}
-                onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-                onDragLeave={() => setDragActive(false)}
-                onDrop={(e) => { e.preventDefault(); setDragActive(false); uploadFiles(e.dataTransfer.files); }}
-                onClick={() => fileInputRef.current?.click()}
-            >
-                <Upload className="w-5 h-5 mx-auto mb-1.5" style={{ color: dragActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                    {uploading
-                        ? 'Uploading…'
-                        : <>Drop files here or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>click to browse</span></>}
-                </p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
-                    Briefs, designs, brand guides — agents can read text inline; binary fetched on demand.
-                </p>
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => { uploadFiles(e.target.files); e.target.value = ''; }}
-                />
-            </div>
-            {attachments.length > 0 && (
-                <div className="space-y-1">
-                    {attachments.map((a) => (
-                        <div key={a.id}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs"
-                            style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)' }}
-                        >
-                            <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-primary)' }} />
-                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{a.filename}</span>
-                            <span className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>{formatSize(a.size_bytes)}</span>
-                            <button
-                                type="button"
-                                onClick={() => api.downloadAttachment(a.id, a.filename).catch(err => alert('Failed to download: ' + err.message))}
-                                className="p-0.5 rounded-lg hover:bg-bg-hover"
-                                style={{ color: 'var(--text-tertiary)' }}
-                                title="Download"
-                            >
-                                <Download className="w-3 h-3" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleDelete(a)}
-                                className="p-0.5 rounded-lg hover:bg-red-500/10 transition-colors"
-                                style={{ color: 'var(--text-tertiary)' }}
-                                title="Delete"
-                            >
-                                <Trash2 className="w-3 h-3" />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-
-function countByStatus(board) {
-    const out = { backlog: 0, todo: 0, in_progress: 0, review: 0, done: 0 };
-    if (!board || !board.columns) return out;
-    for (const status of Object.keys(out)) {
-        out[status] = (board.columns[status] || []).length;
-    }
-    return out;
-}
