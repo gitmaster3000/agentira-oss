@@ -111,6 +111,23 @@ describe('RoadmapView navigation', () => {
         expect(screen.getByText('Full task AP-496')).toBeInTheDocument();
     });
 
+    it('calendarOnly: Calendar title, no view switcher, no Timeline toggle', async () => {
+        render(
+            <MemoryRouter initialEntries={['/studio/project/p1/calendar']}>
+                <Routes>
+                    <Route path="/studio/project/:projectId/calendar" element={<RoadmapView calendarOnly />} />
+                </Routes>
+            </MemoryRouter>,
+        );
+
+        expect(await screen.findByRole('heading', { name: 'Calendar' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Schedule' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Links' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Timeline' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Agenda' })).toBeInTheDocument();
+    });
+
     it('uses the same selected range for the timeline and Day calendar mode', async () => {
         render(
             <MemoryRouter initialEntries={['/studio/project/p1/roadmap']}>
