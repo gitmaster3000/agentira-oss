@@ -115,6 +115,6 @@ The in-app preview (`AttachmentPreview.jsx`) reuses `GET /api/attachments/{id}/d
 | `people` | Each member across those projects: `open` tasks and `days_done_this_week` |
 | `week_summary` | Latest week summary text, or `null` |
 
-Weeks start on Monday (UTC). "Finished" uses the task's last update time while in `done`. The endpoint issues a fixed number of queries regardless of project or task count (asserted in `backend/tests/test_home_api.py`); date filters are backed by indexes on `tasks.due_date`, `tasks.updated_at` and `activities.created_at`.
+Weeks start on Monday (UTC). "Finished" uses `tasks.completed_at`, set when a task enters `done` and cleared when it leaves, so later edits to a done task do not count it again. Existing done tasks were backfilled from their latest move into `done` (falling back to `updated_at`). The endpoint issues a fixed number of queries regardless of project or task count (asserted in `backend/tests/test_home_api.py`); date filters are backed by indexes on `tasks.due_date`, `tasks.completed_at` and `activities.created_at`.
 
 `GET /api/home/layout` and `PUT /api/home/layout` read and replace the caller's tile layout, stored on their profile. The body is `{"layout": [["tile_id", "size"], ...]}` (at most 50 tiles).

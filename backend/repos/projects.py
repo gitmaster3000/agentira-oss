@@ -78,7 +78,7 @@ def task_stats_by_project(db, project_ids: list[str], now: datetime) -> dict[str
             func.count(case((open_, 1))),
             func.count(case((open_ & (Task.due_date >= ws) & (Task.due_date < we), 1))),
             func.count(case((open_ & (Task.due_date < now), 1))),
-            func.count(case((is_done & (Task.updated_at >= ws), 1))),
+            func.count(case((is_done & (Task.completed_at >= ws), 1))),
             func.max(Task.updated_at),
         )
         .join(Status, Status.id == Task.status_id)
@@ -93,11 +93,11 @@ def done_trend_by_project(db, project_ids: list[str], now: datetime) -> dict[str
     """Done-per-week for the last TREND_WEEKS weeks (oldest first), one query."""
     ws = week_start(now)
     first = ws - timedelta(weeks=TREND_WEEKS - 1)
-    wk = func.date_trunc("week", Task.updated_at)
+    wk = func.date_trunc("week", Task.completed_at)
     rows = (
         db.query(Task.project_id, wk, func.count(Task.id))
         .join(Status, Status.id == Task.status_id)
-        .filter(Task.project_id.in_(project_ids), Status.name == "done", Task.updated_at >= first)
+        .filter(Task.project_id.in_(project_ids), Status.name == "done", Task.completed_at >= first)
         .group_by(Task.project_id, wk).all()
     )
     out = {pid: [0] * TREND_WEEKS for pid in project_ids}
@@ -141,8 +141,8 @@ def people_stats(db, project_ids: list[str], member_names: list[str], now: datet
         db.query(
             Task.assignee,
             func.count(case((~is_done, 1))),
-            func.count(func.distinct(case((is_done & (Task.updated_at >= ws),
-                                           cast(Task.updated_at, Date))))),
+            func.count(func.distinct(case((is_done & (Task.completed_at >= ws),
+                                           cast(Task.completed_at, Date))))),
         )
         .join(Status, Status.id == Task.status_id)
         .filter(Task.project_id.in_(project_ids), Task.assignee.in_(member_names))

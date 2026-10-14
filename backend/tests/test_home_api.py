@@ -9,8 +9,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 
 from backend.db import privileged
-from backend.models import Profile, Role, Status, Task, allow_task_write
+from backend.models import Profile, Role, Task
 from backend.rest_api import app
+
+
+_CLIENT = [None]
 
 
 @pytest.fixture
@@ -18,6 +21,7 @@ def client(seed_admin):
     _, token = seed_admin
     c = TestClient(app)
     c.headers["Authorization"] = f"Bearer {token}"
+    _CLIENT[0] = c
     return c
 
 
@@ -28,19 +32,20 @@ def _project(client, name, n_tasks):
     return pid
 
 
+def _move(task_id, status):
+    return _CLIENT[0].post(f"/api/tasks/{task_id}/move", json={"status": status})
+
+
 def _age_tasks(pg, project_id, done_n, due_delta_days):
-    """Mark first done_n tasks done; give the rest a due date."""
+    """Mark first done_n tasks done (via the service, so completed_at is set); give the rest a due date."""
     with privileged(), pg.SessionLocal() as db:
-        done = db.query(Status).filter(Status.name == "done").one()
-        tasks = db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at).all()
+        ids = [t.id for t in db.query(Task).filter(Task.project_id == project_id).order_by(Task.created_at)]
         due = datetime.now(timezone.utc) + timedelta(days=due_delta_days)
-        with allow_task_write():
-            for i, t in enumerate(tasks):
-                if i < done_n:
-                    t.status_id = done.id
-                else:
-                    t.due_date = due
+        for t in db.query(Task).filter(Task.id.in_(ids[done_n:])):
+            t.due_date = due
         db.commit()
+    for tid in ids[:done_n]:
+        assert _move(tid, "done").status_code == 200
 
 
 def _count(engine, fn):
@@ -102,3 +107,53 @@ def test_layout_roundtrip_per_user(pg, client):
     assert r.status_code == 200
     assert client.get("/api/home/layout").json()["layout"] == [["week", "wide"], ["people", "small"]]
     assert client.put("/api/home/layout", json={"layout": [["x"]]}).status_code == 422
+
+
+def _one_done_task(pg, client):
+    pid = _project(client, "Beta", 1)
+    _age_tasks(pg, pid, done_n=1, due_delta_days=0)
+    with privileged(), pg.SessionLocal() as db:
+        return db.query(Task).filter(Task.project_id == pid).one().id
+
+
+def test_edit_after_done_does_not_change_done_week(pg, client):
+    tid = _one_done_task(pg, client)
+    assert client.get("/api/home").json()["week"]["done"] == 1
+    # the task was actually finished a month ago
+    with privileged(), pg.SessionLocal() as db:
+        t = db.get(Task, tid)
+        t.completed_at = datetime.now(timezone.utc) - timedelta(days=30)
+        db.commit()
+    before = client.get("/api/home").json()
+    assert before["week"]["done"] == 0
+    r = client.patch(f"/api/tasks/{tid}", json={"title": "renamed", "tags": ["x"]})
+    assert r.status_code == 200
+    after = client.get("/api/home").json()
+    assert after["week"]["done"] == 0
+    assert after["projects"][0]["done_per_week"] == before["projects"][0]["done_per_week"]
+    assert after["people"] == before["people"]
+
+
+def test_reopen_clears_completed_at(pg, client):
+    tid = _one_done_task(pg, client)
+    with privileged(), pg.SessionLocal() as db:
+        assert db.get(Task, tid).completed_at is not None
+    assert _move(tid, "todo").status_code == 200
+    with privileged(), pg.SessionLocal() as db:
+        assert db.get(Task, tid).completed_at is None
+    assert client.get("/api/home").json()["week"]["done"] == 0
+
+
+def test_migration_backfills_completed_at_from_move_activity(pg, client):
+    from sqlalchemy import text
+    from backend.db import run_migrations
+    tid = _one_done_task(pg, client)
+    with pg.engine.begin() as conn:
+        moved_at = conn.execute(text(
+            "SELECT max(created_at) FROM activities WHERE task_id=:t AND action='task.move'"),
+            {"t": tid}).scalar()
+        conn.execute(text("ALTER TABLE tasks DROP COLUMN completed_at"))
+    run_migrations()
+    with pg.engine.begin() as conn:
+        got = conn.execute(text("SELECT completed_at FROM tasks WHERE id=:t"), {"t": tid}).scalar()
+    assert got == moved_at

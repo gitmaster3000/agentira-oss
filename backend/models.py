@@ -584,7 +584,7 @@ class Task(Base):
         UniqueConstraint("project_id", "key", name="uq_tasks_project_key"),
         # Home page date filters (due this week / late / done this week).
         Index("ix_tasks_due_date", "due_date"),
-        Index("ix_tasks_updated_at", "updated_at"),
+        Index("ix_tasks_completed_at", "completed_at"),
     )
 
     id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
@@ -623,6 +623,8 @@ class Task(Base):
     start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+    # Set when the task enters "done", cleared when it leaves (TaskService).
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="tasks")
     epic: Mapped["Epic | None"] = relationship(back_populates="tasks", foreign_keys=[epic_id])

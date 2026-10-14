@@ -657,7 +657,6 @@ def run_migrations():
         # Home page date-filter indexes (create_all won't add them to old tables)
         for ddl in (
             "CREATE INDEX IF NOT EXISTS ix_tasks_due_date ON tasks(due_date)",
-            "CREATE INDEX IF NOT EXISTS ix_tasks_updated_at ON tasks(updated_at)",
             "CREATE INDEX IF NOT EXISTS ix_activities_created_at ON activities(created_at)",
         ):
             if ddl.split(" ON ")[1].split("(")[0] in tables:
@@ -816,6 +815,17 @@ def run_migrations():
         if "tasks" in tables:
             _ensure_column(conn, "tasks", "repo_name", "VARCHAR(60)")
             _ensure_column(conn, "tasks", "repos_json", "TEXT")
+            # Home page: when a task entered "done". Backfill once from the
+            # latest move into done, falling back to updated_at.
+            if _ensure_column(conn, "tasks", "completed_at", "TIMESTAMPTZ"):
+                conn.execute(text(
+                    "UPDATE tasks SET completed_at = COALESCE((SELECT max(a.created_at) "
+                    "FROM activities a WHERE a.task_id = tasks.id AND a.action = 'task.move' "
+                    "AND a.detail LIKE '% → done'), updated_at) "
+                    "WHERE status_id IN (SELECT id FROM statuses WHERE name = 'done')"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_tasks_completed_at ON tasks(completed_at)"))
+            conn.commit()
         # AP-121: backfill — for every project with a legacy repo_path /
         # repo_url and no project_repos rows, insert one primary row.
         # Runs after `Base.metadata.create_all` has created project_repos.
