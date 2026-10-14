@@ -17,7 +17,7 @@ import { ForcePasswordChange } from './components/ForcePasswordChange';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { CliAuth } from './pages/CliAuth';
 import { Settings } from './pages/Settings';
-import { StudioDashboard } from './pages/StudioDashboard';
+import { Home } from './pages/Home';
 import { TaskPage } from './pages/TaskPage';
 import { EpicPage } from './pages/EpicPage';
 import { ProjectEpics } from './pages/ProjectEpics';
@@ -43,7 +43,7 @@ const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m =>
 import { ROUTES } from './routes';
 import { PreviewBanner } from './components/PreviewBanner';
 
-// Old "Welcome" stub replaced by StudioDashboard — see pages/StudioDashboard.jsx
+// Old "Welcome" stub replaced by Home — see pages/Home.jsx
 
 function RequireAuth({ children }) {
     const { user, loading } = useAuth();
@@ -89,7 +89,7 @@ export default function App() {
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
-                        <Route index element={<StudioDashboard />} />
+                        <Route index element={<Home />} />
                         <Route path="inbox" element={<Inbox />} />
                         <Route path="my-work" element={<MyWork />} />
                         <Route path="project/:projectId" element={<ProjectLayout />}>

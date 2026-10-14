@@ -176,6 +176,9 @@ export const api = {
 
     // Projects — no more actor params, JWT handles identity
     getProjects: () => request('/projects'),
+    getHome: () => request('/home'),
+    getHomeLayout: () => request('/home/layout'),
+    saveHomeLayout: (layout) => request('/home/layout', { method: 'PUT', body: JSON.stringify({ layout }) }),
     createProject: (data) => request('/projects', { method: 'POST', body: JSON.stringify(data) }),
     getProject: (id) => request(`/projects/${id}`),
     updateProject: (id, data) => request(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
