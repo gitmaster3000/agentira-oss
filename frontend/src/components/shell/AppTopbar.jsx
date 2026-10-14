@@ -5,10 +5,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useCurrentProjectId } from '../../currentProject';
 import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
+import { ThemeToggle } from '../ThemeToggle';
 import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
 // Top bar per home-dashboard.html: logo, Work | Build, spacer, search, New,
-// bell, avatar. Project identity lives in the page header, not here.
+// theme, bell, avatar — the same on every width (shell.css compacts, never hides). Project identity lives in the page header, not here.
 const NEW_ITEMS = [
     { kind: 'task', title: 'Task', sub: 'File work on the board', tint: 'rgba(128,203,196,.14)', stroke: 'var(--brand-teal)', icon: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></> },
     { kind: 'project', title: 'Project', sub: 'Guided 5-step wizard', tint: 'rgba(201,184,255,.14)', stroke: 'var(--brand-lavender)', icon: <path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18" /> },
@@ -111,22 +112,22 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
             </div>
 
             {/* Work | Build — the two areas of the app. */}
-            <div role="group" aria-label="Area" style={{ display: 'flex', gap: '2px', padding: '3px', borderRadius: '11px', background: 'var(--overlay-tint-soft)', border: '1px solid var(--overlay-line)', flexShrink: 0 }}>
+            <div role="group" aria-label="Area" className="shell-switch" style={{ display: 'flex', gap: '2px', padding: '3px', borderRadius: '11px', background: 'var(--overlay-tint-soft)', border: '1px solid var(--overlay-line)', flexShrink: 0 }}>
                 <button onClick={() => navigate('/studio')} aria-pressed={!isBuild} style={SWITCH_BTN(!isBuild)}>Work</button>
                 <button onClick={() => navigate('/forge')} aria-pressed={isBuild} style={SWITCH_BTN(isBuild)}>Build</button>
             </div>
 
             <div style={{ flex: 1 }} />
 
-            <div className="shell-hide-sm"><GlobalSearch /></div>
+            <GlobalSearch />
 
             {/* Right controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+            <div className="shell-actions" style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                 {/* New menu */}
                 <div style={{ position: 'relative' }} ref={newRef}>
-                    <div onClick={() => setNewOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 13px', borderRadius: '10px', background: 'var(--brand-lavender)', color: 'var(--accent-on)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
-                        <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14" /></svg>New
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M6 9l6 6 6-6" /></svg>
+                    <div onClick={() => setNewOpen((o) => !o)} className="shell-new" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 13px', borderRadius: '10px', background: 'var(--brand-lavender)', color: 'var(--accent-on)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                        <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14" /></svg><span className="shell-new-label">New</span>
+                        <svg className="shell-new-label" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M6 9l6 6 6-6" /></svg>
                     </div>
                     {newOpen && (
                         <div className="dropdown-menu" style={{ top: '100%', right: 0, marginTop: '8px', width: '250px' }}>
@@ -137,8 +138,10 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                     )}
                 </div>
 
+                <ThemeToggle />
+
                 {/* Bell */}
-                <div className="shell-hide-sm" style={{ position: 'relative' }} ref={bellRef}>
+                <div style={{ position: 'relative' }} ref={bellRef}>
                     <div className="hovertint" onClick={() => setBellOpen((o) => !o)} style={{ position: 'relative', padding: '7px', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '9px' }}>
                         <svg className="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
                         {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid var(--canvas-base)' }} />}
