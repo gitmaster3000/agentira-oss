@@ -149,7 +149,7 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
     };
 
     const createItem = (tint, stroke, icon, title, sub, onClick) => (
-        <div className="nav" onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '9px 10px', borderRadius: '11px', cursor: 'pointer', color: 'inherit' }}>
+        <div className="dropdown-item" onClick={onClick}>
             <span style={{ width: '30px', height: '30px', borderRadius: '9px', background: tint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2">{icon}</svg>
             </span>
@@ -255,7 +255,7 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M6 9l6 6 6-6" /></svg>
                     </div>
                     {newOpen && (
-                        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '250px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 50, padding: '6px' }}>
+                        <div className="dropdown-menu" style={{ top: '100%', right: 0, marginTop: '8px', width: '250px' }}>
                             {NEW_ITEMS.map((it) => it.divider
                                 ? <div key="div" style={{ height: '1px', background: 'var(--overlay-tint)', margin: '5px 4px' }} />
                                 : <React.Fragment key={it.kind}>{createItem(it.tint, it.stroke, it.icon, it.title, it.sub, () => startCreate(it.kind))}</React.Fragment>)}
@@ -304,18 +304,18 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                         {unread > 0 && <span style={{ position: 'absolute', top: '-1px', right: '-1px', width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444', border: '2px solid var(--canvas-base)' }} />}
                     </div>
                     {userOpen && (
-                        <div className="usermenu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: '8px', width: '210px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 60, padding: '5px' }}>
+                        <div className="dropdown-menu" style={{ top: '100%', right: 0, marginTop: '8px', width: '210px' }}>
                             <div style={{ padding: '8px 10px 6px', lineHeight: 1.2 }}>
                                 <div style={{ fontSize: '12.5px', fontWeight: 600 }}>{userName}</div>
                                 <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{user?.role || 'member'}</div>
                             </div>
                             {[['Inbox', '/studio/inbox', unread], ['My Work', '/studio/my-work', 0], ['Chat', '/chat', 0], ['Settings', '/studio/settings', 0]].map(([label, to, n]) => (
-                                <div key={label} className="nav" onClick={() => { setUserOpen(false); navigate(to); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-tertiary)' }}>
+                                <div key={label} className="dropdown-item" onClick={() => { setUserOpen(false); navigate(to); }}>
                                     <span style={{ flex: 1 }}>{label}</span>
                                     {n > 0 && <span style={{ fontSize: '10px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 6px' }}>{n}</span>}
                                 </div>
                             ))}
-                            <div className="nav" onClick={() => { localStorage.removeItem('agentira_token'); navigate('/login'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: '#f87171' }}>Sign out</div>
+                            <div className="dropdown-item" onClick={() => { localStorage.removeItem('agentira_token'); navigate('/login'); }} style={{ color: 'var(--text-tertiary)' }}>Sign out</div>
                         </div>
                     )}
                 </div>
