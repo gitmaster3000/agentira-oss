@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Settings2 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from '../components/UserAvatar';
@@ -236,7 +237,14 @@ export function Home() {
         <div className={`home${editing ? ' home-editing' : ''}`}>
             <section className="home-week" aria-label="This week">
                 <div>
-                    <p className="home-date">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+                    <p className="home-date">
+                        {new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}
+                        {!editing && (
+                            <button type="button" className="home-gear" aria-label="Customize home" title="Customize home" onClick={() => setEditing(true)}>
+                                <Settings2 size={14} />
+                            </button>
+                        )}
+                    </p>
                     <h1 className="home-greet">{greeting()}{firstName ? `, ${firstName}` : ''}</h1>
                     <p className="home-message">{weekMessage(week)}</p>
                     {data.week_summary && <p className="home-summary">{data.week_summary}</p>}
@@ -244,10 +252,6 @@ export function Home() {
                 <WeekRings week={week} />
             </section>
 
-            <div className="home-toolbar">
-                <h2>Your home</h2><span className="home-grow" />
-                {!editing && <button type="button" className="home-btn" onClick={() => setEditing(true)}>Customize</button>}
-            </div>
             {editing && (
                 <div className="home-editbar">
                     <span>Drag tiles or use the arrows to reorder. Choose a width, or remove a tile.</span><span className="home-grow" />

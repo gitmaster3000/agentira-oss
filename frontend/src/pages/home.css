@@ -11,7 +11,9 @@
 .home-state{padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px}
 
 .home-week{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:center;padding-bottom:28px;margin-bottom:28px;border-bottom:1px solid var(--border-default)}
-.home-date{color:var(--text-muted);margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.home-date{display:flex;align-items:center;gap:8px;color:var(--text-muted);margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.home-gear{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;border:0;background:none;color:var(--text-muted);cursor:pointer;opacity:.6}
+.home-gear:hover,.home-gear:focus-visible{opacity:1;background:var(--surface-card);color:var(--text-primary)}
 .home-greet{font-size:clamp(28px,3.2vw,40px);line-height:1.1;letter-spacing:-.02em;font-weight:650;margin:0}
 .home-message{margin:12px 0 0;font-size:17px;line-height:1.45;color:var(--text-primary)}
 
@@ -26,8 +28,6 @@
 .home-of{font-size:12.5px;font-weight:400;color:var(--text-muted)}
 @media (prefers-reduced-motion:no-preference){.home-arc{animation:home-draw .9s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(var(--i,0) * 120ms + 100ms)}@keyframes home-draw{from{stroke-dasharray:0 999}}}
 
-.home-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
-.home-toolbar h2{margin:0;font-size:15px;font-weight:650}
 .home-editbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:var(--tint-lavender);margin-bottom:16px;font-size:13px}
 .home-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;grid-auto-flow:row dense}
 .home-tile{grid-column:span 6;min-width:0;position:relative}

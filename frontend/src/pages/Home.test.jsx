@@ -102,7 +102,7 @@ describe('Home', () => {
     it('customize: resize, reorder, remove, add and reset persist via PUT', async () => {
         renderHome();
         await screen.findByText('Projects');
-        fireEvent.click(screen.getByText('Customize'));
+        fireEvent.click(screen.getByRole('button', { name: 'Customize home' }));
 
         fireEvent.click(within(screen.getByText('Activity').closest('section')).getByText('Third'));
         expect(api.saveHomeLayout).toHaveBeenLastCalledWith([['projects', 'l'], ['activity', 's'], ['people', 'm']]);
