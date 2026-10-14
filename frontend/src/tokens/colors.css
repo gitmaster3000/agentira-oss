@@ -5,6 +5,10 @@
    ============================================================ */
 
 :root {
+  /* Overview: due-soon / at-risk amber and late coral */
+  --warn-amber: #ffb74d;
+  --late-coral: #f28b82;
+
   /* ---- Surfaces (deepest → highest) ---- */
   --surface-sunken:   #0a0c10;  /* code blocks, deepest wells */
   --surface-base:     #0e1117;  /* app background, inputs */
@@ -96,6 +100,9 @@
    they need to read on white.
    ============================================================ */
 :root[data-theme="light"] {
+  --warn-amber: #b86e00;
+  --late-coral: #c8463b;
+
   /* ---- Surfaces (deepest → highest) ---- */
   --surface-sunken:   #eaeef2;
   --surface-base:     #ffffff;

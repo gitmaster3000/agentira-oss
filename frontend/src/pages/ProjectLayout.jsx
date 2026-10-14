@@ -1,15 +1,15 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
+import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink, Link } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { X, Search, ChevronDown, Users, Plus } from 'lucide-react';
+import { X, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
-import { Markdown } from '../components/Markdown';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
+import { BoardToolbar } from '../components/BoardToolbar';
 
 // Members control — design board-toolbar "Members [N] ▾" dropdown: lists
 // current members (remove on hover) + the addable profiles under "Add member".
@@ -83,57 +83,16 @@ function MembersControl({ members, availableProfiles, onAdd, onRemove }) {
     );
 }
 
-// Filter Dropdown
-function FilterDropdown({ label, value, options, onChange }) {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-    const selectedLabel = options.find(o => o.value === value)?.label || label;
-
-    useEffect(() => {
-        function handler(e) {
-            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-        }
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    return (
-        <div className="relative" ref={ref}>
-            <button
-                onClick={() => setOpen(v => !v)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-label-lg transition-colors ${
-                    value ? 'border-accent-primary text-text-primary bg-bg-app' : 'text-text-secondary bg-bg-app hover:border-border-active hover:text-text-primary'
-                }`}
-            >
-                <span>{selectedLabel}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} />
-            </button>
-            {open && (
-                <div className="dropdown-menu top-full left-0 mt-1 min-w-[140px]">
-                    {options.map(opt => (
-                        <button
-                            key={opt.value}
-                            className={`dropdown-item ${value === opt.value ? 'text-accent-primary font-medium' : ''}`}
-                            onClick={() => { onChange(opt.value); setOpen(false); }}
-                        >
-                            {opt.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
 
 // Project tabs — replace the old PROJECT section of the sidebar. Calendar,
-// Epics and Reports have no page yet, so they render disabled.
+// Epics have pages; Reports has none yet, so it renders disabled.
 const PROJECT_TABS = [
     { label: 'Overview', leaf: 'overview' },
     { label: 'Backlog', leaf: 'backlog' },
     { label: 'Board', leaf: 'board' },
     { label: 'Roadmap', leaf: 'roadmap' },
-    { label: 'Calendar' },
-    { label: 'Epics' },
+    { label: 'Calendar', leaf: 'calendar' },
+    { label: 'Epics', leaf: 'epics' },
     { label: 'Reports' },
     { label: 'Workflow', leaf: 'workflow' },
     { label: 'Deploy', leaf: 'deploy' },
@@ -175,8 +134,12 @@ export function ProjectLayout() {
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
-    const [showCreate, setShowCreate] = useState(false);
-    const [showCreateEpic, setShowCreateEpic] = useState(false);
+    // Recent feed for the Overview tab: loaded once with the page, refreshed
+    // only when the 30s limit=1 change-check sees a new newest entry.
+    const [activity, setActivity] = useState([]);
+    // The global New menu can navigate here with route state asking for a create modal.
+    const [showCreate, setShowCreate] = useState(location.state?.create === 'task');
+    const [showCreateEpic, setShowCreateEpic] = useState(location.state?.create === 'epic');
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedTaskId = searchParams.get('selectedTask');
     
@@ -279,6 +242,8 @@ export function ProjectLayout() {
             const latest = activities[0];
             if (latest && latest.id !== lastActivityIdRef.current) {
                 lastActivityIdRef.current = latest.id;
+                // Cheap limit=1 poll; the full feed is fetched only on change.
+                api.getProjectActivity(projectId, 20).then(setActivity).catch(() => {});
                 loadBoard();
                 loadMembers();
                 loadEpics();
@@ -290,8 +255,9 @@ export function ProjectLayout() {
         const init = async () => {
             await Promise.all([loadBoard(), loadMembers(), loadProfiles(), loadEpics()]);
             try {
-                const activities = await api.getProjectActivity(projectId, 1);
+                const activities = await api.getProjectActivity(projectId, 20);
                 if (activities[0]) lastActivityIdRef.current = activities[0].id;
+                setActivity(activities || []);
             } catch (e) {}
         };
         init();
@@ -367,6 +333,7 @@ export function ProjectLayout() {
     // Filters context
     const filters = {
         searchQuery, filterPriority, filterAssignee, filterEpic, board, epics,
+        members, activity, availableProfiles, onAddMember: handleAddMember,
         reloadBoard: loadBoard,
         applyMove,
         requestSelectTask,
@@ -382,6 +349,11 @@ export function ProjectLayout() {
         <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
             <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
                 <header className="shrink-0 border-b">
+                    <nav aria-label="Breadcrumb" className="px-4 pt-3 flex items-center gap-2 text-[13px] text-text-tertiary">
+                        <Link to={ROUTES.STUDIO} className="hover:text-accent-primary">Home</Link>
+                        <span>/</span>
+                        <span className="truncate">{board.project.name}</span>
+                    </nav>
                     <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
                         <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>
@@ -391,30 +363,22 @@ export function ProjectLayout() {
                             onAdd={handleAddMember}
                             onRemove={handleRemoveMember}
                         />
-                        {isBoardView && (
-                            <>
-                                <div className="flex-1" />
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <div className="flex items-center relative group">
-                                        <Search className="w-3.5 h-3.5 absolute left-3 text-text-tertiary group-focus-within:text-accent-primary transition-colors" />
-                                        <input type="text" placeholder="Search tasks…" className="bg-bg-app border rounded-lg pl-9 pr-3 py-1.5 text-sm w-44 lg:w-56 focus:outline-none focus:border-accent-primary transition-colors text-text-primary" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                                    </div>
-                                    <FilterDropdown label="Priority" value={filterPriority} onChange={setFilterPriority} options={[{ value: '', label: 'All Priorities' }, { value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }, { value: 'critical', label: 'Critical' }]} />
-                                    <FilterDropdown label="Epic" value={filterEpic} onChange={setFilterEpic} options={[{ value: '', label: 'All Epics' }, ...epics.map(ep => ({ value: ep.id, label: ep.title }))]} />
-                                    {(searchQuery || filterPriority || filterAssignee || filterEpic) && (
-                                        <button onClick={() => { setSearchQuery(''); setFilterPriority(''); setFilterAssignee(''); setFilterEpic(''); }} className="text-xs text-text-secondary hover:text-text-primary transition-colors px-2 py-1">Clear</button>
-                                    )}
-                                </div>
-                            </>
-                        )}
                     </div>
-                    {isOverview && (
-                        <div className="px-4 pt-2 pb-3">
-                            <ProjectDescription text={board.project.description} />
-                        </div>
-                    )}
                     <ProjectTabs projectId={projectId} />
                 </header>
+
+                {isBoardView && (
+                    <BoardToolbar
+                        projectId={projectId}
+                        members={members}
+                        epics={epics}
+                        searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+                        filterPriority={filterPriority} setFilterPriority={setFilterPriority}
+                        filterAssignee={filterAssignee} setFilterAssignee={setFilterAssignee}
+                        filterEpic={filterEpic} setFilterEpic={setFilterEpic}
+                        onCreate={() => setShowCreate(true)}
+                    />
+                )}
 
                 <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
                     <Outlet context={filters} />
@@ -449,28 +413,6 @@ export function ProjectLayout() {
 
             {showCreate && <CreateTaskModal projectId={projectId} onClose={() => setShowCreate(false)} onCreated={loadBoard} />}
             {showCreateEpic && <CreateEpicModal projectId={projectId} onClose={() => setShowCreateEpic(false)} onCreated={loadEpics} />}
-        </div>
-    );
-}
-
-
-// Project description is Markdown: render it, clamp to two lines, and let the
-// reader expand the rest instead of cutting it off.
-function ProjectDescription({ text }) {
-    const [open, setOpen] = useState(false);
-    if (!text) return <p className="text-body-sm text-text-secondary">No description</p>;
-    const long = text.length > 160 || text.includes('\n');
-    return (
-        <div className="text-body-sm text-text-secondary">
-            <div style={open ? undefined : { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                <Markdown>{text}</Markdown>
-            </div>
-            {long && (
-                <button type="button" onClick={() => setOpen((o) => !o)}
-                    className="text-xs text-text-tertiary hover:text-text-primary mt-0.5">
-                    {open ? 'Show less' : 'Show more'}
-                </button>
-            )}
         </div>
     );
 }

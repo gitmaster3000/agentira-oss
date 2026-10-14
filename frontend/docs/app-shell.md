@@ -42,22 +42,33 @@ old `border-right` / `border-bottom` slab dividers are gone.
 The header is deliberately **not** a card. It sits directly on the canvas so the
 logo lockup reads as part of the page rather than as chrome.
 
+## Work and Build
+
+The app has two areas, switched from the top bar. **Work** (everything outside
+`/forge/*`) renders full width with **no sidebar**. **Build** (`/forge/*`) keeps
+the sidebar. `Layout` decides with `pathname.startsWith('/forge')`.
+
 ## Top bar
 
-Left to right:
+Per `home-dashboard.html`, left to right: **logo** (to Home), **Work | Build**
+switch, spacer, **search** (⌘K), **New** menu, **bell**, **avatar**. Nothing
+else — no project switcher, no breadcrumb, no "N running" chip. The bar is one
+40px row flush with the page edges. Below 768px the hamburger (Build only) opens
+the sidebar drawer, and the wordmark, search and bell are hidden
+(`.shell-hide-sm`) so logo, switch, New and avatar fit at 375px.
 
-1. **Logo lockup** — gradient "A" tile + "Acme Inc / Agentira". Always visible,
-   clicks through to Home.
-2. **Divider** — a 1px, 20px-tall hairline.
-3. **Project switcher** — a `PROJECT` caption plus a pill showing the active
-   project's colour chip, name, and a live-run badge when that project has runs
-   in flight. Opens a `SWITCH PROJECT` dropdown. **This moved out of the
-   sidebar** — the rail no longer contains a project picker.
-4. **Breadcrumb** — derived from the route (`useBreadcrumb`).
-5. **Search pill** — `⌘K` affordance. **Also moved out of the sidebar.**
-6. **Pulse pill** — "N running" when runs are live, "Live status" when quiet.
-   Toggles the Pulse drawer.
-7. **New menu** and **bell**.
+- **New menu** — Task, Project, Epic, Milestone, divider, Agent. Each opens the
+  existing create flow: Task/Epic fire `open-create-task` / `open-create-epic`
+  inside a project, otherwise navigate to the active project's board with route
+  state `{ create }` that `ProjectLayout` reads; Milestone goes to the roadmap
+  with `{ create: 'milestone' }`; Agent goes to `/forge/agents` with
+  `{ create: 'agent' }`; Project opens the wizard.
+- **Avatar menu** — Inbox, My Work, Chat, Settings, Sign out.
+- **Project identity** lives only in the project page header: a
+  `Home / Project name` breadcrumb, the title, members, then the tabs. Switch
+  projects from Home or with search / ⌘K.
+
+The project board toolbar has a **New task** button (opens the same task modal).
 
 ## The collapsible rail
 
@@ -87,16 +98,10 @@ text: `.railhdr` collapses to a thin `border-top` divider with a dimmed
 Note the labels stay in the DOM when collapsed — CSS hides `.rl`, it isn't
 conditionally rendered. Tests assert on the class, not on absence of text.
 
-### User menu
-Expanded, it opens **above** the user row. Collapsed, `.rail.rc .usermenu`
-flies it **out to the right** of the rail (`left: calc(100% + 6px)`, a fixed
-194px wide, items left-aligned) — otherwise it would be clipped to 66px.
-
 ## Nav order
 
-Home, Inbox, My Work, Chat → **BUILD**: Agents, Runs, Conductor, Agent
-Runtimes, MCP Servers → **PROJECT**: Overview, Board, Backlog, Roadmap,
-Workflow, Deploy, Settings. Footer: the user row.
+**BUILD** only: Agents, Runs, Conductor, Agent Runtimes, MCP Servers. No
+footer — the user menu is the top-bar avatar.
 
 ## Two deliberate departures from the design file
 

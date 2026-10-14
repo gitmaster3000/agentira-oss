@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus } from 'lucide-react';
 import { api } from '../../api';
 import { CreateAgentModal } from '../../components/CreateAgentModal';
@@ -16,7 +16,7 @@ export function AgentsDashboard() {
     const [runtimes, setRuntimes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
-    const [showCreate, setShowCreate] = useState(false);
+    const [showCreate, setShowCreate] = useState(useLocation().state?.create === 'agent');
 
     const loadAgents = async () => {
         try {

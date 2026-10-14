@@ -20,6 +20,7 @@ import { Settings } from './pages/Settings';
 import { StudioDashboard } from './pages/StudioDashboard';
 import { TaskPage } from './pages/TaskPage';
 import { EpicPage } from './pages/EpicPage';
+import { ProjectEpics } from './pages/ProjectEpics';
 import { Inbox } from './pages/Inbox';
 import { MyWork } from './pages/MyWork';
 import { Workflow } from './pages/Workflow';
@@ -97,6 +98,8 @@ export default function App() {
                             <Route path="board" element={<Board />} />
                             <Route path="backlog" element={<Backlog />} />
                             <Route path="roadmap" element={<RoadmapView />} />
+                            <Route path="calendar" element={<RoadmapView calendarOnly />} />
+                            <Route path="epics" element={<ProjectEpics />} />
                             <Route path="workflow" element={<Workflow />} />
                             <Route path="deploy" element={<Deploy />} />
                             <Route path="settings" element={<ProjectSettings />} />

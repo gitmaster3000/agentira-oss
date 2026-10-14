@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Flag, Plus, Trash2, Check, X } from 'lucide-react';
 import { api } from '../../api';
 
@@ -125,7 +126,7 @@ function NewMilestoneForm({ onCreate, onCancel }) {
  * the backend from the board, so it can never be talked up by hand.
  */
 export function MilestonePanel({ projectId, milestones = [], onChanged }) {
-    const [adding, setAdding] = useState(false);
+    const [adding, setAdding] = useState(useLocation().state?.create === 'milestone');
     const [error, setError] = useState(null);
 
     const run = async (fn) => {

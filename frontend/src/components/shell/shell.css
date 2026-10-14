@@ -30,14 +30,6 @@
     border-radius: 0 !important;
 }
 .rail.rc .hdricon { display: block; opacity: .45; }
-.rail.rc .usermenu {
-    left: calc(100% + 6px) !important;
-    right: auto !important;
-    bottom: 8px !important;
-    width: 194px !important;
-    margin-bottom: 0 !important;
-}
-.rail.rc .usermenu .nav { justify-content: flex-start !important; padding-left: 10px !important; padding-right: 10px !important; }
 .rail.rc .hdrlabel { display: none !important; }
 .rail.rc .railtoggle-wrap { justify-content: center !important; }
 
@@ -70,7 +62,10 @@
 .shell-backdrop { display: none; }
 
 @media (max-width: 768px) {
-    .shell-hamburger { display: inline-flex; }
+    .shell-hamburger { display: inline-flex; padding: 2px !important; }
+    .shell-topbar { gap: 8px !important; }
+    /* 375px: keep logo, Work | Build, New and avatar; drop the rest. */
+    .shell-hide-sm { display: none !important; }
     .shell-sidebar,
     .shell-sidebar.rc {
         position: fixed !important; /* beats the aside's inline position:relative */

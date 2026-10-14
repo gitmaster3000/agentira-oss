@@ -21,6 +21,8 @@ export function Layout() {
     // Desktop rail: expanded (248px) or collapsed to icons (66px).
     const [railOpen, setRailOpen] = useState(true);
     const location = useLocation();
+    // Work (everything outside /forge) is full width; only Build keeps a sidebar.
+    const isBuild = location.pathname.startsWith('/forge');
 
     // Any route change (incl. project switch) closes the mobile drawer.
     useEffect(() => { setNavOpen(false); }, [location.pathname]);
@@ -34,11 +36,11 @@ export function Layout() {
     return (
         <ShellDataProvider>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'hidden', padding: '12px', background: CANVAS }}>
-                <AppTopbar onNewProject={() => setShowCreate(true)} onMenu={() => setNavOpen((o) => !o)} />
+                <AppTopbar isBuild={isBuild} onNewProject={() => setShowCreate(true)} onMenu={() => setNavOpen((o) => !o)} />
 
                 <div style={{ flex: 1, display: 'flex', gap: '12px', minHeight: 0 }}>
-                    {navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
-                    <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />
+                    {isBuild && navOpen && <div className="shell-backdrop" onClick={() => setNavOpen(false)} />}
+                    {isBuild && <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />}
                     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface-base)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--shadow-panel)' }}>
                         <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
                             <Outlet />
