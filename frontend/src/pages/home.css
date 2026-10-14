@@ -2,11 +2,11 @@
 .home button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
 .home :focus-visible{outline:2px solid var(--brand-lavender);outline-offset:2px;border-radius:6px}
 .home .tnum{font-variant-numeric:tabular-nums}
-.home-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-default)!important;border-radius:9px;padding:6px 12px;color:var(--text-tertiary);font-size:13px;white-space:nowrap;background:var(--surface-raised)!important}
-.home-btn:hover{border-color:var(--border-strong)!important;color:var(--text-primary)}
-.home-btn.primary{background:var(--brand-lavender)!important;border-color:transparent!important;color:var(--surface-base);font-weight:600}
-.home-btn.link{border-color:transparent!important;background:none!important;padding:4px 0;color:var(--brand-lavender)}
-.home-btn.link.quiet{color:var(--text-muted)}
+.home .home-btn{display:inline-flex;align-items:center;gap:var(--space-3);border:1px solid var(--border-default)!important;border-radius:var(--radius-lg);padding:var(--space-3) var(--space-5);color:var(--text-secondary);font-size:12.5px;white-space:nowrap;background:var(--surface-base)!important;transition:color var(--dur-fast),filter var(--dur-fast)}
+.home .home-btn:hover{border-color:var(--border-strong)!important;color:var(--text-primary)}
+.home .home-btn.primary{background:var(--accent-primary)!important;border-color:transparent!important;color:var(--accent-on);font-weight:var(--weight-semibold)}
+.home-btn.primary:hover{filter:brightness(1.1)}
+.home .home-btn.link{border-color:transparent!important;background:none!important;padding:4px 0;color:var(--brand-lavender)}
 .home-grow{flex:1}
 .home-state{padding:40px 0;text-align:center;color:var(--text-muted);font-size:13px}
 

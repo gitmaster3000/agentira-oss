@@ -93,7 +93,7 @@ function ProjectsTile({ data, onNew, title }) {
                         <button type="button" className="home-icon" aria-label="Next projects" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button>
                     </div>
                 )}
-                <button type="button" className="home-btn" onClick={onNew}><Plus size={14} />New project</button>
+                <button type="button" className="home-btn primary" onClick={onNew}><Plus size={14} />New project</button>
             </div>
             {projects.length === 0 && <div className="home-panel home-empty">No projects yet. Create one to get started.</div>}
             <div className="home-pcards">
