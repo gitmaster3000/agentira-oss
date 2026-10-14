@@ -167,6 +167,37 @@ describe('AppSidebar — collapsible rail', () => {
     });
 });
 
+describe('ShellDataProvider — only fetches what the page shows', () => {
+    const mountAt = (entry) => render(
+        <MemoryRouter initialEntries={[entry]}>
+            <ShellDataProvider><div>PAGE</div></ShellDataProvider>
+        </MemoryRouter>,
+    );
+
+    it('project pages fetch projects + notifications only (no agents, no runs)', async () => {
+        mountAt('/studio/project/p1/board');
+        await act(async () => {});
+        expect(api.getProjects).toHaveBeenCalledTimes(1);
+        expect(api.getNotifications).toHaveBeenCalledTimes(1);
+        expect(api.forge.listAgents).not.toHaveBeenCalled();
+        expect(api.forge.listRuns).not.toHaveBeenCalled();
+    });
+
+    it('Home fetches runs but not the agent list', async () => {
+        mountAt('/studio');
+        await act(async () => {});
+        expect(api.forge.listRuns).toHaveBeenCalledTimes(2);
+        expect(api.forge.listAgents).not.toHaveBeenCalled();
+    });
+
+    it('Build fetches runs and the agent list', async () => {
+        mountAt('/forge/runs');
+        await act(async () => {});
+        expect(api.forge.listRuns).toHaveBeenCalledTimes(2);
+        expect(api.forge.listAgents).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('AppTopbar — blended bar', () => {
     it('renders the logo lockup and the search pill', () => {
         mountTopbar();

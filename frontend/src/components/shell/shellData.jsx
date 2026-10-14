@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../../api';
 
 // Projects have no colour of their own. Every project marker uses the one
@@ -17,8 +18,9 @@ export function projectKey(p) {
     return (p?.name || '??').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || '??';
 }
 
-// One shared fetch for the chrome: projects, running runs (list + per-project and
-// total counts), runs waiting on a human, recent notifications, agent count, unread.
+// One shared fetch for the chrome: projects, recent notifications / unread, and —
+// only on Home and Build — running runs (list + per-project and total counts) and
+// runs waiting on a human; the agent count loads only in Build.
 // Everything the sidebar, the topbar "N running" pill AND the Pulse drawer need —
 // all from the SAME query, mounted once via ShellDataProvider so the pill and the
 // drawer are a single source (COMPONENT_MAP key behavior #2: "Pulse is global").
@@ -71,50 +73,57 @@ export function ShellDataProvider({ children }) {
         });
     };
 
+    // Only fetch what the page on screen shows: runs feed Home (Live now /
+    // Needs you) and Build; the agent count feeds the Build sidebar. Project
+    // pages need neither, so they only pay for projects + notifications.
+    const path = useLocation().pathname;
+    const inBuild = path.startsWith('/forge');
+    const wantsRuns = inBuild || path === '/studio';
+
     useEffect(() => {
         let cancelled = false;
-
-        const loadStatic = async () => {
-            try {
-                const [pj, agents] = await Promise.all([
-                    api.getProjects().catch(() => []),
-                    api.forge.listAgents().catch(() => []),
-                ]);
-                if (cancelled) return;
-                setProjects(Array.isArray(pj) ? pj : []);
-                setAgentCount(Array.isArray(agents) ? agents.length : null);
-            } catch { /* ignore */ }
+        const loadNotifs = async () => {
+            const notifs = await api.getNotifications(false).catch(() => []);
+            if (cancelled) return;
+            const nlist = Array.isArray(notifs) ? notifs : [];
+            setRecentNotifs(nlist);
+            setUnread(nlist.filter((x) => !x.read).length);
         };
-
-        const loadLive = async () => {
-            try {
-                const [runs, waiting, notifs] = await Promise.all([
-                    api.forge.listRuns({ status: 'running' }).catch(() => []),
-                    api.forge.listRuns({ outcome: 'needs_input', unresolved: true }).catch(() => []),
-                    api.getNotifications(false).catch(() => []),
-                ]);
-                if (cancelled) return;
-                const list = Array.isArray(runs) ? runs : [];
-                const by = {};
-                for (const r of list) {
-                    const pid = r.project_id;
-                    if (pid) by[pid] = (by[pid] || 0) + 1;
-                }
-                setRunningRuns(list);
-                setRunningByProject(by);
-                setRunningTotal(list.length);
-                setWaitingRuns(Array.isArray(waiting) ? waiting : []);
-                const nlist = Array.isArray(notifs) ? notifs : [];
-                setRecentNotifs(nlist);
-                setUnread(nlist.filter((x) => !x.read).length);
-            } catch { /* ignore */ }
-        };
-
-        loadStatic();
-        loadLive();
-        const id = setInterval(loadLive, 30_000);
+        api.getProjects().catch(() => []).then((pj) => { if (!cancelled) setProjects(Array.isArray(pj) ? pj : []); });
+        loadNotifs();
+        const id = setInterval(loadNotifs, 30_000);
         return () => { cancelled = true; clearInterval(id); };
     }, []);
+
+    useEffect(() => {
+        if (!wantsRuns) return undefined;
+        let cancelled = false;
+        const loadRuns = async () => {
+            const [runs, waiting] = await Promise.all([
+                api.forge.listRuns({ status: 'running' }).catch(() => []),
+                api.forge.listRuns({ outcome: 'needs_input', unresolved: true }).catch(() => []),
+            ]);
+            if (cancelled) return;
+            const list = Array.isArray(runs) ? runs : [];
+            const by = {};
+            for (const r of list) {
+                const pid = r.project_id;
+                if (pid) by[pid] = (by[pid] || 0) + 1;
+            }
+            setRunningRuns(list);
+            setRunningByProject(by);
+            setRunningTotal(list.length);
+            setWaitingRuns(Array.isArray(waiting) ? waiting : []);
+        };
+        loadRuns();
+        const id = setInterval(loadRuns, 30_000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, [wantsRuns]);
+
+    useEffect(() => {
+        if (!inBuild) return;
+        api.forge.listAgents().catch(() => []).then((agents) => setAgentCount(Array.isArray(agents) ? agents.length : null));
+    }, [inBuild]);
 
     const value = {
         projects, runningRuns, runningByProject, runningTotal,

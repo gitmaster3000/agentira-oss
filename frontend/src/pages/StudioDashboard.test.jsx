@@ -30,7 +30,7 @@ function ChatSpy() {
 
 function renderHome() {
     return render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={['/studio']}>
             <ShellDataProvider>
                 <StudioDashboard />
             </ShellDataProvider>
@@ -96,10 +96,10 @@ describe('StudioDashboard (Home cockpit)', () => {
                 : []),
         );
         render(
-            <MemoryRouter>
+            <MemoryRouter initialEntries={['/studio']}>
                 <ShellDataProvider>
                     <Routes>
-                        <Route path="/" element={<StudioDashboard />} />
+                        <Route path="/studio" element={<StudioDashboard />} />
                         <Route path="/chat" element={<ChatSpy />} />
                     </Routes>
                 </ShellDataProvider>

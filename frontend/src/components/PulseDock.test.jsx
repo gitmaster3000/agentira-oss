@@ -21,7 +21,7 @@ vi.mock('../api', () => ({
 
 function renderDock() {
     return render(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={['/studio']}>
             <ShellDataProvider>
                 <PulseDock />
             </ShellDataProvider>
