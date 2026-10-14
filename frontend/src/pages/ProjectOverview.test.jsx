@@ -100,11 +100,13 @@ describe('ProjectOverview', () => {
         expect(api.listProjectAttachments).toHaveBeenCalledWith('P1');
     });
 
-    it('shows attachments below Recent activity, in the main column', async () => {
+    it('orders description, then activity; project files sit in the side column after People', async () => {
         const { container } = renderOverview();
         expect(await screen.findByText('brief.pdf')).toBeInTheDocument();
-        const titles = [...container.querySelectorAll('h3')].map((h) => h.textContent);
-        expect(titles.indexOf('Attachments')).toBeGreaterThan(titles.indexOf('Recent activity'));
+        const titles = [...container.querySelectorAll('section h3')].map((h) => h.textContent);
+        expect(titles.slice(0, 2)).toEqual(['Project description', 'Recent activity']);
+        const side = [...container.querySelectorAll('aside h3')].map((h) => h.textContent);
+        expect(side).toEqual(['About', 'People', 'Project files']);
         expect(screen.getByRole('button', { name: 'Upload attachments' })).toBeInTheDocument();
     });
 
