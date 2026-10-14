@@ -59,6 +59,12 @@
 .home-dots i{width:6px;height:16px;border-radius:var(--radius-xs);background:var(--border-default)}
 .home-dots i.on{background:var(--status-done)}
 
+.home-thead{display:flex;align-items:center;gap:var(--space-6);margin-bottom:var(--space-6)}
+.home-thead h3{margin:0!important;flex:1}
+.home-pager{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-12);color:var(--text-muted)}
+.home-icon{display:grid;place-items:center;width:var(--control-sm);height:var(--control-sm);border-radius:var(--radius-lg);color:var(--text-secondary)!important}
+.home-icon:hover:not(:disabled){background:var(--surface-hover)!important;color:var(--text-primary)!important}
+.home-icon:disabled{opacity:.35;cursor:default}
 .home-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--space-7)}
 .home-pcard{display:flex;flex-direction:column;gap:var(--space-6);width:100%;padding:var(--space-8) var(--space-10);text-align:left;background:var(--surface-nav)!important;border:1px solid var(--border-default)!important;border-radius:16px;transition:border-color var(--dur-fast),background var(--dur-fast)}
 .home-pcard:hover{border-color:var(--border-strong)!important;background:var(--surface-hover)!important}

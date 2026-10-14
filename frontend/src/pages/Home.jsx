@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Settings2 } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { UserAvatar } from '../components/UserAvatar';
@@ -76,13 +76,25 @@ function WeekRings({ week }) {
 // Card previews show plain text; descriptions are markdown.
 const plainText = (md) => (md || '').replace(/[*_`#>~]|\[|\]\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
 
-function ProjectsTile({ data, onNew }) {
+function ProjectsTile({ data, onNew, title }) {
     const navigate = useNavigate();
-    const [all, setAll] = useState(false);
+    const [page, setPage] = useState(0);
     const projects = data.projects;
-    const shown = all ? projects : projects.slice(0, PROJECTS_SHOWN);
+    const pages = Math.ceil(projects.length / PROJECTS_SHOWN);
+    const shown = projects.slice(page * PROJECTS_SHOWN, (page + 1) * PROJECTS_SHOWN);
     return (
         <>
+            <div className="home-thead">
+                {title}
+                {pages > 1 && (
+                    <div className="home-pager">
+                        <button type="button" className="home-icon" aria-label="Previous projects" disabled={page === 0} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button>
+                        <span className="tnum">{page + 1} / {pages}</span>
+                        <button type="button" className="home-icon" aria-label="Next projects" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button>
+                    </div>
+                )}
+                <button type="button" className="home-btn" onClick={onNew}><Plus size={14} />New project</button>
+            </div>
             {projects.length === 0 && <div className="home-panel home-empty">No projects yet. Create one to get started.</div>}
             <div className="home-pcards">
                 {shown.map((p) => (
@@ -111,14 +123,6 @@ function ProjectsTile({ data, onNew }) {
                         </div>
                     </button>
                 ))}
-            </div>
-            <div style={{ paddingTop: 12 }}>
-                {projects.length > PROJECTS_SHOWN && (
-                    <button type="button" className="home-btn link" onClick={() => setAll((v) => !v)}>
-                        {all ? 'Show fewer' : `All ${projects.length} projects`}
-                    </button>
-                )}
-                <button type="button" className="home-btn link quiet" style={{ marginLeft: 18 }} onClick={onNew}>New project</button>
             </div>
         </>
     );
@@ -167,7 +171,7 @@ function PeopleTile({ data }) {
 }
 
 const TILES = {
-    projects: { title: 'Projects', sub: (d) => `${d.projects.length} active`, size: 'l', Body: ProjectsTile,
+    projects: { title: 'Projects', sub: (d) => `${d.projects.length} active`, size: 'l', Body: ProjectsTile, ownHeader: true,
         desc: 'Every project with its description, progress, people and what is due. Click one to open it.' },
     activity: { title: 'Activity', sub: () => 'all projects', size: 'm', Body: ActivityTile,
         desc: 'What changed across your projects: tasks created, moved, finished, commented.' },
@@ -271,8 +275,9 @@ export function Home() {
                                     <button type="button" aria-label={`Remove ${T.title}`} onClick={() => remove(i)}>Remove</button>
                                 </div>
                             )}
-                            <h3>{T.title}<small>{T.sub(data)}</small></h3>
-                            <T.Body data={data} onNew={() => setCreating(true)} />
+                            {T.ownHeader
+                                ? <T.Body data={data} onNew={() => setCreating(true)} title={<h3>{T.title}<small>{T.sub(data)}</small></h3>} />
+                                : <><h3>{T.title}<small>{T.sub(data)}</small></h3><T.Body data={data} /></>}
                         </section>
                     );
                 })}
