@@ -194,30 +194,46 @@ describe('ProjectOverview — recent activity feed', () => {
         api.listProjectAttachments.mockResolvedValue([]);
     });
 
-    it('renders activity entries with actor and human action label', async () => {
+    it('renders one row per event: actor, verb, time', async () => {
         renderOverview();
         expect(await screen.findByText('Frontend Developer')).toBeInTheDocument();
-        expect(screen.getByText('moved task')).toBeInTheDocument();
+        expect(screen.getByText(/moved$/)).toBeInTheDocument();
+        expect(screen.getByText(/commented on$/)).toBeInTheDocument();
     });
 
-    it('links each entry to its task page', async () => {
-        renderOverview();
-        const taskLink = await screen.findByRole('link', { name: /#cb344582/i });
-        expect(taskLink).toHaveAttribute('href', '/studio/tasks/cb344582f4f9');
+    it('shows the task key + title from the loaded board, linked to the task', async () => {
+        const board = { ...BOARD, columns: { ...BOARD.columns,
+            todo: [{ id: 'cb344582f4f9', key: 'AP-654', title: 'Board toolbar' }] } };
+        renderOverview({ board });
+        const link = await screen.findByRole('link', { name: 'AP-654 Board toolbar' });
+        expect(link).toHaveAttribute('href', '/studio/tasks/cb344582f4f9');
     });
 
-    it('renders an internal run link as an SPA route (relative href, no new tab)', async () => {
+    it('falls back to a short id when the task is not on the board', async () => {
         renderOverview();
-        const runLink = await screen.findByRole('link', { name: /run df896c2d/i });
-        expect(runLink).toHaveAttribute('href', '/forge/runs/df896c2d029a');
-        expect(runLink).not.toHaveAttribute('target');
+        const link = await screen.findByRole('link', { name: /#cb344582/i });
+        expect(link).toHaveAttribute('href', '/studio/tasks/cb344582f4f9');
     });
 
-    it('renders an external PR url as a new-tab link', async () => {
-        renderOverview();
-        const prLink = await screen.findByRole('link', {
-            name: /github\.com\/acme\/agentira-frontend\/pull\/70/i,
-        });
-        expect(prLink).toHaveAttribute('target', '_blank');
+    it('cuts a long comment to one plain-text line (no links, no markdown)', async () => {
+        renderOverview({ activity: [{
+            id: 'c1', task_id: 't9', actor: 'Claude', action: 'commented', created_at: '2026-06-07T17:05:34',
+            detail: '**Review** of [PR 66](https://x.test/pull/66)\n\nSecond paragraph that must not render.',
+        }] });
+        expect(await screen.findByText('Review of PR 66')).toBeInTheDocument();
+        expect(screen.queryByText(/Second paragraph/)).toBeNull();
+        expect(screen.queryByRole('link', { name: 'PR 66' })).toBeNull();
+    });
+
+    it('shows 8 events, with See all activity revealing the rest already loaded', async () => {
+        const many = Array.from({ length: 12 }, (_, i) => ({
+            id: `e${i}`, task_id: `t${i}`, actor: `actor${i}`, action: 'task.update', detail: '', created_at: '2026-06-07T17:05:34',
+        }));
+        renderOverview({ activity: many });
+        expect(await screen.findByText('actor0')).toBeInTheDocument();
+        expect(screen.queryByText('actor8')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'See all activity' }));
+        expect(screen.getByText('actor11')).toBeInTheDocument();
+        expect(api.listMilestones).toHaveBeenCalledTimes(1); // no extra request
     });
 });
