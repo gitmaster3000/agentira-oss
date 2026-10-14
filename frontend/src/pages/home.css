@@ -1,4 +1,4 @@
-.home{padding:28px 28px 56px;max-width:1160px;width:100%;margin:0 auto;font-family:var(--font-sans);color:var(--text-primary)}
+.home{padding:28px 32px 56px;width:100%;font-family:var(--font-sans);color:var(--text-primary)}
 .home button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
 .home :focus-visible{outline:2px solid var(--brand-lavender);outline-offset:2px;border-radius:6px}
 .home .tnum{font-variant-numeric:tabular-nums}
@@ -58,7 +58,7 @@
 .home-dots i{width:6px;height:16px;border-radius:2px;background:var(--surface-base)}
 .home-dots i.on{background:var(--brand-teal)}
 
-.home-pcards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.home-pcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
 .home-pcard{background:var(--surface-card);border:1px solid var(--border-default);border-radius:14px;padding:16px 18px;cursor:pointer;display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden;transition:border-color .15s;text-align:left;width:100%}
 .home-pcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--pc)}
 .home-pcard:hover{border-color:var(--border-strong)}

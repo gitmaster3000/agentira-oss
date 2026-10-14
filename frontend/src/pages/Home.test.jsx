@@ -83,12 +83,12 @@ describe('Home', () => {
     });
 
     it('caps project cards and expands with All N projects', async () => {
-        api.getHome.mockResolvedValue({ ...HOME, projects: [1, 2, 3, 4, 5, 6].map((i) => project(i)) });
+        api.getHome.mockResolvedValue({ ...HOME, projects: [1, 2, 3, 4, 5, 6, 7, 8].map((i) => project(i)) });
         renderHome();
         await screen.findByRole('button', { name: 'Open Project 1' });
-        expect(screen.queryByRole('button', { name: 'Open Project 5' })).toBeNull();
-        fireEvent.click(screen.getByText('All 6 projects'));
-        expect(screen.getByRole('button', { name: 'Open Project 6' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Open Project 7' })).toBeNull();
+        fireEvent.click(screen.getByText('All 8 projects'));
+        expect(screen.getByRole('button', { name: 'Open Project 8' })).toBeInTheDocument();
     });
 
     it('uses a saved layout and falls back to the default when empty', async () => {

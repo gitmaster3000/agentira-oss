@@ -9,7 +9,7 @@ import './home.css';
 
 const DEFAULT_LAYOUT = [['projects', 'l'], ['activity', 'm'], ['people', 'm']];
 const SIZES = [['s', 'Third'], ['m', 'Half'], ['l', 'Full']];
-const PROJECTS_SHOWN = 4;
+const PROJECTS_SHOWN = 6;
 
 function greeting() {
     const h = new Date().getHours();
