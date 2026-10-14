@@ -75,22 +75,6 @@ function ProgressRing({ pct, colour }) {
     );
 }
 
-function Sparkline({ values, colour }) {
-    const m = Math.max(...values, 1);
-    const w = 92;
-    const h = 30;
-    const step = w / Math.max(values.length - 1, 1);
-    const pts = values.map((v, i) => [i * step, h - 3 - (v / m) * (h - 6)]);
-    const last = pts[pts.length - 1];
-    return (
-        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Tasks done per week, last 6 weeks">
-            <polyline points={pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} fill="none" stroke={colour}
-                strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-            <circle cx={last[0]} cy={last[1]} r="2.6" fill={colour} />
-        </svg>
-    );
-}
-
 function ProjectsTile({ data, onNew }) {
     const navigate = useNavigate();
     const [all, setAll] = useState(false);
@@ -109,7 +93,6 @@ function ProjectsTile({ data, onNew }) {
                                 <div className="name">{p.name}</div>
                                 <span className="home-pc-key">{p.key}</span>
                             </div>
-                            <Sparkline values={p.done_per_week} colour={p.colour} />
                         </div>
                         <p className="home-pc-desc">{p.description}</p>
                         <div className="home-pc-stats">
