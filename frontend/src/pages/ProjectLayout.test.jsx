@@ -56,9 +56,35 @@ describe('ProjectLayout header', () => {
         expect(screen.queryByPlaceholderText('Search board')).not.toBeInTheDocument();
     });
 
-    it('shows the project description under the header on Overview only', async () => {
+    it('shows a Home / project breadcrumb on Overview only, and the description moves to the page', async () => {
         api.getBoard.mockResolvedValue({ project: { id: 'p1', name: 'Atlas', key_prefix: 'ATL', description: 'Maps for everyone' }, columns: {} });
         mount('/studio/project/p1/overview');
-        expect(await screen.findByText('Maps for everyone')).toBeInTheDocument();
+        const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+        expect(crumb).toHaveTextContent('Home');
+        expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/studio');
+        expect(screen.queryByText('Maps for everyone')).not.toBeInTheDocument();
+    });
+
+    it('loads the feed once (limit 20), then polls with limit=1 and refetches 20 only when the newest id changes', async () => {
+        api.getProjectActivity.mockImplementation((_p, limit) =>
+            Promise.resolve(limit === 1 ? [{ id: 'a1' }] : [{ id: 'a1' }, { id: 'a0' }]));
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        try {
+            mount('/studio/project/p1/board');
+            await screen.findByText('ATL');
+            expect(api.getProjectActivity).toHaveBeenCalledWith('p1', 20);
+            api.getProjectActivity.mockClear();
+            // newest id unchanged -> poll is limit=1 only
+            await vi.advanceTimersByTimeAsync(30000);
+            expect(api.getProjectActivity.mock.calls).toEqual([['p1', 1]]);
+            // new entry -> limit=1 then one limit=20 refresh
+            api.getProjectActivity.mockClear();
+            api.getProjectActivity.mockImplementation((_p, limit) =>
+                Promise.resolve(limit === 1 ? [{ id: 'a2' }] : [{ id: 'a2' }, { id: 'a1' }]));
+            await vi.advanceTimersByTimeAsync(30000);
+            expect(api.getProjectActivity.mock.calls).toEqual([['p1', 1], ['p1', 20]]);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
