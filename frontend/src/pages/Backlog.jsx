@@ -6,6 +6,7 @@ import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { CreateEpicModal } from '../components/CreateEpicModal';
 import { matchesTaskSearch } from '../lib/taskSearch';
+import { matchesTaskFilters } from '../lib/taskFilters';
 import { ChevronDown, ChevronRight, UserPlus, Zap, Tag } from 'lucide-react';
 
 export function Backlog() {
@@ -15,7 +16,6 @@ export function Backlog() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [filterStatus, setFilterStatus] = useState('');
-    const [filterAssignee, setFilterAssignee] = useState('');
     const [sortKey, setSortKey] = useState('created_at');
     const [sortDirection, setSortDirection] = useState('desc');
     const [searchParams, setSearchParams] = useSearchParams();
@@ -25,6 +25,7 @@ export function Backlog() {
     const outletCtx = useOutletContext() || {};
     const requestSelectTask = outletCtx.requestSelectTask;
     const searchQuery = outletCtx.searchQuery;
+    const taskFilters = outletCtx.taskFilters;
     const [isEditing, setIsEditing] = useState(false);
     const [showCreate, setShowCreate] = useState(false);
     const [showCreateEpic, setShowCreateEpic] = useState(false);
@@ -39,7 +40,7 @@ export function Backlog() {
                 console.warn('Epics load failed:', err);
                 return [];
             });
-            const tasksPromise = api.listTasks(projectId, filterStatus || undefined, filterAssignee || undefined).catch(err => {
+            const tasksPromise = api.listTasks(projectId, filterStatus || undefined).catch(err => {
                 console.error('Tasks load failed:', err);
                 return [];
             });
@@ -66,7 +67,7 @@ export function Backlog() {
         } finally {
             setLoading(false);
         }
-    }, [projectId, filterStatus, filterAssignee, sortKey, sortDirection]);
+    }, [projectId, filterStatus, sortKey, sortDirection]);
 
     const lastActivityIdRef = React.useRef(null);
 
@@ -96,7 +97,7 @@ export function Backlog() {
             } catch (e) {}
         };
         init();
-    }, [projectId, filterStatus, filterAssignee, sortKey, sortDirection]);
+    }, [projectId, filterStatus, sortKey, sortDirection]);
 
     useEffect(() => {
         if (!projectId) return;
@@ -119,7 +120,7 @@ export function Backlog() {
 
     const toggleSection = (id) => setCollapsedSections(prev => ({ ...prev, [id]: !prev[id] }));
 
-    const visibleTasks = tasks.filter(t => matchesTaskSearch(t, searchQuery));
+    const visibleTasks = tasks.filter(t => matchesTaskSearch(t, searchQuery) && (!taskFilters || matchesTaskFilters(t, taskFilters)));
 
     // Grouping logic
     let sections = [];
@@ -191,14 +192,6 @@ export function Backlog() {
                             <option value="review">Review</option>
                             <option value="done">Done</option>
                         </select>
-                        <input
-                            className="input"
-                            style={{ width: 160, padding: '8px 14px', fontSize: 13 }}
-                            type="text"
-                            placeholder="Filter assignee..."
-                            value={filterAssignee}
-                            onChange={e => setFilterAssignee(e.target.value)}
-                        />
                         <select
                             className="input"
                             style={{ width: 'auto', minWidth: 120, padding: '8px 36px 8px 14px', fontSize: 13 }}
