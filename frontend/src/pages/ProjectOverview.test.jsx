@@ -117,6 +117,22 @@ describe('ProjectOverview', () => {
         expect(screen.getByRole('link', { name: 'Board UX' })).toHaveAttribute('href', '/studio/epics/E1');
     });
 
+    it('shows at most 5 milestones/epics, at-risk first, with a See all epics link', async () => {
+        const many = Array.from({ length: 4 }, (_, i) => ({
+            id: `X${i}`, title: `Calm ${i}`, status: 'open', due_date: iso(40 + i), total: 10, done: 5, progress: 50,
+        }));
+        api.listMilestones.mockResolvedValue([
+            ...many,
+            { id: 'R', title: 'Risky one', status: 'open', due_date: iso(-2), total: 4, done: 1, progress: 25 },
+        ]);
+        renderOverview();
+        await waitFor(() => expect(screen.getAllByRole('progressbar')).toHaveLength(5));
+        const bars = screen.getAllByRole('progressbar');
+        expect(bars[0]).toHaveAttribute('aria-label', 'Risky one');
+        expect(screen.getByRole('link', { name: /See all epics \(1 more\)/ }))
+            .toHaveAttribute('href', '/studio/project/P1/epics');
+    });
+
     it('shows About facts and routes Edit details to settings', async () => {
         renderOverview();
         expect(await screen.findByText('agentira-oss')).toBeInTheDocument();
@@ -124,6 +140,17 @@ describe('ProjectOverview', () => {
         expect(screen.getAllByText('Ali Faraz').length).toBeGreaterThan(0);
         fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
         expect(await screen.findByText('settings-page')).toBeInTheDocument();
+    });
+
+    it('derives roles from account_type, not names (external agents are Agents too)', async () => {
+        renderOverview({ members: [
+            { id: 'a', name: 'admin-bot', display_name: 'Admin Bot', roles: ['admin'], account_type: 'external_agent' },
+            { id: 'h', name: 'sam', display_name: 'Sam', roles: ['member'], account_type: 'human' },
+        ] });
+        await screen.findByText('Admin Bot');
+        expect(screen.getByText('Agent')).toBeInTheDocument();
+        expect(screen.getAllByText('Lead')).toHaveLength(2); // About label + Sam (only human -> lead)
+        expect(screen.queryByText('Member')).toBeNull();
     });
 
     it('labels people Lead / Agent / Member', async () => {

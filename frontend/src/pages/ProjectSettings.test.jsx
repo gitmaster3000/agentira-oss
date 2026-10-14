@@ -18,6 +18,7 @@ vi.mock('../api', () => ({
         updateProject: vi.fn(),
         listProjectRepos: vi.fn().mockResolvedValue([]),
         addProjectRepo: vi.fn(),
+        listProjectAttachments: vi.fn().mockResolvedValue([{ id: 'f1', filename: 'brief.pdf', size_bytes: 10 }]),
     },
 }));
 
@@ -195,5 +196,22 @@ describe('ProjectSettings — automation workflow switch', () => {
         fireEvent.click(screen.getByRole('button', { name: /^save changes$/i }));
         await waitFor(() => expect(api.updateProject).toHaveBeenCalled());
         expect(api.updateProject.mock.calls[0][1].workflow_enabled).toBe(false);
+    });
+});
+
+
+describe('ProjectSettings — attachments section', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getProject.mockResolvedValue({ id: 'p1', name: 'P', description: '' });
+    });
+
+    it('fetches attachments only when the Attachments section is opened', async () => {
+        render(<ProjectSettings />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Repositories' }));
+        expect(api.listProjectAttachments).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Attachments' }));
+        expect(await screen.findByText('brief.pdf')).toBeInTheDocument();
+        expect(api.listProjectAttachments).toHaveBeenCalledTimes(1);
     });
 });

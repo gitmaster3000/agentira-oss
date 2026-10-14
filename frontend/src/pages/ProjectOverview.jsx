@@ -26,6 +26,7 @@ const LAV = 'var(--accent-primary)';
 const AMBER = 'var(--warn-amber)';
 const CORAL = 'var(--late-coral)';
 const DAY = 86400000;
+const MAX_ITEMS = 5;
 const BTN = 'inline-flex items-center border rounded-lg px-3 py-1.5 text-[12.5px] text-text-secondary hover:text-text-primary transition-colors';
 
 function timeAgo(iso) {
@@ -66,13 +67,13 @@ function summarize(board, epics, milestones) {
             if (col === 'done') doneByEpic[t.epic_id] = (doneByEpic[t.epic_id] || 0) + 1;
         }
     }
-    const items = [
+    const all = [
         ...(milestones || []).filter((m) => m.status !== 'done').map((m) => {
             const ms = m.due_date ? new Date(m.due_date).getTime() : null;
             const atRisk = m.progress < 100 && ms != null
                 && (ms < today.getTime() || (ms < today.getTime() + 14 * DAY && m.progress < 50));
             return {
-                key: `m-${m.id}`, title: m.title, progress: m.progress, atRisk,
+                key: `m-${m.id}`, title: m.title, progress: m.progress, atRisk, dueMs: ms,
                 sub: atRisk && ms < today.getTime() ? 'Overdue'
                     : m.due_date ? `${m.done} of ${m.total} done · due ${new Date(m.due_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
                         : `${m.done} of ${m.total} done`,
@@ -88,7 +89,12 @@ function summarize(board, epics, milestones) {
             };
         }),
     ];
-    return { done, open: openTasks.length, total: done + openTasks.length, due, late, items };
+    // At most 5: at-risk / overdue first, then in progress, then due soonest.
+    const rank = (it) => (it.atRisk ? 0 : it.progress > 0 ? 1 : 2);
+    const items = all
+        .sort((x, y) => rank(x) - rank(y) || (x.dueMs ?? Infinity) - (y.dueMs ?? Infinity))
+        .slice(0, MAX_ITEMS);
+    return { done, open: openTasks.length, total: done + openTasks.length, due, late, items, hidden: all.length - items.length };
 }
 
 
@@ -242,6 +248,10 @@ export function ProjectOverview() {
                         {stats.items.length === 0
                             ? <div className="text-xs text-text-tertiary py-1">No milestones or epics with tasks yet.</div>
                             : stats.items.map((it) => <ProgressRow key={it.key} item={it} />)}
+                        <Link to={`${ROUTES.STUDIO_PROJECT(projectId)}/epics`}
+                            className="inline-block mt-2 text-[13px] text-accent-primary hover:underline">
+                            See all epics{stats.hidden > 0 ? ` (${stats.hidden} more)` : ''}
+                        </Link>
                     </Panel>
 
                     <SectionTitle>Recent activity</SectionTitle>

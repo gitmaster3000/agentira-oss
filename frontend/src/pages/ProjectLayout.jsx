@@ -174,8 +174,8 @@ export function ProjectLayout() {
     const [members, setMembers] = useState([]);
     const [profiles, setProfiles] = useState([]);
     const [epics, setEpics] = useState([]);
-    // Recent feed: the same request the 30s change-check already makes (limit 20
-    // instead of 1), shared with the Overview tab so it needs no call of its own.
+    // Recent feed for the Overview tab: loaded once with the page, refreshed
+    // only when the 30s limit=1 change-check sees a new newest entry.
     const [activity, setActivity] = useState([]);
     const [showCreate, setShowCreate] = useState(false);
     const [showCreateEpic, setShowCreateEpic] = useState(false);
@@ -277,11 +277,12 @@ export function ProjectLayout() {
     const checkForUpdates = useCallback(async () => {
         if (document.visibilityState !== 'visible' || !projectId) return;
         try {
-            const activities = await api.getProjectActivity(projectId, 20);
+            const activities = await api.getProjectActivity(projectId, 1);
             const latest = activities[0];
             if (latest && latest.id !== lastActivityIdRef.current) {
                 lastActivityIdRef.current = latest.id;
-                setActivity(activities);
+                // Cheap limit=1 poll; the full feed is fetched only on change.
+                api.getProjectActivity(projectId, 20).then(setActivity).catch(() => {});
                 loadBoard();
                 loadMembers();
                 loadEpics();
