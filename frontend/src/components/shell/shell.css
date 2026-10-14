@@ -67,10 +67,14 @@
    hamburger; a backdrop dismisses it. Route changes close it (Layout).
    The drawer always shows labels, so the collapsed width is overridden. */
 .shell-hamburger { display: none; }
+.shell-spacer-sm { display: none; }
 .shell-backdrop { display: none; }
 
 @media (max-width: 768px) {
     .shell-hamburger { display: inline-flex; }
+    /* 375px: keep logo, Work | Build, New and avatar; drop the rest. */
+    .shell-hide-sm { display: none !important; }
+    .shell-spacer-sm { display: block; flex: 1; }
     .shell-sidebar,
     .shell-sidebar.rc {
         position: fixed !important; /* beats the aside's inline position:relative */

@@ -66,9 +66,9 @@ describe('BoardToolbar', () => {
         expect(p.setFilterEpic).toHaveBeenCalledWith('');
     });
 
-    it('Create calls onCreate', () => {
+    it('New task calls onCreate', () => {
         const p = setup();
-        fireEvent.click(screen.getByText('Create'));
+        fireEvent.click(screen.getByText('New task'));
         expect(p.onCreate).toHaveBeenCalled();
     });
 });

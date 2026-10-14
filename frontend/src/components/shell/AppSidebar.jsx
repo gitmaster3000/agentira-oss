@@ -1,6 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import { useShellData } from './shellData';
 
 // Exact port of the Agentira.dc.html collapsible icon rail: a floating panel
@@ -62,27 +61,11 @@ const buildIcon = (
 export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const { user } = useAuth();
-    const { runningTotal, agentCount, unread } = useShellData();
+    const { runningTotal, agentCount } = useShellData();
 
     const path = location.pathname;
-    const [userOpen, setUserOpen] = useState(false);
-    const userRef = useRef(null);
-
-    useEffect(() => {
-        const onDown = (e) => {
-            if (userRef.current && !userRef.current.contains(e.target)) setUserOpen(false);
-        };
-        document.addEventListener('mousedown', onDown);
-        return () => document.removeEventListener('mousedown', onDown);
-    }, []);
-
 
     const is = {
-        home: path === '/studio',
-        inbox: path === '/studio/inbox',
-        mywork: path === '/studio/my-work',
-        chat: path === '/chat',
         agents: path.startsWith('/forge/agents'),
         runs: path.startsWith('/forge/runs'),
         conductor: path.startsWith('/forge/conductor'),
@@ -90,7 +73,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
         mcp: path === '/forge/settings',
     };
 
-    const userInitial = (user?.display_name || user?.name || 'U')[0].toUpperCase();
     const rc = railOpen ? '' : ' rc';
 
     return (
@@ -107,17 +89,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                 </div>
 
                 <div style={{ position: 'relative', zIndex: 1, flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '6px 8px' }}>
-                    {/* global */}
-                    <NavRow active={is.home} onClick={() => navigate('/studio')} label="Home"
-                        icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M9 22V12h6v10" /></svg>} />
-                    <NavRow active={is.inbox} onClick={() => navigate('/studio/inbox')} label="Inbox"
-                        icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>}
-                        badge={unread > 0 ? <span className="rl" style={{ fontSize: '10px', fontWeight: 700, background: '#ef4444', color: '#fff', borderRadius: '999px', padding: '1px 6px' }}>{unread}</span> : null} />
-                    <NavRow active={is.mywork} onClick={() => navigate('/studio/my-work')} label="My Work"
-                        icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>} />
-                    <NavRow active={is.chat} onClick={() => navigate('/chat')} label="Chat"
-                        icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
-
                     {/* BUILD */}
                     <RailHeader label="BUILD" icon={buildIcon} />
                     <NavRow active={is.agents} onClick={() => navigate('/forge/agents')} label="Agents"
@@ -134,29 +105,6 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>} />
                 </div>
 
-                {/* footer user */}
-                <div style={{ position: 'relative', zIndex: 1, borderTop: '1px solid var(--overlay-tint)', padding: '8px' }} ref={userRef}>
-                    <div className="nav" title={user?.display_name || user?.name || 'User'} onClick={() => setUserOpen((o) => !o)} style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: '7px 9px', borderRadius: '10px', cursor: 'pointer' }}>
-                        <div style={{ width: '28px', height: '28px', flexShrink: 0, borderRadius: '50%', background: 'rgba(201,184,255,.12)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 600 }}>{userInitial}</div>
-                        <div className="rl" style={{ flex: 1, lineHeight: 1.15 }}>
-                            <div style={{ fontSize: '12px', fontWeight: 500 }}>{user?.display_name || user?.name || 'User'}</div>
-                            <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{user?.role || 'member'}</div>
-                        </div>
-                        <svg className="ico rl" width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ stroke: 'var(--text-muted)' }} strokeWidth="2"><path d="M8 9l4-4 4 4" /><path d="M16 15l-4 4-4-4" /></svg>
-                    </div>
-                    {userOpen && (
-                        // Opens above when expanded; shell.css flies it out to the right of
-                        // the rail when collapsed (.rail.rc .usermenu).
-                        <div className="usermenu" style={{ position: 'absolute', bottom: '100%', left: '8px', right: '8px', marginBottom: '6px', background: 'var(--surface-card)', border: '1px solid var(--overlay-line)', borderRadius: '14px', boxShadow: 'var(--shadow-popover)', zIndex: 60, padding: '5px' }}>
-                            <div className="nav" onClick={() => { setUserOpen(false); navigate('/studio/settings'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-tertiary)' }}>
-                                <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 1v4M12 19v4M1 12h4M19 12h4" /></svg>Settings
-                            </div>
-                            <div className="nav" onClick={() => { localStorage.removeItem('agentira_token'); navigate('/login'); }} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 10px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', color: '#f87171' }}>
-                                <svg className="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>Sign out
-                            </div>
-                        </div>
-                    )}
-                </div>
             </div>
         </aside>
     );

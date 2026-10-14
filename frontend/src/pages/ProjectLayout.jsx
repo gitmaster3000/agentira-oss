@@ -137,8 +137,9 @@ export function ProjectLayout() {
     // Recent feed for the Overview tab: loaded once with the page, refreshed
     // only when the 30s limit=1 change-check sees a new newest entry.
     const [activity, setActivity] = useState([]);
-    const [showCreate, setShowCreate] = useState(false);
-    const [showCreateEpic, setShowCreateEpic] = useState(false);
+    // The global New menu can navigate here with route state asking for a create modal.
+    const [showCreate, setShowCreate] = useState(location.state?.create === 'task');
+    const [showCreateEpic, setShowCreateEpic] = useState(location.state?.create === 'epic');
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedTaskId = searchParams.get('selectedTask');
     

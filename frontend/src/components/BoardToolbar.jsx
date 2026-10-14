@@ -238,7 +238,7 @@ export function BoardToolbar({
                 <Settings2 className="w-3.5 h-3.5" /> View
             </button>
             <button type="button" onClick={onCreate} className={`${btnBase} border-transparent bg-accent-primary text-black font-semibold hover:brightness-110`} style={{ background: 'var(--accent-primary)' }}>
-                <Plus className="w-3.5 h-3.5" /> Create
+                <Plus className="w-3.5 h-3.5" /> New task
             </button>
         </header>
     );

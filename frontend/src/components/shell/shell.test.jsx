@@ -57,19 +57,25 @@ function mountSidebar(props = {}) {
     );
 }
 
-function mountTopbar(props = {}) {
+function mountTopbar(props = {}, entry = '/studio/project/p1/board') {
     return render(
-        <MemoryRouter initialEntries={['/studio']}>
+        <MemoryRouter initialEntries={[entry]}>
             <ShellDataProvider>
                 <Routes>
                     <Route path="/studio" element={<AppTopbar {...props} />} />
-                    <Route path="/studio/project/:projectId/board" element={<div>BOARD</div>} />
+                    <Route path="/studio/project/:projectId/board" element={<><AppTopbar {...props} /><div>BOARD</div></>} />
+                    <Route path="/studio/project/:projectId/roadmap" element={<div>ROADMAP</div>} />
+                    <Route path="/forge" element={<AppTopbar isBuild {...props} />} />
+                    <Route path="/forge/agents" element={<div>AGENTS PAGE</div>} />
                     <Route path="/studio/tasks/:taskId" element={<div>TASK PAGE</div>} />
                 </Routes>
             </ShellDataProvider>
         </MemoryRouter>,
     );
 }
+
+// Project name appears in the switcher and the breadcrumb; wait for projects, take the switcher.
+const switcher = async () => (await screen.findAllByText('Atlas'))[0];
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -83,9 +89,10 @@ describe('AppSidebar — collapsible rail', () => {
     it('renders the nav in the design order, with BUILD and PROJECT section headers', () => {
         mountSidebar();
 
-        const labels = ['Home', 'Inbox', 'My Work', 'Chat', 'Agents', 'Runs', 'Conductor',
-            'Agent Runtimes', 'MCP Servers'];
+        const labels = ['Agents', 'Runs', 'Conductor', 'Agent Runtimes', 'MCP Servers'];
         for (const l of labels) expect(screen.getByText(l)).toBeInTheDocument();
+        // Work destinations moved to the top bar; the sidebar is Build-only.
+        for (const l of ['Home', 'Inbox', 'My Work', 'Chat']) expect(screen.queryByText(l)).not.toBeInTheDocument();
 
         expect(screen.getByText('BUILD')).toBeInTheDocument();
     });
@@ -128,13 +135,12 @@ describe('AppSidebar — collapsible rail', () => {
         // identifies the row once only the icon is visible.
         expect(screen.getByTitle('Conductor')).toBeInTheDocument();
         expect(screen.getByTitle('MCP Servers')).toBeInTheDocument();
-        expect(screen.getByTitle('Alex Rivera')).toBeInTheDocument();
     });
 
     it('wraps the labels and badges in .rl so collapsing can hide them', () => {
         const { container } = mountSidebar();
-        const home = screen.getByTitle('Home');
-        expect(within(home).getByText('Home').classList.contains('rl')).toBe(true);
+        const home = screen.getByTitle('Agents');
+        expect(within(home).getByText('Agents').classList.contains('rl')).toBe(true);
         expect(container.querySelectorAll('.rl').length).toBeGreaterThan(0);
     });
 
@@ -144,16 +150,6 @@ describe('AppSidebar — collapsible rail', () => {
 
         fireEvent.click(screen.getByTitle('Toggle sidebar'));
         expect(onToggleRail).toHaveBeenCalledTimes(1);
-    });
-
-    it('opens the user menu, which carries .usermenu so it can fly out when collapsed', () => {
-        const { container } = mountSidebar({ railOpen: false });
-        expect(container.querySelector('.usermenu')).toBeNull();
-
-        fireEvent.click(screen.getByTitle('Alex Rivera'));
-
-        expect(container.querySelector('.usermenu')).not.toBeNull();
-        expect(screen.getByText('Sign out')).toBeInTheDocument();
     });
 
     it('still navigates — the rows keep their click handlers through the port', async () => {
@@ -208,18 +204,18 @@ describe('AppTopbar — blended bar', () => {
     it('hosts the project switcher (moved out of the sidebar) and shows the active project', async () => {
         mountTopbar();
         expect(screen.getByText('PROJECT')).toBeInTheDocument();
-        expect(await screen.findByText('Atlas')).toBeInTheDocument();
+        expect(await switcher()).toBeInTheDocument();
     });
 
     it('names the project in plain readable text, not a per-project colour', async () => {
         mountTopbar();
-        expect((await screen.findByText('Atlas')).style.color).toBe('var(--text-primary)');
+        expect((await switcher()).style.color).toBe('var(--text-primary)');
     });
 
     it('opens the SWITCH PROJECT dropdown and switches project on select', async () => {
         mountTopbar();
 
-        fireEvent.click(await screen.findByText('Atlas'));
+        fireEvent.click(await switcher());
         expect(screen.getByText('SWITCH PROJECT')).toBeInTheDocument();
 
         fireEvent.click(screen.getByText('Beacon'));
@@ -228,17 +224,76 @@ describe('AppTopbar — blended bar', () => {
         expect(await screen.findByText('BOARD')).toBeInTheDocument();
     });
 
-    it('shows the pulse pill with the live running total', async () => {
+    it('does not show the N running chip in Work', async () => {
         mountTopbar();
+        await switcher();
+        expect(screen.queryByText(/running/)).not.toBeInTheDocument();
+    });
+
+    it('shows the pulse pill with the live running total in Build', async () => {
+        mountTopbar({}, '/forge');
         expect(await screen.findByText('2 running')).toBeInTheDocument();
     });
 
-    it('opens the New menu and routes "New project" to the wizard callback', async () => {
+    it('has a Work | Build switch; Build goes to /forge', async () => {
+        mountTopbar();
+        expect(screen.getByRole('button', { name: 'Work' })).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(screen.getByRole('button', { name: 'Build' }));
+        expect(await screen.findByText('Overview')).toBeInTheDocument();
+    });
+
+    it('hides the hamburger outside Build and the project switcher outside a project', async () => {
+        mountTopbar({}, '/studio');
+        expect(screen.queryByLabelText('Open navigation')).not.toBeInTheDocument();
+        expect(screen.queryByText('PROJECT')).not.toBeInTheDocument();
+    });
+
+    it('lists Task, Project, Epic, Milestone and Agent in the New menu', async () => {
+        mountTopbar();
+        await switcher();
+        fireEvent.click(screen.getByText('New'));
+        for (const l of ['Task', 'Project', 'Epic', 'Milestone', 'Agent']) expect(screen.getByText(l)).toBeInTheDocument();
+    });
+
+    it('New > Task inside a project fires the existing open-create-task event', async () => {
+        const spy = vi.fn();
+        window.addEventListener('open-create-task', spy);
+        mountTopbar();
+        await switcher();
+        fireEvent.click(screen.getByText('New'));
+        fireEvent.click(screen.getByText('Task'));
+        window.removeEventListener('open-create-task', spy);
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it('New > Milestone opens the roadmap', async () => {
+        mountTopbar();
+        await switcher();
+        fireEvent.click(screen.getByText('New'));
+        fireEvent.click(screen.getByText('Milestone'));
+        expect(await screen.findByText('ROADMAP')).toBeInTheDocument();
+    });
+
+    it('New > Agent navigates to the agents page', async () => {
+        mountTopbar();
+        fireEvent.click(screen.getByText('New'));
+        fireEvent.click(screen.getByText('Agent'));
+        expect(await screen.findByText('AGENTS PAGE')).toBeInTheDocument();
+    });
+
+    it('avatar menu carries Inbox, My Work, Chat', () => {
+        mountTopbar();
+        fireEvent.click(screen.getByTitle('Alex Rivera'));
+        for (const l of ['Inbox', 'My Work', 'Chat', 'Sign out']) expect(screen.getByText(l)).toBeInTheDocument();
+    });
+
+    it('opens the New menu and routes "Project" to the wizard callback', async () => {
         const onNewProject = vi.fn();
         mountTopbar({ onNewProject });
+        await switcher();
 
         fireEvent.click(screen.getByText('New'));
-        fireEvent.click(screen.getByText('New project'));
+        fireEvent.click(screen.getByText('Project'));
 
         expect(onNewProject).toHaveBeenCalledTimes(1);
     });

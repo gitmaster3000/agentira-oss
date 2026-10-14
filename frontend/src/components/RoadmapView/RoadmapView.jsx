@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
     addDays,
     differenceInCalendarDays,
@@ -477,7 +477,7 @@ export function RoadmapView({ projectId: projectIdProp, calendarOnly = false }) 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [groupBy, setGroupBy] = useState('epic');
-    const [view, setView] = useState('schedule');
+    const [view, setView] = useState(useLocation().state?.create === 'milestone' ? 'milestones' : 'schedule');
     const [scheduleMode, setScheduleMode] = useState(calendarOnly ? 'month' : 'timeline');
     // AP-501: filter the plan by due date so owners can focus overdue / this week.
     const [dueFilter, setDueFilter] = useState('all');
