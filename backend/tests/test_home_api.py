@@ -79,7 +79,7 @@ def test_home_query_count_is_constant(pg, client):
         _project(client, f"Big{i}", 15)
     big = _count(pg.engine, lambda: client.get("/api/home"))
     assert small == big, f"query count grew {small} -> {big}"
-    assert big <= 14
+    assert big <= 8, f"/api/home used {big} queries"
 
 
 def test_home_only_member_projects(pg, client):
