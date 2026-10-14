@@ -59,6 +59,19 @@ useless symptom — *"your key is invalid"* for a key that was perfectly good:
    environmentId }` with that header. The adapter remembers the kind per token
    (by hash), lists only that project's services in the wizard, and deploys to
    the token's own environment.
+5. **Branch previews are Railway PR Environments.** Turn on PR Environments in
+   the Railway project: Railway then creates and builds an ephemeral
+   environment per pull request. `main` deploys to the base environment; any
+   other branch deploys into its PR environment (or fails with "open a pull
+   request" when there is none). `previews()` reports what Railway built, and
+   the flow mirrors it onto the branch list on every `GET /deployments`, so a
+   PR's live URL appears without a click. A project token can't see PR
+   environments and would overwrite its own (often production) environment,
+   so it is refused for anything but `main` — use a workspace token.
+6. **Status is pulled, not pushed.** Railway doesn't call us back. While a
+   deployment is queued/building, `GET /deployments` asks `observe()` for a
+   fresh status and URL. `observe()` raises when Railway can't be asked, so a
+   network blip never turns a building deployment into "failed".
 
 A mocked test cannot catch (1) — the transport is the thing that's broken. The
 regression gate is `bruno/rest/11-deploy`, which probes a **real** key against

@@ -24,6 +24,9 @@ Honest scope notes (this build):
   * The Railway *live* deploy path is wired through the adapter but exercising it
     end-to-end needs a real Railway token + project linkage (see
     `deploy/railway.py`); it is untested against a live account here.
+  * Listing syncs with a provider that can be asked (`previews` / `observe`
+    on the adapter, both optional): previews it built on its own appear as
+    `preview` rows, and queued/building rows get a fresh status + URL.
 """
 from __future__ import annotations
 
@@ -146,6 +149,10 @@ class DeployFlow:
             "service": (svc or {}).get("name", service_id),
             "connected_at": _utcnow().isoformat(),
         }
+        if (svc or {}).get("project_id"):
+            # The provider's own project the service lives in (Railway's API
+            # is project-addressed); not the Agentira project.
+            config["project_id"] = svc["project_id"]
         deploy_repo.set_credential(
             db, project.org_id, kind,
             token=(api_key or "").strip(), valid=True, checked_at=_utcnow())
@@ -224,9 +231,10 @@ class DeployFlow:
         deployment but no longer exists on the remote. A branch with no
         deployment yet appears with `deployment: null`. If GitHub is unlinked
         or unreachable we fall back to the branches we've deployed."""
-        self._require_project(db, project_id)
-        latest = deploy_repo.latest_deployment_per_branch(db, project_id)
+        project = self._require_project(db, project_id)
         target = deploy_repo.get_target(db, project_id)
+        self._sync_with_provider(db, project, target)
+        latest = deploy_repo.latest_deployment_per_branch(db, project_id)
         token = deploy_repo.github_token_for_project(db, project_id)
         real = repo_tokens.list_repo_branches(_repo_url(target["config"]), token)
 
@@ -348,10 +356,85 @@ class DeployFlow:
         except ValueError:
             return True
 
+    def _sync_with_provider(self, db, project: Project, target: dict) -> None:
+        """Bring deployment rows up to date with a provider that can be asked
+        (a daemon-backed one pushes instead): pick up previews it built on its
+        own — Railway builds one per pull request — and refresh deployments
+        still queued or building. Best effort: a provider hiccup is logged and
+        never breaks the branch list."""
+        kind = (target or {}).get("kind")
+        if not kind:
+            return
+        try:
+            adapter = self._adapter(kind)
+        except ValueError:
+            return
+        previews = getattr(adapter, "previews", None)
+        observe = getattr(adapter, "observe", None)
+        token = deploy_repo.get_credential(db, project.org_id, kind)
+        if (previews is None and observe is None) or not token:
+            return
+        config = target.get("config") or {}
+        latest = deploy_repo.latest_deployment_per_branch(db, project.id)
+        with _provider_token(kind, token):
+            found = {}
+            if previews is not None:
+                try:
+                    found = previews(DeployTargetConfig(
+                        kind=TargetKind(kind), name=config.get("service_name", ""),
+                        config=config, repo_url=_repo_url(config)))
+                except Exception as exc:
+                    _log.warning("preview sync failed: project=%s kind=%s: %s",
+                                 project.id, kind, exc)
+            for branch, result in found.items():
+                if branch == "main":
+                    continue
+                self._record_preview(db, project, kind, latest.get(branch),
+                                     branch, result)
+            if observe is None:
+                return
+            for row in latest.values():
+                if (row.status not in ("queued", "building")
+                        or not row.provider_deployment_id
+                        or row.branch in found):
+                    continue
+                try:
+                    result = observe(row.provider_deployment_id)
+                except Exception as exc:
+                    _log.warning("deploy status refresh failed: deployment=%s: %s",
+                                 row.id, exc)
+                    continue
+                status = _STATUS.get(result.status, "failed")
+                if status != row.status or result.url != row.url:
+                    deploy_repo.update_deployment(
+                        db, row.id, status=status, url=result.url,
+                        status_reason=_REASON.get(status, "Deployment updated."))
+
+    def _record_preview(self, db, project: Project, kind: str, row, branch: str,
+                        result) -> None:
+        """Mirror one provider-built preview onto the branch's deployment row:
+        a new build is a new row, the same build just updates."""
+        status = _STATUS.get(result.status, "failed")
+        reason = (f"{result.detail} — {_REASON.get(status, 'Deployment updated.')}"
+                  if result.detail else _REASON.get(status, "Deployment updated."))
+        if row is not None and row.provider_deployment_id == result.deployment_id:
+            if (row.status, row.url, row.status_reason) != (status, result.url, reason):
+                deploy_repo.update_deployment(db, row.id, status=status,
+                                              url=result.url, status_reason=reason)
+            return
+        deploy_repo.create_deployment(
+            db, org_id=project.org_id, project_id=project.id, branch=branch,
+            is_main=False, provider_kind=kind, trigger="preview", status=status,
+            status_reason=reason, provider_deployment_id=result.deployment_id,
+            url=result.url)
+
     def _deploy_branch(self, db, project: Project, kind: str, config: dict, *,
                        branch: str, trigger: str, existing=None):
         adapter = self._adapter(kind)
         token = deploy_repo.get_credential(db, project.org_id, kind)
+        # Which branch this deploy is of. An adapter may route on it (Railway:
+        # `main` -> base environment, any other branch -> its PR environment).
+        config = {**config, "branch": branch}
         prepare = getattr(adapter, "prepare", None)
         if prepare is not None:
             config = prepare(db, project, config)

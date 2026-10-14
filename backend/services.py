@@ -954,7 +954,11 @@ def get_deploy_repo_access(project_id: str, *, provider: str) -> dict:
 
 def list_deployments(project_id: str) -> dict:
     with _session() as db:
-        return _deploy_flow.list_deployments(db, project_id)
+        # Listing also syncs rows with the provider (fresh status, previews
+        # it built on its own), so it commits.
+        result = _deploy_flow.list_deployments(db, project_id)
+        db.commit()
+        return result
 
 
 def create_deployment(project_id: str, *, branch: str) -> dict:

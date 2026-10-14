@@ -17,6 +17,7 @@ Operations used (Railway Public API):
     buildLogs / deploymentLogs           logs
     deploymentRemove(id)                 teardown
     project(id)                          resolve service/environment names -> ids
+    project(id).environments(isEphemeral) the PR (preview) environments
 
 Config (`DeployTargetConfig.config`, never a secret — ADR-011 §3/§6):
 
@@ -39,6 +40,12 @@ environment and must go in `Project-Access-Token` instead. The adapter detects
 the kind once per token (cached by hash, never the raw token) and, for a project
 token, deploys to the token's own environment; `project_id` defaults to the
 token's project.
+
+Branch previews ride on Railway's *PR Environments* (a project setting): Railway
+creates an ephemeral environment per pull request and builds it. `main` deploys
+to the base environment; any other branch deploys into its PR environment, and
+`previews()` reports what Railway already built so the UI shows it without a
+click. A project token can't see other environments, so it deploys `main` only.
 """
 from __future__ import annotations
 
@@ -72,6 +79,22 @@ _CLOUDFLARE_BLOCK = "error code: 1010"
 #: Railway phrasing for "your token doesn't grant this". Anything else is ours.
 _AUTH_MESSAGES = ("not authorized", "unauthorized", "invalid token",
                   "authentication", "forbidden")
+
+#: The branch that deploys to the base environment. Any other
+#: `config["branch"]` is a preview and deploys into its Railway PR environment.
+BASE_BRANCH = "main"
+
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+_NO_PREVIEW_ENVIRONMENT = (
+    "No preview environment for {branch} yet. Open a pull request for this "
+    "branch: Railway builds a preview for each one once PR Environments is "
+    "turned on in the Railway project's settings.")
+
+_PROJECT_TOKEN_NO_PREVIEWS = (
+    "This key is a Railway project token, which only reaches one environment, "
+    "so it can't deploy previews of other branches. Connect a workspace token "
+    "(Railway → Workspace → Tokens) to get a preview for each pull request.")
 
 #: Railway services that host no app of ours — the wizard shows them disabled.
 _ADDON_HINTS = ("postgres", "mysql", "redis", "mongo", "clickhouse", "minio")
@@ -118,8 +141,27 @@ _Q_PROJECT = """
 query($id: String!) {
   project(id: $id) {
     name
+    baseEnvironmentId
+    primaryEnvironmentId
     services { edges { node { id name } } }
-    environments { edges { node { id name } } }
+    environments(isEphemeral: false) { edges { node { id name } } }
+  }
+}
+"""
+
+#: Railway's PR environments: one ephemeral environment per open pull request,
+#: tagged with the PR's branch, and the latest deployment of each service.
+_Q_PREVIEWS = """
+query($id: String!) {
+  project(id: $id) {
+    environments(isEphemeral: true) { edges { node {
+      id
+      meta { branch prNumber }
+      serviceInstances { edges { node {
+        serviceName
+        latestDeployment { id status url staticUrl }
+      } } }
+    } } }
   }
 }
 """
@@ -342,6 +384,7 @@ class RailwayAdapter(DeployAdapter):
                 "id": service["id"],
                 "name": service["name"],
                 "project": project.get("name") or "",
+                "project_id": project.get("id") or (scope or {}).get("projectId"),
                 "type": "database" if _is_addon(service["name"]) else "web service",
                 "region": None,
                 "deployable": not _is_addon(service["name"]),
@@ -373,13 +416,25 @@ class RailwayAdapter(DeployAdapter):
             project_id = project_id or (scope or {}).get("projectId")
             if not project_id:
                 return _failed("deploy target config is missing project_id")
-            services, environments = self._resolve(project_id, token)
-            if scope:
+            branch = config.get("branch")
+            if branch and branch != BASE_BRANCH:
+                if scope:
+                    return _failed(_PROJECT_TOKEN_NO_PREVIEWS)
+                environment_id, environment = self._preview_environment(
+                    project_id, branch, token)
+                services, _environments, _base = self._resolve(project_id, token)
+            elif scope:
+                services, environments, _base = self._resolve(project_id, token)
                 environment_id = scope["environmentId"]
-                environment = next((name for name, env_id in environments.items()
-                                    if env_id == environment_id), environment_id)
+                environment = _name_of(environments, environment_id)
             else:
-                environment_id = _pick(environments, environment, "environment")
+                services, environments, base = self._resolve(project_id, token)
+                if environment not in environments and base and not config.get("environments"):
+                    # No explicit test/prod mapping: `main` goes to the
+                    # project's base environment (the one PRs fork from).
+                    environment_id, environment = base, _name_of(environments, base)
+                else:
+                    environment_id = _pick(environments, environment, "environment")
             deployment_ids = [
                 self._deploy_service(
                     _pick(services, name, "service"), environment_id, ref, token)
@@ -399,6 +454,45 @@ class RailwayAdapter(DeployAdapter):
             detail=(f"railway deploy {ref} -> {environment} "
                     f"({', '.join(service_names(config))})"),
         )
+
+    def previews(self, target: DeployTargetConfig) -> dict[str, DeploymentResult]:
+        """{branch: latest deployment} of the primary service in each Railway
+        PR environment — previews Railway built on its own when a PR opened or
+        got a push. `{}` for a project token (it can't see other environments).
+        Raises `ApiError` when Railway can't be asked; the caller decides."""
+        token = token_from_env()
+        project_id = (target.config or {}).get("project_id")
+        if not token or not project_id or self._scope(token):
+            return {}
+        primary = service_names(target.config or {})[0]
+        found = {}
+        for env in self._pr_environments(project_id, token):
+            branch = (env.get("meta") or {}).get("branch")
+            deployment = next(
+                (inst.get("latestDeployment") for inst in _nodes(env.get("serviceInstances"))
+                 if inst.get("serviceName") == primary), None)
+            if not branch or not (deployment or {}).get("id"):
+                continue
+            pr_number = (env.get("meta") or {}).get("prNumber")
+            found[branch] = DeploymentResult(
+                deployment_id=str(deployment["id"]),
+                status=_status_of(deployment),
+                url=_url_of(deployment),
+                detail=(f"Preview of pull request #{pr_number}" if pr_number
+                        else "Preview built by Railway"),
+            )
+        return found
+
+    def observe(self, deployment_id: str) -> DeploymentResult:
+        """Fresh status + URL of one deployment. Unlike `status()`, raises
+        `ApiError` when Railway can't be asked — "couldn't check" must not
+        overwrite a building deployment with "failed"."""
+        token = token_from_env()
+        if not token:
+            raise ApiError("no Railway token in env")
+        deployment = self._deployment(deployment_id, token)
+        return DeploymentResult(deployment_id=deployment_id,
+                                status=_status_of(deployment), url=_url_of(deployment))
 
     def status(self, deployment_id: str) -> DeploymentStatus:
         token = token_from_env()
@@ -474,21 +568,40 @@ class RailwayAdapter(DeployAdapter):
                     "environmentId": scope["environmentId"]}
         return None
 
-    def _resolve(self, project_id: str, token: str) -> tuple[dict, dict]:
-        """name -> id for the project's services and environments. Railway's
-        API is id-addressed; config carries human names (the compose service
-        names), so every deploy resolves them once."""
+    def _resolve(self, project_id: str, token: str) -> tuple[dict, dict, str | None]:
+        """name -> id for the project's services and (non-preview)
+        environments, plus the base environment id. Railway's API is
+        id-addressed; config carries human names (the compose service names),
+        so every deploy resolves them once."""
         data = self._call(_Q_PROJECT, {"id": project_id}, token)
         project = data.get("project") or {}
         return (_by_name(project.get("services")),
-                _by_name(project.get("environments")))
+                _by_name(project.get("environments")),
+                project.get("baseEnvironmentId") or project.get("primaryEnvironmentId"))
+
+    def _pr_environments(self, project_id: str, token: str) -> list[dict]:
+        data = self._call(_Q_PREVIEWS, {"id": project_id}, token)
+        return _nodes((data.get("project") or {}).get("environments"))
+
+    def _preview_environment(self, project_id: str, branch: str,
+                             token: str) -> tuple[str, str]:
+        """(id, label) of the PR environment Railway made for `branch`."""
+        for env in self._pr_environments(project_id, token):
+            meta = env.get("meta") or {}
+            if meta.get("branch") == branch and env.get("id"):
+                label = (f"pull request #{meta['prNumber']}" if meta.get("prNumber")
+                         else f"preview of {branch}")
+                return env["id"], label
+        raise LookupError(_NO_PREVIEW_ENVIRONMENT.format(branch=branch))
 
     def _deploy_service(self, service_id: str, environment_id: str,
                         ref: str, token: str) -> str:
         data = self._call(
             _M_DEPLOY,
+            # A branch name is not a commit. Without a sha Railway builds the
+            # latest commit of the branch that environment tracks.
             {"environmentId": environment_id, "serviceId": service_id,
-             "commitSha": ref or None},
+             "commitSha": ref if _SHA.fullmatch(ref or "") else None},
             token,
         )
         deployment_id = data.get("serviceInstanceDeployV2")
@@ -561,6 +674,11 @@ def _account_of(projects: list[dict], detail: str) -> str:
     if detail.startswith("authenticated as "):
         return detail[len("authenticated as "):]
     return projects[0].get("name") or "Railway workspace" if projects else "Railway workspace"
+
+
+def _name_of(environments: dict, environment_id: str) -> str:
+    return next((name for name, env_id in environments.items()
+                 if env_id == environment_id), environment_id)
 
 
 def _project_account(project: dict, environment_id: str) -> str:

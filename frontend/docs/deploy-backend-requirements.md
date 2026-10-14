@@ -97,6 +97,9 @@ body   { "provider": "railway", "api_key": "…" }
                                      "detail": "It may be expired or revoked. Generate a fresh token in Railway → Account → Tokens." } }
 ```
 
+A service row may also carry `project_id` — the provider's own project the
+service lives in (Railway). The backend stores it on connect; the UI ignores it.
+
 Note the shape: an **invalid key is a 200, not a 4xx**. The wizard renders
 `error.headline` and `error.detail` inline; a transport-level failure (5xx,
 timeout) is a separate, uglier path. `deployable: false` rows (a Postgres add-on,
@@ -185,6 +188,9 @@ is torn down; the tab also pauses while the document is hidden. A project sittin
 on a green `main` generates zero background traffic.
 
 The backend does not need to push. It does need `GET /deployments` to be cheap.
+For a provider that can be asked (Railway), `GET /deployments` also syncs: it
+refreshes queued/building rows and adds previews the provider built on its own
+(one per pull request) — one or two provider calls, never a build.
 
 ---
 

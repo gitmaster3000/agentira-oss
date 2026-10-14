@@ -10,7 +10,7 @@ const KEY_HELP = {
 
 // Which kinds of key the provider accepts, in plain words.
 const KEY_KINDS = {
-    railway: 'An account, workspace or project token all work. A project token (Project → Settings → Tokens) deploys to its own environment.',
+    railway: 'For a live preview of every pull request, use a workspace token and turn on PR Environments in your Railway project. A project token also works, but it only deploys main to its one environment.',
 };
 
 function StepBar({ step }) {
