@@ -11,6 +11,7 @@ Operations used (Railway Public API):
 
     me                                   verify a personal token
     projects                             verify a team token (`me` is personal-only)
+    projectToken                         verify a project token (one project + env)
     serviceInstanceDeployV2              deploy a commit/branch to an env
     deployment(id)                       status, url/staticUrl
     buildLogs / deploymentLogs           logs
@@ -31,9 +32,17 @@ Config (`DeployTargetConfig.config`, never a secret — ADR-011 §3/§6):
 Credential: the Railway token is an environment variable the daemon supplies
 to this process (`RAILWAY_TOKEN`, or `RAILWAY_API_TOKEN`) — never in the config
 blob, never in a result, never logged.
+
+Token kinds: account and workspace (team) tokens go in `Authorization: Bearer`.
+A *project* token (Project → Settings → Tokens) is scoped to one project and one
+environment and must go in `Project-Access-Token` instead. The adapter detects
+the kind once per token (cached by hash, never the raw token) and, for a project
+token, deploys to the token's own environment; `project_id` defaults to the
+token's project.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -84,6 +93,10 @@ _STATUS_MAP = {
 
 _Q_ME = "query { me { id email name } }"
 
+#: Only a project token can run this; it names the one project + environment
+#: the token is scoped to.
+_Q_PROJECT_TOKEN = "query { projectToken { projectId environmentId } }"
+
 #: Works for every token type; `me` does not (see `verify_credential`).
 _Q_PROJECTS = "query { projects(first: 1) { edges { node { id } } } }"
 
@@ -104,6 +117,7 @@ query {
 _Q_PROJECT = """
 query($id: String!) {
   project(id: $id) {
+    name
     services { edges { node { id name } } }
     environments { edges { node { id name } } }
   }
@@ -159,18 +173,23 @@ class RailwayApi:
         self.url = url
         self.timeout = timeout
 
-    def call(self, query: str, variables: dict, *, token: str) -> dict:
+    def call(self, query: str, variables: dict, *, token: str,
+             project_token: bool = False) -> dict:
         """POST one GraphQL operation. Returns the `data` object. Raises
         `AuthError` if Railway refused the token, `TransportError`/`BlockedError`
-        if we never got an answer, `ApiError` for anything else."""
+        if we never got an answer, `ApiError` for anything else.
+        `project_token` sends the token as `Project-Access-Token` (Railway's
+        header for project tokens) instead of `Authorization: Bearer`."""
         operation = _operation_name(query)
         body = json.dumps({"query": query, "variables": variables}).encode()
+        auth = ({"Project-Access-Token": token} if project_token
+                else {"Authorization": f"Bearer {token}"})
         req = urllib.request.Request(
             self.url,
             data=body,
             method="POST",
             headers={
-                "Authorization": f"Bearer {token}",
+                **auth,
                 "Content-Type": "application/json",
                 # Railway is behind Cloudflare, which 403s the stdlib default
                 # `Python-urllib/3.x` UA with "error code: 1010". Identify
@@ -232,6 +251,9 @@ class RailwayAdapter(DeployAdapter):
     def __init__(self, api: RailwayApi | None = None, log_limit: int = 100) -> None:
         self.api = api or RailwayApi()
         self.log_limit = log_limit
+        #: sha256(token) -> a project token's {projectId, environmentId}, or
+        #: None for an account/workspace token. Never keyed by the raw token.
+        self._scopes: dict[str, dict | None] = {}
 
     # ── credential ───────────────────────────────────────────────────────
 
@@ -256,6 +278,7 @@ class RailwayAdapter(DeployAdapter):
             _log.warning("railway credential unverifiable: %s", exc)
             return None, f"could not check this key with Railway: {exc}"
 
+        self._scopes[_token_key(token)] = None
         me = data.get("me") or {}
         who = me.get("email") or me.get("name") or me.get("id")
         _log.info("railway credential verified (personal token)")
@@ -268,11 +291,30 @@ class RailwayAdapter(DeployAdapter):
         except TransportError as exc:
             _log.warning("railway credential unverifiable: %s", exc)
             return None, f"could not reach Railway to check this key: {exc}"
+        except AuthError:
+            # Not an account/workspace token either. A project token is refused
+            # by both Bearer probes — it needs its own header.
+            return self._verify_project_token(token, personal_error=personal_error)
         except ApiError:
             _log.info("railway rejected the credential")
             return False, str(personal_error)
+        self._scopes[_token_key(token)] = None
         _log.info("railway credential verified (team token)")
         return True, "authenticated (team token)"
+
+    def _verify_project_token(self, token: str, *,
+                              personal_error: AuthError) -> tuple[bool | None, str]:
+        try:
+            scope = self._project_scope(token)
+        except TransportError as exc:
+            _log.warning("railway credential unverifiable: %s", exc)
+            return None, f"could not reach Railway to check this key: {exc}"
+        if scope is None:
+            _log.info("railway rejected the credential")
+            return False, str(personal_error)
+        self._scopes[_token_key(token)] = scope
+        _log.info("railway credential verified (project token)")
+        return True, "authenticated (project token)"
 
     def probe_key(self, token: str) -> dict:
         """What the connect wizard needs from one key: is it good, whose
@@ -282,12 +324,19 @@ class RailwayAdapter(DeployAdapter):
         valid, detail = self.verify_credential(token)
         if valid is not True:
             return {"valid": False, "error": _verify_error(valid, detail)}
+        token = token.strip()
         try:
-            data = self.api.call(_Q_WORKSPACE, {}, token=token.strip())
+            scope = self._scope(token)
+            if scope:
+                # A project token can't list projects — only its own one.
+                data = self._call(_Q_PROJECT, {"id": scope["projectId"]}, token)
+                projects = [data.get("project") or {}]
+            else:
+                data = self._call(_Q_WORKSPACE, {}, token)
+                projects = _nodes(data.get("projects"))
         except ApiError as exc:
             return {"valid": False, "error": _verify_error(None, str(exc))}
 
-        projects = _nodes(data.get("projects"))
         services = [
             {
                 "id": service["id"],
@@ -303,8 +352,9 @@ class RailwayAdapter(DeployAdapter):
         ]
         _log.info("railway key probe ok: %s project(s), %s service(s)",
                   len(projects), len(services))
-        return {"valid": True, "account": _account_of(projects, detail),
-                "services": services}
+        account = (_project_account(projects[0], scope["environmentId"]) if scope
+                   else _account_of(projects, detail))
+        return {"valid": True, "account": account, "services": services}
 
     # ── contract ─────────────────────────────────────────────────────────
 
@@ -315,13 +365,21 @@ class RailwayAdapter(DeployAdapter):
 
         config = target.config or {}
         project_id = config.get("project_id")
-        if not project_id:
-            return _failed("deploy target config is missing project_id")
-
+        environment = railway_environment(target)
         try:
+            # A project token is bound to one project + environment: deploy
+            # there, whatever the target's test/prod mapping says.
+            scope = self._scope(token)
+            project_id = project_id or (scope or {}).get("projectId")
+            if not project_id:
+                return _failed("deploy target config is missing project_id")
             services, environments = self._resolve(project_id, token)
-            environment_id = _pick(environments, railway_environment(target),
-                                   "environment")
+            if scope:
+                environment_id = scope["environmentId"]
+                environment = next((name for name, env_id in environments.items()
+                                    if env_id == environment_id), environment_id)
+            else:
+                environment_id = _pick(environments, environment, "environment")
             deployment_ids = [
                 self._deploy_service(
                     _pick(services, name, "service"), environment_id, ref, token)
@@ -338,7 +396,7 @@ class RailwayAdapter(DeployAdapter):
             deployment_id=primary,
             status=_status_of(deployment),
             url=_url_of(deployment),
-            detail=(f"railway deploy {ref} -> {railway_environment(target)} "
+            detail=(f"railway deploy {ref} -> {environment} "
                     f"({', '.join(service_names(config))})"),
         )
 
@@ -356,8 +414,8 @@ class RailwayAdapter(DeployAdapter):
         if not token or not deployment_id:
             return []
         try:
-            data = self.api.call(
-                _Q_LOGS, {"id": deployment_id, "limit": self.log_limit}, token=token)
+            data = self._call(
+                _Q_LOGS, {"id": deployment_id, "limit": self.log_limit}, token)
         except ApiError:
             return []
         lines = []
@@ -382,28 +440,56 @@ class RailwayAdapter(DeployAdapter):
         if not token or not deployment_id:
             return
         try:
-            self.api.call(_M_REMOVE, {"id": deployment_id}, token=token)
+            self._call(_M_REMOVE, {"id": deployment_id}, token)
         except ApiError:
             _log.warning("railway teardown failed: deployment=%s", deployment_id)
 
     # ── internals ────────────────────────────────────────────────────────
 
+    def _call(self, query: str, variables: dict, token: str) -> dict:
+        """One API call with the header this token's kind needs."""
+        return self.api.call(query, variables, token=token,
+                             project_token=self._scope(token) is not None)
+
+    def _scope(self, token: str) -> dict | None:
+        """The token's project-token scope, detected once per token."""
+        key = _token_key(token)
+        if key not in self._scopes:
+            self._scopes[key] = self._project_scope(token)
+        return self._scopes[key]
+
+    def _project_scope(self, token: str) -> dict | None:
+        """{projectId, environmentId} if Railway accepts this as a project
+        token, else None (an account/workspace token). A transport failure
+        raises — "couldn't ask" is not an answer, so it is never cached."""
+        try:
+            data = self.api.call(_Q_PROJECT_TOKEN, {}, token=token, project_token=True)
+        except TransportError:
+            raise
+        except ApiError:
+            return None
+        scope = data.get("projectToken") or {}
+        if scope.get("projectId") and scope.get("environmentId"):
+            return {"projectId": scope["projectId"],
+                    "environmentId": scope["environmentId"]}
+        return None
+
     def _resolve(self, project_id: str, token: str) -> tuple[dict, dict]:
         """name -> id for the project's services and environments. Railway's
         API is id-addressed; config carries human names (the compose service
         names), so every deploy resolves them once."""
-        data = self.api.call(_Q_PROJECT, {"id": project_id}, token=token)
+        data = self._call(_Q_PROJECT, {"id": project_id}, token)
         project = data.get("project") or {}
         return (_by_name(project.get("services")),
                 _by_name(project.get("environments")))
 
     def _deploy_service(self, service_id: str, environment_id: str,
                         ref: str, token: str) -> str:
-        data = self.api.call(
+        data = self._call(
             _M_DEPLOY,
             {"environmentId": environment_id, "serviceId": service_id,
              "commitSha": ref or None},
-            token=token,
+            token,
         )
         deployment_id = data.get("serviceInstanceDeployV2")
         if not deployment_id:
@@ -411,7 +497,7 @@ class RailwayAdapter(DeployAdapter):
         return str(deployment_id)
 
     def _deployment(self, deployment_id: str, token: str) -> dict:
-        data = self.api.call(_Q_DEPLOYMENT, {"id": deployment_id}, token=token)
+        data = self._call(_Q_DEPLOYMENT, {"id": deployment_id}, token)
         return data.get("deployment") or {}
 
 
@@ -440,6 +526,11 @@ def service_names(config: dict) -> list[str]:
     services = config.get("services") or (
         [config["service"]] if config.get("service") else [])
     return [str(s) for s in services] or ["app"]
+
+
+def _token_key(token: str) -> str:
+    """Cache key for a token — a digest, so the raw secret is never retained."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def _operation_name(query: str) -> str:
@@ -472,6 +563,13 @@ def _account_of(projects: list[dict], detail: str) -> str:
     return projects[0].get("name") or "Railway workspace" if projects else "Railway workspace"
 
 
+def _project_account(project: dict, environment_id: str) -> str:
+    """"<project> · <environment>" for a project token — all it can see."""
+    names = {env_id: name for name, env_id in _by_name(project.get("environments")).items()}
+    label = project.get("name") or "Railway project"
+    return f"{label} · {names[environment_id]}" if environment_id in names else label
+
+
 def _verify_error(valid: bool | None, detail: str) -> dict:
     """The wizard renders `headline` + `detail` inline. Say plainly whether the
     key is bad or we simply couldn't check it — those are different problems and
@@ -485,8 +583,9 @@ def _verify_error(valid: bool | None, detail: str) -> dict:
     return {
         "headline": "Railway rejected this key",
         "detail": (f"{detail} It may be expired or revoked. Generate a fresh "
-                   "token in Railway → Account → Tokens (or your workspace's "
-                   "Tokens tab) and paste it here."),
+                   "token in Railway → Account → Tokens, your workspace's "
+                   "Tokens tab, or Project → Settings → Tokens, and paste it "
+                   "here."),
     }
 
 

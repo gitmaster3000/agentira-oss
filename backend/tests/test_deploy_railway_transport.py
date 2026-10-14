@@ -127,6 +127,28 @@ def test_every_transport_failure_is_an_api_error():
         assert issubclass(exc, ApiError)
 
 
+# ── auth header per token kind ───────────────────────────────────────────
+
+def test_account_token_is_sent_as_bearer():
+    with patch("urllib.request.urlopen", return_value=_ok({"data": {}})) as urlopen:
+        RailwayApi().call("query { me { id } }", {}, token="tok")
+
+    request = urlopen.call_args[0][0]
+    assert request.get_header("Authorization") == "Bearer tok"
+    assert request.get_header("Project-access-token") is None
+
+
+def test_project_token_is_sent_as_project_access_token():
+    """Railway project tokens are refused as Bearer; they need their own header."""
+    with patch("urllib.request.urlopen", return_value=_ok({"data": {}})) as urlopen:
+        RailwayApi().call("query { projectToken { projectId } }", {},
+                          token="ptok", project_token=True)
+
+    request = urlopen.call_args[0][0]
+    assert request.get_header("Project-access-token") == "ptok"
+    assert request.get_header("Authorization") is None
+
+
 # ── logging: diagnosable without leaking the token ────────────────────────
 
 def test_failures_are_logged_without_the_token(caplog):

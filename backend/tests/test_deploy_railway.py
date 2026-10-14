@@ -31,8 +31,11 @@ class FakeApi:
 
     def __init__(self, state="SUCCESS", url="agentira-test.up.railway.app",
                  services=("backend", "frontend"), environments=("test", "production"),
-                 raise_on=None):
+                 raise_on=None, project_scope=None):
         self.state = state
+        # Set = this fake is a Railway *project* token scoped to that
+        # {projectId, environmentId}: it only works via Project-Access-Token.
+        self.project_scope = project_scope
         self.url = url
         self.services = services
         self.environments = environments
@@ -41,14 +44,22 @@ class FakeApi:
         self.removed: set[str] = set()
         self._deployed = 0
 
-    def call(self, query: str, variables: dict, *, token: str) -> dict:
+    def call(self, query: str, variables: dict, *, token: str,
+             project_token: bool = False) -> dict:
         operation = _operation(query)
-        self.calls.append({"op": operation, "vars": variables, "token": token})
+        self.calls.append({"op": operation, "vars": variables, "token": token,
+                           "project_token": project_token})
         if operation in self.raise_on:
             raise self.raise_on[operation]
+        # Like Railway: a token sent in the wrong header is "Not Authorized".
+        if project_token != (self.project_scope is not None):
+            raise AuthError("railway API error: Not Authorized")
         return getattr(self, f"_{operation}")(variables)
 
     # one method per operation the adapter issues
+    def _projectToken(self, _):  # noqa: N802 — mirrors the GraphQL name
+        return {"projectToken": self.project_scope}
+
     def _me(self, _):
         return {"me": {"id": "u1", "email": "ops@agentira.dev"}}
 
@@ -60,6 +71,7 @@ class FakeApi:
 
     def _project(self, _):
         return {"project": {
+            "name": "easy esg",
             "services": _edges(self.services, "svc"),
             "environments": _edges(self.environments, "env"),
         }}
@@ -94,6 +106,7 @@ def _operation(query: str) -> str:
     """Which operation a query string is. Longest/most specific marker first —
     "deployment" is a substring of deploymentLogs/deploymentRemove."""
     markers = [
+        ("projectToken", "projectToken"),
         ("serviceInstanceDeployV2(", "serviceInstanceDeployV2"),
         ("projects(", "projects"),
         ("buildLogs(", "logs"),
@@ -360,6 +373,89 @@ def test_probe_key_distinguishes_unreachable_from_rejected():
     assert result["valid"] is False
     assert result["error"]["headline"] == "Couldn't reach Railway to check this key"
     assert "not a problem with your key" in result["error"]["detail"]
+
+
+# ── project tokens (Project → Settings → Tokens) ─────────────────────────
+
+PROJECT_SCOPE = {"projectId": "proj_esg", "environmentId": "env_production"}
+
+
+def test_verify_credential_accepts_project_token():
+    """A project token fails both Bearer probes; it must be retried with the
+    Project-Access-Token header before it is called bad."""
+    api = FakeApi(project_scope=PROJECT_SCOPE)
+
+    valid, detail = RailwayAdapter(api=api).verify_credential("rw_project_token")
+
+    assert valid is True
+    assert "project token" in detail
+    assert [(c["op"], c["project_token"]) for c in api.calls] == [
+        ("me", False), ("projects", False), ("projectToken", True)]
+
+
+def test_verify_credential_project_token_unreachable_is_unknown():
+    api = FakeApi(project_scope=PROJECT_SCOPE,
+                  raise_on={"projectToken": TransportError("timed out")})
+
+    valid, _detail = RailwayAdapter(api=api).verify_credential("rw_project_token")
+
+    assert valid is None
+
+
+def test_probe_key_project_token_lists_its_projects_services():
+    """`projects` is closed to a project token — the probe lists the services
+    of the token's own project, in the wizard's usual shape."""
+    api = FakeApi(project_scope=PROJECT_SCOPE, services=("esg-api", "Postgres"))
+
+    result = RailwayAdapter(api=api).probe_key("rw_project_token")
+
+    assert result["valid"] is True
+    assert result["account"] == "easy esg · production"
+    assert result["services"] == [
+        {"id": "svc_esg-api", "name": "esg-api", "project": "easy esg",
+         "type": "web service", "region": None, "deployable": True},
+        {"id": "svc_Postgres", "name": "Postgres", "project": "easy esg",
+         "type": "database", "region": None, "deployable": False},
+    ]
+    project_call = next(c for c in api.calls if c["op"] == "project")
+    assert project_call["vars"] == {"id": "proj_esg"}
+    assert project_call["project_token"] is True
+    assert "projects" not in [c["op"] for c in api.calls if c["project_token"]]
+
+
+def test_deploy_with_project_token_uses_its_environment_and_header(monkeypatch):
+    """Runtime calls send Project-Access-Token and deploy to the token's own
+    environment — even though the target says `test` and has no project_id."""
+    monkeypatch.setenv("RAILWAY_TOKEN", "rw_project_token")
+    api = FakeApi(project_scope=PROJECT_SCOPE, services=("backend",))
+    adapter = RailwayAdapter(api=api)
+    target = DeployTargetConfig(kind=TargetKind.RAILWAY, environment="test",
+                                config={"service": "backend"})
+
+    result = adapter.deploy(target, ref="abc123")
+
+    assert result.status == DeploymentStatus.LIVE
+    assert "-> production" in result.detail
+    deploy_call = next(c for c in api.calls if c["op"] == "serviceInstanceDeployV2")
+    assert deploy_call["vars"]["environmentId"] == "env_production"
+    assert next(c for c in api.calls if c["op"] == "project")["vars"] == {"id": "proj_esg"}
+    assert all(c["project_token"] for c in api.calls)
+
+    adapter.logs(result.deployment_id)
+    adapter.teardown(result.deployment_id)
+    assert adapter.status(result.deployment_id) == DeploymentStatus.ROLLED_BACK
+    assert [c["op"] for c in api.calls].count("projectToken") == 1  # detected once
+
+
+def test_bearer_token_runtime_calls_keep_bearer_header(token):
+    api = FakeApi()
+
+    RailwayAdapter(api=api).deploy(_target(), ref="abc123")
+
+    assert [c["op"] for c in api.calls if c["project_token"]] == ["projectToken"]
+    deploy_call = next(c for c in api.calls if c["op"] == "serviceInstanceDeployV2")
+    assert deploy_call["project_token"] is False
+    assert deploy_call["vars"]["environmentId"] == "env_test"
 
 
 def test_verify_credential_rejects_empty_token():
