@@ -6,9 +6,9 @@
  * Right column: About (key, lead, repository, started, Edit details) and
  * People with roles (Lead / Agent / Member) + Add people.
  *
- * No data of its own except milestones: board, members, epics and the recent
- * activity feed all come from ProjectLayout via outlet context. Milestones is
- * the single extra request this page makes.
+ * Board, members, epics and the recent activity feed come from ProjectLayout
+ * via outlet context. The page makes two requests of its own: milestones and
+ * the project attachments list (inside <ProjectAttachments>).
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -20,6 +20,7 @@ import { api } from '../api';
 import { ROUTES } from '../routes';
 import { Markdown } from '../components/Markdown';
 import { UserAvatar } from '../components/UserAvatar';
+import { ProjectAttachments } from '../components/ProjectAttachments';
 
 const TEAL = 'var(--status-done)';
 const LAV = 'var(--accent-primary)';
@@ -264,6 +265,9 @@ export function ProjectOverview() {
                             </div>
                         )}
                     </Panel>
+
+                    <SectionTitle>Attachments</SectionTitle>
+                    <Panel><ProjectAttachments projectId={projectId} /></Panel>
                 </section>
 
                 <aside className="min-w-0">

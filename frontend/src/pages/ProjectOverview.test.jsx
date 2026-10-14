@@ -6,7 +6,13 @@ import { ProjectOverview } from './ProjectOverview';
 import { api } from '../api';
 
 vi.mock('../api', () => ({
-    api: { listMilestones: vi.fn() },
+    api: {
+        listMilestones: vi.fn(),
+        listProjectAttachments: vi.fn(),
+        uploadProjectAttachment: vi.fn(),
+        deleteAttachment: vi.fn(),
+        downloadAttachment: vi.fn(),
+    },
 }));
 
 const ACTIVITY = [
@@ -78,17 +84,28 @@ function renderOverview(ctx = {}) {
 describe('ProjectOverview', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        api.listProjectAttachments.mockResolvedValue([{ id: 'f1', filename: 'brief.pdf', size_bytes: 2048 }]);
         api.listMilestones.mockResolvedValue([
             { id: 'M1', title: 'Deploy that works', status: 'open', due_date: iso(5), total: 10, done: 2, progress: 20 },
             { id: 'M2', title: 'Seedbox', status: 'open', due_date: iso(60), total: 10, done: 6, progress: 60 },
         ]);
     });
 
-    it('makes exactly one request of its own (milestones)', async () => {
+    it('makes exactly two requests of its own: milestones and the attachments list', async () => {
         renderOverview();
         await screen.findByText('Milestones and epics');
-        await waitFor(() => expect(api.listMilestones).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(api.listProjectAttachments).toHaveBeenCalledTimes(1));
+        expect(api.listMilestones).toHaveBeenCalledTimes(1);
         expect(api.listMilestones).toHaveBeenCalledWith('P1');
+        expect(api.listProjectAttachments).toHaveBeenCalledWith('P1');
+    });
+
+    it('shows attachments below Recent activity, in the main column', async () => {
+        const { container } = renderOverview();
+        expect(await screen.findByText('brief.pdf')).toBeInTheDocument();
+        const titles = [...container.querySelectorAll('h3')].map((h) => h.textContent);
+        expect(titles.indexOf('Attachments')).toBeGreaterThan(titles.indexOf('Recent activity'));
+        expect(screen.getByRole('button', { name: 'Upload attachments' })).toBeInTheDocument();
     });
 
     it('shows the description at the top, rendered as markdown', async () => {
@@ -174,6 +191,7 @@ describe('ProjectOverview — recent activity feed', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         api.listMilestones.mockResolvedValue([]);
+        api.listProjectAttachments.mockResolvedValue([]);
     });
 
     it('renders activity entries with actor and human action label', async () => {

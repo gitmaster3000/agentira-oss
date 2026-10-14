@@ -1,7 +1,8 @@
 /**
  * Project attachments (AP-152) — drag-and-drop upload, list, download, delete.
- * Lives in project Settings. Fetches only when mounted, i.e. when the
- * Attachments section is opened, so no other page pays for it.
+ * Rendered on the project Overview; makes its own single request (the list).
+ * Same behaviour as before the Overview redesign, restyled to match the
+ * Overview panels.
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -16,20 +17,17 @@ function formatSize(bytes) {
 }
 
 export function ProjectAttachments({ projectId }) {
+    const fileInputRef = useRef(null);
     const [attachments, setAttachments] = useState([]);
+    const [dragActive, setDragActive] = useState(false);
+    const [uploading, setUploading] = useState(false);
+
     const reload = useCallback(async () => {
         try {
             setAttachments((await api.listProjectAttachments(projectId)) || []);
         } catch { /* keep prior */ }
     }, [projectId]);
     useEffect(() => { reload(); }, [reload]);
-    return <AttachmentsList projectId={projectId} attachments={attachments} onChange={reload} />;
-}
-
-function AttachmentsList({ projectId, attachments, onChange }) {
-    const fileInputRef = useRef(null);
-    const [dragActive, setDragActive] = useState(false);
-    const [uploading, setUploading] = useState(false);
 
     const uploadFiles = async (fileList) => {
         const files = Array.from(fileList || []);
@@ -39,7 +37,7 @@ function AttachmentsList({ projectId, attachments, onChange }) {
             for (const f of files) {
                 await api.uploadProjectAttachment(projectId, f);
             }
-            await onChange();
+            await reload();
         } catch (err) {
             alert('Upload failed: ' + (err.message || err));
         } finally {
@@ -51,7 +49,7 @@ function AttachmentsList({ projectId, attachments, onChange }) {
         if (!window.confirm(`Delete ${att.filename}?`)) return;
         try {
             await api.deleteAttachment(att.id);
-            await onChange();
+            await reload();
         } catch (err) {
             alert('Delete failed: ' + (err.message || err));
         }
@@ -60,23 +58,21 @@ function AttachmentsList({ projectId, attachments, onChange }) {
     return (
         <div className="space-y-3">
             <div
-                className="rounded-lg p-4 text-center cursor-pointer transition-all"
-                style={{
-                    border: `2px dashed ${dragActive ? 'var(--accent-primary)' : 'var(--border-subtle)'}`,
-                    backgroundColor: dragActive ? 'var(--accent-subtle)' : 'var(--bg-app)',
-                }}
+                role="button" tabIndex={0} aria-label="Upload attachments"
+                className={`rounded-xl border-2 border-dashed p-4 text-center cursor-pointer transition-colors ${dragActive ? 'border-accent-primary bg-accent-subtle' : 'bg-bg-app'}`}
                 onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
                 onDragLeave={() => setDragActive(false)}
                 onDrop={(e) => { e.preventDefault(); setDragActive(false); uploadFiles(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => { if (e.key === 'Enter') fileInputRef.current?.click(); }}
             >
-                <Upload className="w-5 h-5 mx-auto mb-1.5" style={{ color: dragActive ? 'var(--accent-primary)' : 'var(--text-tertiary)' }} />
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <Upload className={`w-5 h-5 mx-auto mb-1.5 ${dragActive ? 'text-accent-primary' : 'text-text-tertiary'}`} />
+                <p className="text-xs text-text-secondary">
                     {uploading
                         ? 'Uploading…'
-                        : <>Drop files here or <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>click to browse</span></>}
+                        : <>Drop files here or <span className="font-semibold text-accent-primary">click to browse</span></>}
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                <p className="text-[10px] mt-0.5 text-text-tertiary">
                     Briefs, designs, brand guides — agents can read text inline; binary fetched on demand.
                 </p>
                 <input
@@ -88,32 +84,21 @@ function AttachmentsList({ projectId, attachments, onChange }) {
                 />
             </div>
             {attachments.length > 0 && (
-                <div className="space-y-1">
+                <div className="divide-y divide-border-subtle/60">
                     {attachments.map((a) => (
-                        <div key={a.id}
-                            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs"
-                            style={{ backgroundColor: 'var(--bg-panel)', border: '1px solid var(--border-subtle)' }}
-                        >
-                            <FileText className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-primary)' }} />
-                            <span className="flex-1 truncate" style={{ color: 'var(--text-primary)' }}>{a.filename}</span>
-                            <span className="flex-shrink-0" style={{ color: 'var(--text-tertiary)' }}>{formatSize(a.size_bytes)}</span>
-                            <button
-                                type="button"
-                                onClick={() => api.downloadAttachment(a.id, a.filename).catch(err => alert('Failed to download: ' + err.message))}
-                                className="p-0.5 rounded-lg hover:bg-bg-hover"
-                                style={{ color: 'var(--text-tertiary)' }}
-                                title="Download"
-                            >
-                                <Download className="w-3 h-3" />
+                        <div key={a.id} className="flex items-center gap-3 py-2 text-[13px] min-w-0">
+                            <FileText className="w-4 h-4 flex-shrink-0 text-accent-primary" />
+                            <span className="flex-1 truncate text-text-primary">{a.filename}</span>
+                            <span className="flex-shrink-0 text-text-tertiary">{formatSize(a.size_bytes)}</span>
+                            <button type="button" title="Download" aria-label={`Download ${a.filename}`}
+                                onClick={() => api.downloadAttachment(a.id, a.filename).catch((err) => alert('Failed to download: ' + err.message))}
+                                className="p-0.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-bg-hover">
+                                <Download className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                                type="button"
+                            <button type="button" title="Delete" aria-label={`Delete ${a.filename}`}
                                 onClick={() => handleDelete(a)}
-                                className="p-0.5 rounded-lg hover:bg-red-500/10 transition-colors"
-                                style={{ color: 'var(--text-tertiary)' }}
-                                title="Delete"
-                            >
-                                <Trash2 className="w-3 h-3" />
+                                className="p-0.5 rounded-lg text-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                                <Trash2 className="w-3.5 h-3.5" />
                             </button>
                         </div>
                     ))}

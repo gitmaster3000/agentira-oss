@@ -26,7 +26,6 @@ import { ROUTES } from '../routes';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { parseGitAddress, fetchRepoInfo } from '../lib/gitAddress';
 import { GitTokenField } from '../components/GitTokenField';
-import { ProjectAttachments } from '../components/ProjectAttachments';
 import {
     SettingsSection, SubLabel, Field, TextField, TextArea, Toggle, ChoiceList,
     Card, Notice, Button, Advanced, InfoTip,
@@ -107,7 +106,6 @@ const isDirty = (form, project) => !!project && JSON.stringify({
 const SECTIONS = [
     { id: 'overview', label: 'Overview' },
     { id: 'repos', label: 'Repositories' },
-    { id: 'attachments', label: 'Attachments' },
     { id: 'checks', label: 'Checks & workflow' },
     { id: 'safety', label: 'Safety & isolation' },
 ];
@@ -269,13 +267,6 @@ export function ProjectSettings() {
                                 hint="Normally each agent gets its own fresh copy of the repo, so your folder is never touched. Turn this on to have agents edit the repo folder on this machine directly instead. Only works for folders the daemon can read — macOS blocks Desktop, Documents and Downloads." />
                         </Advanced>
                         {saveBar}
-                    </SettingsSection>
-                )}
-
-                {section === 'attachments' && (
-                    <SettingsSection title="Attachments"
-                        description="Briefs, designs and brand guides for this project. Agents read text files inline and fetch binary files on demand.">
-                        <ProjectAttachments projectId={projectId} />
                     </SettingsSection>
                 )}
 
