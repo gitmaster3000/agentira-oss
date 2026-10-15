@@ -51,12 +51,14 @@ function baseTask(overrides = {}) {
 }
 
 // Wrapper drives isEditing the same way the parent pages do.
-function Harness({ task, onSelectTask }) {
+function Harness({ task, onSelectTask, epics = [], members = [] }) {
     const [isEditing, setIsEditing] = useState(false);
     return (
         <MemoryRouter>
             <TaskDetailPanel
                 task={task}
+                epics={epics}
+                members={members}
                 onClose={() => {}}
                 onUpdate={() => {}}
                 onSelectTask={onSelectTask}
@@ -132,25 +134,27 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
     });
 
     it('shows the epic as a dropdown in the details rows (like assignee)', async () => {
-        api.getEpics.mockResolvedValue([
+        const epics = [
             { id: 'E1', title: 'Onboarding' },
             { id: 'E2', title: 'Billing' },
-        ]);
-        render(<Harness task={baseTask({ epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' })} />);
+        ];
+        render(<Harness epics={epics} task={baseTask({ epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' })} />);
 
-        const select = await screen.findByLabelText('Epic');
+        // Options are present on the first frame: they come from props, not a fetch.
+        const select = screen.getByLabelText('Epic');
         expect(select.tagName).toBe('SELECT');
-        await waitFor(() => expect(select.value).toBe('E1'));
+        expect(select.value).toBe('E1');
+        expect(api.getEpics).not.toHaveBeenCalled();
+        expect(api.getProjectMembers).not.toHaveBeenCalled();
         // Options come from the project's epics.
         expect(screen.getByRole('option', { name: 'Billing' })).toBeInTheDocument();
     });
 
     it('saves the epic via updateTask when the dropdown changes (no edit mode)', async () => {
-        api.getEpics.mockResolvedValue([{ id: 'E1', title: 'Onboarding' }]);
-        render(<Harness task={baseTask()} />);
+        render(<Harness epics={[{ id: 'E1', title: 'Onboarding' }]} task={baseTask()} />);
 
         const select = await screen.findByLabelText('Epic');
-        await waitFor(() => expect(screen.getByRole('option', { name: 'Onboarding' })).toBeInTheDocument());
+        expect(screen.getByRole('option', { name: 'Onboarding' })).toBeInTheDocument();
         fireEvent.change(select, { target: { value: 'E1' } });
 
         await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
@@ -302,6 +306,64 @@ describe('TaskDetailPanel — due date (AP-501)', () => {
         await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
             'T1',
             expect.objectContaining({ due_date: '' }),
+        ));
+    });
+});
+
+describe('TaskDetailPanel — drafts survive collapsing a section', () => {
+    beforeEach(() => vi.clearAllMocks());
+    const toggle = (name) => fireEvent.click(screen.getByRole('button', { name: `Toggle ${name} section` }));
+
+    it('keeps a half-written comment when Comments is collapsed and reopened', async () => {
+        render(<Harness task={baseTask()} />);
+        const box = await screen.findByPlaceholderText(/Comment or @mention/);
+        fireEvent.change(box, { target: { value: 'half-written' } });
+        toggle('Comments');
+        expect(screen.queryByPlaceholderText(/Comment or @mention/)).toBeNull();
+        toggle('Comments');
+        expect(screen.getByPlaceholderText(/Comment or @mention/).value).toBe('half-written');
+    });
+
+    it('shows the typed description after Details is collapsed and Save writes that same text', async () => {
+        render(<Harness task={baseTask()} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByDisplayValue('desc'), { target: { value: 'edited text' } });
+        toggle('Details');
+        toggle('Details');
+        expect(screen.getByDisplayValue('edited text')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ description: 'edited text' }),
+        ));
+    });
+
+    it('shows the typed branch after Branch & PR is collapsed and Save writes that same text', async () => {
+        render(<Harness task={baseTask()} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'feature/typed' } });
+        toggle('Branch & PR');
+        toggle('Branch & PR');
+        expect(screen.getByLabelText('Branch').value).toBe('feature/typed');
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ branch: 'feature/typed' }),
+        ));
+    });
+});
+
+describe('TaskDetailPanel — Branch & PR edit reseeds', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('after Cancel, Edit shows the saved branch again, not the abandoned text', async () => {
+        render(<Harness task={baseTask({ branch: 'saved-branch' })} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'abandoned' } });
+        fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+        fireEvent.click(screen.getByTitle('Edit'));
+        expect(screen.getByLabelText('Branch').value).toBe('saved-branch');
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ branch: 'saved-branch' }),
         ));
     });
 });

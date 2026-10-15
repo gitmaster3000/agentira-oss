@@ -32,10 +32,6 @@ const MAX_LINES_ALLOW_LIST = [
     'src/pages/EpicPage.jsx',
     'src/components/FloatingChat.jsx',
     'src/pages/ProjectLayout.jsx',
-    // AP-696 is reworking these in parallel; do not edit until it lands.
-    'src/pages/TaskPage.jsx',
-    'src/components/TaskDetailPanel.jsx',
-    'src/components/CreateTaskModal.jsx',
 ];
 
 // TODO(AP-698): existing exhaustive-deps violations. Fix the deps and remove the file; never add to it.
@@ -43,7 +39,6 @@ const EXHAUSTIVE_DEPS_ALLOW_LIST = [
     'src/components/TaskDetail/AttachmentPreview.jsx',
     'src/components/TaskDetail/AttachmentsSection.jsx',
     'src/components/TaskDetailModal.jsx',
-    'src/components/TaskDetailPanel.jsx',
     'src/pages/Backlog.jsx',
     'src/pages/CliAuth.jsx',
     'src/pages/GitHubCallback.jsx',

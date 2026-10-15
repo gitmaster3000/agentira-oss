@@ -66,7 +66,9 @@ const COMPONENTS = {
 };
 
 
-export function Markdown({ children, className = '' }) {
+// Memoized: parsing a long description is the costliest render on the task
+// pages, so it must only re-run when the text itself changes.
+export const Markdown = React.memo(function Markdown({ children, className = '' }) {
     if (!children) return null;
     return (
         <div className={className}>
@@ -75,4 +77,4 @@ export function Markdown({ children, className = '' }) {
             </ReactMarkdown>
         </div>
     );
-}
+});
