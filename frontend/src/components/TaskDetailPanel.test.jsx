@@ -51,12 +51,14 @@ function baseTask(overrides = {}) {
 }
 
 // Wrapper drives isEditing the same way the parent pages do.
-function Harness({ task, onSelectTask }) {
+function Harness({ task, onSelectTask, epics = [], members = [] }) {
     const [isEditing, setIsEditing] = useState(false);
     return (
         <MemoryRouter>
             <TaskDetailPanel
                 task={task}
+                epics={epics}
+                members={members}
                 onClose={() => {}}
                 onUpdate={() => {}}
                 onSelectTask={onSelectTask}
@@ -132,25 +134,27 @@ describe('TaskDetailPanel — edit mode Branch & PR', () => {
     });
 
     it('shows the epic as a dropdown in the details rows (like assignee)', async () => {
-        api.getEpics.mockResolvedValue([
+        const epics = [
             { id: 'E1', title: 'Onboarding' },
             { id: 'E2', title: 'Billing' },
-        ]);
-        render(<Harness task={baseTask({ epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' })} />);
+        ];
+        render(<Harness epics={epics} task={baseTask({ epic_id: 'E1', epic_name: 'Onboarding', epic_color: '#7c4dff' })} />);
 
-        const select = await screen.findByLabelText('Epic');
+        // Options are present on the first frame: they come from props, not a fetch.
+        const select = screen.getByLabelText('Epic');
         expect(select.tagName).toBe('SELECT');
-        await waitFor(() => expect(select.value).toBe('E1'));
+        expect(select.value).toBe('E1');
+        expect(api.getEpics).not.toHaveBeenCalled();
+        expect(api.getProjectMembers).not.toHaveBeenCalled();
         // Options come from the project's epics.
         expect(screen.getByRole('option', { name: 'Billing' })).toBeInTheDocument();
     });
 
     it('saves the epic via updateTask when the dropdown changes (no edit mode)', async () => {
-        api.getEpics.mockResolvedValue([{ id: 'E1', title: 'Onboarding' }]);
-        render(<Harness task={baseTask()} />);
+        render(<Harness epics={[{ id: 'E1', title: 'Onboarding' }]} task={baseTask()} />);
 
         const select = await screen.findByLabelText('Epic');
-        await waitFor(() => expect(screen.getByRole('option', { name: 'Onboarding' })).toBeInTheDocument());
+        expect(screen.getByRole('option', { name: 'Onboarding' })).toBeInTheDocument();
         fireEvent.change(select, { target: { value: 'E1' } });
 
         await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(

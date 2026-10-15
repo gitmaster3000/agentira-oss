@@ -3,7 +3,7 @@ import { api } from '../api';
 
 /**
  * A single-line comment input with @mention autocomplete over a project's
- * members (humans + agents). Typing "@" opens a filtered picker; Enter/Tab or
+ * members (humans + agents; pass `members` to skip the fetch). Typing "@" opens a filtered picker; Enter/Tab or
  * click inserts "@Name ". Enter (with the menu closed) submits via onSubmit.
  *
  * Inserting the full name (spaces and all) is fine — the backend matches an
@@ -15,6 +15,7 @@ export function MentionInput({
     onChange,
     onSubmit,
     projectId,
+    members: membersProp,
     placeholder = 'Add a comment…',
     className = '',
     menuAbove = false,
@@ -22,20 +23,24 @@ export function MentionInput({
     rows = 3,
     autoGrow = false,
 }) {
-    const [members, setMembers] = useState([]);
+    const [fetched, setFetched] = useState([]);
+    // Callers that already hold the project's members pass them in, so the
+    // composer needs no request of its own.
+    const members = membersProp ?? fetched;
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [active, setActive] = useState(0);
     const inputRef = useRef(null);
 
     useEffect(() => {
+        if (membersProp) return;
         let alive = true;
-        if (!projectId) { setMembers([]); return; }
+        if (!projectId) { setFetched([]); return; }
         api.getProjectMembers(projectId)
-            .then(list => { if (alive) setMembers(Array.isArray(list) ? list : []); })
-            .catch(() => { if (alive) setMembers([]); });
+            .then(list => { if (alive) setFetched(Array.isArray(list) ? list : []); })
+            .catch(() => { if (alive) setFetched([]); });
         return () => { alive = false; };
-    }, [projectId]);
+    }, [projectId, membersProp]);
 
     // Auto-grow a multiline box with its content (capped by the consumer's
     // max-height class, which then scrolls). Opt-in so single-line and

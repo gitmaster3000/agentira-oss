@@ -1,129 +1,34 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { UserAvatar } from '../components/UserAvatar';
-import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
-import { Markdown } from '../components/Markdown';
 import { CreateTaskModal } from '../components/CreateTaskModal';
-import { MentionInput } from '../components/MentionInput';
-import { AttachmentsSection } from '../components/TaskDetail/AttachmentsSection';
-import { TestedBy } from '../components/TaskDetail/TestedBy';
-import { LinksSection } from '../components/TaskDetail/LinksSection';
-import { CollapsibleSection } from '../components/TaskDetail/CollapsibleSection';
+import { PlanTab } from '../components/TaskDetail/PlanTab';
+import {
+    AgentSection, RUN_STATUS, ACTIVE_RUN_STATUSES, pickCurrentRun, summaryStamp,
+} from '../components/TaskDetail/RunTab';
+import { ActivityTab } from '../components/TaskDetail/ActivityFeed';
+import { TitleEditor } from '../components/TaskDetail/TextDraft';
+import { keepSameActivity, keepSameJson } from '../lib/pollState';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import {
-    Clock,
-    MessageSquare,
-    Calendar,
-    GitBranch,
-    GitCommit,
-    GitPullRequest,
-    ExternalLink,
-    Copy,
     Check,
     Pencil,
-    CheckSquare,
-    Square,
-    Plus,
     X,
-    Bot,
-    Zap,
-    DollarSign,
-    AlertTriangle,
     ClipboardList,
     Activity as ActivityIcon,
     Play,
-    Info,
-    ListTree,
-    Paperclip,
-    Users,
 } from 'lucide-react';
+
+// Re-exported: these pure helpers moved with the Run tab but are still tested here.
+export { pickCurrentRun, summaryStamp };
 
 const TABS = [
     { id: 'plan', label: 'Plan', icon: ClipboardList },
     { id: 'run', label: 'Run', icon: Play },
     { id: 'activity', label: 'Activity', icon: ActivityIcon },
 ];
-
-const STATUS_OPTIONS = [
-    { value: 'backlog', label: 'Backlog' },
-    { value: 'todo', label: 'To Do' },
-    { value: 'in_progress', label: 'In Progress' },
-    { value: 'review', label: 'In Review' },
-    { value: 'done', label: 'Done' },
-];
-const PRIORITY_OPTIONS = ['critical', 'high', 'medium', 'low'];
-
-// Minimal run-status palette — mirrors RunDetail's STATUS_CONFIG for the
-// states a task's single run actually reaches. Local so TaskPage doesn't
-// depend on RunDetail's internals.
-const RUN_STATUS = {
-    ready:        { bg: '#3b82f6', label: 'Ready' },
-    pending:      { bg: '#5f6368', label: 'Queued' },
-    running:      { bg: '#f1c40f', label: 'Running' },
-    interrupting: { bg: '#9aa0a6', label: 'Stopping…' },
-    paused:       { bg: '#9aa0a6', label: 'Paused' },
-    completed:    { bg: '#2ecc71', label: 'Completed' },
-    failed:       { bg: '#e74c3c', label: 'Failed' },
-    cancelled:    { bg: '#9aa0a6', label: 'Cancelled' },
-};
-
-const ACTIVE_RUN_STATUSES = new Set(['pending', 'running', 'interrupting']);
-
-// 1 task = 1 run: the "current" run is simply the newest one.
-export function pickCurrentRun(runs) {
-    if (!Array.isArray(runs) || runs.length === 0) return null;
-    return [...runs].sort(
-        (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
-    )[0];
-}
-
-// When did Run.summary last change? While running it rolls every turn, so we
-// stamp "now" on each change. First sighting of an already-finished run uses
-// the run's own finish/create time instead of the moment we loaded the page.
-export function summaryStamp(prevSummary, run, prevStamp, now) {
-    if (!run || !run.summary) return null;
-    if (run.summary === prevSummary) return prevStamp;
-    if (prevSummary === null && run.status !== 'running') {
-        return run.finished_at || run.created_at || now;
-    }
-    return now;
-}
-
-function formatBranchDisplay(val) {
-    if (!val) return '';
-    const treeMatch = val.match(/\/tree\/(.+)$/);
-    if (treeMatch) return treeMatch[1];
-    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
-    return val;
-}
-
-function formatPrDisplay(val) {
-    if (!val) return '';
-    const prMatch = val.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
-    if (prMatch) return `${prMatch[1]}#${prMatch[2]}`;
-    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
-    return val;
-}
-
-function formatDuration(ms) {
-    if (ms == null) return '—';
-    const s = Math.round(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    return `${m}m ${s % 60}s`;
-}
-
-function relTime(value) {
-    if (!value) return '';
-    const d = new Date(value);
-    const diff = Math.round((Date.now() - d.getTime()) / 1000);
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return d.toLocaleString();
-}
 
 export function TaskPage() {
     const { taskId } = useParams();
@@ -140,17 +45,11 @@ export function TaskPage() {
 
     const [task, setTask] = useState(null);
     const [activities, setActivities] = useState([]);
-    const [comment, setComment] = useState('');
     const [loading, setLoading] = useState(true);
     const [commits, setCommits] = useState([]);
     const [projectRepos, setProjectRepos] = useState([]);
     const [dodItems, setDodItems] = useState([]);
     const [newDodText, setNewDodText] = useState('');
-    const [editingBranch, setEditingBranch] = useState(false);
-    const [branchValue, setBranchValue] = useState('');
-    const [editingPrUrl, setEditingPrUrl] = useState(false);
-    const [prUrlValue, setPrUrlValue] = useState('');
-    const [copiedField, setCopiedField] = useState(null);
     const [profiles, setProfiles] = useState([]);
     const [scheduling, setScheduling] = useState(false);
     const [epics, setEpics] = useState([]);
@@ -170,6 +69,13 @@ export function TaskPage() {
     const [summaryUpdatedAt, setSummaryUpdatedAt] = useState(null);
     const prevSummary = useRef(null);
 
+    // Title and description drafts live in their own inputs (TitleEditor /
+    // DescriptionEditor); they report here by ref so typing never re-renders
+    // the page. Save merges them over formData.
+    const draft = useRef({});
+    const onTitleDraft = useCallback(v => { draft.current.title = v; }, []);
+    const onDescriptionDraft = useCallback(v => { draft.current.description = v; }, []);
+
     // The URL param can be a task key (AP-12) — Forge endpoints only accept
     // the primary id, so every forge call goes through the loaded task.
     const taskUid = task?.id;
@@ -183,15 +89,13 @@ export function TaskPage() {
         return () => window.removeEventListener('open-create-task', open);
     }, []);
 
-    const loadTask = async () => {
+    const loadTask = useCallback(async () => {
         try {
             const data = await api.getTask(taskId);
             setTask(data);
             setDodItems(data.dod_items || []);
-            setBranchValue(data.branch || '');
-            setPrUrlValue(data.pr_url || '');
         } catch (err) { console.error(err); }
-    };
+    }, [taskId]);
 
     useEffect(() => {
         const load = async () => {
@@ -199,8 +103,6 @@ export function TaskPage() {
                 const data = await api.getTask(taskId);
                 setTask(data);
                 setDodItems(data.dod_items || []);
-                setBranchValue(data.branch || '');
-                setPrUrlValue(data.pr_url || '');
                 if (data.project_id) setCurrentProjectId(data.project_id);
                 api.getProjectMembers(data.project_id).then(setProfiles).catch(() => {});
                 api.getEpics(data.project_id).then(d => setEpics(Array.isArray(d) ? d : [])).catch(() => {});
@@ -236,7 +138,7 @@ export function TaskPage() {
                 setSummaryUpdatedAt(prev =>
                     summaryStamp(prevSummary.current, current, prev, new Date().toISOString()));
                 prevSummary.current = current?.summary || null;
-                setRun(current);
+                setRun(prev => keepSameJson(prev, current));
                 const cadence = current && ACTIVE_RUN_STATUSES.has(current.status) ? 5000 : 30000;
                 timer = setTimeout(tick, cadence);
             } catch {
@@ -253,39 +155,18 @@ export function TaskPage() {
     useEffect(() => {
         let cancelled = false;
         const poll = async () => {
+            if (document.visibilityState !== 'visible') return;
             try {
                 const data = await api.getActivity(taskId);
-                if (!cancelled) setActivities(data);
+                if (!cancelled) setActivities(prev => keepSameActivity(prev, data));
             } catch { /* transient */ }
         };
         const interval = setInterval(poll, 3000);
         return () => { cancelled = true; clearInterval(interval); };
     }, [taskId]);
 
-    const copyToClipboard = (text, field) => {
-        navigator.clipboard.writeText(text);
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 800);
-    };
-
-    const saveBranch = async (val) => {
-        setEditingBranch(false);
-        if (task && val !== (task.branch || '')) {
-            await api.updateTask(taskId, { branch: val });
-            loadTask();
-        }
-    };
-
-    const savePrUrl = async (val) => {
-        setEditingPrUrl(false);
-        if (task && val !== (task.pr_url || '')) {
-            await api.updateTask(taskId, { pr_url: val });
-            loadTask();
-        }
-    };
-
     // Dropdown fields save on change when the page is not in edit mode.
-    const saveField = async (patch) => {
+    const saveField = useCallback(async (patch) => {
         try {
             if (patch.status !== undefined) await api.moveTask(taskId, patch.status);
             else await api.updateTask(taskId, patch);
@@ -293,9 +174,10 @@ export function TaskPage() {
         } catch (err) {
             alert(err.message);
         }
-    };
+    }, [taskId, loadTask]);
 
     const startEditing = () => {
+        draft.current = {};
         setFormData({
             title: task.title || '',
             description: task.description || '',
@@ -314,8 +196,8 @@ export function TaskPage() {
     const handleSave = async () => {
         try {
             await api.updateTask(taskId, {
-                title: formData.title,
-                description: formData.description,
+                title: draft.current.title ?? formData.title,
+                description: draft.current.description ?? formData.description,
                 priority: formData.priority,
                 assignee: formData.assignee,
                 tags: formData.tags,
@@ -370,18 +252,12 @@ export function TaskPage() {
         await api.updateTask(taskId, { dod_items: updated });
     };
 
-    const handleComment = async (e) => {
-        if (e) e.preventDefault();
-        if (!comment.trim()) return;
-        try {
-            await api.addComment(taskId, { comment });
-            setComment('');
-            const actData = await api.getActivity(taskId);
-            setActivities(actData);
-        } catch (err) {
-            alert(err.message);
-        }
-    };
+    // The composer owns the text and clears itself when this resolves.
+    const handleComment = useCallback(async (text) => {
+        await api.addComment(taskId, { comment: text });
+        const actData = await api.getActivity(taskId);
+        setActivities(prev => keepSameActivity(prev, actData));
+    }, [taskId]);
 
     if (loading) return <div className="p-8 text-text-secondary">Loading task...</div>;
     if (!task) return <div className="p-8 text-red-400">Task not found.</div>;
@@ -404,11 +280,11 @@ export function TaskPage() {
                 {/* Header */}
                 <div className="flex items-start justify-between gap-4 mb-4">
                     {isEditing ? (
-                        <input
+                        <TitleEditor
                             aria-label="Title"
                             className="flex-1 text-xl font-bold text-text-primary bg-bg-card border border-border-subtle rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent-primary"
-                            value={formData.title}
-                            onChange={e => setFormData({ ...formData, title: e.target.value })}
+                            initial={formData.title}
+                            onDraft={onTitleDraft}
                             autoFocus
                         />
                     ) : (
@@ -483,24 +359,11 @@ export function TaskPage() {
                         addDodItem={addDodItem}
                         removeDodItem={removeDodItem}
                         projectRepos={projectRepos}
-                        branchValue={branchValue}
-                        setBranchValue={setBranchValue}
-                        editingBranch={editingBranch}
-                        setEditingBranch={setEditingBranch}
-                        saveBranch={saveBranch}
-                        prUrlValue={prUrlValue}
-                        setPrUrlValue={setPrUrlValue}
-                        editingPrUrl={editingPrUrl}
-                        setEditingPrUrl={setEditingPrUrl}
-                        savePrUrl={savePrUrl}
                         commits={commits}
-                        copiedField={copiedField}
-                        copyToClipboard={copyToClipboard}
+                        onDescriptionDraft={onDescriptionDraft}
                         taskId={taskId}
                         user={user}
-                        comment={comment}
-                        setComment={setComment}
-                        handleComment={handleComment}
+                        onComment={handleComment}
                         activities={activities}
                         loadTask={loadTask}
                     />
@@ -525,695 +388,12 @@ export function TaskPage() {
             {showCreate && (
                 <CreateTaskModal
                     projectId={task.project_id}
+                    members={profiles}
+                    epics={epics}
                     onClose={() => setShowCreate(false)}
                     onCreated={() => setShowCreate(false)}
                 />
             )}
-        </div>
-    );
-}
-
-function AgentSection({ run, runStatus, runActive, summaryUpdatedAt, task, canRunWithAgent, scheduling, handleRunWithAgent }) {
-    const launcher = !canRunWithAgent ? null : (
-        <RunLauncher
-            scheduling={scheduling}
-            handleRunWithAgent={handleRunWithAgent}
-            label={run ? 'Run again with agent' : 'Run with agent'}
-        />
-    );
-
-    if (!run) {
-        return (
-            <div className="bg-bg-card border border-border-subtle rounded-xl p-5 shadow-sm flex items-center gap-4">
-                <Bot className="w-8 h-8 text-text-tertiary flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text-secondary">No agent run yet for this task.</p>
-                    <p className="text-xs text-text-tertiary mt-0.5">{canRunWithAgent ? 'Kick one off, or wait for an agent to pick it up.' : 'Assign a managed agent to run this task.'}</p>
-                </div>
-                {launcher && <div className="flex-shrink-0">{launcher}</div>}
-            </div>
-        );
-    }
-    const totalTokens = (run.input_tokens || 0) + (run.output_tokens || 0);
-    return (
-        <div className="max-w-3xl space-y-6">
-            {!runActive && launcher}
-            {/* Run header */}
-            <div className="flex items-center gap-3">
-                <Link to={ROUTES.FORGE_RUN(run.id)} className="text-lg font-bold text-text-primary hover:text-accent-primary">
-                    Run {run.id}
-                </Link>
-                {runStatus && (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold text-white" style={{ backgroundColor: runStatus.bg }}>
-                        {runActive && (
-                            <span className="relative flex h-2 w-2">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" />
-                                <span className="relative inline-flex rounded-full h-2 w-2 bg-white" />
-                            </span>
-                        )}
-                        {runStatus.label}
-                    </span>
-                )}
-                {run.agent_name && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-bg-hover text-xs text-text-secondary">
-                        <Bot className="w-3 h-3" /> {run.agent_name}
-                    </span>
-                )}
-                <Link to={ROUTES.FORGE_RUN(run.id)} className="ml-auto text-xs text-accent-primary hover:underline flex items-center gap-1">
-                    Full run <ExternalLink className="w-3 h-3" />
-                </Link>
-            </div>
-
-            {/* Rolling summary — updates each turn while running. */}
-            <div className="bg-bg-card border border-border-subtle border-l-4 rounded-lg p-5 shadow-sm" style={{ borderLeftColor: runStatus?.bg }}>
-                <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary">Summary</h3>
-                    {summaryUpdatedAt && (
-                        <span className="text-[11px] text-text-tertiary flex items-center gap-1" title={new Date(summaryUpdatedAt).toLocaleString()}>
-                            <Clock className="w-3 h-3" /> updated {relTime(summaryUpdatedAt)}
-                        </span>
-                    )}
-                </div>
-                {run.summary
-                    ? <p className="text-sm text-text-primary whitespace-pre-wrap">{run.summary}</p>
-                    : <p className="text-sm text-text-tertiary italic">{runActive ? 'Working…' : 'No summary yet.'}</p>}
-            </div>
-
-            {run.error && (
-                <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4">
-                    <div className="flex items-start gap-3">
-                        <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
-                        <pre className="text-xs text-text-secondary whitespace-pre-wrap font-mono">{run.error}</pre>
-                    </div>
-                </div>
-            )}
-
-            {/* Artifacts */}
-            {Array.isArray(run.artifacts) && run.artifacts.length > 0 && (
-                <div className="bg-bg-card border border-border-subtle rounded-lg p-5 shadow-sm">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary mb-3">Artifacts</h3>
-                    <div className="space-y-1.5">
-                        {run.artifacts.map((a, i) => (
-                            <a key={i} href={a.url} target="_blank" rel="noopener noreferrer"
-                               className="flex items-center gap-2 text-sm text-accent-primary hover:underline">
-                                <ExternalLink className="w-3.5 h-3.5 flex-shrink-0" />
-                                {a.label || a.url}
-                            </a>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Metrics */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <Metric icon={Clock} label="Duration" value={formatDuration(run.duration_ms)} />
-                <Metric icon={Zap} label="Tokens" value={totalTokens > 0 ? totalTokens.toLocaleString() : '—'} />
-                <Metric icon={DollarSign} label="Cost" value={run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)}` : '—'} />
-                <Metric icon={Bot} label="Model" value={run.model_used || '—'} />
-            </div>
-        </div>
-    );
-}
-
-function RunLauncher({ scheduling, handleRunWithAgent, label }) {
-    return (
-        <div className="flex justify-end">
-            <button
-                disabled={scheduling}
-                onClick={handleRunWithAgent}
-                className="text-xs px-3 py-1.5 rounded-lg bg-accent-subtle text-accent-primary hover:bg-accent-subtle/80 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
-            >
-                <Play className="w-3 h-3" /> {label}
-            </button>
-        </div>
-    );
-}
-
-function Metric({ icon: Icon, label, value }) {
-    return (
-        <div className="bg-bg-card border border-border-subtle rounded-lg p-4 shadow-sm">
-            <div className="flex items-center gap-1.5 text-text-tertiary mb-1">
-                <Icon className="w-3.5 h-3.5" />
-                <span className="text-[10px] font-bold uppercase">{label}</span>
-            </div>
-            <div className="text-sm font-semibold text-text-primary truncate" title={value}>{value}</div>
-        </div>
-    );
-}
-
-function ActivityTab({ activities }) {
-    // Full, read-only timeline of everything that happened on the task
-    // (status changes, comments, runs…). Posting comments lives on the Plan tab.
-    return (
-        <div className="max-w-3xl">
-            <h2 className="text-sm font-bold uppercase text-text-tertiary mb-6 flex items-center gap-2">
-                <ActivityIcon className="w-4 h-4" /> Activity
-            </h2>
-            {activities.length === 0 ? (
-                <p className="text-sm text-text-tertiary italic">No activity yet.</p>
-            ) : (
-                <div className="space-y-6">
-                    {activities.map(act => (
-                        <div key={act.id} className="flex gap-4">
-                            <div className="w-10 h-10 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary shadow-sm flex-shrink-0">
-                                {act.actor?.[0]?.toUpperCase() || '?'}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-3 mb-1">
-                                    <span className="text-sm font-bold text-text-primary">{act.actor}</span>
-                                    <span className="text-xs text-text-tertiary">
-                                        {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                </div>
-                                <div className="text-sm text-text-secondary break-words">
-                                    <span className="text-accent-primary font-medium mr-1">{act.action}</span>
-                                    {act.detail}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function CommentsSection({ user, comment, setComment, handleComment, activities, projectId }) {
-    // Comments only — the full activity timeline lives in the board side panel.
-    const comments = activities.filter(a => a.action === 'commented');
-    return (
-        <div>
-            <h2 className="text-sm font-bold uppercase text-text-tertiary mb-4 flex items-center gap-2">
-                <MessageSquare className="w-4 h-4" /> Comments
-            </h2>
-
-            <div className="flex gap-4 mb-8">
-                <div className="w-10 h-10 rounded-full bg-accent-subtle flex items-center justify-center font-bold text-sm text-accent-primary flex-shrink-0">
-                    {user?.display_name?.[0]?.toUpperCase() || 'U'}
-                </div>
-                <form onSubmit={handleComment} className="flex-1">
-                    <MentionInput
-                        multiline
-                        rows={3}
-                        className="w-full bg-bg-card border border-border-subtle text-sm p-4 rounded-lg focus:outline-none focus:border-accent-primary transition-colors h-24 resize-none shadow-sm"
-                        placeholder="Add a comment… (@ to mention an agent)"
-                        value={comment}
-                        onChange={setComment}
-                        onSubmit={handleComment}
-                        projectId={projectId}
-                    />
-                    <div className="mt-2 flex justify-end">
-                        <button className="btn btn-primary">Add Comment</button>
-                    </div>
-                </form>
-            </div>
-
-            <div className="space-y-6">
-                {comments.length === 0 && <p className="text-sm text-text-tertiary italic">No comments yet.</p>}
-                {comments.map(act => (
-                    <div key={act.id} className="flex gap-4 group">
-                        <div className="w-10 h-10 rounded-full bg-bg-card border border-border-subtle flex items-center justify-center font-bold text-xs text-text-tertiary shadow-sm flex-shrink-0">
-                            {act.actor?.[0]?.toUpperCase() || '?'}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-3 mb-1">
-                                <span className="text-sm font-bold text-text-primary">{act.actor}</span>
-                                <span className="text-xs text-text-tertiary">
-                                    {new Date(act.created_at).toLocaleDateString()} at {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                            </div>
-                            <div className="text-sm text-text-secondary bg-bg-card border border-border-subtle rounded-lg px-4 py-3 break-words">
-                                {act.detail}
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function PlanTab(props) {
-    const {
-        task, isEditing, epics, saveField, formData, setFormData, profiles, priorityColors, dodItems, newDodText, setNewDodText,
-        toggleDodItem, addDodItem, removeDodItem, projectRepos,
-        branchValue, setBranchValue, editingBranch, setEditingBranch, saveBranch,
-        prUrlValue, setPrUrlValue, editingPrUrl, setEditingPrUrl, savePrUrl,
-        commits, copiedField, copyToClipboard,
-        taskId, user, comment, setComment, handleComment, activities,
-        loadTask,
-    } = props;
-
-    const assigneeName = isEditing ? formData.assignee : task.assignee;
-    const [proofTick, setProofTick] = useState(0);
-    const [openSections, setOpenSections] = useState({
-        details: true, people: true, relations: true, dod: true, git: true, files: false, dates: true,
-    });
-    const toggleSection = (id) => setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
-
-    return (
-        <div className="space-y-6">
-            {/* The top band is height-bounded so a long or short description
-                never decides how much of the page is empty. The brief keeps its
-                own pane; every other card shares one scrolling pane beside it.
-                The page itself then scrolls once, to the discussion. */}
-            <section
-                aria-label="Task overview"
-                data-testid="task-overview-section"
-                className="grid grid-cols-1 xl:grid-cols-4 2xl:grid-cols-5 gap-4 xl:h-[62vh] xl:min-h-[26rem]"
-            >
-                {/* The card clips its own corners and the body scrolls inside
-                    it, so long text never runs past the rounded edge. */}
-                <div className="xl:col-span-2 min-w-0 xl:h-full flex flex-col bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
-                    <h3 className="text-xs font-bold uppercase text-text-tertiary px-5 pt-5 pb-3">Description</h3>
-                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-5 pb-5">
-                    {isEditing ? (
-                        <textarea
-                            aria-label="Description"
-                            className="w-full min-h-[10rem] h-full text-sm text-text-primary leading-relaxed bg-bg-app p-3 rounded-lg border border-border-subtle focus:outline-none focus:border-accent-primary resize-y"
-                            value={formData.description}
-                            onChange={e => setFormData({ ...formData, description: e.target.value })}
-                            placeholder="Describe this task… (Markdown supported)"
-                        />
-                    ) : (
-                        <div className="text-sm text-text-secondary leading-relaxed break-words overflow-x-auto">
-                            {task.description
-                                ? <Markdown>{task.description}</Markdown>
-                                : <span className="italic text-text-tertiary">No description provided.</span>}
-                        </div>
-                    )}
-                    </div>
-                </div>
-
-                {/* Everything else about the task lives in one panel of
-                    collapsible sections — same shape as the side panel, so a
-                    section reads the same wherever you meet it. */}
-                <div className="xl:col-span-2 2xl:col-span-3 min-w-0 xl:h-full bg-bg-card border border-border-subtle rounded-xl shadow-sm overflow-hidden">
-                {/* Sections stay a single vertical stack — the extra width goes
-                    into spreading each section's own fields sideways, never into
-                    a horizontal scrollbar. */}
-                <div
-                    data-testid="task-info-pane"
-                    className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar p-5"
-                >
-
-                <CollapsibleSection
-                    title="Details"
-                    icon={Info}
-                    open={openSections.details}
-                    onToggle={() => toggleSection('details')}
-                >
-                    <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
-                        <div>
-                            <label htmlFor="task-status" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Status</label>
-                            <select
-                                id="task-status"
-                                aria-label="Status"
-                                className="ghost-select text-sm"
-                                value={isEditing ? formData.status : task.status}
-                                onChange={e => (isEditing
-                                    ? setFormData({ ...formData, status: e.target.value })
-                                    : saveField({ status: e.target.value }))}
-                            >
-                                {STATUS_OPTIONS.map(s => (
-                                    <option key={s.value} value={s.value}>{s.label}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div>
-                            <label htmlFor="task-priority" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Priority</label>
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: priorityColors[isEditing ? formData.priority : task.priority] }} />
-                                <select
-                                    id="task-priority"
-                                    aria-label="Priority"
-                                    className="ghost-select text-sm capitalize"
-                                    value={isEditing ? formData.priority : task.priority}
-                                    onChange={e => (isEditing
-                                        ? setFormData({ ...formData, priority: e.target.value })
-                                        : saveField({ priority: e.target.value }))}
-                                >
-                                    {PRIORITY_OPTIONS.map(p => (
-                                        <option key={p} value={p}>{p}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label htmlFor="task-tags" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Labels</label>
-                            {isEditing ? (
-                                <input
-                                    id="task-tags"
-                                    aria-label="Tags"
-                                    className="ghost-select text-sm"
-                                    placeholder="comma, separated, tags"
-                                    value={(formData.tags || []).join(', ')}
-                                    onChange={e => setFormData({
-                                        ...formData,
-                                        tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean),
-                                    })}
-                                />
-                            ) : (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {(task.tags || []).length > 0 ? task.tags.map(t => (
-                                        <span key={t} className="text-[10px] font-medium bg-bg-app px-2 py-0.5 rounded border border-border-subtle text-text-secondary">
-                                            {t}
-                                        </span>
-                                    )) : <span className="text-xs text-text-tertiary italic">None</span>}
-                                </div>
-                            )}
-                        </div>
-
-                        <div>
-                            <label htmlFor="task-epic" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Epic</label>
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: task.epic_id ? (task.epic_color || '#7c4dff') : 'transparent' }} />
-                                <select
-                                    id="task-epic"
-                                    aria-label="Epic"
-                                    className="ghost-select text-sm"
-                                    value={task.epic_id || ''}
-                                    onChange={e => saveField({ epic_id: e.target.value })}
-                                >
-                                    <option value="">No epic</option>
-                                    {epics.map(ep => <option key={ep.id} value={ep.id}>{ep.title}</option>)}
-                                </select>
-                            </div>
-                            {task.epic_id && (
-                                <Link to={ROUTES.STUDIO_EPIC(task.epic_id)} className="text-[10px] text-text-tertiary hover:underline mt-1 inline-block">
-                                    Open epic
-                                </Link>
-                            )}
-                        </div>
-
-                        {projectRepos.length > 0 && (
-                            <div className="col-span-full">
-                                <label className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Repos</label>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {(task.repos || []).length > 0
-                                        ? task.repos.map(n => (
-                                            <span key={n} className="text-[10px] font-medium bg-bg-app px-2 py-0.5 rounded border border-border-subtle text-text-secondary">{n}</span>
-                                        ))
-                                        : <span className="text-xs text-text-tertiary italic">none — falls back to project's primary repo</span>}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                    title="People"
-                    icon={Users}
-                    open={openSections.people}
-                    onToggle={() => toggleSection('people')}
-                    separated
-                >
-                    <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-4">
-                        <div>
-                            <label htmlFor="task-assignee" className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Assignee</label>
-                            <div className="flex items-center gap-2">
-                            <div className="flex-shrink-0" data-testid="task-assignee-avatar">
-                                <UserAvatar profile={profiles.find(p => p.name === assigneeName)} name={assigneeName || '?'} size={24} />
-                            </div>
-                            <select
-                                id="task-assignee"
-                                aria-label="Assignee"
-                                className="ghost-select text-sm"
-                                value={isEditing ? formData.assignee : (task.assignee || '')}
-                                onChange={e => (isEditing
-                                    ? setFormData({ ...formData, assignee: e.target.value })
-                                    : saveField({ assignee: e.target.value }))}
-                            >
-                                <option value="">Unassigned</option>
-                                {profiles.map(p => (
-                                    <option key={p.id} value={p.name}>{p.display_name}</option>
-                                ))}
-                            </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <span className="text-[10px] font-bold uppercase text-text-tertiary block mb-2">Creator</span>
-                            <div className="flex items-center gap-2" data-testid="task-creator">
-                                <div className="w-6 h-6 rounded-full bg-accent-subtle flex items-center justify-center text-[10px] font-bold text-accent-primary flex-shrink-0">
-                                    {task.creator ? task.creator[0].toUpperCase() : '?'}
-                                </div>
-                                <span className="text-sm text-text-secondary">{task.creator || 'Unknown'}</span>
-                            </div>
-                        </div>
-                    </div>
-                </CollapsibleSection>
-
-                {/* Links to other tasks and the milestone this counts towards. */}
-                <CollapsibleSection
-                    title="Links"
-                    icon={ListTree}
-                    open={openSections.relations}
-                    onToggle={() => toggleSection('relations')}
-                    separated
-                >
-                    <LinksSection task={task} onChanged={loadTask} isEditing={isEditing} compact spread />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                    title="Definition of Done"
-                    icon={CheckSquare}
-                    open={openSections.dod}
-                    onToggle={() => toggleSection('dod')}
-                    separated
-                >
-                    {dodItems.length > 0 && (
-                        <div className="text-xs text-text-secondary mb-2">
-                            {dodItems.filter(i => i.checked).length}/{dodItems.length} done
-                        </div>
-                    )}
-
-                    {dodItems.length > 0 && (
-                        <div className="w-full bg-bg-app rounded-full h-1.5 mb-3">
-                            <div
-                                className="h-1.5 rounded-full transition-all duration-300"
-                                style={{
-                                    width: `${dodItems.length ? (dodItems.filter(i => i.checked).length / dodItems.length) * 100 : 0}%`,
-                                    backgroundColor: dodItems.every(i => i.checked) ? '#2ecc71' : '#7c4dff',
-                                }}
-                            />
-                        </div>
-                    )}
-
-                    <div className="space-y-1">
-                        {dodItems.map((item, i) => (
-                            <div key={i} className="flex items-center gap-2 group py-1 px-2 rounded hover:bg-bg-hover transition-colors">
-                                <button onClick={() => toggleDodItem(i)} className="flex-shrink-0 text-text-secondary hover:text-accent-primary transition-colors">
-                                    {item.checked ? <CheckSquare className="w-4 h-4 text-green-500" /> : <Square className="w-4 h-4" />}
-                                </button>
-                                <span className={`text-sm flex-1 ${item.checked ? 'line-through text-text-tertiary' : 'text-text-primary'}`}>{item.text}</span>
-                                <button onClick={() => removeDodItem(i)} className="opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all p-0.5">
-                                    <X className="w-3 h-3" />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="flex items-center gap-2 mt-2">
-                        <input
-                            className="flex-1 bg-bg-app border border-border-subtle text-sm text-text-primary p-1.5 rounded focus:outline-none focus:border-accent-primary"
-                            placeholder="Add DOD item..."
-                            value={newDodText}
-                            onChange={(e) => setNewDodText(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && addDodItem()}
-                        />
-                        <button onClick={addDodItem} className="p-1.5 rounded hover:bg-bg-hover text-text-tertiary hover:text-accent-primary transition-colors">
-                            <Plus className="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    <div className="mt-3">
-                        <TestedBy taskId={taskId} refreshKey={proofTick} />
-                    </div>
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                    title="Branch & PR"
-                    icon={GitBranch}
-                    open={openSections.git}
-                    onToggle={() => toggleSection('git')}
-                    separated
-                >
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6">
-                    <div className="mb-4 min-w-0">
-                        <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
-                        {editingBranch ? (
-                            <input
-                                className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded font-mono text-text-primary focus:outline-none focus:border-accent-primary"
-                                value={branchValue}
-                                onChange={e => setBranchValue(e.target.value)}
-                                onBlur={() => saveBranch(branchValue)}
-                                onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
-                                autoFocus
-                            />
-                        ) : (
-                            <div className="flex items-center gap-1.5">
-                                {branchValue ? (
-                                    <>
-                                        {branchValue.startsWith('http') ? (
-                                            <a href={branchValue} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-primary hover:underline truncate">
-                                                {formatBranchDisplay(branchValue)}
-                                            </a>
-                                        ) : (
-                                            <span className="text-sm font-mono text-text-primary truncate">{branchValue}</span>
-                                        )}
-                                        <button onClick={() => setEditingBranch(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
-                                            <Pencil className="w-3 h-3" />
-                                        </button>
-                                        <button onClick={() => copyToClipboard(branchValue, 'branch')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
-                                            {copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                        </button>
-                                    </>
-                                ) : (
-                                    <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingBranch(true)}>No branch set</span>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="mb-4 min-w-0">
-                        <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
-                        {editingPrUrl ? (
-                            <input
-                                className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
-                                value={prUrlValue}
-                                onChange={e => setPrUrlValue(e.target.value)}
-                                onBlur={() => savePrUrl(prUrlValue)}
-                                onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
-                                placeholder="https://github.com/..."
-                                autoFocus
-                            />
-                        ) : (
-                            <div className="flex items-center gap-1.5">
-                                {prUrlValue ? (
-                                    <>
-                                        <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
-                                            {formatPrDisplay(prUrlValue)}
-                                        </a>
-                                        <button onClick={() => setEditingPrUrl(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
-                                            <Pencil className="w-3 h-3" />
-                                        </button>
-                                        <button onClick={() => copyToClipboard(prUrlValue, 'pr')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
-                                            {copiedField === 'pr' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                                        </button>
-                                    </>
-                                ) : (
-                                    <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingPrUrl(true)}>No PR linked</span>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    </div>
-
-                    {commits.length > 0 && (
-                        <>
-                            <div className="text-[10px] font-bold uppercase text-text-secondary mb-1.5">Commits & PRs ({commits.length})</div>
-                            <div className="space-y-1.5">
-                                {commits.map((c) => (
-                                    <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded bg-bg-app border border-border-subtle/30 text-sm">
-                                        {c.kind === 'pr'
-                                            ? <GitPullRequest className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                            : <GitCommit className="w-3.5 h-3.5 text-text-secondary flex-shrink-0" />
-                                        }
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-text-primary truncate text-xs">
-                                                {c.kind === 'pr' ? `#${c.pr_number} ` : `${c.sha.slice(0, 7)} `}{c.message}
-                                            </div>
-                                            <div className="text-[10px] text-text-secondary">
-                                                {c.author}{c.branch ? ` on ${c.branch}` : ''}
-                                                {c.kind === 'pr' && c.pr_state && (
-                                                    <span className={`ml-1.5 px-1 py-0.5 rounded text-[9px] font-medium ${
-                                                        c.pr_state === 'merged' ? 'bg-purple-500/20 text-purple-400' :
-                                                        c.pr_state === 'open' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
-                                                    }`}>{c.pr_state}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {c.url && (
-                                            <a href={c.url} target="_blank" rel="noopener noreferrer" className="text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0">
-                                                <ExternalLink className="w-3 h-3" />
-                                            </a>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </>
-                    )}
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                    title="Files"
-                    icon={Paperclip}
-                    open={openSections.files}
-                    onToggle={() => toggleSection('files')}
-                    separated
-                >
-                    <AttachmentsSection taskId={taskId} bare onChanged={() => setProofTick((t) => t + 1)} />
-                </CollapsibleSection>
-
-                <CollapsibleSection
-                    title="Timestamps"
-                    icon={Clock}
-                    open={openSections.dates}
-                    onToggle={() => toggleSection('dates')}
-                    separated
-                >
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
-                            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="text-xs flex-1">Due</span>
-                            {isEditing ? (
-                                <input
-                                    type="date"
-                                    aria-label="Due date"
-                                    className="input input-date text-xs py-1 px-2 w-auto"
-                                    value={formData.due_date || ''}
-                                    onChange={e => setFormData({ ...formData, due_date: e.target.value })}
-                                />
-                            ) : (
-                                <span className="text-xs" data-testid="task-due-date">
-                                    {task.due_date
-                                        ? new Date(task.due_date).toLocaleDateString()
-                                        : 'Not set'}
-                                </span>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
-                            <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="text-xs truncate">Created: {new Date(task.created_at).toLocaleDateString()}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-text-secondary min-w-0">
-                            <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-                            <span className="text-xs truncate">Updated: {new Date(task.updated_at).toLocaleDateString()}</span>
-                        </div>
-                    </div>
-                </CollapsibleSection>
-
-                </div>
-                </div>
-            </section>
-
-            <section
-                aria-label="Discussion"
-                data-testid="task-collaboration-section"
-                className="border-t border-border-subtle pt-6"
-            >
-                <CommentsSection
-                    user={user}
-                    comment={comment}
-                    setComment={setComment}
-                    handleComment={handleComment}
-                    activities={activities}
-                    projectId={task.project_id}
-                />
-            </section>
         </div>
     );
 }

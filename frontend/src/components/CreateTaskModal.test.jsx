@@ -20,13 +20,16 @@ vi.mock('../api', () => ({
     },
 }));
 
+const MEMBERS = [{ id: 'u1', name: 'alice', display_name: 'Alice', role: 'admin' }];
+const EPICS = [{ id: 'E1', title: 'Launch epic' }];
+
 function renderModal(props = {}) {
     return render(
         <MemoryRouter initialEntries={['/start']}>
             <Routes>
                 <Route
                     path="/start"
-                    element={<CreateTaskModal projectId="P1" onClose={() => {}} onCreated={() => {}} {...props} />}
+                    element={<CreateTaskModal projectId="P1" members={MEMBERS} epics={EPICS} projectName="Acme Board" onClose={() => {}} onCreated={() => {}} {...props} />}
                 />
                 <Route path="/studio/tasks/:id" element={<div>TASK DETAIL</div>} />
                 <Route path="/studio/epics/:id" element={<div>EPIC DETAIL</div>} />
@@ -38,10 +41,42 @@ function renderModal(props = {}) {
 describe('CreateTaskModal', () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it('shows the project name in the header', async () => {
+    it('shows the project name in the header', () => {
         renderModal();
-        expect(await screen.findByText('in Acme Board')).toBeInTheDocument();
-        expect(api.getProject).toHaveBeenCalledWith('P1');
+        expect(screen.getByText('in Acme Board')).toBeInTheDocument();
+    });
+
+    it('fills Assignee and Epic on the first render and makes no request on open', () => {
+        renderModal();
+        // Synchronous: options are there before any effect or fetch could land.
+        expect(screen.getByRole('option', { name: /Alice/ })).toBeInTheDocument();
+        expect(screen.getByRole('option', { name: 'Launch epic' })).toBeInTheDocument();
+        expect(api.getProjectMembers).not.toHaveBeenCalled();
+        expect(api.getEpics).not.toHaveBeenCalled();
+        expect(api.getProject).not.toHaveBeenCalled();
+        expect(api.listTasks).not.toHaveBeenCalled();
+    });
+
+    it('loads the task list once, on first focus of the tag or link field', async () => {
+        renderModal();
+        fireEvent.focus(screen.getByLabelText('Tags'));
+        fireEvent.focus(screen.getByLabelText('Link task'));
+        fireEvent.focus(screen.getByLabelText('Tags'));
+        await waitFor(() => expect(api.listTasks).toHaveBeenCalledTimes(1));
+        expect(api.listTasks).toHaveBeenCalledWith('P1');
+    });
+
+    it('creates with the typed title and description and the chosen epic', async () => {
+        api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-1' });
+        renderModal();
+        fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Hello' } });
+        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'World' } });
+        fireEvent.change(screen.getByLabelText('Epic'), { target: { value: 'E1' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+        await waitFor(() => expect(api.createTask).toHaveBeenCalled());
+        expect(api.createTask.mock.calls[0][0]).toMatchObject({
+            title: 'Hello', description: 'World', epic_id: 'E1',
+        });
     });
 
     it('navigates to the new task detail page (by key) after creation', async () => {
@@ -97,8 +132,9 @@ describe('CreateTaskModal', () => {
     it('suggests existing tags, links a task, sets due date and accepts dropped files', async () => {
         api.createTask.mockResolvedValue({ id: 'T1', key: 'AP-1' });
         renderModal();
-        await waitFor(() => expect(api.listTasks).toHaveBeenCalledWith('P1'));
 
+        fireEvent.focus(screen.getByLabelText('Tags'));
+        await waitFor(() => expect(api.listTasks).toHaveBeenCalledWith('P1'));
         fireEvent.change(screen.getByLabelText('Tags'), { target: { value: 'fro' } });
         fireEvent.click(await screen.findByRole('option', { name: 'frontend' }));
 

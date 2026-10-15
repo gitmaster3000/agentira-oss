@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { ROUTES } from '../routes';
 import { LINK_TYPES } from './TaskDetail/LinksSection';
+import { TitleEditor, DescriptionEditor } from './TaskDetail/TextDraft';
 
 const TYPES = [
     { id: 'task', label: 'Task' },
@@ -11,15 +12,16 @@ const TYPES = [
 ];
 const EPIC_COLORS = ['#7c4dff', '#00bcd4', '#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#3498db', '#9b59b6'];
 
-export function CreateTaskModal({ projectId, onClose, onCreated }) {
+// `members`, `epics` and `projectName` come from the caller (ProjectLayout /
+// TaskPage already hold them), so the dropdowns are filled on the first frame
+// and opening the modal makes no request. Only the task list behind tag and
+// link suggestions is fetched, on first use.
+export function CreateTaskModal({ projectId, members = [], epics = [], projectName = '', onClose, onCreated }) {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
-    const [profiles, setProfiles] = useState([]);
-    const [epics, setEpics] = useState([]);
-    const [projectName, setProjectName] = useState('');
+    // Title and description drafts live in their own inputs; Create reads them here.
+    const draft = useRef({ title: '', description: '' });
     const [formData, setFormData] = useState({
-        title: '',
-        description: '',
         priority: 'medium',
         assignee: '',
         epic_id: '',
@@ -28,6 +30,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const [tags, setTags] = useState([]);
     const [tagInput, setTagInput] = useState('');
     const [projectTasks, setProjectTasks] = useState([]);
+    const tasksRequested = useRef(false);
     const [links, setLinks] = useState([]);
     const [linkType, setLinkType] = useState('relates_to');
     const [linkQuery, setLinkQuery] = useState('');
@@ -37,12 +40,12 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     const [newDodText, setNewDodText] = useState('');
     const [files, setFiles] = useState([]);
 
-    useEffect(() => {
-        api.getProjectMembers(projectId).then(setProfiles).catch(console.error);
-        api.getEpics(projectId).then(setEpics).catch(console.error);
-        api.getProject(projectId).then(p => setProjectName(p.name)).catch(console.error);
+    // First focus of the tag or link field loads the task list, once.
+    const loadProjectTasks = () => {
+        if (tasksRequested.current) return;
+        tasksRequested.current = true;
         api.listTasks(projectId).then(r => setProjectTasks(r || [])).catch(console.error);
-    }, [projectId]);
+    };
 
     const addDodItem = () => {
         if (!newDodText.trim()) return;
@@ -54,7 +57,10 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
 
     const addFiles = (fileList) => setFiles([...files, ...Array.from(fileList)]);
 
-    const existingTags = [...new Set(projectTasks.flatMap(t => t.tags || []))].sort();
+    const existingTags = useMemo(
+        () => [...new Set(projectTasks.flatMap(t => t.tags || []))].sort(),
+        [projectTasks],
+    );
     const tagQuery = tagInput.trim().toLowerCase();
     const tagSuggestions = tagQuery
         ? existingTags.filter(t => t.toLowerCase().includes(tagQuery) && !tags.includes(t)).slice(0, 6)
@@ -67,12 +73,12 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
     };
 
     const linkQ = linkQuery.trim().toLowerCase();
-    const linkMatches = linkQ
+    const linkMatches = useMemo(() => (linkQ
         ? projectTasks
             .filter(t => !links.some(l => l.task.id === t.id)
                 && `${t.key || t.id} ${t.title}`.toLowerCase().includes(linkQ))
             .slice(0, 6)
-        : [];
+        : []), [projectTasks, links, linkQ]);
 
     const addLink = (task) => {
         setLinks([...links, { task, type: linkType }]);
@@ -87,8 +93,8 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
         try {
             if (type === 'epic') {
                 const epic = await api.createEpic(projectId, {
-                    title: formData.title.trim(),
-                    description: formData.description.trim(),
+                    title: draft.current.title.trim(),
+                    description: draft.current.description.trim(),
                     assignee: formData.assignee,
                     color: EPIC_COLORS[epics.length % EPIC_COLORS.length]
                 });
@@ -103,6 +109,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
             const task = await api.createTask({
                 project_id: projectId,
                 ...formData,
+                ...draft.current,
                 type,
                 epic_id: formData.epic_id || undefined,
                 due_date: formData.due_date || undefined,
@@ -158,13 +165,12 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                         </div>
                         <div>
                             <label className={labelCls} style={lbl}>Title</label>
-                            <input
+                            <TitleEditor
                                 autoFocus
                                 aria-label="Title"
                                 className="input text-sm font-semibold"
                                 placeholder={type === 'epic' ? 'What are we aiming for?' : `${type === 'bug' ? 'Bug' : 'Task'} title`}
-                                value={formData.title}
-                                onChange={e => setFormData({ ...formData, title: e.target.value })}
+                                onDraft={v => { draft.current.title = v; }}
                                 maxLength={255}
                                 required
                             />
@@ -173,12 +179,11 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
 
                     <div>
                         <label className={labelCls} style={lbl}>Description</label>
-                        <textarea
+                        <DescriptionEditor
                             aria-label="Description"
                             className="input resize-y h-56 min-h-[10rem]"
                             placeholder={type === 'epic' ? 'Goal, scope and what success looks like…' : 'Add a description…'}
-                            value={formData.description}
-                            onChange={e => setFormData({ ...formData, description: e.target.value })}
+                            onDraft={v => { draft.current.description = v; }}
                         />
                     </div>
 
@@ -192,7 +197,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 onChange={e => setFormData({ ...formData, assignee: e.target.value })}
                             >
                                 <option value="">Unassigned</option>
-                                {profiles.map(p => (
+                                {members.map(p => (
                                     <option key={p.id} value={p.name}>
                                         {p.display_name || p.name} ({p.role})
                                     </option>
@@ -257,6 +262,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 placeholder={tags.length ? '' : 'Type to add or find a tag'}
                                 value={tagInput}
                                 onChange={e => setTagInput(e.target.value)}
+                                onFocus={loadProjectTasks}
                                 onKeyDown={e => {
                                     if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput); }
                                     else if (e.key === 'Backspace' && !tagInput && tags.length) setTags(tags.slice(0, -1));
@@ -302,6 +308,7 @@ export function CreateTaskModal({ projectId, onClose, onCreated }) {
                                 placeholder="Search tasks by key or title…"
                                 value={linkQuery}
                                 onChange={e => setLinkQuery(e.target.value)}
+                                onFocus={loadProjectTasks}
                             />
                         </div>
                         {linkMatches.length > 0 && (

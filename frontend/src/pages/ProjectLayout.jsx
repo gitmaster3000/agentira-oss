@@ -390,6 +390,8 @@ export function ProjectLayout() {
             {selectedTask && (
                 <TaskDetailPanel
                     task={selectedTask}
+                    members={members}
+                    epics={epics}
                     isEditing={isEditing}
                     setIsEditing={setIsEditing}
                     onSelectTask={requestSelectTask}
@@ -413,7 +415,16 @@ export function ProjectLayout() {
                 />
             )}
 
-            {showCreate && <CreateTaskModal projectId={projectId} onClose={() => setShowCreate(false)} onCreated={loadBoard} />}
+            {showCreate && (
+                <CreateTaskModal
+                    projectId={projectId}
+                    members={members}
+                    epics={epics}
+                    projectName={board.project.name}
+                    onClose={() => setShowCreate(false)}
+                    onCreated={loadBoard}
+                />
+            )}
             {showCreateEpic && <CreateEpicModal projectId={projectId} onClose={() => setShowCreateEpic(false)} onCreated={loadEpics} />}
         </div>
     );

@@ -1,18 +1,21 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { ROUTES } from '../routes';
 import { Markdown } from './Markdown';
-import { MentionInput } from './MentionInput';
+import { CommentComposer } from './TaskDetail/CommentComposer';
+import { TitleEditor, DescriptionEditor } from './TaskDetail/TextDraft';
+import { CommentThread, ActivityTimeline, PanelFiles, initials, relTime } from './TaskDetail/PanelFeed';
+import { keepSameActivity, keepSameJson } from '../lib/pollState';
 import { LinksSection } from './TaskDetail/LinksSection';
 import { CollapsibleSection } from './TaskDetail/CollapsibleSection';
 import { TestedBy } from './TaskDetail/TestedBy';
 import {
-    Trash2, X, ExternalLink, Pencil, CheckSquare, Square, Plus,
-    GitCommit, GitPullRequest, GitBranch, Copy, Check, Send,
-    Info, FileText, MessageSquare, Activity as ActivityIcon, Paperclip,
-    Play, Cpu, ListTree, ChevronDown,
+    Trash2, X, ExternalLink, Pencil, Plus,
+    GitCommit, GitPullRequest, GitBranch, Copy, Check,
+    Info, FileText, MessageSquare, Activity as ActivityIcon,
+    Play, Cpu, ListTree,
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -25,17 +28,6 @@ const STATUS = {
     done:        { color: '#2ecc71', label: 'Done' },
 };
 const LIVE_RUN_STATUSES = ['pending', 'running', 'interrupting'];
-const ATTACHMENT_KIND_OPTIONS = [
-    ['other', 'General file'],
-    ['test-report', 'Test report'],
-    ['recording', 'Recording'],
-    ['screenshot', 'Screenshot'],
-    ['build', 'Build'],
-];
-const EVIDENCE_KINDS = new Set(['test-report', 'recording', 'screenshot']);
-const attachmentKindLabel = (kind) => (
-    ATTACHMENT_KIND_OPTIONS.find(([value]) => value === kind)?.[1] || 'General file'
-);
 
 // Panel width: user-draggable, remembered across sessions.
 const WIDTH_KEY = 'taskPanelWidth';
@@ -67,33 +59,20 @@ function formatPrDisplay(val) {
     if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
     return val;
 }
-function initials(name) {
-    if (!name) return '?';
-    return name.slice(0, 2).toUpperCase();
-}
-function relTime(value) {
-    if (!value) return '';
-    const diff = Math.round((Date.now() - new Date(value).getTime()) / 1000);
-    if (diff < 60) return 'just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-    return new Date(value).toLocaleDateString();
-}
 
-export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditing, setIsEditing }) {
+// `members` and `epics` come from ProjectLayout, which already holds them, so
+// the Assignee and Epic dropdowns are filled on the first frame.
+export function TaskDetailPanel({ task, members = [], epics = [], onClose, onUpdate, onSelectTask, isEditing, setIsEditing }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [activities, setActivities] = useState([]);
     const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-    const [comment, setComment] = useState('');
     const [attachments, setAttachments] = useState([]);
-    const [attachmentKind, setAttachmentKind] = useState('other');
     const [commits, setCommits] = useState([]);
     const [dodItems, setDodItems] = useState(task.dod_items || []);
     const [newDodText, setNewDodText] = useState('');
     const [taskRuns, setTaskRuns] = useState([]);
-    const [profiles, setProfiles] = useState([]);
-    const [epics, setEpics] = useState([]);
+    const profiles = members;
     const [scheduling, setScheduling] = useState(false);
     const [editingBranch, setEditingBranch] = useState(false);
     const [branchValue, setBranchValue] = useState(task.branch || '');
@@ -107,7 +86,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
 
     const scrollRef = useRef(null);
     const sectionRefs = useRef({});
-    const fileInputRef = useRef(null);
+    // Title/description drafts live in TitleEditor/DescriptionEditor and report
+    // here by ref, so typing never re-renders the panel. Save merges them.
+    const draft = useRef({});
+    const onTitleDraft = useCallback(v => { draft.current.title = v; }, []);
+    const onDescriptionDraft = useCallback(v => { draft.current.description = v; }, []);
 
     const [width, setWidth] = useState(() => {
         const saved = Number(localStorage.getItem(WIDTH_KEY));
@@ -137,6 +120,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     useEffect(() => {
         setIsEditing(false);
         setFormData({ ...task });
+        draft.current = {};
     }, [task.id]);
 
     useEffect(() => {
@@ -147,9 +131,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
         setDodItems(task.dod_items || []);
         setBranchValue(task.branch || '');
         setPrUrlValue(task.pr_url || '');
-        if (task.project_id) api.getProjectMembers(task.project_id).then(setProfiles).catch(() => {});
-        if (task.project_id) api.getEpics(task.project_id).then(d => setEpics(Array.isArray(d) ? d : [])).catch(() => {});
-        const interval = setInterval(() => { loadActivity(); loadTaskRuns(); }, 3000);
+        const interval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            loadActivity();
+            loadTaskRuns();
+        }, 3000);
         return () => clearInterval(interval);
     }, [task.id]);
 
@@ -165,11 +151,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const loadTaskRuns = async () => {
         try {
             const data = await api.forge.listTaskRuns(task.id);
-            if (Array.isArray(data)) setTaskRuns(data);
+            if (Array.isArray(data)) setTaskRuns(prev => keepSameJson(prev, data));
         } catch { /* forge may be down */ }
     };
     const loadActivity = async () => {
-        try { setActivities(await api.getActivity(task.id)); } catch (err) { console.error(err); }
+        try {
+            const data = await api.getActivity(task.id);
+            setActivities(prev => keepSameActivity(prev, data));
+        } catch (err) { console.error(err); }
     };
     const loadAttachments = async () => {
         try {
@@ -217,28 +206,13 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
         setDodItems(updated);
         try { await api.updateTask(task.id, { dod_items: updated }); onUpdate(); } catch (err) { console.error(err); }
     };
-    const handleUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        try {
-            await api.uploadAttachment(task.id, file, attachmentKind);
-            loadAttachments();
-            loadActivity();
-        }
-        catch (err) { alert(err.message); }
-        finally { e.target.value = ''; }
-    };
-    const handleDeleteAttachment = async (id, filename) => {
-        if (!confirm(`Delete attachment "${filename}"?`)) return;
-        try { await api.deleteAttachment(id); loadAttachments(); loadActivity(); }
-        catch (err) { alert(err.message); }
-    };
+    const onFilesChanged = () => { loadAttachments(); loadActivity(); };
     const handleSave = async () => {
         try {
             // Edit mode edits everything, including Branch & PR.
             await api.updateTask(task.id, {
-                title: formData.title,
-                description: formData.description,
+                title: draft.current.title ?? formData.title,
+                description: draft.current.description ?? formData.description,
                 branch: formData.branch || '',
                 pr_url: formData.pr_url || '',
             });
@@ -276,11 +250,10 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
             setScheduling(false);
         }
     };
-    const handleComment = async (e) => {
-        if (e) e.preventDefault();
-        if (!comment.trim()) return;
-        try { await api.addComment(task.id, { comment }); setComment(''); loadActivity(); }
-        catch (err) { alert(err.message); }
+    // The composer owns the text and clears itself when this resolves.
+    const handleComment = async (text) => {
+        await api.addComment(task.id, { comment: text });
+        loadActivity();
     };
     const handleDelete = async () => {
         try { await api.deleteTask(task.id); onUpdate(); }
@@ -318,7 +291,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const status = STATUS[task.status] || { color: 'var(--text-muted)', label: task.status };
     const liveRun = taskRuns.find(r => LIVE_RUN_STATUSES.includes(r.status));
     const workRuns = taskRuns.filter(r => r.is_work);
-    const comments = activities.filter(a => a.action === 'commented');
+    const comments = useMemo(() => activities.filter(a => a.action === 'commented'), [activities]);
     const doneCount = dodItems.filter(i => i.checked).length;
 
     // Branch & PR are a per-repo 1:1 mapping. Surface which repo they belong to
@@ -327,16 +300,6 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
     const taskRepos = task.repos || [];
     const gitRepoLabel = task.repo_name || taskRepos[0] || '';
     const isMultiRepo = taskRepos.length > 1;
-    const attachmentGroups = [
-        {
-            label: 'Test evidence',
-            items: attachments.filter((item) => EVIDENCE_KINDS.has(item.kind)),
-        },
-        {
-            label: 'Other files',
-            items: attachments.filter((item) => !EVIDENCE_KINDS.has(item.kind)),
-        },
-    ].filter((group) => group.items.length > 0);
 
     return (
         <aside
@@ -381,7 +344,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         >
                             <ExternalLink className="w-3 h-3" /> Open full
                         </button>
-                        <button onClick={() => { setFormData({ ...task }); toggleEditing(true); }} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
+                        <button onClick={() => { draft.current = {}; setFormData({ ...task }); toggleEditing(true); }} title="Edit" className="flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-bg-card transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
                             <Pencil className="w-4 h-4" />
                         </button>
                         <button onClick={() => setIsConfirmingDelete(true)} title="Delete" className="flex items-center justify-center text-text-tertiary hover:text-red-400 transition-colors" style={{ width: 28, height: 28, borderRadius: 8 }}>
@@ -401,11 +364,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
             {/* Title */}
             <div style={{ padding: '15px 18px 13px' }}>
                 {isEditing ? (
-                    <input
+                    <TitleEditor
                         className="w-full bg-bg-app border border-border-subtle rounded-lg p-2 text-text-primary focus:outline-none focus:border-accent-primary"
                         style={{ fontSize: 17.5, fontWeight: 600 }}
-                        value={formData.title}
-                        onChange={e => setFormData({ ...formData, title: e.target.value })}
+                        initial={formData.title}
+                        onDraft={onTitleDraft}
                         maxLength={255}
                         autoFocus
                     />
@@ -572,11 +535,11 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                             fields are the scannable part, the prose is the detail. */}
                         <SectionLabel>Description</SectionLabel>
                         {isEditing ? (
-                            <textarea
+                            <DescriptionEditor
                                 className="w-full bg-bg-app border border-border-subtle rounded-lg p-2.5 text-text-secondary focus:outline-none focus:border-accent-primary"
                                 style={{ fontSize: 12.5, lineHeight: 1.6, minHeight: 90, marginBottom: 18 }}
-                                value={formData.description || ''}
-                                onChange={e => setFormData({ ...formData, description: e.target.value })}
+                                initial={formData.description}
+                                onDraft={onDescriptionDraft}
                             />
                         ) : (
                             <div style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 18 }} className="text-text-tertiary break-words">
@@ -642,52 +605,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         onToggle={() => toggleSection('files')}
                         separated
                     >
-                        <div className="flex flex-col" style={{ gap: 8 }}>
-                            {attachmentGroups.map((group) => (
-                                <div key={group.label} className="flex flex-col" style={{ gap: 6 }}>
-                                    <div className="text-text-tertiary uppercase" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em' }}>
-                                        {group.label}
-                                    </div>
-                                    {group.items.map(att => (
-                                <div key={att.id} className="flex items-center group hover:border-border-strong transition-colors" style={{ gap: 10, padding: '10px 12px', borderRadius: 9, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
-                                    <button type="button"
-                                       onClick={() => api.downloadAttachment(att.id, att.filename || att.name).catch(err => alert('Failed to download: ' + err.message))}
-                                       className="flex items-center min-w-0 flex-1" style={{ gap: 10, textAlign: 'left', cursor: 'pointer' }}>
-                                        <FileText className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--brand-teal)' }} />
-                                        <div className="flex-1 min-w-0">
-                                            <div style={{ fontSize: 12.5 }} className="text-text-primary truncate">{att.filename || att.name}</div>
-                                            <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{attachmentKindLabel(att.kind)}</div>
-                                            {att.size != null && <div style={{ fontSize: 10.5 }} className="text-text-tertiary">{Math.round(att.size / 1024)} KB</div>}
-                                        </div>
-                                    </button>
-                                    <button type="button"
-                                       onClick={() => handleDeleteAttachment(att.id, att.filename || att.name)}
-                                       title="Delete attachment"
-                                       className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-text-tertiary hover:text-red-400 transition-all">
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                </div>
-                                    ))}
-                                </div>
-                            ))}
-                            <div className="flex items-center" style={{ gap: 6, marginTop: 4 }}>
-                                <select
-                                    aria-label="Attachment kind"
-                                    className="input"
-                                    style={{ fontSize: 11.5, padding: '8px 9px' }}
-                                    value={attachmentKind}
-                                    onChange={(event) => setAttachmentKind(event.target.value)}
-                                >
-                                    {ATTACHMENT_KIND_OPTIONS.map(([value, label]) => (
-                                        <option key={value} value={value}>{label}</option>
-                                    ))}
-                                </select>
-                            <button onClick={() => fileInputRef.current?.click()} className="flex flex-1 items-center justify-center text-text-tertiary hover:text-text-secondary transition-colors" style={{ gap: 6, padding: 10, borderRadius: 9, border: '1px dashed var(--border-subtle)', fontSize: 11.5 }}>
-                                <Plus className="w-3 h-3" /> Attach a file
-                            </button>
-                            </div>
-                            <input ref={fileInputRef} type="file" className="hidden" onChange={handleUpload} />
-                        </div>
+                        <PanelFiles taskId={task.id} attachments={attachments} onChanged={onFilesChanged} />
                     </CollapsibleSection>
 
                     {/* GIT */}
@@ -800,52 +718,14 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                     >
                         {/* Composer sits ABOVE the thread so it's the first thing
                             you reach, and grows with what you type. */}
-                        <form onSubmit={handleComment} className="flex items-end" style={{ gap: 8, marginBottom: 16 }}>
-                            <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'var(--bg-card)', color: 'var(--text-tertiary)', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{user?.display_name?.[0]?.toUpperCase() || 'U'}</span>
-                            <div className="flex-1 min-w-0" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: '6px 10px' }}>
-                                <MentionInput
-                                    multiline
-                                    autoGrow
-                                    rows={2}
-                                    className="block w-full bg-transparent text-text-primary text-xs leading-relaxed focus:outline-none resize-none max-h-32 overflow-y-auto"
-                                    placeholder="Comment or @mention…  (Shift+Enter for a new line)"
-                                    value={comment}
-                                    onChange={setComment}
-                                    onSubmit={handleComment}
-                                    projectId={task.project_id}
-                                />
-                            </div>
-                            <button
-                                type="submit"
-                                disabled={!comment.trim()}
-                                title="Send comment"
-                                className="flex items-center justify-center flex-shrink-0 transition-colors"
-                                style={{
-                                    width: 32, height: 32, borderRadius: '50%',
-                                    background: comment.trim() ? 'var(--accent-primary)' : 'var(--bg-card)',
-                                    color: comment.trim() ? 'var(--accent-on)' : 'var(--text-tertiary)',
-                                    border: '1px solid var(--border-subtle)',
-                                    cursor: comment.trim() ? 'pointer' : 'not-allowed',
-                                }}
-                            >
-                                <Send className="w-3.5 h-3.5" />
-                            </button>
-                        </form>
-                        <div className="flex flex-col" style={{ gap: 13 }}>
-                            {comments.length === 0 && <p style={{ fontSize: 12 }} className="text-text-tertiary italic">No comments yet.</p>}
-                            {comments.map(c => (
-                                <div key={c.id} className="flex" style={{ gap: 9 }}>
-                                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'rgba(201,184,255,.16)', color: 'var(--brand-lavender)', fontSize: 9.5, fontWeight: 700 }} className="flex items-center justify-center">{initials(c.actor)}</span>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center" style={{ gap: 7, marginBottom: 3 }}>
-                                            <span style={{ fontSize: 12, fontWeight: 600 }} className="text-text-primary">{c.actor}</span>
-                                            <span style={{ fontSize: 10 }} className="text-text-tertiary">{relTime(c.created_at)}</span>
-                                        </div>
-                                        <div className="text-text-secondary" style={{ fontSize: 12.5, lineHeight: 1.55, background: 'var(--bg-card)', borderRadius: 10, borderTopLeftRadius: 3, padding: '9px 11px' }}>{c.detail}</div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <CommentComposer
+                            variant="panel"
+                            user={user}
+                            projectId={task.project_id}
+                            members={members}
+                            onSubmit={handleComment}
+                        />
+                        <CommentThread comments={comments} />
                     </CollapsibleSection>
 
                     {/* ACTIVITY */}
@@ -857,22 +737,7 @@ export function TaskDetailPanel({ task, onClose, onUpdate, onSelectTask, isEditi
                         onToggle={() => toggleSection('activity')}
                         separated
                     >
-                        <div className="flex flex-col">
-                            {activities.map((a, i) => (
-                                <div key={a.id} className="flex" style={{ gap: 11 }}>
-                                    <div className="flex flex-col items-center">
-                                        <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#00bcd4', marginTop: 3 }} />
-                                        {i < activities.length - 1 && <span className="flex-1" style={{ width: 1.5, background: 'var(--border-subtle)' }} />}
-                                    </div>
-                                    <div style={{ paddingBottom: 16 }}>
-                                        <div style={{ fontSize: 12.5, lineHeight: 1.45 }} className="text-text-primary">
-                                            <b>{a.actor}</b> <span className="text-accent-primary">{a.action}</span> {a.detail}
-                                        </div>
-                                        <div style={{ fontSize: 10.5, marginTop: 2 }} className="text-text-tertiary">{relTime(a.created_at)} ago</div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <ActivityTimeline activities={activities} />
                     </CollapsibleSection>
                     <div style={{ height: 80 }} />
                 </div>
