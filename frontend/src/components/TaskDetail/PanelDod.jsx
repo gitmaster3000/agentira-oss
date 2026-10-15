@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import { api } from '../../api';
 import { SectionLabel } from './PanelFeed';
 
 // Definition-of-Done list. Owns its items and the "Add item" draft, so typing
-// there re-renders only this list.
+// there re-renders only this list. The panel is keyed by task id, so a task
+// switch remounts it with that task's items.
 export function PanelDod({ task, onUpdate }) {
     const [items, setItems] = useState(task.dod_items || []);
     const [newText, setNewText] = useState('');
-    useEffect(() => { setItems(task.dod_items || []); }, [task.id]);
 
     const save = async (updated) => {
         setItems(updated);

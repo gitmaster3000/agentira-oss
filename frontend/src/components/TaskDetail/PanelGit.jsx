@@ -5,13 +5,25 @@ import {
 import { SectionLabel } from './PanelFeed';
 import { useGitFields, formatBranchDisplay, formatPrDisplay } from './useGitFields';
 
-// Side-panel Branch & PR body. In edit mode the two fields are drafts that
-// report to `draft` (a parent ref) and reseed from it if this section remounts,
-// so typing never re-renders the panel and collapsing can't desync Save.
+// Edit-mode field. It is mounted only while editing, so every edit starts from
+// the parent's draft ref (or the task's saved value when there is none) —
+// after Cancel, a collapse/reopen or a task switch it never shows stale text.
+function EditField({ field, task, draft, ...props }) {
+    const [value, setValue] = useState(draft.current[field] ?? task[field] ?? '');
+    return (
+        <input
+            {...props}
+            value={value}
+            onChange={e => { setValue(e.target.value); draft.current[field] = e.target.value; }}
+        />
+    );
+}
+
+// Side-panel Branch & PR body. In edit mode the two fields report to `draft`
+// (a parent ref), so typing never re-renders the panel and Save writes what
+// is shown.
 export function PanelGit({ task, commits, isEditing, draft, onSaved }) {
     const { branch, pr, copiedField, copyToClipboard, error } = useGitFields(task, onSaved);
-    const [editBranch, setEditBranch] = useState(draft.current.branch ?? task.branch ?? '');
-    const [editPr, setEditPr] = useState(draft.current.pr_url ?? task.pr_url ?? '');
 
     // Branch & PR are a per-repo 1:1 mapping. Surface which repo they belong to
     // so multi-repo tasks read correctly. `repo_name`/`repos` come from the API
@@ -33,12 +45,13 @@ export function PanelGit({ task, commits, isEditing, draft, onSaved }) {
             <SectionLabel>Branch</SectionLabel>
             <div style={{ marginBottom: 16 }}>
                 {isEditing ? (
-                    <input
+                    <EditField
+                        field="branch"
+                        task={task}
+                        draft={draft}
                         aria-label="Branch"
                         className="w-full bg-bg-app border border-border-subtle rounded-lg font-mono text-text-primary focus:outline-none focus:border-accent-primary"
                         style={{ fontSize: 12, padding: '9px 11px' }}
-                        value={editBranch}
-                        onChange={e => { setEditBranch(e.target.value); draft.current.branch = e.target.value; }}
                         placeholder="feature/my-branch"
                     />
                 ) : branch.editing ? (
@@ -62,12 +75,13 @@ export function PanelGit({ task, commits, isEditing, draft, onSaved }) {
             <SectionLabel>Pull Request</SectionLabel>
             <div style={{ marginBottom: 16 }}>
                 {isEditing ? (
-                    <input
+                    <EditField
+                        field="pr_url"
+                        task={task}
+                        draft={draft}
                         aria-label="Pull Request"
                         className="w-full bg-bg-app border border-border-subtle rounded-lg text-text-primary focus:outline-none focus:border-accent-primary"
                         style={{ fontSize: 12, padding: '9px 11px' }}
-                        value={editPr}
-                        onChange={e => { setEditPr(e.target.value); draft.current.pr_url = e.target.value; }}
                         placeholder="https://github.com/…"
                     />
                 ) : pr.editing ? (

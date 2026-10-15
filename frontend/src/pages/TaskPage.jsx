@@ -36,6 +36,13 @@ const TABS = [
 
 export function TaskPage() {
     const { taskId } = useParams();
+    // Keyed by task: switching tasks remounts the page, so typed drafts, edit
+    // mode and form state from the previous task can never reach the next one.
+    return <TaskPageBody key={taskId} />;
+}
+
+function TaskPageBody() {
+    const { taskId } = useParams();
     const navigate = useNavigate();
     const { user } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -96,8 +103,6 @@ export function TaskPage() {
         return () => window.removeEventListener('open-create-task', open);
     }, []);
 
-    useEffect(() => { commentDraft.current = ''; draft.current = {}; }, [taskId]);
-
     const loadTask = useCallback(async () => {
         try {
             const data = await api.getTask(taskId);
@@ -132,37 +137,28 @@ export function TaskPage() {
         load();
     }, [taskId]);
 
-    // Pulse: poll the task's single run. 5s while active, 30s once terminal.
-    // Keyed on the task's real id, not the URL param — the side panel's
-    // "Open full" link navigates by task key, and Forge resolves runs by id.
-    useEffect(() => {
+    // Pulse: the task's single run. Keyed on the task's real id, not the URL
+    // param — the side panel's "Open full" link navigates by task key, and
+    // Forge resolves runs by id.
+    const loadRun = useCallback(async () => {
         if (!taskUid) return;
-        let cancelled = false;
-        let timer;
-        const tick = async () => {
-            try {
-                const runs = await api.forge.listTaskRuns(taskUid);
-                if (cancelled) return;
-                const current = pickCurrentRun(runs);
-                setSummaryUpdatedAt(prev =>
-                    summaryStamp(prevSummary.current, current, prev, new Date().toISOString()));
-                prevSummary.current = current?.summary || null;
-                setRun(prev => keepSameJson(prev, current));
-                const cadence = current && ACTIVE_RUN_STATUSES.has(current.status) ? 5000 : 30000;
-                timer = setTimeout(tick, cadence);
-            } catch {
-                if (!cancelled) timer = setTimeout(tick, 30000);
-            }
-        };
-        tick();
-        return () => { cancelled = true; clearTimeout(timer); };
+        try {
+            const runs = await api.forge.listTaskRuns(taskUid);
+            const current = pickCurrentRun(runs);
+            setSummaryUpdatedAt(prev =>
+                summaryStamp(prevSummary.current, current, prev, new Date().toISOString()));
+            prevSummary.current = current?.summary || null;
+            setRun(prev => keepSameJson(prev, current));
+        } catch { /* transient */ }
     }, [taskUid]);
+    useEffect(() => { loadRun(); }, [loadRun]);
 
-    // Keep the Activity tab live — agents and the daemon append activity while
-    // the page is open. 5 s only while a run is active, 30 s otherwise, and
-    // never while the tab is hidden.
+    // Keep the run and the Activity tab live — agents and the daemon append
+    // activity while the page is open. 5 s only while a run is active, 30 s
+    // otherwise, and never while the browser tab is hidden.
     const runActive = !!run && ACTIVE_RUN_STATUSES.has(run.status);
     useVisiblePoll(async () => {
+        loadRun();
         try {
             const data = await api.getActivity(taskId);
             setActivities(prev => keepSameActivity(prev, data));

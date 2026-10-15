@@ -1,7 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, Link } from 'react-router-dom';
 import { TaskPage } from './TaskPage';
 import { api } from '../api';
 
@@ -81,5 +81,52 @@ describe('TaskPage — Create Task header', () => {
         await screen.findByText('My task');
         window.dispatchEvent(new Event('open-create-task'));
         expect(await screen.findByText('in Acme Board')).toBeInTheDocument();
+    });
+});
+
+describe('TaskPage — switching task', () => {
+    const task2 = { ...task, id: 'T2', key: 'AP-2', title: 'Other task', description: 'other body', tags: [] };
+    beforeEach(() => {
+        vi.clearAllMocks();
+        api.getTask.mockImplementation((id) => Promise.resolve(id === 'T2' ? task2 : task));
+    });
+    function renderTwo() {
+        render(
+            <MemoryRouter initialEntries={['/studio/tasks/T1']}>
+                <Link to="/studio/tasks/T2">go-two</Link>
+                <Routes><Route path="/studio/tasks/:taskId" element={<TaskPage />} /></Routes>
+            </MemoryRouter>,
+        );
+    }
+
+    it('shows an empty composer on the new task and submits only there', async () => {
+        api.addComment = vi.fn(() => Promise.resolve({}));
+        renderTwo();
+        fireEvent.change(await screen.findByPlaceholderText(/Add a comment/), { target: { value: 'for task one' } });
+        fireEvent.click(screen.getByText('go-two'));
+        await screen.findByText('Other task');
+        const box = screen.getByPlaceholderText(/Add a comment/);
+        expect(box.value).toBe('');
+        fireEvent.change(box, { target: { value: 'for two' } });
+        fireEvent.submit(box.closest('form'));
+        await waitFor(() => expect(api.addComment).toHaveBeenCalled());
+        expect(api.addComment.mock.calls[0][0]).toBe('T2');
+        expect(api.addComment.mock.calls[0][1]).toEqual({ comment: 'for two' });
+    });
+
+    it('leaves edit mode on switch; Save writes the new task values only', async () => {
+        renderTwo();
+        fireEvent.click(await screen.findByTitle('Edit task'));
+        fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'typed on one' } });
+        fireEvent.click(screen.getByText('go-two'));
+        await screen.findByText('Other task');
+        expect(screen.queryByTitle('Save changes')).toBeNull();
+        fireEvent.click(screen.getByTitle('Edit task'));
+        expect(screen.getByLabelText('Description').value).toBe('other body');
+        fireEvent.click(screen.getByTitle('Save changes'));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalled());
+        const [id, body] = api.updateTask.mock.calls[0];
+        expect(id).toBe('T2');
+        expect(body).toMatchObject({ title: 'Other task', description: 'other body' });
     });
 });

@@ -51,12 +51,9 @@ export function TaskDetailPanel({ task, members = [], epics = [], onClose, onUpd
     const commentDraft = useRef('');
     const onTitleDraft = useCallback(v => { draft.current.title = v; }, []);
 
-    useEffect(() => {
-        setIsEditing(false);
-        setFormData({ ...task });
-        draft.current = {};
-        commentDraft.current = '';
-    }, [task.id]);
+    // ProjectLayout keys the panel by task id, so every task starts with fresh
+    // refs and form state; only the parent-owned edit flag needs clearing.
+    useEffect(() => { setIsEditing(false); }, [setIsEditing]);
 
     const startEditing = () => { draft.current = {}; setFormData({ ...task }); setIsEditing(true); };
     const cancelEditing = () => { draft.current = {}; setIsEditing(false); setFormData({ ...task }); };

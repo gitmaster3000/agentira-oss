@@ -389,6 +389,7 @@ export function ProjectLayout() {
 
             {selectedTask && (
                 <TaskDetailPanel
+                    key={selectedTask.id}
                     task={selectedTask}
                     members={members}
                     epics={epics}

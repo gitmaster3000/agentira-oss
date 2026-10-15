@@ -350,3 +350,20 @@ describe('TaskDetailPanel — drafts survive collapsing a section', () => {
         ));
     });
 });
+
+describe('TaskDetailPanel — Branch & PR edit reseeds', () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it('after Cancel, Edit shows the saved branch again, not the abandoned text', async () => {
+        render(<Harness task={baseTask({ branch: 'saved-branch' })} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'abandoned' } });
+        fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+        fireEvent.click(screen.getByTitle('Edit'));
+        expect(screen.getByLabelText('Branch').value).toBe('saved-branch');
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ branch: 'saved-branch' }),
+        ));
+    });
+});

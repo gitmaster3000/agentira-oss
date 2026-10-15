@@ -43,7 +43,7 @@ export function usePanelData(taskId) {
         loadAttachments();
         loadCommits();
         loadTaskRuns();
-    }, [taskId]);
+    }, [loadActivity, loadAttachments, loadCommits, loadTaskRuns]);
 
     const live = taskRuns.some(r => LIVE_RUN_STATUSES.includes(r.status));
     useVisiblePoll(() => { loadActivity(); loadTaskRuns(); }, live ? 5000 : 30000, taskId);
