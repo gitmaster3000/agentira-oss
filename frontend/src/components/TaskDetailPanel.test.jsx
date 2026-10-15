@@ -309,3 +309,44 @@ describe('TaskDetailPanel — due date (AP-501)', () => {
         ));
     });
 });
+
+describe('TaskDetailPanel — drafts survive collapsing a section', () => {
+    beforeEach(() => vi.clearAllMocks());
+    const toggle = (name) => fireEvent.click(screen.getByRole('button', { name: `Toggle ${name} section` }));
+
+    it('keeps a half-written comment when Comments is collapsed and reopened', async () => {
+        render(<Harness task={baseTask()} />);
+        const box = await screen.findByPlaceholderText(/Comment or @mention/);
+        fireEvent.change(box, { target: { value: 'half-written' } });
+        toggle('Comments');
+        expect(screen.queryByPlaceholderText(/Comment or @mention/)).toBeNull();
+        toggle('Comments');
+        expect(screen.getByPlaceholderText(/Comment or @mention/).value).toBe('half-written');
+    });
+
+    it('shows the typed description after Details is collapsed and Save writes that same text', async () => {
+        render(<Harness task={baseTask()} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByDisplayValue('desc'), { target: { value: 'edited text' } });
+        toggle('Details');
+        toggle('Details');
+        expect(screen.getByDisplayValue('edited text')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ description: 'edited text' }),
+        ));
+    });
+
+    it('shows the typed branch after Branch & PR is collapsed and Save writes that same text', async () => {
+        render(<Harness task={baseTask()} />);
+        fireEvent.click(await screen.findByTitle('Edit'));
+        fireEvent.change(screen.getByLabelText('Branch'), { target: { value: 'feature/typed' } });
+        toggle('Branch & PR');
+        toggle('Branch & PR');
+        expect(screen.getByLabelText('Branch').value).toBe('feature/typed');
+        fireEvent.click(screen.getByRole('button', { name: /save/i }));
+        await waitFor(() => expect(api.updateTask).toHaveBeenCalledWith(
+            'T1', expect.objectContaining({ branch: 'feature/typed' }),
+        ));
+    });
+});

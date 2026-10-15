@@ -10,6 +10,8 @@ import {
 import { ActivityTab } from '../components/TaskDetail/ActivityFeed';
 import { TitleEditor } from '../components/TaskDetail/TextDraft';
 import { keepSameActivity, keepSameJson } from '../lib/pollState';
+import { useVisiblePoll } from '../lib/useVisiblePoll';
+import { useShellData } from '../components/shell/shellData';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import {
@@ -23,6 +25,8 @@ import {
 
 // Re-exported: these pure helpers moved with the Run tab but are still tested here.
 export { pickCurrentRun, summaryStamp };
+
+const PRIORITY_COLORS = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#6b7280' };
 
 const TABS = [
     { id: 'plan', label: 'Plan', icon: ClipboardList },
@@ -58,8 +62,7 @@ export function TaskPage() {
     // priority and assignee stay inline-editable in the Plan tab.
     const [isEditing, setIsEditing] = useState(false);
     const [formData, setFormData] = useState({
-        title: '', description: '', status: 'backlog', priority: 'medium', assignee: '', tags: [],
-        due_date: '',
+        title: '', description: '', status: 'backlog', priority: 'medium', assignee: '', tags: [], due_date: '',
     });
 
     // Single source of truth for live run state (DoD: "Live run state
@@ -72,9 +75,13 @@ export function TaskPage() {
     // Title and description drafts live in their own inputs (TitleEditor /
     // DescriptionEditor); they report here by ref so typing never re-renders
     // the page. Save merges them over formData.
+    // The refs also reseed the editors when their tab or section remounts, so
+    // switching tabs never loses typed text or shows stale text that Save would
+    // then overwrite.
     const draft = useRef({});
+    const commentDraft = useRef('');
     const onTitleDraft = useCallback(v => { draft.current.title = v; }, []);
-    const onDescriptionDraft = useCallback(v => { draft.current.description = v; }, []);
+    const { projects } = useShellData();
 
     // The URL param can be a task key (AP-12) — Forge endpoints only accept
     // the primary id, so every forge call goes through the loaded task.
@@ -88,6 +95,8 @@ export function TaskPage() {
         window.addEventListener('open-create-task', open);
         return () => window.removeEventListener('open-create-task', open);
     }, []);
+
+    useEffect(() => { commentDraft.current = ''; draft.current = {}; }, [taskId]);
 
     const loadTask = useCallback(async () => {
         try {
@@ -150,20 +159,15 @@ export function TaskPage() {
     }, [taskUid]);
 
     // Keep the Activity tab live — agents and the daemon append activity while
-    // the page is open, so poll it (matching the side panel's cadence) instead
-    // of only loading once on mount.
-    useEffect(() => {
-        let cancelled = false;
-        const poll = async () => {
-            if (document.visibilityState !== 'visible') return;
-            try {
-                const data = await api.getActivity(taskId);
-                if (!cancelled) setActivities(prev => keepSameActivity(prev, data));
-            } catch { /* transient */ }
-        };
-        const interval = setInterval(poll, 3000);
-        return () => { cancelled = true; clearInterval(interval); };
-    }, [taskId]);
+    // the page is open. 5 s only while a run is active, 30 s otherwise, and
+    // never while the tab is hidden.
+    const runActive = !!run && ACTIVE_RUN_STATUSES.has(run.status);
+    useVisiblePoll(async () => {
+        try {
+            const data = await api.getActivity(taskId);
+            setActivities(prev => keepSameActivity(prev, data));
+        } catch { /* transient */ }
+    }, runActive ? 5000 : 30000, taskId);
 
     // Dropdown fields save on change when the page is not in edit mode.
     const saveField = useCallback(async (patch) => {
@@ -232,25 +236,26 @@ export function TaskPage() {
         }
     };
 
-    const toggleDodItem = async (index) => {
-        const updated = dodItems.map((item, i) => i === index ? { ...item, checked: !item.checked } : item);
+    // Stable handlers (read the latest list through refs) so the memoized
+    // PlanTab is not re-rendered by unrelated page state.
+    const dodRef = useRef(dodItems);
+    dodRef.current = dodItems;
+    const newDodRef = useRef(newDodText);
+    newDodRef.current = newDodText;
+    const saveDod = useCallback(async (updated) => {
         setDodItems(updated);
         await api.updateTask(taskId, { dod_items: updated });
-    };
-
-    const addDodItem = async () => {
-        if (!newDodText.trim()) return;
-        const updated = [...dodItems, { text: newDodText.trim(), checked: false }];
-        setDodItems(updated);
+    }, [taskId]);
+    const toggleDodItem = useCallback((index) => saveDod(
+        dodRef.current.map((item, i) => i === index ? { ...item, checked: !item.checked } : item)), [saveDod]);
+    const addDodItem = useCallback(async () => {
+        const text = newDodRef.current.trim();
+        if (!text) return;
         setNewDodText('');
-        await api.updateTask(taskId, { dod_items: updated });
-    };
-
-    const removeDodItem = async (index) => {
-        const updated = dodItems.filter((_, i) => i !== index);
-        setDodItems(updated);
-        await api.updateTask(taskId, { dod_items: updated });
-    };
+        await saveDod([...dodRef.current, { text, checked: false }]);
+    }, [saveDod]);
+    const removeDodItem = useCallback((index) => saveDod(
+        dodRef.current.filter((_, i) => i !== index)), [saveDod]);
 
     // The composer owns the text and clears itself when this resolves.
     const handleComment = useCallback(async (text) => {
@@ -262,14 +267,7 @@ export function TaskPage() {
     if (loading) return <div className="p-8 text-text-secondary">Loading task...</div>;
     if (!task) return <div className="p-8 text-red-400">Task not found.</div>;
 
-    const priorityColors = {
-        critical: '#ef4444',
-        high: '#f97316',
-        medium: '#eab308',
-        low: '#6b7280',
-    };
     const runStatus = run ? (RUN_STATUS[run.status] || { bg: '#5f6368', label: run.status }) : null;
-    const runActive = run && ACTIVE_RUN_STATUSES.has(run.status);
 
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
@@ -351,7 +349,7 @@ export function TaskPage() {
                         formData={formData}
                         setFormData={setFormData}
                         profiles={profiles}
-                        priorityColors={priorityColors}
+                        priorityColors={PRIORITY_COLORS}
                         dodItems={dodItems}
                         newDodText={newDodText}
                         setNewDodText={setNewDodText}
@@ -360,7 +358,8 @@ export function TaskPage() {
                         removeDodItem={removeDodItem}
                         projectRepos={projectRepos}
                         commits={commits}
-                        onDescriptionDraft={onDescriptionDraft}
+                        draft={draft}
+                        commentDraft={commentDraft}
                         taskId={taskId}
                         user={user}
                         onComment={handleComment}
@@ -390,6 +389,7 @@ export function TaskPage() {
                     projectId={task.project_id}
                     members={profiles}
                     epics={epics}
+                    projectName={projects.find(p => p.id === task.project_id)?.name || ''}
                     onClose={() => setShowCreate(false)}
                     onCreated={() => setShowCreate(false)}
                 />

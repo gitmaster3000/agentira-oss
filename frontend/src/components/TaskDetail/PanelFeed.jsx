@@ -148,3 +148,11 @@ export const PanelFiles = React.memo(function PanelFiles({ taskId, attachments, 
 
     );
 });
+
+export function SectionLabel({ children, inline }) {
+    return (
+        <div style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '.06em', color: 'var(--text-bright)', marginBottom: inline ? 0 : 11, textTransform: 'uppercase' }}>
+            {children}
+        </div>
+    );
+}

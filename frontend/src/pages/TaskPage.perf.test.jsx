@@ -43,7 +43,9 @@ vi.mock('../api', () => {
     });
     return { api };
 });
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { display_name: 'Ali' } }) }));
+// Stable object, like the real context: a new user each render would defeat PlanTab's memo.
+const authValue = vi.hoisted(() => ({ user: { display_name: 'Ali' } }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => authValue }));
 
 import { TaskPage } from './TaskPage';
 
@@ -108,8 +110,29 @@ describe('TaskPage typing cost (5k-char description, 60 activity rows)', () => {
         vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
         await mountPage();
         commits.n = 0;
-        await act(async () => { vi.advanceTimersByTime(9000); await new Promise(r => setTimeout(r, 30)); });
-        console.log('PERF poll commits over 9s (3 activity polls)', commits.n);
+        const before = calls.filter(k => k === 'getActivity').length;
+        // Idle task: activity polls every 30 s, so 90 s is 3 polls.
+        await act(async () => { vi.advanceTimersByTime(90000); await new Promise(r => setTimeout(r, 30)); });
+        const polls = calls.filter(k => k === 'getActivity').length - before;
+        console.log('PERF poll commits over 90s', commits.n, 'polls', polls);
+        expect(polls).toBe(3);
         expect(commits.n).toBe(0);
+    });
+
+    it('does not poll faster than 30 s on an idle task', async () => {
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+        await mountPage();
+        const before = calls.filter(k => k === 'getActivity').length;
+        await act(async () => { vi.advanceTimersByTime(29000); await new Promise(r => setTimeout(r, 30)); });
+        expect(calls.filter(k => k === 'getActivity').length).toBe(before);
+    });
+
+    it('unrelated page state (opening Create Task) does not re-render the plan tab', async () => {
+        await mountPage();
+        commits.n = 0; counts.sections = 0; counts.markdown = 0;
+        await act(async () => { window.dispatchEvent(new Event('open-create-task')); });
+        expect(commits.n).toBeGreaterThan(0); // the page did re-render...
+        expect(counts.sections).toBe(0);      // ...the memoized plan tab did not
+        expect(counts.markdown).toBe(0);
     });
 });

@@ -68,13 +68,13 @@ const CommentList = React.memo(function CommentList({ activities }) {
     );
 });
 
-export function CommentsSection({ user, onComment, activities, projectId, members }) {
+export function CommentsSection({ user, onComment, draftRef, activities, projectId, members }) {
     return (
         <div>
             <h2 className="text-sm font-bold uppercase text-text-tertiary mb-4 flex items-center gap-2">
                 <MessageSquare className="w-4 h-4" /> Comments
             </h2>
-            <CommentComposer user={user} projectId={projectId} members={members} onSubmit={onComment} />
+            <CommentComposer user={user} projectId={projectId} members={members} onSubmit={onComment} draftRef={draftRef} />
             <CommentList activities={activities} />
         </div>
     );

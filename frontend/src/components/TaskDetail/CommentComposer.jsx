@@ -1,24 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Send } from 'lucide-react';
 import { MentionInput } from '../MentionInput';
 
 /**
  * Comment box that owns its own draft, so typing re-renders only this
  * component, never the page or panel around it. The text leaves only on
- * submit: `onSubmit(text)` posts it, and the draft clears when that resolves.
+ * submit: `onSubmit(text)` posts it, and the draft clears when that resolves
+ * (unless more was typed meanwhile).
+ *
+ * The parent can pass `draftRef` (a `useRef('')`) so the text survives this
+ * component unmounting, e.g. when its section is collapsed or the tab changes.
  *
  * variant "page" is the full task page box; "panel" is the compact side-panel
  * one with the round send button.
  */
-export function CommentComposer({ variant = 'page', user, projectId, members, onSubmit }) {
-    const [value, setValue] = useState('');
+export function CommentComposer({ variant = 'page', user, projectId, members, onSubmit, draftRef }) {
+    const ownRef = useRef('');
+    const store = draftRef || ownRef;
+    const [value, setValueState] = useState(store.current);
+    const setValue = (v) => { store.current = v; setValueState(v); };
 
     const submit = async (e) => {
         if (e) e.preventDefault();
-        if (!value.trim()) return;
+        const sent = value;
+        if (!sent.trim()) return;
         try {
-            await onSubmit(value);
-            setValue('');
+            await onSubmit(sent);
+            // Keep anything typed while the POST was in flight.
+            if (store.current === sent) setValue('');
         } catch (err) {
             alert(err.message);
         }

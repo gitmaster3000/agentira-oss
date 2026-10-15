@@ -21,12 +21,7 @@ export function CreateTaskModal({ projectId, members = [], epics = [], projectNa
     const [loading, setLoading] = useState(false);
     // Title and description drafts live in their own inputs; Create reads them here.
     const draft = useRef({ title: '', description: '' });
-    const [formData, setFormData] = useState({
-        priority: 'medium',
-        assignee: '',
-        epic_id: '',
-        due_date: ''
-    });
+    const [formData, setFormData] = useState({ priority: 'medium', assignee: '', epic_id: '', due_date: '' });
     const [tags, setTags] = useState([]);
     const [tagInput, setTagInput] = useState('');
     const [projectTasks, setProjectTasks] = useState([]);

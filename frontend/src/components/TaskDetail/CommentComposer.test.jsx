@@ -88,3 +88,28 @@ describe('TitleEditor / DescriptionEditor', () => {
         expect(parentRenders).toBe(before);
     });
 });
+
+describe('CommentComposer — draft handling', () => {
+    it('keeps text typed while the POST was in flight', async () => {
+        let finish;
+        const onSubmit = vi.fn(() => new Promise(r => { finish = r; }));
+        render(<CommentComposer members={MEMBERS} onSubmit={onSubmit} />);
+        const box = screen.getByRole('textbox');
+        type(box, 'first');
+        fireEvent.submit(box.closest('form'));
+        type(box, 'first and more');
+        finish();
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('first'));
+        await Promise.resolve();
+        expect(box.value).toBe('first and more');
+    });
+
+    it('reseeds from draftRef after an unmount', () => {
+        const draftRef = { current: '' };
+        const first = render(<CommentComposer members={MEMBERS} onSubmit={vi.fn()} draftRef={draftRef} />);
+        type(screen.getByRole('textbox'), 'still here');
+        first.unmount();
+        render(<CommentComposer members={MEMBERS} onSubmit={vi.fn()} draftRef={draftRef} />);
+        expect(screen.getByRole('textbox').value).toBe('still here');
+    });
+});

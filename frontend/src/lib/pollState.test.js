@@ -10,6 +10,10 @@ describe('keepSameActivity', () => {
         const next = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
         expect(keepSameActivity([{ id: 'a' }, { id: 'b' }], next)).toBe(next);
     });
+    it('takes the new list when the first id differs (newest-first order)', () => {
+        const next = [{ id: 'x' }, { id: 'b' }];
+        expect(keepSameActivity([{ id: 'a' }, { id: 'b' }], next)).toBe(next);
+    });
     it('takes the new list when the newest id differs', () => {
         const next = [{ id: 'a' }, { id: 'x' }];
         expect(keepSameActivity([{ id: 'a' }, { id: 'b' }], next)).toBe(next);

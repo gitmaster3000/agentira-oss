@@ -47,6 +47,12 @@ vi.mock('../api', () => {
     return { api };
 });
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: { display_name: 'Ali' } }) }));
+// CreateTaskModal calls useNavigate once per render, so this counts its renders.
+const nav = vi.hoisted(() => ({ renders: 0 }));
+vi.mock('react-router-dom', async (orig) => ({
+    ...(await orig()),
+    useNavigate: () => { nav.renders += 1; return () => {}; },
+}));
 
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { CreateTaskModal } from './CreateTaskModal';
@@ -68,7 +74,7 @@ function Panel() {
 }
 
 function typeInto(el, n = 30, base = '') {
-    commits.n = 0; commits.ms = 0; counts.markdown = 0; counts.sections = 0;
+    commits.n = 0; commits.ms = 0; counts.markdown = 0; counts.sections = 0; nav.renders = 0;
     const t0 = performance.now();
     for (let i = 1; i <= n; i++) fireEvent.change(el, { target: { value: base + 'x'.repeat(i) } });
     const wall = performance.now() - t0;
@@ -77,6 +83,7 @@ function typeInto(el, n = 30, base = '') {
         wallMsPerKey: +(wall / n).toFixed(2),
         markdownPerKey: counts.markdown / n,
         sectionsPerKey: counts.sections / n,
+        modalRendersPerKey: nav.renders / n,
     };
 }
 
@@ -113,8 +120,13 @@ describe('side panel typing cost (5k-char description, 60 activity rows)', () =>
         await screen.findByText('Perf task');
         await flush();
         commits.n = 0; counts.sections = 0;
-        await act(async () => { vi.advanceTimersByTime(9000); await new Promise(r => setTimeout(r, 40)); });
+        const before = counts.calls.filter(k => k === 'getActivity').length;
+        // Idle task: 30 s cadence, so 90 s is 3 polls.
+        await act(async () => { vi.advanceTimersByTime(90000); await new Promise(r => setTimeout(r, 40)); });
+        const polls = counts.calls.filter(k => k === 'getActivity').length - before;
         console.log('PERF panel poll commits over 3 polls', commits.n, 'section renders', counts.sections);
+        expect(polls).toBe(3);
+        expect(commits.n).toBe(0);
         expect(counts.sections).toBe(0);
     });
 });
@@ -157,5 +169,10 @@ describe('Create Task modal', () => {
         await flush();
         const rl = typeInto(screen.getByLabelText('Title'));
         console.log('PERF modal title (600 tasks loaded)', JSON.stringify(rl));
+        // Typing never re-renders the modal itself, with or without the task list loaded.
+        for (const r of [rt, rd, rl]) {
+            expect(r.modalRendersPerKey).toBe(0);
+            expect(r.renderMsPerKey).toBeLessThan(50);
+        }
     });
 });

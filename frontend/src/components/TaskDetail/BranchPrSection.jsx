@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
     GitBranch,
     GitCommit,
@@ -8,58 +8,13 @@ import {
     Check,
     Pencil,
 } from 'lucide-react';
-import { api } from '../../api';
 import { CollapsibleSection } from './CollapsibleSection';
+import { useGitFields, formatBranchDisplay, formatPrDisplay } from './useGitFields';
 
-function formatBranchDisplay(val) {
-    if (!val) return '';
-    const treeMatch = val.match(/\/tree\/(.+)$/);
-    if (treeMatch) return treeMatch[1];
-    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
-    return val;
-}
-
-function formatPrDisplay(val) {
-    if (!val) return '';
-    const prMatch = val.match(/github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/);
-    if (prMatch) return `${prMatch[1]}#${prMatch[2]}`;
-    if (val.startsWith('http')) return val.replace(/^https?:\/\/(www\.)?/, '');
-    return val;
-}
-
-// Branch & PR card. The inline-edit state (which field is open, its draft and
-// the copy tick) lives here, so typing a branch name re-renders only this card.
-export function BranchPrSection({ task, taskId, commits, open, onToggle, onSaved }) {
-    const [branchValue, setBranchValue] = useState(task.branch || '');
-    const [prUrlValue, setPrUrlValue] = useState(task.pr_url || '');
-    const [editingBranch, setEditingBranch] = useState(false);
-    const [editingPrUrl, setEditingPrUrl] = useState(false);
-    const [copiedField, setCopiedField] = useState(null);
-
-    useEffect(() => { setBranchValue(task.branch || ''); }, [task.branch]);
-    useEffect(() => { setPrUrlValue(task.pr_url || ''); }, [task.pr_url]);
-
-    const copyToClipboard = (text, field) => {
-        navigator.clipboard.writeText(text);
-        setCopiedField(field);
-        setTimeout(() => setCopiedField(null), 800);
-    };
-
-    const saveBranch = async (val) => {
-        setEditingBranch(false);
-        if (val !== (task.branch || '')) {
-            await api.updateTask(taskId, { branch: val });
-            onSaved();
-        }
-    };
-
-    const savePrUrl = async (val) => {
-        setEditingPrUrl(false);
-        if (val !== (task.pr_url || '')) {
-            await api.updateTask(taskId, { pr_url: val });
-            onSaved();
-        }
-    };
+// Branch & PR card. The inline-edit state lives in useGitFields, inside this
+// card, so typing a branch name re-renders only the card.
+export function BranchPrSection({ task, commits, open, onToggle, onSaved }) {
+    const { branch, pr, copiedField, copyToClipboard, error } = useGitFields(task, onSaved);
 
     return (
         <CollapsibleSection
@@ -72,35 +27,31 @@ export function BranchPrSection({ task, taskId, commits, open, onToggle, onSaved
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6">
             <div className="mb-4 min-w-0">
                 <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Branch</div>
-                {editingBranch ? (
+                {branch.editing ? (
                     <input
                         className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded font-mono text-text-primary focus:outline-none focus:border-accent-primary"
-                        value={branchValue}
-                        onChange={e => setBranchValue(e.target.value)}
-                        onBlur={() => saveBranch(branchValue)}
-                        onKeyDown={e => e.key === 'Enter' && saveBranch(branchValue)}
-                        autoFocus
+                        {...branch.inputProps()}
                     />
                 ) : (
                     <div className="flex items-center gap-1.5">
-                        {branchValue ? (
+                        {branch.value ? (
                             <>
-                                {branchValue.startsWith('http') ? (
-                                    <a href={branchValue} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-primary hover:underline truncate">
-                                        {formatBranchDisplay(branchValue)}
+                                {branch.value.startsWith('http') ? (
+                                    <a href={branch.value} target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-primary hover:underline truncate">
+                                        {formatBranchDisplay(branch.value)}
                                     </a>
                                 ) : (
-                                    <span className="text-sm font-mono text-text-primary truncate">{branchValue}</span>
+                                    <span className="text-sm font-mono text-text-primary truncate">{branch.value}</span>
                                 )}
-                                <button onClick={() => setEditingBranch(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
+                                <button onClick={() => branch.setEditing(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
                                     <Pencil className="w-3 h-3" />
                                 </button>
-                                <button onClick={() => copyToClipboard(branchValue, 'branch')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
+                                <button onClick={() => copyToClipboard(branch.value, 'branch')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
                                     {copiedField === 'branch' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                                 </button>
                             </>
                         ) : (
-                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingBranch(true)}>No branch set</span>
+                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => branch.setEditing(true)}>No branch set</span>
                         )}
                     </div>
                 )}
@@ -108,37 +59,34 @@ export function BranchPrSection({ task, taskId, commits, open, onToggle, onSaved
 
             <div className="mb-4 min-w-0">
                 <div className="text-[10px] font-bold uppercase text-text-secondary mb-1">Pull Request</div>
-                {editingPrUrl ? (
+                {pr.editing ? (
                     <input
                         className="w-full px-2 py-1.5 text-sm bg-bg-app border border-border-subtle rounded text-text-primary focus:outline-none focus:border-accent-primary"
-                        value={prUrlValue}
-                        onChange={e => setPrUrlValue(e.target.value)}
-                        onBlur={() => savePrUrl(prUrlValue)}
-                        onKeyDown={e => e.key === 'Enter' && savePrUrl(prUrlValue)}
+                        {...pr.inputProps()}
                         placeholder="https://github.com/..."
-                        autoFocus
                     />
                 ) : (
                     <div className="flex items-center gap-1.5">
-                        {prUrlValue ? (
+                        {pr.value ? (
                             <>
-                                <a href={prUrlValue} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
-                                    {formatPrDisplay(prUrlValue)}
+                                <a href={pr.value} target="_blank" rel="noopener noreferrer" className="text-sm text-accent-primary hover:underline truncate">
+                                    {formatPrDisplay(pr.value)}
                                 </a>
-                                <button onClick={() => setEditingPrUrl(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
+                                <button onClick={() => pr.setEditing(true)} className="p-0.5 text-text-tertiary hover:text-text-secondary transition-colors flex-shrink-0" title="Edit">
                                     <Pencil className="w-3 h-3" />
                                 </button>
-                                <button onClick={() => copyToClipboard(prUrlValue, 'pr')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
+                                <button onClick={() => copyToClipboard(pr.value, 'pr')} className="p-0.5 text-text-tertiary hover:text-accent-primary transition-colors flex-shrink-0" title="Copy">
                                     {copiedField === 'pr' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                                 </button>
                             </>
                         ) : (
-                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => setEditingPrUrl(true)}>No PR linked</span>
+                            <span className="text-xs text-text-tertiary italic cursor-pointer hover:text-text-secondary" onClick={() => pr.setEditing(true)}>No PR linked</span>
                         )}
                     </div>
                 )}
             </div>
             </div>
+            {error && <p role="alert" className="text-xs text-red-400 mb-3">{error}</p>}
 
             {commits.length > 0 && (
                 <>

@@ -36,7 +36,7 @@ export const PlanTab = React.memo(function PlanTab(props) {
     const {
         task, isEditing, epics, saveField, formData, setFormData, profiles, priorityColors, dodItems, newDodText, setNewDodText,
         toggleDodItem, addDodItem, removeDodItem, projectRepos,
-        commits, onDescriptionDraft,
+        commits, draft, commentDraft,
         taskId, user, onComment, activities,
         loadTask,
     } = props;
@@ -68,8 +68,8 @@ export const PlanTab = React.memo(function PlanTab(props) {
                         <DescriptionEditor
                             aria-label="Description"
                             className="w-full min-h-[10rem] h-full text-sm text-text-primary leading-relaxed bg-bg-app p-3 rounded-lg border border-border-subtle focus:outline-none focus:border-accent-primary resize-y"
-                            initial={formData.description}
-                            onDraft={onDescriptionDraft}
+                            initial={draft.current.description ?? formData.description}
+                            onDraft={v => { draft.current.description = v; }}
                             placeholder="Describe this task… (Markdown supported)"
                         />
                     ) : (
@@ -313,7 +313,6 @@ export const PlanTab = React.memo(function PlanTab(props) {
 
                 <BranchPrSection
                     task={task}
-                    taskId={taskId}
                     commits={commits}
                     open={openSections.git}
                     onToggle={() => toggleSection('git')}
@@ -380,6 +379,7 @@ export const PlanTab = React.memo(function PlanTab(props) {
                 <CommentsSection
                     user={user}
                     onComment={onComment}
+                    draftRef={commentDraft}
                     activities={activities}
                     projectId={task.project_id}
                     members={profiles}
