@@ -84,6 +84,7 @@ const sidebars = {
         'technical/deployment',
         'technical/configuration',
         'technical/client-telemetry',
+        'technical/frontend-performance',
       ],
     },
   ],
