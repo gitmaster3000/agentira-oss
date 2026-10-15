@@ -4,6 +4,7 @@
 |---|---|---|
 | `bootstrap_db.py` | Called inside the backend container at startup. Runs `services.bootstrap()` → tables + migrations + default seeds. | python (auto, in container) |
 | `write_cli_manifest.py` | Writes `backend/static/cli/manifest.json` from the baked CLI wheel (Docker build). | python (auto, in container) |
+| `seed_test_data.py` | Seeds the realistic **Preview Org** (4 projects: ~600/~120/~60/4 tasks, long markdown, comments, commits, PRs, attachments, finished runs, notifications) for staging and PR previews. Idempotent; `--reset` drops and rebuilds only that org. No daemon/LLM/network. Login `preview` / `preview1234`. Code: `backend/sample_data/`. | `python scripts/seed_test_data.py [--reset]` |
 | `install-daemon.sh` | Mac / Linux daemon installer. Checks prereqs, pip-installs from instance wheel, writes `~/.agentira/.env`. | `bash` (on a user's machine) |
 | `install-daemon.ps1` | Windows daemon installer. Same shape as `install-daemon.sh`. | PowerShell (on a user's machine) |
 
