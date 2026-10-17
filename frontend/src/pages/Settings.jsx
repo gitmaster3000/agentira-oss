@@ -573,8 +573,9 @@ export function Settings() {
         try {
             let key = botKey;
             if (!key) key = (await api.getServiceAccount(botId)).api_key;
-            const mcpUrl = `${window.location.protocol}//${window.location.hostname}:8000/sse`;
-            const config = { agentira: { url: mcpUrl, headers: { Authorization: `Bearer ${key}` } } };
+            const { mcp_url } = await api.getAuthConfig();
+            const mcpUrl = mcp_url || `${window.location.protocol}//${window.location.hostname}:8000/mcp`;
+            const config = { mcpServers: { agentira: { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${key}` } } } };
             await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
             alert("MCP configuration copied to clipboard.");
         } catch (err) { alert("Failed to copy config: " + err.message); }

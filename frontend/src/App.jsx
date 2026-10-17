@@ -16,6 +16,7 @@ import { ResetPassword } from './pages/ResetPassword';
 import { ForcePasswordChange } from './components/ForcePasswordChange';
 import { GitHubCallback } from './pages/GitHubCallback';
 import { CliAuth } from './pages/CliAuth';
+import { McpAuthorize } from './pages/McpAuthorize';
 import { Settings } from './pages/Settings';
 import { Home } from './pages/Home';
 import { TaskPage } from './pages/TaskPage';
@@ -86,6 +87,7 @@ export default function App() {
                     <Route path={ROUTES.RESET_PASSWORD} element={<ResetPassword />} />
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
                     <Route path="/cli-auth" element={<CliAuth />} />
+                    <Route path="/mcp-authorize" element={<McpAuthorize />} />
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>

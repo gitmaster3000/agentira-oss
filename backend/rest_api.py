@@ -439,6 +439,8 @@ def api_auth_config():
         "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
         "github": bool(os.getenv("GITHUB_CLIENT_ID")),
         "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
+        "mcp_url": (os.getenv("AGENTIRA_MCP_PUBLIC_URL", "").rstrip("/") + "/mcp")
+                   if os.getenv("AGENTIRA_MCP_PUBLIC_URL") else "",
         "dev": is_dev(),  # AGENTIRA_ENV=dev — UI unlocks local-only shortcuts
     }
 
@@ -511,6 +513,42 @@ def api_cli_approve(body: dict, payload: dict = Depends(get_current_user_payload
     s["token"] = create_token(payload["sub"], payload["profile_id"],
                               payload_roles(payload) or ["admin"], payload.get("org_id"))
     return {"ok": True}
+
+# ── MCP connector sign-in (OAuth consent) ────────────────────────────────
+# The MCP server (backend/mcp_server.py) sends the browser to the app's
+# /mcp-authorize page; the signed-in user approves here and is sent back to
+# the client with a one-time code. See backend/mcp_oauth.py.
+
+@auth.get("/auth/mcp/client")
+def api_mcp_client(client_id: str, payload: dict = Depends(get_current_user_payload)):
+    from backend import mcp_oauth
+    client = mcp_oauth.get_client(client_id)
+    if not client:
+        raise HTTPException(404, "Unknown app")
+    return {"client_name": client["client_name"]}
+
+@auth.post("/auth/mcp/authorize")
+def api_mcp_authorize(body: dict, payload: dict = Depends(get_current_user_payload)):
+    """Signed-in user allows (or denies) an MCP client. Returns the URL to send
+    the browser to."""
+    from backend import mcp_oauth
+    body = body or {}
+    try:
+        if not body.get("approve"):
+            client = mcp_oauth.get_client(body.get("client_id", ""))
+            uri = body.get("redirect_uri", "")
+            if not client or uri not in client["redirect_uris"]:
+                raise mcp_oauth.OAuthError("invalid_request", "unknown client or redirect_uri")
+            from urllib.parse import urlencode
+            q = {"error": "access_denied", **({"state": body["state"]} if body.get("state") else {})}
+            return {"redirect_url": uri + ("&" if "?" in uri else "?") + urlencode(q)}
+        url = mcp_oauth.approve(
+            body.get("client_id", ""), body.get("redirect_uri", ""),
+            body.get("code_challenge", ""), body.get("code_challenge_method", ""),
+            body.get("scope"), body.get("state"), payload["profile_id"])
+    except mcp_oauth.OAuthError as e:
+        raise HTTPException(400, e.description or e.error)
+    return {"redirect_url": url}
 
 @auth.get("/statuses")
 def api_list_statuses():

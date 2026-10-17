@@ -158,6 +158,10 @@ export const api = {
     // Admin: approve a daemon browser-login (device code).
     approveCliLogin: (userCode) => request('/auth/cli/approve', { method: 'POST', body: JSON.stringify({ user_code: userCode }) }),
 
+    // MCP connector sign-in (OAuth consent page).
+    getMcpClient: (clientId) => request(`/auth/mcp/client?client_id=${encodeURIComponent(clientId)}`),
+    mcpAuthorize: (body) => request('/auth/mcp/authorize', { method: 'POST', body: JSON.stringify(body) }),
+
     async googleAuth(idToken, invite) {
         const result = await request('/auth/google', { method: 'POST', body: JSON.stringify({ id_token: idToken, invite: invite || null }) });
         if (result.token) localStorage.setItem('agentira_token', result.token);

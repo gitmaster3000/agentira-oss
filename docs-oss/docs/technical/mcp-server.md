@@ -10,23 +10,39 @@ Any MCP-aware client can talk to an Agentira workspace: Claude Desktop, Cursor, 
 
 The server runs on port 8000 in the default Compose profile.
 
-## Get an API key
+## Connect Claude (sign in with your browser)
 
-Open **Settings → API key** for a personal key.
+Recommended. No key to copy. You approve the connection on a page in Agentira, and Claude holds a revocable connection that renews itself.
 
-For a script or an external tool, create a **service account** instead, under **Settings → Service Accounts**. Service accounts have an API key and no runtime.
+In Claude Code:
 
-The key identifies the caller and carries that account's permissions. Every tool call is checked against them.
+```bash
+claude mcp add --transport http agentira https://YOUR_MCP_ADDRESS/mcp
+```
 
-## Connect over HTTP
+Then run `/mcp`, choose **agentira** and **Authenticate**. In Claude Desktop or claude.ai, add a custom connector with the same address.
 
-Recommended.
+Your browser opens Agentira. Sign in if needed, then choose what Claude may do:
+
+- **See** your projects, tasks, comments and runs (always on).
+- **Create and change** tasks, comments and projects (optional; leave it off for a read-only connection).
+
+Claude acts as you, with your permissions. It never sees your password or API key. The connection renews automatically: access lasts one hour and is refreshed in the background, and the sign-in lasts 30 days from the last refresh.
+
+Operators: set `FRONTEND_URL` (the app's public address) and, behind a proxy, `AGENTIRA_MCP_PUBLIC_URL` (the MCP server's public address) on the MCP service. The server publishes standard OAuth 2.1 discovery at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, with dynamic client registration (`/register`), PKCE (S256 only), and rotating refresh tokens. Reusing an old refresh token revokes the connection.
+
+## Connect with an API key
+
+For scripts, CI and clients without browser sign-in. Open **Settings → API key** for a personal key, or create a **service account** under **Settings → Service Accounts** (an API key and no runtime). The key identifies the caller and carries that account's permissions. Every tool call is checked against them.
+
+**Copy MCP config** on a service account gives you this block:
 
 ```json
 {
   "mcpServers": {
     "agentira": {
-      "serverUrl": "http://127.0.0.1:8000/mcp",
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp",
       "headers": { "Authorization": "Bearer YOUR_API_KEY" }
     }
   }
@@ -54,7 +70,7 @@ For clients without HTTP transport support.
 
 ## Verify the connection
 
-Call `get_me`. It returns the profile the key belongs to. If it fails, the key is wrong or the server is unreachable.
+Call `get_me`. It returns the profile you are connected as. If it fails, the connection or key is wrong or the server is unreachable.
 
 Then call `list_permissions` to see what the key may do.
 

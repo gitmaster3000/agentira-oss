@@ -361,7 +361,7 @@ def _apply_rls(conn: Connection) -> None:
         for t in ("orgs", "invites", "roles", "permissions", "role_permissions",
                   "statuses", "forge_runs", "forge_messages",
                   "forge_conversations", "forge_queued_messages",
-                  "forge_webhook_logs"):
+                  "forge_webhook_logs", "mcp_oauth_clients", "mcp_oauth_tokens"):
             if t in _list_tables(conn):
                 conn.execute(text(
                     f"GRANT SELECT, INSERT, UPDATE, DELETE ON {t} TO {_APP_ROLE}"))

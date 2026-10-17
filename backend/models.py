@@ -804,3 +804,33 @@ class ClientDebugSession(Base):
     reason: Mapped[str] = mapped_column(String(200), nullable=False, default="")
     created_by: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class McpOAuthClient(Base):
+    """Dynamically registered OAuth client (RFC 7591) for MCP connectors."""
+    __tablename__ = "mcp_oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_name: Mapped[str] = mapped_column(String(200), default="")
+    redirect_uris: Mapped[str] = mapped_column(Text, default="[]")  # JSON list
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class McpOAuthToken(Base):
+    """Auth code / access token / refresh token for the MCP OAuth flow.
+
+    Only the SHA-256 of the secret is stored. Rows are single-use (codes,
+    refresh) or short-lived (access); `used` marks a consumed code/refresh.
+    """
+    __tablename__ = "mcp_oauth_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)  # code | access | refresh
+    client_id: Mapped[str] = mapped_column(ForeignKey("mcp_oauth_clients.client_id"), nullable=False)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(100), default="")
+    redirect_uri: Mapped[str] = mapped_column(Text, default="")
+    code_challenge: Mapped[str] = mapped_column(String(128), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
