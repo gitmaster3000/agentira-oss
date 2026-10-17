@@ -22,10 +22,11 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.requests import Request
 from starlette.routing import Route
 
+from backend import mcp_oauth
 from backend import services
 from backend import task_batch
 
@@ -91,35 +92,57 @@ class ASGILoggingMiddleware:
         actor = "system"
         actor_org = None
         is_authenticated = False
+        read_only = False
 
         token = ""
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
             try:
                 profile_dict = services.validate_api_key(token)
-                if profile_dict:
-                    actor = profile_dict.get("name", "unknown")
-                    actor_org = profile_dict.get("org_id")
-                    is_authenticated = True
-                    logger.info(f"Resolved actor from token: {actor} (org {actor_org})")
             except Exception as e:
-                logger.warning(f"Token validation failed: {e}")
+                logger.debug(f"Not an API key ({e}); trying OAuth access token")
+                profile_dict = None
+                try:
+                    oauth = mcp_oauth.validate_access_token(token)
+                    if oauth:
+                        profile_dict = oauth[0]
+                        read_only = mcp_oauth.SCOPE_WRITE not in oauth[1].split()
+                except Exception as e2:
+                    logger.warning(f"Token validation failed: {e2}")
+            if profile_dict:
+                actor = profile_dict.get("name", "unknown")
+                actor_org = profile_dict.get("org_id")
+                is_authenticated = True
+                logger.info(f"Resolved actor from token: {actor} (org {actor_org})")
 
         if is_protected and not is_authenticated:
             logger.warning(f"Unauthorized access attempt to {path}")
+            # RFC 9728: point OAuth-capable clients (Claude) at the metadata
+            # so they start the browser sign-in flow.
+            resource_meta = _public_base(scope, headers) + "/.well-known/oauth-protected-resource"
+            return await Response(
+                '{"error":"Unauthorized","message":"Valid Bearer token required"}',
+                status_code=401, media_type="application/json",
+                headers={"WWW-Authenticate": f'Bearer resource_metadata="{resource_meta}"'},
+            )(scope, receive, send)
 
-            async def _unauthorized(scope, receive, send):
-                await send({
-                    "type": "http.response.start",
-                    "status": 401,
-                    "headers": [(b"content-type", b"application/json")],
-                })
-                await send({
-                    "type": "http.response.body",
-                    "body": b'{"error":"Unauthorized","message":"Valid Bearer token required"}',
-                })
+        if is_protected and read_only and method == "POST":
+            body = b""
+            while True:
+                msg = await receive()
+                body += msg.get("body", b"")
+                if not msg.get("more_body"):
+                    break
+            if not mcp_oauth.is_read_only_call(body):
+                return await JSONResponse(
+                    {"jsonrpc": "2.0", "id": None, "error": {
+                        "code": -32001,
+                        "message": "This connection is read-only. Reconnect and allow changes to use this tool."}},
+                    status_code=403)(scope, receive, send)
+            replay = [{"type": "http.request", "body": body, "more_body": False}]
 
-            return await _unauthorized(scope, receive, send)
+            async def receive():  # noqa: F811 — replay the buffered body
+                return replay.pop(0) if replay else await _never_disconnect()
 
         if not is_authenticated:
             logger.debug(f"Public access to: {path}")
@@ -1056,6 +1079,84 @@ async def lifespan(app_instance) -> AsyncIterator[None]:
         yield
 
 
+# ── OAuth endpoints (see backend/mcp_oauth.py) ─────────────────────────────────
+
+async def _never_disconnect():
+    import asyncio
+    await asyncio.Event().wait()
+
+
+def _public_base(scope, headers: dict) -> str:
+    """Public origin of this server (no trailing slash), proxy-aware."""
+    env = os.getenv("AGENTIRA_MCP_PUBLIC_URL", "").rstrip("/")
+    if env:
+        return env
+    proto = headers.get("x-forwarded-proto") or scope.get("scheme", "http")
+    host = headers.get("x-forwarded-host") or headers.get("host", "localhost:8000")
+    return f"{proto}://{host}"
+
+
+def _base(request: Request) -> str:
+    return _public_base(request.scope, dict(request.headers))
+
+
+def _oauth_error(e: "mcp_oauth.OAuthError", status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": e.error, "error_description": e.description},
+                        status_code=401 if e.error == "invalid_client" else status,
+                        headers={"Cache-Control": "no-store"})
+
+
+async def oauth_protected_resource(request: Request):
+    base = _base(request)
+    return JSONResponse({
+        "resource": f"{base}/mcp",
+        "authorization_servers": [base],
+        "scopes_supported": sorted(mcp_oauth.VALID_SCOPES),
+        "bearer_methods_supported": ["header"],
+    })
+
+
+async def oauth_authorization_server(request: Request):
+    base = _base(request)
+    return JSONResponse({
+        "issuer": base,
+        "authorization_endpoint": f"{base}/authorize",
+        "token_endpoint": f"{base}/token",
+        "registration_endpoint": f"{base}/register",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "scopes_supported": sorted(mcp_oauth.VALID_SCOPES),
+    })
+
+
+async def oauth_register(request: Request):
+    try:
+        return JSONResponse(mcp_oauth.register_client(await request.json()), status_code=201)
+    except ValueError:
+        return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
+    except mcp_oauth.OAuthError as e:
+        return _oauth_error(e)
+
+
+async def oauth_authorize(request: Request):
+    """Send the browser to the app's consent page (it signs the user in)."""
+    frontend = os.getenv("FRONTEND_URL", "").rstrip("/")
+    if not frontend:
+        return JSONResponse({"error": "server_error",
+                             "error_description": "FRONTEND_URL is not configured"}, status_code=500)
+    return RedirectResponse(f"{frontend}/mcp-authorize?{request.url.query}", status_code=302)
+
+
+async def oauth_token(request: Request):
+    form = dict(await request.form())
+    try:
+        return JSONResponse(mcp_oauth.exchange(form), headers={"Cache-Control": "no-store"})
+    except mcp_oauth.OAuthError as e:
+        return _oauth_error(e)
+
+
 # ── Starlette Application ──────────────────────────────────────────────────────
 
 app = Starlette(
@@ -1064,6 +1165,12 @@ app = Starlette(
     middleware=[Middleware(ASGILoggingMiddleware)],
     routes=[
         Route("/mcp", mcp_handler, methods=["GET", "POST", "DELETE"]),
+        Route("/.well-known/oauth-protected-resource", oauth_protected_resource),
+        Route("/.well-known/oauth-protected-resource/mcp", oauth_protected_resource),
+        Route("/.well-known/oauth-authorization-server", oauth_authorization_server),
+        Route("/register", oauth_register, methods=["POST"]),
+        Route("/authorize", oauth_authorize),
+        Route("/token", oauth_token, methods=["POST"]),
     ],
 )
 
