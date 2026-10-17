@@ -6,6 +6,7 @@ import { useCurrentProjectId } from '../../currentProject';
 import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
 import { ThemeToggle } from '../ThemeToggle';
+import { AppSwitcher } from './AppSwitcher';
 import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
 // Top bar per home-dashboard.html: logo, Work | Build, spacer, search, New,
@@ -102,6 +103,9 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                 style={{ background: 'none', border: 'none', padding: '6px', color: 'var(--text-tertiary)', cursor: 'pointer', alignItems: 'center', flexShrink: 0 }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
             </button>}
+
+            {/* App switcher — Agentira + connected apps (hidden when none are configured). */}
+            <AppSwitcher />
 
             {/* Logo lockup — separate from any card, always visible. */}
             <div onClick={() => navigate('/studio')} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flexShrink: 0 }}>
