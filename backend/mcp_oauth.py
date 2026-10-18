@@ -20,7 +20,7 @@ import hashlib
 import html
 import os
 import time
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import jwt
 from starlette.requests import Request
@@ -28,7 +28,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 from backend import services
-from backend.db import privileged
+from backend.db import privileged, set_current_org
 from backend.jwt_auth import JWT_ALGORITHM, JWT_SECRET
 
 ACCESS_TTL = 3600
@@ -139,7 +139,7 @@ async def register(request: Request):
 
 # ── Authorization (login + consent in one step) ─────────────────────────────
 
-_FIELDS = ("client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method")
+_FIELDS = ("client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "resource")
 
 
 def _validate_authorize(params: dict) -> str | None:
@@ -158,9 +158,7 @@ def _validate_authorize(params: dict) -> str | None:
 
 
 def _login_page(params: dict, error: str = "", status: int = 200) -> HTMLResponse:
-    hidden = "".join(
-        f'<input type="hidden" name="{k}" value="{html.escape(params.get(k, ""))}">'
-        for k in _FIELDS + ("response_type",))
+    hidden = _hidden(params)
     err = f'<p class="err">{html.escape(error)}</p>' if error else ""
     return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -178,6 +176,61 @@ button{{width:100%;padding:11px;border:0;border-radius:8px;background:#111;color
 <button type="submit">Sign in and allow</button></form></body></html>""", status_code=status)
 
 
+def _hidden(params: dict) -> str:
+    return "".join(
+        f'<input type="hidden" name="{k}" value="{html.escape(params.get(k, ""))}">'
+        for k in _FIELDS + ("response_type",))
+
+
+def _agent_name_from_resource(resource: str) -> str:
+    """The admin-copied connector link is `<mcp>/mcp?as=<agent>`; Claude sends
+    it back as the `resource` parameter."""
+    return (parse_qs(urlparse(resource or "").query).get("as") or [""])[0]
+
+
+def _agent_identities(profile: dict) -> list[dict]:
+    """Agent identities this user may connect as. Admins only."""
+    if "admin" not in (profile.get("roles") or []):
+        return []
+    set_current_org(profile["org_id"])
+    try:
+        return services.list_service_accounts()
+    finally:
+        set_current_org(None)
+
+
+def _picker_page(params: dict, profile: dict, agents: list[dict]) -> HTMLResponse:
+    choices = [(profile["id"], f'Myself ({profile["display_name"]})')] + [
+        (a["id"], f'Agent: {a["display_name"]}') for a in agents]
+    radios = "".join(
+        f'<label><input type="radio" name="identity" value="{html.escape(i)}"'
+        f'{" checked" if n == 0 else ""}> {html.escape(label)}</label>'
+        for n, (i, label) in enumerate(choices))
+    login = _sign("mcp_login", CODE_TTL, sub=profile["id"])
+    return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect to Agentira</title><style>
+body{{font:16px system-ui,sans-serif;background:#f6f6f7;display:grid;place-items:center;min-height:100vh;margin:0}}
+form{{background:#fff;padding:32px;border-radius:12px;width:min(360px,90vw);box-shadow:0 2px 12px #0001}}
+h1{{font-size:20px;margin:0 0 4px}}p{{color:#555;margin:0 0 20px}}
+label{{display:block;padding:10px;border:1px solid #ddd;border-radius:8px;margin:0 0 8px;cursor:pointer}}
+button{{width:100%;padding:11px;border:0;border-radius:8px;background:#111;color:#fff;font:inherit;cursor:pointer;margin-top:8px}}
+</style></head><body><form method="post" action="/authorize"><h1>Who is connecting?</h1>
+<p>Choose the identity this connection acts as.</p>{radios}{_hidden(params)}
+<input type="hidden" name="login" value="{html.escape(login)}">
+<button type="submit">Connect</button></form></body></html>""")
+
+
+def _redirect_with_code(form: dict, profile_id: str) -> RedirectResponse:
+    code = _sign("mcp_code", CODE_TTL, sub=profile_id, cid=form["client_id"],
+                 ru=form["redirect_uri"], cc=form["code_challenge"])
+    query = {"code": code}
+    if form.get("state"):
+        query["state"] = form["state"]
+    sep = "&" if "?" in form["redirect_uri"] else "?"
+    return RedirectResponse(form["redirect_uri"] + sep + urlencode(query), status_code=302)
+
+
 async def authorize(request: Request):
     if request.method == "GET":
         params = dict(request.query_params)
@@ -190,16 +243,33 @@ async def authorize(request: Request):
     error = _validate_authorize(form)
     if error:
         return HTMLResponse(html.escape(error), status_code=400)
+    # Step 2: admin picked an identity on the "Who is connecting?" page.
+    if form.get("login"):
+        claims = _verify(form["login"], "mcp_login")
+        profile = claims and _profile(claims["sub"])
+        if not profile:
+            return HTMLResponse("Sign-in expired. Start again.", status_code=400)
+        allowed = {profile["id"]} | {a["id"] for a in _agent_identities(profile)}
+        if form.get("identity") not in allowed:
+            return HTMLResponse("You can't connect as that identity.", status_code=403)
+        return _redirect_with_code(form, form["identity"])
+
+    # Step 1: password sign-in.
     profile = services.authenticate_user(form.get("username", "").strip(), form.get("password", ""))
     if not profile:
         return _login_page(form, "Wrong username or password.", status=401)
-    code = _sign("mcp_code", CODE_TTL, sub=profile["id"], cid=form["client_id"],
-                 ru=form["redirect_uri"], cc=form["code_challenge"])
-    query = {"code": code}
-    if form.get("state"):
-        query["state"] = form["state"]
-    sep = "&" if "?" in form["redirect_uri"] else "?"
-    return RedirectResponse(form["redirect_uri"] + sep + urlencode(query), status_code=302)
+    agents = _agent_identities(profile)
+
+    # Link copied from the admin menu pins the agent: `.../mcp?as=<agent>`.
+    wanted = _agent_name_from_resource(form.get("resource", ""))
+    if wanted:
+        agent = next((a for a in agents if a["name"] == wanted), None)
+        if not agent:
+            return _login_page(form, "Only an admin can connect as this agent.", status=403)
+        return _redirect_with_code(form, agent["id"])
+    if agents:
+        return _picker_page(form, profile, agents)
+    return _redirect_with_code(form, profile["id"])
 
 
 # ── Token endpoint ──────────────────────────────────────────────────────────

@@ -440,6 +440,8 @@ def api_auth_config():
         "github": bool(os.getenv("GITHUB_CLIENT_ID")),
         "github_client_id": os.getenv("GITHUB_CLIENT_ID", ""),
         "dev": is_dev(),  # AGENTIRA_ENV=dev — UI unlocks local-only shortcuts
+        # Public MCP address; the admin menu builds the copyable connector link from it.
+        "mcp_url": (os.getenv("MCP_PUBLIC_URL") or os.getenv("AGENTIRA_MCP_URL", "")).rstrip("/"),
     }
 
 

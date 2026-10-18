@@ -21,8 +21,13 @@ def client(pg):
     from backend import services
     with privileged(), SessionLocal() as db:
         role = db.query(Role).filter(Role.name == "member").first()
+        admin_role = db.query(Role).filter(Role.name == "admin").first()
         db.add(Profile(name="alice", account_type="human", roles=[role], org_id=pg.org_id,
                        password_hash=services._hash_password("s3cret")))
+        db.add(Profile(name="boss", account_type="human", roles=[admin_role], org_id=pg.org_id,
+                       password_hash=services._hash_password("s3cret")))
+        db.add(Profile(name="bot1", account_type="external_agent", roles=[role], org_id=pg.org_id,
+                       password_hash=""))
         db.commit()
     # No lifespan: the MCP session manager is single-use. Auth runs before it,
     # so a non-401 on /mcp (500 here) proves the token was accepted.
@@ -36,11 +41,18 @@ def _register(c):
     return r.json()["client_id"]
 
 
-def _authorize(c, client_id, password="s3cret"):
+def _authorize(c, client_id, password="s3cret", username="alice", **extra):
     return c.post("/authorize", data={
         "client_id": client_id, "redirect_uri": REDIRECT, "state": "xyz",
         "code_challenge": CHALLENGE, "code_challenge_method": "S256",
-        "response_type": "code", "username": "alice", "password": password})
+        "response_type": "code", "username": username, "password": password, **extra})
+
+
+def _profile_of(c, response):
+    """Name of the profile an authorize redirect's code was issued for."""
+    from backend import mcp_oauth, services
+    code = parse_qs(urlparse(response.headers["location"]).query)["code"][0]
+    return services.get_profile(mcp_oauth._verify(code, "mcp_code")["sub"])["name"]
 
 
 def _exchange(c, client_id):
@@ -115,3 +127,33 @@ def test_access_token_cannot_be_used_as_refresh(client):
     r = client.post("/token", data={"grant_type": "refresh_token",
                                     "refresh_token": tok["access_token"]})
     assert r.status_code == 400
+
+
+def test_admin_link_pins_agent_identity(client):
+    cid = _register(client)
+    r = _authorize(client, cid, username="boss",
+                   resource="https://mcp.example.com/mcp?as=bot1")
+    assert r.status_code == 302 and _profile_of(client, r) == "bot1"
+
+
+def test_admin_without_link_gets_picker_then_chosen_identity(client):
+    cid = _register(client)
+    r = _authorize(client, cid, username="boss")
+    assert r.status_code == 200 and "Who is connecting?" in r.text
+    import re
+    from backend import services
+    login = re.search(r'name="login" value="([^"]+)"', r.text).group(1)
+    bot_id = next(a["id"] for a in services.list_profiles() if a["name"] == "bot1")
+    r = client.post("/authorize", data={
+        "client_id": cid, "redirect_uri": REDIRECT, "state": "xyz", "code_challenge": CHALLENGE,
+        "code_challenge_method": "S256", "response_type": "code",
+        "login": login, "identity": bot_id})
+    assert r.status_code == 302 and _profile_of(client, r) == "bot1"
+
+
+def test_non_admin_cannot_connect_as_agent(client):
+    cid = _register(client)
+    r = _authorize(client, cid, resource="https://mcp.example.com/mcp?as=bot1")
+    assert r.status_code == 403
+    r = _authorize(client, cid)  # no link: acts as themselves
+    assert _profile_of(client, r) == "alice"

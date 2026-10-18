@@ -258,7 +258,7 @@ const InfoBanner = ({ children }) => (
 );
 
 // ── ProfileDetailsModal ──────────────────────────────────────────────────────
-function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, onCopyKey, onCopyConfig, onRegenerateKey, onConfigure }) {
+function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, onCopyLink, onRegenerateKey, onConfigure }) {
     const meta = ACCOUNT_META[profile.account_type] || ACCOUNT_META.human;
     const isHuman = !profile.account_type || profile.account_type === 'human';
     const isService = profile.account_type === 'external_agent';
@@ -369,8 +369,7 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
                         <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: 16 }}>
                             <FL>API key</FL>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                                <GhostBtn onClick={onCopyKey}><Key style={{ width: 13, height: 13 }} /> Copy key</GhostBtn>
-                                <GhostBtn onClick={onCopyConfig}><Copy style={{ width: 13, height: 13 }} /> Copy MCP config</GhostBtn>
+                                <GhostBtn onClick={onCopyLink}><Copy style={{ width: 13, height: 13 }} /> Copy connector link</GhostBtn>
                                 {editable && <GhostBtn onClick={onRegenerateKey}><RefreshCw style={{ width: 13, height: 13 }} /> Regenerate</GhostBtn>}
                             </div>
                         </div>
@@ -550,7 +549,7 @@ export function Settings() {
                 if (!name) return;
                 try {
                     const res = await api.createServiceAccount(name);
-                    setNewBotKey({ name: res.name || name, api_key: res.api_key, title: "Bot key created" });
+                    setNewBotKey({ name: res.name || name, handle: res.name || name, api_key: res.api_key, title: "Bot key created" });
                     setCopied(false);
                     await loadGeneral();
                 } catch (err) { alert(err.message); }
@@ -560,24 +559,13 @@ export function Settings() {
         });
     }
 
-    async function copyKey(botId) {
+    async function copyLink(agentName) {
         try {
-            const data = await api.getServiceAccount(botId);
-            if (!data?.api_key) { alert("No API key found."); return; }
-            await navigator.clipboard.writeText(data.api_key);
-            alert("API key copied to clipboard.");
-        } catch (err) { alert("Failed to copy key: " + err.message); }
-    }
-
-    async function copyConfig(botId, botKey = null) {
-        try {
-            let key = botKey;
-            if (!key) key = (await api.getServiceAccount(botId)).api_key;
-            const mcpUrl = `${window.location.protocol}//${window.location.hostname}:8000/sse`;
-            const config = { agentira: { url: mcpUrl, headers: { Authorization: `Bearer ${key}` } } };
-            await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
-            alert("MCP configuration copied to clipboard.");
-        } catch (err) { alert("Failed to copy config: " + err.message); }
+            const { mcp_url } = await api.getAuthConfig();
+            if (!mcp_url) { alert("MCP address is not configured (set MCP_PUBLIC_URL)."); return; }
+            await navigator.clipboard.writeText(`${mcp_url}/mcp?as=${encodeURIComponent(agentName)}`);
+            alert("Connector link copied. In Claude, add it as a custom connector.");
+        } catch (err) { alert("Failed to copy link: " + err.message); }
     }
 
     async function handleCopyKey() {
@@ -599,7 +587,7 @@ export function Settings() {
             onConfirm: async () => {
                 try {
                     const res = await api.regenerateApiKey(bot.id);
-                    setNewBotKey({ name: bot.display_name, api_key: res.api_key, title: "New API key" });
+                    setNewBotKey({ name: bot.display_name, handle: bot.name, api_key: res.api_key, title: "New API key" });
                     setCopied(false);
                 } catch (err) { alert(err.message); }
                 finally { setConfirmState(null); }
@@ -1142,8 +1130,8 @@ export function Settings() {
                             <button onClick={handleCopyKey} style={{ padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border-default)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }}>
                                 {copied ? <Check style={{ width: 15, height: 15 }} /> : <Copy style={{ width: 15, height: 15 }} />}
                             </button>
-                            <button onClick={() => copyConfig(null, newBotKey.api_key)} style={{ padding: '10px 13px', borderRadius: 9, background: 'var(--brand-lavender)', color: 'var(--accent-on)', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                                Copy MCP
+                            <button onClick={() => copyLink(newBotKey.handle)} style={{ padding: '10px 13px', borderRadius: 9, background: 'var(--brand-lavender)', color: 'var(--accent-on)', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                                Copy link
                             </button>
                         </div>
                     </div>
@@ -1243,8 +1231,7 @@ export function Settings() {
                     onClose={() => setManaging(null)}
                     onSaved={async () => { await loadGeneral(); setManaging(null); }}
                     onDelete={() => handleDeleteAccount(managing)}
-                    onCopyKey={() => copyKey(managing.id)}
-                    onCopyConfig={() => copyConfig(managing.id)}
+                    onCopyLink={() => copyLink(managing.name)}
                     onRegenerateKey={() => handleRegenerateKey(managing)}
                     onConfigure={() => navigate(ROUTES.FORGE_AGENT(managing.id))}
                 />
