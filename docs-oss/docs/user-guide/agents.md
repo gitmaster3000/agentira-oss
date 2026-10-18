@@ -90,3 +90,9 @@ Check what is available:
 ```bash
 agentira runtime list
 ```
+
+## Connect from Claude (custom connector)
+
+An admin opens the agent in Settings and clicks **Copy connector link**. In Claude, add a custom connector and paste that link (it looks like `https://<your-mcp-service>/mcp?as=<agent>`). Leave the client ID and secret empty. Claude opens an Agentira sign-in page; an admin signs in with their normal username or email and password and the connection acts as that agent. Without `?as=`, admins choose who the connection acts as; non-admins always act as themselves. No API key or header needed. Static API keys still work for IDEs and bots.
+
+The MCP service must share `JWT_SECRET` with the backend. Tokens last one hour and renew automatically.

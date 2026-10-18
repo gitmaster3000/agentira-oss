@@ -28,6 +28,7 @@ from starlette.routing import Route
 
 from backend import services
 from backend import task_batch
+from backend import mcp_oauth
 
 # ── Global Actor Context ──────────────────────────────────────────────────────
 # Set per-request by the auth middleware; read by tool handlers.
@@ -104,6 +105,13 @@ class ASGILoggingMiddleware:
                     logger.info(f"Resolved actor from token: {actor} (org {actor_org})")
             except Exception as e:
                 logger.warning(f"Token validation failed: {e}")
+            if not is_authenticated:
+                # OAuth access token (Claude custom connector flow).
+                profile_dict = mcp_oauth.verify_access_token(token)
+                if profile_dict:
+                    actor = profile_dict.get("name", "unknown")
+                    actor_org = profile_dict.get("org_id")
+                    is_authenticated = True
 
         if is_protected and not is_authenticated:
             logger.warning(f"Unauthorized access attempt to {path}")
@@ -112,7 +120,11 @@ class ASGILoggingMiddleware:
                 await send({
                     "type": "http.response.start",
                     "status": 401,
-                    "headers": [(b"content-type", b"application/json")],
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"www-authenticate",
+                         f'Bearer resource_metadata="{mcp_oauth.resource_metadata_url(Request(scope))}"'.encode()),
+                    ],
                 })
                 await send({
                     "type": "http.response.body",
@@ -1064,6 +1076,7 @@ app = Starlette(
     middleware=[Middleware(ASGILoggingMiddleware)],
     routes=[
         Route("/mcp", mcp_handler, methods=["GET", "POST", "DELETE"]),
+        *mcp_oauth.routes,
     ],
 )
 
