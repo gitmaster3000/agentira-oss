@@ -10,9 +10,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Date, case, cast, func
+from sqlalchemy import Date, case, cast, func, literal, or_, select
 
-from backend.models import Activity, ProjectRepo, Profile, Project, ProjectMember, Status, Task
+from backend.models import (Activity, Permission, ProfilePermission, ProjectRepo, Profile, Project, ProjectMember,
+                            RolePermission, Status, Task, profile_roles)
 
 
 def delete_project_repos(db, project_id: str) -> None:
@@ -58,10 +59,24 @@ def project_colour(project_id: str) -> str:
     return _PALETTE[sum(map(ord, project_id)) % len(_PALETTE)]
 
 
-def member_projects(db, profile_id: str) -> list[Project]:
-    return (db.query(Project).join(ProjectMember, ProjectMember.project_id == Project.id)
-            .filter(ProjectMember.profile_id == profile_id)
-            .order_by(Project.created_at.desc()).all())
+def home_projects(db, profile: Profile) -> list[Project]:
+    """Projects shown on Home, in ONE query: every project in the org for a read-all principal
+    (``project.view_all`` via a role or an extra permission, or ``*`` / system), otherwise only memberships.
+
+    Admins must see work agents do in projects the admin was never added to; a membership-only Home would
+    hide that activity from the people overseeing it. The permission check lives inside the same statement
+    so Home's query budget does not grow."""
+    codes = ("project.view_all", "*")
+    via_role = (select(literal(1)).select_from(profile_roles)
+                .join(RolePermission, RolePermission.role_id == profile_roles.c.role_id)
+                .join(Permission, Permission.id == RolePermission.permission_id)
+                .where(profile_roles.c.profile_id == profile.id, Permission.codename.in_(codes)).exists())
+    via_extra = (select(literal(1)).select_from(ProfilePermission)
+                 .join(Permission, Permission.id == ProfilePermission.permission_id)
+                 .where(ProfilePermission.profile_id == profile.id, Permission.codename.in_(codes)).exists())
+    member = Project.id.in_(select(ProjectMember.project_id).where(ProjectMember.profile_id == profile.id))
+    read_all = or_(literal(bool(getattr(profile, "is_system", False))), via_role, via_extra)
+    return db.query(Project).filter(or_(read_all, member)).order_by(Project.created_at.desc()).all()
 
 
 def task_stats_by_project(db, project_ids: list[str], now: datetime) -> dict[str, dict]:

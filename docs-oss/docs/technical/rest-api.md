@@ -105,7 +105,7 @@ The in-app preview (`AttachmentPreview.jsx`) reuses `GET /api/attachments/{id}/d
 
 ## Home page
 
-`GET /api/home` returns everything the Home page renders in a single response, scoped to the projects you are a member of:
+`GET /api/home` returns everything the Home page renders in a single response, scoped to the projects you are a member of, or to every project in your org if you hold `project.view_all` (admins), so work agents do in projects an admin was never added to stays visible:
 
 | Field | Contents |
 |---|---|
