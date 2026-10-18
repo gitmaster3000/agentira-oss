@@ -5,7 +5,7 @@ schema; it shares only **login**, the **selected project**, and API credentials.
 
 ## Configure
 
-Build-time, no runtime request: set `VITE_CONNECTED_APPS` for the frontend build (empty or invalid hides the switcher).
+Build-time, no runtime request: set `VITE_CONNECTED_APPS` for the frontend build (empty or invalid hides the switcher). With docker compose it is forwarded as a build arg, so put it in the environment or `.env` used for `docker compose up --build frontend`; changing it needs a frontend rebuild, not just a restart.
 
 ```bash
 VITE_CONNECTED_APPS='[{"key":"easeign","name":"Easeign","description":"Design, mockups & prototypes","url":"http://localhost:4400"}]'

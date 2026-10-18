@@ -34,6 +34,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_CONNECTED_APPS: ${VITE_CONNECTED_APPS:-}
     depends_on:
       - backend
 
