@@ -5,27 +5,12 @@ import { ProjectLayout } from './pages/ProjectLayout';
 import { Board } from './pages/Board';
 import { Backlog } from './pages/Backlog';
 import { ProjectOverview } from './pages/ProjectOverview';
-import { ProjectSettings } from './pages/ProjectSettings';
-import { RoadmapView } from './components/RoadmapView/RoadmapView';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
-import { Signup } from './pages/Signup';
-import { ForgotPassword } from './pages/ForgotPassword';
-import { ResetPassword } from './pages/ResetPassword';
 import { ForcePasswordChange } from './components/ForcePasswordChange';
-import { GitHubCallback } from './pages/GitHubCallback';
-import { CliAuth } from './pages/CliAuth';
-import { Settings } from './pages/Settings';
 import { Home } from './pages/Home';
 import { TaskPage } from './pages/TaskPage';
-import { EpicPage } from './pages/EpicPage';
-import { ProjectEpics } from './pages/ProjectEpics';
-import { Inbox } from './pages/Inbox';
-import { MyWork } from './pages/MyWork';
-import { Workflow } from './pages/Workflow';
-import { Deploy } from './pages/Deploy';
-import { DevGlow } from './pages/DevGlow';
 import { ForgeLayout } from './pages/forge/ForgeLayout';
 // Lazy loaded for perf (AP-433): these are heavier surfaces; split them out of main bundle to speed initial load and reduce memory pressure on deploy/other flows.
 // These pages use named exports (no `export default`) — lazy() resolves
@@ -40,6 +25,23 @@ const RunsDashboard = lazy(() => import('./pages/forge/RunsDashboard').then(m =>
 const RunDetail = lazy(() => import('./pages/forge/RunDetail').then(m => ({ default: m.RunDetail })));
 const ConductorPage = lazy(() => import('./pages/forge/ConductorPage').then(m => ({ default: m.ConductorPage })));
 const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m => ({ default: m.ForgeSettings })));
+// Secondary surfaces: split out of the main bundle (named exports -> map to default).
+const page = (load, name) => lazy(() => load().then(m => ({ default: m[name] })));
+const ProjectSettings = page(() => import('./pages/ProjectSettings'), 'ProjectSettings');
+const RoadmapView = page(() => import('./components/RoadmapView/RoadmapView'), 'RoadmapView');
+const Signup = page(() => import('./pages/Signup'), 'Signup');
+const ForgotPassword = page(() => import('./pages/ForgotPassword'), 'ForgotPassword');
+const ResetPassword = page(() => import('./pages/ResetPassword'), 'ResetPassword');
+const GitHubCallback = page(() => import('./pages/GitHubCallback'), 'GitHubCallback');
+const CliAuth = page(() => import('./pages/CliAuth'), 'CliAuth');
+const Settings = page(() => import('./pages/Settings'), 'Settings');
+const EpicPage = page(() => import('./pages/EpicPage'), 'EpicPage');
+const ProjectEpics = page(() => import('./pages/ProjectEpics'), 'ProjectEpics');
+const Inbox = page(() => import('./pages/Inbox'), 'Inbox');
+const MyWork = page(() => import('./pages/MyWork'), 'MyWork');
+const Workflow = page(() => import('./pages/Workflow'), 'Workflow');
+const Deploy = page(() => import('./pages/Deploy'), 'Deploy');
+const DevGlow = page(() => import('./pages/DevGlow'), 'DevGlow');
 import { ROUTES } from './routes';
 import { PreviewBanner } from './components/PreviewBanner';
 
@@ -77,6 +79,7 @@ export default function App() {
         <AuthProvider>
             <PreviewBanner />
             <BrowserRouter>
+                <Suspense fallback={null}>
                 <Routes>
                     {/* Public routes */}
                     <Route path={ROUTES.WELCOME} element={<RedirectIfAuth><Landing /></RedirectIfAuth>} />
@@ -142,6 +145,7 @@ export default function App() {
                     {/* Catch-all */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
+                </Suspense>
             </BrowserRouter>
         </AuthProvider>
     );
