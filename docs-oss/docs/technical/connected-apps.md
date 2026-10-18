@@ -11,6 +11,10 @@ Build-time, no runtime request: set `VITE_CONNECTED_APPS` for the frontend build
 VITE_CONNECTED_APPS='[{"key":"easeign","name":"Easeign","description":"Design, mockups & prototypes","url":"http://localhost:4400"}]'
 ```
 
+### Railway
+
+The frontend service builds from `frontend/Dockerfile` (Root Directory `frontend`). Railway passes service variables to Docker builds as build args for every `ARG` the Dockerfile declares, so set `VITE_CONNECTED_APPS` as a variable on the **frontend** service and redeploy (a variable change triggers a rebuild). Use the connected app's public **HTTPS** URL: a form POST from an HTTPS page to an `http://` URL is blocked or warned by browsers. Leave it unset to keep the switcher hidden. The compose build arg is only for local compose; Railway does not read it.
+
 ## What an app must do
 
 1. **Handoff.** The switcher form-POSTs `token` (the user's Agentira JWT) and `project` (current project id) to `<url>/auth/handoff`.
