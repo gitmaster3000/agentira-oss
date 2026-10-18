@@ -1984,7 +1984,8 @@ def _profile(db, actor: str):
 
 def build_home(db, prof) -> dict:
     now = datetime.now(timezone.utc)
-    projects = projects_repo.member_projects(db, prof.id)
+    # Read-all principals (admins) see every project, members only theirs: one query, see projects_repo.home_projects.
+    projects = projects_repo.home_projects(db, prof)
     ids = [p.id for p in projects]
     stats = projects_repo.task_stats_by_project(db, ids, now) if ids else {}
     trend = projects_repo.done_trend_by_project(db, ids, now) if ids else {}

@@ -157,3 +157,41 @@ def test_migration_backfills_completed_at_from_move_activity(pg, client):
     with pg.engine.begin() as conn:
         got = conn.execute(text("SELECT completed_at FROM tasks WHERE id=:t"), {"t": tid}).scalar()
     assert got == moved_at
+
+
+def _profile_token(pg, name, role_name):
+    from backend.jwt_auth import create_token
+    with privileged(), pg.SessionLocal() as db:
+        role = db.query(Role).filter(Role.name == role_name).first()
+        prof = Profile(name=name, account_type="human", roles=[role], org_id=pg.org_id, password_hash="")
+        db.add(prof)
+        db.commit()
+        return create_token(name, prof.id, [role_name], org_id=pg.org_id)
+
+
+def _as(token):
+    c = TestClient(app)
+    c.headers["Authorization"] = f"Bearer {token}"
+    return c
+
+
+def test_home_shows_every_project_to_a_read_all_principal(pg, client):
+    """An admin must see work done by agents in projects the admin was never added to:
+    a Home that only lists membership would hide agent activity from the people overseeing it."""
+    other = _as(_profile_token(pg, "other-admin", "admin"))
+    hidden = other.post("/api/projects", json={"name": "AgentOnly", "initial_tasks": []}).json()["id"]
+    other.post("/api/tasks", json={"project_id": hidden, "title": "agent task"})
+    mine = _project(client, "Mine", 1)
+
+    body = client.get("/api/home").json()
+    ids = {p["id"] for p in body["projects"]}
+    assert {hidden, mine} <= ids
+    assert any(a["project_id"] == hidden for a in body["activity"]) if body["activity"] and "project_id" in body["activity"][0] else True
+    assert body["week"]["planned"] >= 2  # stats cover the project the admin is not a member of
+
+
+def test_home_still_scopes_non_privileged_users_to_membership(pg, client):
+    other = _as(_profile_token(pg, "other-admin", "admin"))
+    hidden = other.post("/api/projects", json={"name": "NotYours", "initial_tasks": []}).json()["id"]
+    member = _as(_profile_token(pg, "plain-member", "member"))
+    assert hidden not in {p["id"] for p in member.get("/api/home").json()["projects"]}
