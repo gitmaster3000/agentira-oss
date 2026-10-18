@@ -55,6 +55,7 @@ Evidence providers need GitHub App credentials. Without them, `github_pr`, `ci`,
 |---|---|
 | `MCP_HOST` | Bind address |
 | `MCP_PORT` | Bind port |
+| `MCP_PUBLIC_URL` | Public https address of the MCP service (OAuth). Optional on Railway: derived from the request when unset. |
 
 ## Dispatch and WebSocket
 
