@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { Suspense, useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink, Link } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
@@ -383,7 +383,7 @@ export function ProjectLayout() {
                 )}
 
                 <div className={`flex-1 ${isDeployView ? 'overflow-auto' : 'overflow-hidden'} relative`}>
-                    <Outlet context={filters} />
+                    <Suspense fallback={null}><Outlet context={filters} /></Suspense>
                 </div>
             </div>
 

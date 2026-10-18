@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useState, useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { AppSidebar } from './shell/AppSidebar';
 import { AppTopbar } from './shell/AppTopbar';
@@ -43,7 +43,7 @@ export function Layout() {
                     {isBuild && <AppSidebar open={navOpen} railOpen={railOpen} onToggleRail={() => setRailOpen((o) => !o)} />}
                     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: 'var(--surface-base)', border: '1px solid var(--overlay-tint)', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--shadow-panel)' }}>
                         <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                            <Outlet />
+                            <Suspense fallback={null}><Outlet /></Suspense>
                         </div>
                     </main>
                 </div>

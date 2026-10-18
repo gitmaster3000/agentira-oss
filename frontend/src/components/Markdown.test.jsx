@@ -1,11 +1,12 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { Markdown } from './Markdown';
 
 describe('Markdown — code rendering', () => {
-    it('renders inline code inline, not as a code block', () => {
+    it('renders inline code inline, not as a code block', async () => {
         const { container } = render(<Markdown>{'use the `npm run dev` command'}</Markdown>);
+        await waitFor(() => expect(container.querySelector('code')).not.toBeNull());
         const code = container.querySelector('code');
         expect(code).not.toBeNull();
         expect(code.textContent).toBe('npm run dev');
@@ -14,16 +15,18 @@ describe('Markdown — code rendering', () => {
         expect(container.querySelector('pre')).toBeNull();
     });
 
-    it('still renders fenced blocks as blocks, with the language label', () => {
+    it('still renders fenced blocks as blocks, with the language label', async () => {
         const { container } = render(<Markdown>{'```js\nconst a = 1;\n```'}</Markdown>);
+        await waitFor(() => expect(container.querySelector('code')).not.toBeNull());
         const pre = container.querySelector('pre');
         expect(pre).not.toBeNull();
         expect(pre.textContent).toContain('const a = 1;');
         expect(screen.getByText('js')).toBeInTheDocument();
     });
 
-    it('renders a fenced block without a language as a block', () => {
+    it('renders a fenced block without a language as a block', async () => {
         const { container } = render(<Markdown>{'```\nplain block\n```'}</Markdown>);
+        await waitFor(() => expect(container.querySelector('code')).not.toBeNull());
         const pre = container.querySelector('pre');
         expect(pre).not.toBeNull();
         expect(pre.textContent).toContain('plain block');
