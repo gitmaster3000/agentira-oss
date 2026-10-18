@@ -8,6 +8,10 @@ COPY . .
 # Railway passes the deployed commit; telemetry tags every event with it.
 ARG RAILWAY_GIT_COMMIT_SHA=local
 ENV VITE_RELEASE=$RAILWAY_GIT_COMMIT_SHA
+# Connected apps for the top-bar app switcher (JSON array, see docs-oss/docs/technical/connected-apps.md).
+# Build-time: empty/unset hides the switcher.
+ARG VITE_CONNECTED_APPS=
+ENV VITE_CONNECTED_APPS=$VITE_CONNECTED_APPS
 RUN npm run build
 
 FROM nginx:alpine
