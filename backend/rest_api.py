@@ -9,8 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+import logging
 import os
 import httpx
+from sqlalchemy.exc import IntegrityError
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 
@@ -898,6 +900,28 @@ def api_reverify_deploy_provider(project_id: str):
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+_delete_log = logging.getLogger("agentira.delete")
+
+
+def _delete_entity(kind: str, entity_id: str, actor: str, delete_fn) -> dict:
+    """AP-705: one delete path for tasks/epics/projects — 404 when missing,
+    PermissionError -> 403 via the app handler, a lingering FK reference ->
+    409 (never a raw 500), and every outcome logged with actor + id."""
+    try:
+        deleted = delete_fn(entity_id, actor=actor)
+    except IntegrityError:
+        _delete_log.exception("delete %s=%s by %s blocked by FK reference",
+                              kind, entity_id, actor)
+        raise HTTPException(
+            409, f"This {kind} can't be deleted because other records still "
+                 "depend on it. Nothing was changed.")
+    if not deleted:
+        _delete_log.info("delete %s=%s by %s: not found", kind, entity_id, actor)
+        raise HTTPException(404, f"{kind.capitalize()} not found")
+    _delete_log.info("deleted %s=%s by %s", kind, entity_id, actor)
+    return {"ok": True}
+
+
 @projects.delete("/{project_id}/deploy/provider", status_code=204)
 def api_disconnect_deploy_provider(project_id: str):
     """Detach the provider and tear down any live previews it owns."""
@@ -962,9 +986,7 @@ def api_deployment_logs(project_id: str, deployment_id: str, cursor: int = Query
 
 @projects.delete("/{project_id}")
 def api_delete_project(project_id: str, actor: str = Depends(get_current_user)):
-    if not services.delete_project(project_id, actor=actor):
-        raise HTTPException(404, "Project not found")
-    return {"ok": True}
+    return _delete_entity("project", project_id, actor, services.delete_project)
 
 @projects.get("/{project_id}/members")
 def api_list_project_members(project_id: str, actor: str = Depends(get_current_user)):
@@ -1401,9 +1423,7 @@ def api_remove_link(task_id: str, link_id: str,
 
 @tasks.delete("/{task_id}")
 def api_delete_task(task_id: str, actor: str = Depends(get_current_user)):
-    if not services.delete_task(task_id, actor=actor):
-        raise HTTPException(404, "Task not found")
-    return {"ok": True}
+    return _delete_entity("task", task_id, actor, services.delete_task)
 
 @tasks.post("/{task_id}/move")
 def api_move_task(task_id: str, body: TaskMove, actor: str = Depends(get_current_user)):
@@ -1635,9 +1655,7 @@ def api_update_epic(epic_id: str, body: EpicUpdate, actor: str = Depends(get_cur
 
 @epics_router.delete("/{epic_id}")
 def api_delete_epic(epic_id: str, actor: str = Depends(get_current_user)):
-    if not services.delete_epic(epic_id, actor=actor):
-        raise HTTPException(404, "Epic not found")
-    return {"ok": True}
+    return _delete_entity("epic", epic_id, actor, services.delete_epic)
 
 
 # AP-351: epic planning — the editable default prompt for the modal, and the

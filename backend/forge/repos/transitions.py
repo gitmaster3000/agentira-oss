@@ -57,3 +57,15 @@ def has_driver_event_for_run(db, *, task_id: str, run_id: str,
     if since is not None:
         q = q.filter(TransitionEvent.created_at >= since)
     return q.first() is not None
+
+
+def delete_for_tasks(db, task_ids: list[str]) -> None:
+    """Hard-delete the audit rows (transition_events, gate_evaluations) of
+    tasks that are being deleted. Both FK to tasks.id with no ORM cascade, so
+    any task that ever changed status would otherwise FK-block its own delete
+    (AP-705). Caller owns the commit."""
+    if not task_ids:
+        return
+    for model in (TransitionEvent, GateEvaluation):
+        db.query(model).filter(model.task_id.in_(task_ids)).delete(
+            synchronize_session=False)
