@@ -112,7 +112,8 @@ def delete_with_children(db, task: Task) -> None:
     """Delete a task and its dependent rows in one transaction (no commit).
 
     `activities`, `attachments`, and `commits` already cascade via the ORM
-    relationships on Task. The gap is `forge_runs.task_id`: it has no cascade,
+    relationships on Task. The gaps are `transition_events` / `gate_evaluations`
+    (AP-705) and `forge_runs.task_id`: it has no cascade,
     so a task that's been worked by an agent has a Run row that blocks the
     delete with an IntegrityError (the AP-284 500). Runs are 1:1 with tasks and
     nothing references `forge_runs.id`, so hard-delete them first.
@@ -120,6 +121,9 @@ def delete_with_children(db, task: Task) -> None:
     from backend.forge.models import Run
 
     db.query(Run).filter(Run.task_id == task.id).delete(synchronize_session=False)
+    # AP-705: audit rows FK to tasks.id with no ORM cascade.
+    from backend.forge.repos import transitions
+    transitions.delete_for_tasks(db, [task.id])
 
     # Attachment ROWS cascade via the ORM relationship, but the files on disk
     # would be orphaned — remove them while we still have the paths.

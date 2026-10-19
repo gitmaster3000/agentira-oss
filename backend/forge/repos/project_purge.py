@@ -11,6 +11,7 @@ from sqlalchemy import or_
 
 from backend.forge.models import (Run, Conversation, AgentMessage,
                                   QueuedMessage, Agent)
+from backend.forge.repos import transitions
 
 
 def purge_project_data(db, *, project_id: str, task_ids: list[str]) -> None:
@@ -23,6 +24,9 @@ def purge_project_data(db, *, project_id: str, task_ids: list[str]) -> None:
     run_scopes = [f"run:{r.id}" for r in runs]
     for r in runs:
         db.delete(r)
+
+    # AP-705: audit rows FK to tasks.id with no ORM cascade.
+    transitions.delete_for_tasks(db, task_ids)
 
     # Chat rows are keyed by a string scope_key (no FK): the project chat,
     # each task chat, and any legacy per-run scope.
