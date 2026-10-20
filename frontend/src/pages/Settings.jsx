@@ -10,7 +10,7 @@ import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
-const EASEIGN_MCP_URL = import.meta.env.VITE_EASEIGN_MCP_URL || 'https://easeign-production.up.railway.app/mcp';
+const EZINE_MCP_URL = import.meta.env.VITE_EZINE_MCP_URL || 'https://easeign-production.up.railway.app/mcp';
 
 const roleBadge = (role) => ({
     backgroundColor: role === 'admin' ? 'rgba(239,68,68,0.12)' : role === 'viewer' ? 'rgba(96,165,250,0.12)' : 'rgba(46,204,113,0.12)',
@@ -829,7 +829,7 @@ export function Settings() {
                             Copy a link, then in Claude add it as a custom connector. You pick the identity when Claude connects.
                         </p>
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                            <AccentBtn onClick={() => copyMcpLink(EASEIGN_MCP_URL, 'Easeign')}><Copy style={{ width: 12, height: 12 }} /> Copy Easeign MCP link</AccentBtn>
+                            <AccentBtn onClick={() => copyMcpLink(EZINE_MCP_URL, 'Ezine')}><Copy style={{ width: 12, height: 12 }} /> Copy Ezine MCP link</AccentBtn>
                             <AccentBtn onClick={async () => {
                                 try {
                                     const { mcp_url } = await api.getAuthConfig();
