@@ -1664,6 +1664,7 @@ function ConfigTab({ agent, onSaved }) {
         mcp_servers: Array.isArray(agent.mcp_servers) ? agent.mcp_servers : [],
         mcp_disabled: Array.isArray(agent.mcp_disabled) ? agent.mcp_disabled : [],
         mcp_strict: !!agent.mcp_strict,
+        mcp_tool_allow: agent.mcp_tool_allow && typeof agent.mcp_tool_allow === 'object' ? agent.mcp_tool_allow : {},
         mcp_config_override: agent.mcp_config_override || '',
         home_path: agent.home_path || '',
         // Conductor cadence config (only rendered for the Conductor).
@@ -1715,13 +1716,39 @@ function ConfigTab({ agent, onSaved }) {
             next = { ...form, mcp_disabled: nextDisabled };
         } else {
             const current = form.mcp_servers || [];
-            const nextList = current.includes(name)
-                ? current.filter((s) => s !== name)
-                : [...current, name];
+            const turningOn = !current.includes(name);
+            const nextList = turningOn
+                ? [...current, name]
+                : current.filter((s) => s !== name);
             next = { ...form, mcp_servers: nextList };
+            // New org-registered server: start read-only when the server says
+            // which tools are safe; otherwise all tools (narrow below).
+            const readOnly = (regEntry?.tools || []).filter((t) => t.read_only).map((t) => t.name);
+            if (turningOn && regEntry?.custom && readOnly.length) {
+                next.mcp_tool_allow = { ...form.mcp_tool_allow, [name]: readOnly };
+            }
         }
         setForm(next);
         // Persist immediately so the chip change matches the live config.
+        try {
+            await api.forge.updateAgent(agent.id, next);
+            const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
+            if (preview && preview.mcp_config) setMcpConfig(preview.mcp_config);
+            onSaved();
+        } catch (err) {
+            setMsg('Error: ' + err.message);
+        }
+    };
+
+    // Per-tool allow-list: no entry = every tool; an entry = only those.
+    const toggleTool = async (server, tool, allTools) => {
+        const allowed = form.mcp_tool_allow[server] ?? allTools;
+        const nextAllowed = allowed.includes(tool) ? allowed.filter((t) => t !== tool) : [...allowed, tool];
+        const map = { ...form.mcp_tool_allow };
+        if (allTools.every((t) => nextAllowed.includes(t))) delete map[server];
+        else map[server] = nextAllowed;
+        const next = { ...form, mcp_tool_allow: map };
+        setForm(next);
         try {
             await api.forge.updateAgent(agent.id, next);
             const preview = await api.forge.getDispatchPreview(agent.id).catch(() => null);
@@ -2006,6 +2033,33 @@ function ConfigTab({ agent, onSaved }) {
                             })()}
                         </div>
                     </div>
+
+                    {/* Tools of each org-registered server this agent uses */}
+                    {mcpServers.filter((s) => s.custom && form.mcp_servers.includes(s.name)).map((s) => {
+                        const names = (s.tools || []).map((t) => t.name);
+                        const allowed = form.mcp_tool_allow[s.name] ?? names;
+                        return (
+                            <div key={`tools-${s.name}`} className="rounded-md border border-border-subtle p-2.5 space-y-1.5">
+                                <div className="text-xs font-semibold text-text-secondary">
+                                    <code className="font-mono">{s.name}</code> tools
+                                    <span className="ml-2 font-normal text-text-tertiary">{allowed.length} of {names.length} allowed</span>
+                                </div>
+                                {names.length === 0 && (
+                                    <div className="text-[11px] text-text-tertiary">No tools found yet. Open Settings → Connections and press Test.</div>
+                                )}
+                                {(s.tools || []).map((t) => (
+                                    <label key={t.name} className="flex items-start gap-2 text-xs cursor-pointer" title={t.description}>
+                                        <input type="checkbox" className="mt-0.5" checked={allowed.includes(t.name)} onChange={() => toggleTool(s.name, t.name, names)} />
+                                        <span>
+                                            <code className="font-mono">{t.name}</code>
+                                            {t.read_only ? <span className="ml-1.5 text-[10px] uppercase tracking-wider text-text-tertiary">read-only</span> : <span className="ml-1.5 text-[10px] uppercase tracking-wider text-text-tertiary">can change things</span>}
+                                            {t.description && <span className="block text-[11px] text-text-tertiary">{t.description}</span>}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        );
+                    })}
 
                     {/* Live config preview + edit mode */}
                     <div className="pt-2 mt-1 border-t border-border-subtle space-y-1.5">

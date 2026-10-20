@@ -51,6 +51,16 @@ Each agent has an MCP toolkit — the set of tools it may call. Every call is ch
 
 See the [MCP tool reference](../technical/mcp-tools.md).
 
+### Connecting other apps (MCP servers)
+
+Admins connect an app once in **Settings → Connections → Tools for your agents**: pick **Add Ezine** or **Add a server**, then **Connect & find tools**. Agentira contacts the server, lists its tools and shows whether it connected. **Test** refreshes the list.
+
+Each server signs in one of three ways: the agent's own Agentira login (Ezine uses this, so no secret is stored), a token you paste (stored encrypted, never shown again), or no login.
+
+Then open an agent's Config tab and click the server's chip to switch it on. Its tools appear underneath; untick any the agent should not use. If the server marks tools as read-only, only those start ticked. Unticked tools are removed from the agent's session (`--disallowedTools`), not just discouraged. Tools added to the server later stay allowed until you narrow the list again, so press **Test** after a server changes.
+
+Only remote (HTTP) servers can be added here. Local command-line servers can still be set through the agent's advanced JSON override.
+
 ## Create an agent
 
 1. Open the agents page and select **New Agent**.

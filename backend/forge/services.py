@@ -445,6 +445,9 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
             json.loads(a.profile.mcp_disabled) if (a.profile and a.profile.mcp_disabled) else []
         ),
         "mcp_strict": bool(a.profile.mcp_strict) if a.profile else False,
+        "mcp_tool_allow": (
+            json.loads(a.profile.mcp_tool_allow) if (a.profile and a.profile.mcp_tool_allow) else {}
+        ),
         "mcp_config_override": (a.profile.mcp_config_override if a.profile else "") or "",
         "home_path": (a.profile.home_path if a.profile else None) or resolve_agent_home(a),
         # System agent (Conductor/Concierge) — UI hides delete + offers
@@ -994,7 +997,7 @@ def create_agent(*, profile_id: str | None = None, name: str, executor_type: str
 _AGENT_TO_PROFILE_MIRROR = {
     "name", "model", "system_prompt", "personality", "runtime_id",
     "default_project_id", "mcp_servers", "webhook_url", "mcp_strict",
-    "mcp_config_override", "mcp_disabled", "home_path",
+    "mcp_config_override", "mcp_disabled", "mcp_tool_allow", "home_path",
     # AP-80 Conductor — these live on Profile (not Agent).
     "conductor_enabled", "max_concurrent_runs",
     # Conductor cadence config (only meaningful on the Conductor profile).
@@ -1028,6 +1031,8 @@ def update_agent(agent_id: str, **fields) -> dict | None:
             fields["mcp_servers"] = json.dumps(list(fields["mcp_servers"]))
         if "mcp_disabled" in fields and fields["mcp_disabled"] is not None:
             fields["mcp_disabled"] = json.dumps(list(fields["mcp_disabled"]))
+        if "mcp_tool_allow" in fields and fields["mcp_tool_allow"] is not None:
+            fields["mcp_tool_allow"] = json.dumps(dict(fields["mcp_tool_allow"]))
         # AP-155: empty-string from the UI clears the override (back to
         # workspace default). Validate against the known modes. Applied
         # below the skip-None loop because None IS the legitimate "clear"
@@ -1135,6 +1140,7 @@ def dispatch_preview(agent_id: str, *, project_id: str | None = None) -> dict:
             agent_api_key=(prof.api_key if prof else None),
             mcp_config_override=(prof.mcp_config_override if prof else None),
             disabled_servers=(json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None),
+            tool_allow=(prof.mcp_tool_allow if prof else None),
             agent_home_path=resolve_agent_home(a),
             repo_path=repo_path or None,
         )
@@ -1230,10 +1236,12 @@ def list_agent_projects(agent_id: str) -> list[dict]:
 
 
 def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
-    """Expose the MCP registry to the frontend's agent edit form. By
-    default hides auto-injected servers — users can't toggle them."""
+    """Expose the MCP registry to the frontend's agent edit form: built-ins
+    plus the org's registered servers (with their cached tools). By default
+    hides auto-injected servers — users can't toggle them."""
+    from backend.forge import mcp_servers
     from backend.forge.mcp_registry import list_servers
-    return list_servers(include_auto=include_auto)
+    return list_servers(include_auto=include_auto) + mcp_servers.picker_entries()
 
 
 def delete_agent(agent_id: str) -> bool:
@@ -3136,6 +3144,7 @@ def dispatch_pending_run(*, run_id: str,
         prof = db.get(_Profile, agent.profile_id) if agent.profile_id else None
         agent_api_key = prof.api_key if prof else None
         agent_mcp_strict = bool(prof.mcp_strict) if prof else False
+        agent_mcp_tool_allow = prof.mcp_tool_allow if prof else None
         agent_mcp_override = prof.mcp_config_override if prof else None
         agent_mcp_disabled = (
             _json.loads(prof.mcp_disabled) if (prof and prof.mcp_disabled) else None
@@ -3153,6 +3162,7 @@ def dispatch_pending_run(*, run_id: str,
         agent_api_key=agent_api_key,
         mcp_config_override=agent_mcp_override,
         disabled_servers=agent_mcp_disabled,
+        tool_allow=agent_mcp_tool_allow,
         agent_home_path=agent_home,
         repo_path=repo_path or None,
     )
@@ -4838,6 +4848,7 @@ def send_runtime_message(
                 agent_api_key=(agent_prof.api_key if agent_prof else None),
                 mcp_config_override=(agent_prof.mcp_config_override if agent_prof else None),
                 disabled_servers=(json.loads(agent_prof.mcp_disabled) if (agent_prof and agent_prof.mcp_disabled) else None),
+                tool_allow=(agent_prof.mcp_tool_allow if agent_prof else None),
                 agent_home_path=home_path_for_memory,
                 repo_path=repo_path if proj else None,
             )

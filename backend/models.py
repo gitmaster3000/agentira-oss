@@ -218,6 +218,10 @@ class Profile(Base):
     # named "agentira" or "memory" replaces the auto-injected one.
     # Lets users add custom servers without modifying mcp_registry.py.
     mcp_config_override: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Per-tool allow-list for registry servers: JSON {server: [tool, ...]}.
+    # A server missing from the map exposes all its tools; one present
+    # exposes only the listed ones (enforced via --disallowedTools).
+    mcp_tool_allow: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     # User-provided secrets injected into the dispatched runtime's env
     # (GH_TOKEN, OPENAI_API_KEY, etc.). JSON object {KEY: VALUE}.
     env_vars: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
@@ -462,6 +466,33 @@ class DeployCredential(Base):
     token_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
     token_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class McpServer(Base):
+    """An org-wide MCP server agents can be given (e.g. Ezine).
+
+    Remote HTTP servers only — a stdio entry would run an arbitrary command on
+    the daemon host. `auth_mode`: none | bearer (static `token`, encrypted at
+    rest via `backend.secret_box`) | agent_key (the agent's own Agentira API
+    key, sent as Bearer). `tools` caches the last probe as a JSON list of
+    {name, description, read_only}; the token is never serialized to a client.
+    """
+    __tablename__ = "mcp_servers"
+    __table_args__ = (UniqueConstraint("org_id", "name", name="uq_mcp_server_org_name"),)
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    auth_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    token: Mapped[str | None] = mapped_column(String(1000), nullable=True, default=None)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    tools: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    status_detail: Mapped[str | None] = mapped_column(String(300), nullable=True, default=None)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 

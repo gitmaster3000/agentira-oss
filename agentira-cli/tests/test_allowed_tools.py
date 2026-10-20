@@ -73,3 +73,21 @@ def test_derive_handles_missing_mcp_servers_key():
     out = _derive_allowed_tools(json.dumps({}), "claude")
     assert "Read" in out
     assert not any(t.startswith("mcp__") for t in out)
+
+
+# ── _split_disallowed ──────────────────────────────────────────────────
+
+def test_split_disallowed_strips_backend_key_and_returns_tools():
+    from agentira_cli.daemon.executor import _split_disallowed
+    cfg = json.dumps({"mcpServers": {"ezine": {}}, "agentiraDisallowedTools": ["mcp__ezine__update_node"]})
+    clean, denied = _split_disallowed(cfg)
+    assert json.loads(clean) == {"mcpServers": {"ezine": {}}}
+    assert denied == ("mcp__ezine__update_node",)
+
+
+def test_split_disallowed_passthrough_when_absent_or_invalid():
+    from agentira_cli.daemon.executor import _split_disallowed
+    cfg = json.dumps({"mcpServers": {}})
+    assert _split_disallowed(cfg) == (cfg, ())
+    assert _split_disallowed(None) == (None, ())
+    assert _split_disallowed("{not json") == ("{not json", ())
