@@ -10,7 +10,7 @@ import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
-const EZINE_MCP_URL = import.meta.env.VITE_EZINE_MCP_URL || 'https://easeign-production.up.railway.app/mcp';
+const EZINE_MCP_URL = import.meta.env.VITE_EZINE_MCP_URL || 'https://ezine.up.railway.app/mcp';
 
 const roleBadge = (role) => ({
     backgroundColor: role === 'admin' ? 'rgba(239,68,68,0.12)' : role === 'viewer' ? 'rgba(96,165,250,0.12)' : 'rgba(46,204,113,0.12)',
