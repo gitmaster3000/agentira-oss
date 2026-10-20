@@ -8,7 +8,7 @@ schema; it shares only **login**, the **selected project**, and API credentials.
 Build-time, no runtime request: set `VITE_CONNECTED_APPS` for the frontend build (empty or invalid hides the switcher). With docker compose it is forwarded as a build arg, so put it in the environment or `.env` used for `docker compose up --build frontend`; changing it needs a frontend rebuild, not just a restart.
 
 ```bash
-VITE_CONNECTED_APPS='[{"key":"easeign","name":"Easeign","description":"Design, mockups & prototypes","url":"http://localhost:4400"}]'
+VITE_CONNECTED_APPS='[{"key":"ezine","name":"Ezine","description":"Design, mockups & prototypes","url":"http://localhost:4400"}]'
 ```
 
 ### Railway
@@ -25,4 +25,4 @@ The frontend service builds from `frontend/Dockerfile` (Root Directory `frontend
 2. **API / MCP auth.** Accept the same Agentira API key as `Authorization: Bearer`, validated via `/api/profiles/me`.
 3. **Projects.** List projects with `GET /api/projects` using the caller's token; scope app data to project membership.
 
-Reference implementation: Easeign (`agentira-auth.mjs`, `POST /auth/handoff`).
+Reference implementation: Ezine (`agentira-auth.mjs`, `POST /auth/handoff`).

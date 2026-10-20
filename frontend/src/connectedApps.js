@@ -1,5 +1,5 @@
 // Connected apps shown in the top-bar app switcher (Google/Atlassian style).
-// Static, build-time: VITE_CONNECTED_APPS='[{"key":"easeign","name":"Easeign","description":"Design & prototypes","url":"http://localhost:4400"}]'
+// Static, build-time: VITE_CONNECTED_APPS='[{"key":"ezine","name":"Ezine","description":"Design & prototypes","url":"http://localhost:4400"}]'
 // No request is made to render the switcher; empty/invalid config hides it.
 function parse(raw) {
     try {

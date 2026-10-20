@@ -10,6 +10,7 @@ import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
+const EZINE_MCP_URL = import.meta.env.VITE_EZINE_MCP_URL || 'https://ezine.up.railway.app/mcp';
 
 const roleBadge = (role) => ({
     backgroundColor: role === 'admin' ? 'rgba(239,68,68,0.12)' : role === 'viewer' ? 'rgba(96,165,250,0.12)' : 'rgba(46,204,113,0.12)',
@@ -559,6 +560,13 @@ export function Settings() {
         });
     }
 
+    async function copyMcpLink(url, label) {
+        try {
+            await navigator.clipboard.writeText(url);
+            alert(`${label} MCP link copied. In Claude, add it as a custom connector.`);
+        } catch (err) { alert("Failed to copy link: " + err.message); }
+    }
+
     async function copyLink(agentName) {
         try {
             const { mcp_url } = await api.getAuthConfig();
@@ -687,6 +695,7 @@ export function Settings() {
                     <NavItem active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>My profile</NavItem>
                     <NavItem active={activeTab === 'security'} onClick={() => setActiveTab('security')}>Security</NavItem>
                     <NavItem active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')}>Appearance</NavItem>
+                    <NavItem active={activeTab === 'connections'} onClick={() => setActiveTab('connections')}>Connections</NavItem>
                 </NavSection>
 
                 {isAdmin && (
@@ -811,6 +820,26 @@ export function Settings() {
 
                 {/* ── Appearance ─────────────────────────────────────────── */}
                 {activeTab === 'appearance' && <AppearanceSettings />}
+
+                {/* ── Connections ────────────────────────────────────────── */}
+                {activeTab === 'connections' && (
+                    <div style={{ maxWidth: 580 }}>
+                        <h2 style={{ fontSize: 17, fontWeight: 600, margin: '0 0 4px', color: 'var(--text-primary)' }}>Connections</h2>
+                        <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 24px' }}>
+                            Copy a link, then in Claude add it as a custom connector. You pick the identity when Claude connects.
+                        </p>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <AccentBtn onClick={() => copyMcpLink(EZINE_MCP_URL, 'Ezine')}><Copy style={{ width: 12, height: 12 }} /> Copy Ezine MCP link</AccentBtn>
+                            <AccentBtn onClick={async () => {
+                                try {
+                                    const { mcp_url } = await api.getAuthConfig();
+                                    if (!mcp_url) { alert("MCP address is not configured (set MCP_PUBLIC_URL)."); return; }
+                                    await copyMcpLink(`${mcp_url}/mcp`, 'Agentira');
+                                } catch (err) { alert("Failed to copy link: " + err.message); }
+                            }}><Copy style={{ width: 12, height: 12 }} /> Copy Agentira MCP link</AccentBtn>
+                        </div>
+                    </div>
+                )}
 
                 {/* ── Members (admin) ────────────────────────────────────── */}
                 {activeTab === 'members' && isAdmin && (
