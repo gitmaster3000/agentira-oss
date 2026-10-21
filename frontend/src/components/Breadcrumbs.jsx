@@ -67,16 +67,10 @@ const BUILDERS = {
 };
 
 export function Breadcrumbs({ entity, data, opts, items }) {
-    let resolved = items;
-    if (!resolved && entity) {
-        const build = BUILDERS[entity];
-        if (!build) {
-            console.warn(`Breadcrumbs: no builder for entity "${entity}"`);
-            return null;
-        }
-        resolved = build(data, opts);
-    }
-    const key = JSON.stringify(resolved || []);
+    const build = BUILDERS[entity];
+    if (!items && entity && !build) console.warn(`Breadcrumbs: no builder for entity "${entity}"`);
+    const resolved = items || (build ? build(data, opts) : []);
+    const key = JSON.stringify(resolved);
     useEffect(() => {
         setCrumbs(JSON.parse(key));
         return () => setCrumbs([]);
