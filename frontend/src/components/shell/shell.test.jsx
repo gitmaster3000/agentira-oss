@@ -6,6 +6,7 @@ import { AppSidebar } from './AppSidebar';
 import { AppTopbar } from './AppTopbar';
 import { ShellDataProvider } from './shellData';
 import { api } from '../../api';
+import { setCrumbs } from './crumbs';
 import { setCurrentProjectId } from '../../currentProject';
 
 // The shell chrome is a port of Agentira.dc.html. These tests pin the two
@@ -205,6 +206,17 @@ describe('AppTopbar — blended bar', () => {
         expect(screen.queryByText('Acme Inc')).not.toBeInTheDocument();
         expect(screen.getByPlaceholderText('Search or jump…')).toBeInTheDocument();
         expect(screen.getByText('⌘K')).toBeInTheDocument();
+    });
+
+    it('shows the published page path next to Work | Build, links navigate, last item is plain text', async () => {
+        mountTopbar();
+        await switcher();
+        act(() => setCrumbs([{ label: 'Work', to: '/studio' }, { label: 'Beacon', to: '/studio/project/p1/roadmap' }, { label: 'AP-1' }]));
+        const crumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
+        expect(within(crumb).getByText('AP-1').tagName).toBe('SPAN');
+        fireEvent.click(within(crumb).getByText('Beacon'));
+        expect(await screen.findByText('ROADMAP')).toBeInTheDocument();
+        act(() => setCrumbs([]));
     });
 
     it('searches as you type, groups results, and navigates on click', async () => {

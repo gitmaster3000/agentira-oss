@@ -13,6 +13,7 @@ import { keepSameActivity, keepSameJson } from '../lib/pollState';
 import { useVisiblePoll } from '../lib/useVisiblePoll';
 import { useShellData } from '../components/shell/shellData';
 import { ROUTES } from '../routes';
+import { Breadcrumbs } from '../components/Breadcrumbs';
 import { setCurrentProjectId } from '../currentProject';
 import {
     Check,
@@ -267,6 +268,7 @@ function TaskPageBody() {
 
     return (
         <div className="flex-1 bg-bg-app overflow-y-auto">
+            <Breadcrumbs entity="task" data={task} />
             <div className="max-w-[1700px] mx-auto px-6 pb-5">
                 {/* Title and tabs stay put while the page scrolls to the
                     discussion, so you never lose track of which task you're in. */}
