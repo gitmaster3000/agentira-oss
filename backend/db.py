@@ -230,7 +230,7 @@ _ORG_SCOPED_TABLES = [
     "task_dependencies", "milestones",
     "activities", "attachments", "profile_permissions",
     "forge_agents", "forge_runtimes", "deploy_credentials",
-    "client_debug_sessions",
+    "client_debug_sessions", "mcp_servers",
 ]
 
 # Default org id used to backfill pre-tenancy rows so org_id can go NOT NULL.
@@ -696,6 +696,7 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "mcp_disabled", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_strict", "BOOLEAN DEFAULT FALSE NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "mcp_config_override", "TEXT")
+            runtime_added |= _ensure_column(conn, "profiles", "mcp_tool_allow", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "env_vars", "TEXT")
             runtime_added |= _ensure_column(conn, "profiles", "home_path", "VARCHAR(500)")
             # AP-80 Conductor: opt-in autonomous task pickup

@@ -708,6 +708,11 @@ export const api = {
         getRuntime: (id) => request(`/forge/runtimes/${id}`),
         listAgentProjects: (agentId) => request(`/forge/agents/${agentId}/projects`),
         listMcpServers: (includeAuto = true) => request(`/forge/mcp-servers?include_auto=${includeAuto}`),
+        listMcpRegistry: () => request('/forge/mcp-registry'),
+        addMcpServer: (body) => request('/forge/mcp-registry', { method: 'POST', body: JSON.stringify(body) }),
+        updateMcpServer: (id, body) => request(`/forge/mcp-registry/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+        testMcpServer: (id) => request(`/forge/mcp-registry/${id}/test`, { method: 'POST' }),
+        deleteMcpServer: (id) => request(`/forge/mcp-registry/${id}`, { method: 'DELETE' }),
         getDispatchPreview: (agentId, projectId) => request(
             `/forge/agents/${agentId}/dispatch-preview${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`
         ),

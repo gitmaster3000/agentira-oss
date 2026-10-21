@@ -3,11 +3,11 @@
 from __future__ import annotations
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, Depends
+from fastapi import APIRouter, HTTPException, Request, WebSocket, Depends
 
 from pydantic import BaseModel, Field
 
-from backend.forge import services
+from backend.forge import mcp_servers, services
 from backend.jwt_auth import get_current_user, require_admin
 
 router = APIRouter(prefix="/api/forge", tags=["forge"])
@@ -54,6 +54,7 @@ class AgentUpdate(BaseModel):
     mcp_disabled: Optional[list[str]] = None
     mcp_strict: Optional[bool] = None
     mcp_config_override: Optional[str] = None
+    mcp_tool_allow: Optional[dict[str, list[str]]] = None
     home_path: Optional[str] = None
     # AP-80 Conductor opt-in
     conductor_enabled: Optional[bool] = None
@@ -337,6 +338,69 @@ def list_mcp_servers(include_auto: bool = False):
     hides auto-injected servers (agentira, memory) — those ride on every
     run regardless of the agent's selection."""
     return services.list_mcp_servers(include_auto=include_auto)
+
+
+class McpServerCreate(BaseModel):
+    name: str
+    url: str
+    description: str = ""
+    auth_mode: str = "none"
+    token: Optional[str] = None
+
+
+class McpServerUpdate(BaseModel):
+    url: Optional[str] = None
+    description: Optional[str] = None
+    auth_mode: Optional[str] = None
+    token: Optional[str] = None  # write-only; "" clears
+    enabled: Optional[bool] = None
+
+
+def _bearer(request: Request) -> str | None:
+    auth = request.headers.get("authorization", "")
+    return auth[7:] if auth.lower().startswith("bearer ") else None
+
+
+@router.get("/mcp-registry", dependencies=[Depends(require_admin)])
+def list_mcp_registry():
+    """Org-registered MCP servers with status and cached tools (no secrets)."""
+    return mcp_servers.list_view()
+
+
+@router.post("/mcp-registry", status_code=201, dependencies=[Depends(require_admin)])
+def add_mcp_server(body: McpServerCreate, request: Request):
+    try:
+        return mcp_servers.create(**body.model_dump(), bearer=_bearer(request))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.patch("/mcp-registry/{server_id}", dependencies=[Depends(require_admin)])
+def update_mcp_server(server_id: str, body: McpServerUpdate, request: Request):
+    try:
+        out = mcp_servers.update(server_id, body.model_dump(exclude_unset=True),
+                                 bearer=_bearer(request))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if out is None:
+        raise HTTPException(404, "MCP server not found")
+    return out
+
+
+@router.post("/mcp-registry/{server_id}/test", dependencies=[Depends(require_admin)])
+def test_mcp_server(server_id: str, request: Request):
+    """Reconnect and refresh the server's tool list."""
+    out = mcp_servers.test(server_id, bearer=_bearer(request))
+    if out is None:
+        raise HTTPException(404, "MCP server not found")
+    return out
+
+
+@router.delete("/mcp-registry/{server_id}", dependencies=[Depends(require_admin)])
+def delete_mcp_server(server_id: str):
+    if not mcp_servers.delete(server_id):
+        raise HTTPException(404, "MCP server not found")
+    return {"ok": True}
 
 
 # ── Agent endpoints ──────────────────────────────────────────────────────

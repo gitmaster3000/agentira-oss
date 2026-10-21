@@ -57,9 +57,19 @@ REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
+def _load_custom_servers() -> dict[str, dict[str, Any]]:
+    """Enabled org-registered servers (mcp_servers table), by name."""
+    from backend.db import SessionLocal
+    from backend.forge.repos import mcp_servers as repo
+
+    with SessionLocal() as db:
+        return repo.runtime_map(db)
+
+
 def list_servers(*, include_auto: bool = True) -> list[dict[str, Any]]:
-    """Return the registry as a list. Default includes auto servers; the
-    UI picker should pass include_auto=False to hide them."""
+    """Return the built-in registry as a list. Default includes auto
+    servers; the UI picker should pass include_auto=False to hide them.
+    Org-registered servers are listed by `services.list_mcp_servers`."""
     out = []
     for name, defn in REGISTRY.items():
         if not include_auto and defn.get("auto"):
@@ -90,6 +100,8 @@ def build_mcp_config(
     agent_home_path: str | None = None,
     repo_path: str | None = None,
     memory_root: str = "~/.agentira/memory",
+    custom_servers: dict[str, dict[str, Any]] | None = None,
+    tool_allow: str | dict | None = None,
 ) -> dict[str, Any]:
     """Resolve which MCP servers a run gets and produce the JSON config the
     daemon will write to a tmpfile and pass via --mcp-config.
@@ -103,6 +115,12 @@ def build_mcp_config(
       - The `memory` server's MEMORY_FILE_PATH is scoped per
         (agent_id, project_id) so the same agent on different projects
         gets different memory.
+      - Org-registered servers (`custom_servers`, loaded from the DB when
+        omitted) are opt-in like any non-auto server. `tool_allow`
+        ({server: [tool, ...]}) limits one to the listed tools: the rest
+        are emitted under the `agentiraDisallowedTools` key, which the
+        daemon turns into --disallowedTools and strips before claude
+        reads the file.
       - Unknown server names in agent_mcp_servers are silently dropped —
         the registry is the source of truth and we don't fail a dispatch
         on a stale agent config.
@@ -110,6 +128,9 @@ def build_mcp_config(
     Returns the dict shape claude/codex expect for --mcp-config:
       {"mcpServers": {name: {<server-definition>}, ...}}
     """
+    if custom_servers is None:
+        custom_servers = _load_custom_servers()
+    registry = {**custom_servers, **REGISTRY}  # built-ins win name clashes
     selected = set()
     # auto servers always
     for name, defn in REGISTRY.items():
@@ -120,14 +141,18 @@ def build_mcp_config(
             selected.add(name)
     # agent's choices, filtered against the registry
     for name in agent_mcp_servers or []:
-        if name in REGISTRY and not REGISTRY[name].get("auto"):
+        if name in registry and not registry[name].get("auto"):
             selected.add(name)
 
     mcp_servers: dict[str, Any] = {}
     for name in selected:
-        defn = REGISTRY[name]
+        defn = registry[name]
         if defn["transport"] == "http":
             entry: dict[str, Any] = {"type": "http", "url": defn["url"]}
+            if defn.get("auth_mode") == "bearer" and defn.get("token"):
+                entry["headers"] = {"Authorization": f"Bearer {defn['token']}"}
+            elif defn.get("auth_mode") == "agent_key" and agent_api_key:
+                entry["headers"] = {"Authorization": f"Bearer {agent_api_key}"}
             # Bake the agent's own API key as the Bearer header so this
             # agent's MCP calls authenticate AS itself — actions attribute
             # correctly in audit/activity feeds. The registry says which
@@ -198,4 +223,26 @@ def build_mcp_config(
         for name in disabled_servers:
             mcp_servers.pop(name, None)
 
-    return {"mcpServers": mcp_servers}
+    config: dict[str, Any] = {"mcpServers": mcp_servers}
+    denied = _denied_tools(mcp_servers, custom_servers, tool_allow)
+    if denied:
+        config["agentiraDisallowedTools"] = denied
+    return config
+
+
+def _denied_tools(mcp_servers, custom_servers, tool_allow) -> list[str]:
+    """`mcp__<server>__<tool>` for every known tool outside the agent's
+    allow-list on a server that has one."""
+    if isinstance(tool_allow, str):
+        import json as _json
+
+        try:
+            tool_allow = _json.loads(tool_allow) if tool_allow.strip() else None
+        except ValueError:
+            tool_allow = None
+    denied: list[str] = []
+    for server, allowed in (tool_allow or {}).items():
+        if server in mcp_servers and server in custom_servers and isinstance(allowed, list):
+            denied += [f"mcp__{server}__{t}" for t in custom_servers[server].get("tool_names", [])
+                       if t not in allowed]
+    return denied

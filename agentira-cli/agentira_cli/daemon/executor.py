@@ -76,6 +76,22 @@ def _derive_allowed_tools(mcp_config_json: Optional[str], provider: str) -> tupl
     return tuple(builtins + servers)
 
 
+def _split_disallowed(mcp_config_json: Optional[str]) -> tuple[Optional[str], tuple[str, ...]]:
+    """Pull the backend's `agentiraDisallowedTools` (per-tool allow-lists on
+    registry MCP servers) out of the config so claude never sees the foreign
+    key. Returns (config json to write, tools to pass to --disallowedTools)."""
+    if not mcp_config_json:
+        return mcp_config_json, ()
+    try:
+        cfg = json.loads(mcp_config_json)
+    except (TypeError, ValueError):
+        return mcp_config_json, ()
+    if not isinstance(cfg, dict) or "agentiraDisallowedTools" not in cfg:
+        return mcp_config_json, ()
+    denied = cfg.pop("agentiraDisallowedTools") or []
+    return json.dumps(cfg), tuple(t for t in denied if isinstance(t, str))
+
+
 def _crash_tail(recent) -> str:
     """Render the last few stream events as human-readable crash context.
 
@@ -158,6 +174,7 @@ async def run_cli_stream(
     stderr_log_f = None
 
     try:
+        mcp_config_json, disallowed_tools = _split_disallowed(mcp_config_json)
         if mcp_config_json:
             mcp_config_path = _write_mcp_config(mcp_config_json)
             if getattr(runtime_cls, "provider", "") == "grok":
@@ -192,6 +209,8 @@ async def run_cli_stream(
             resume_session_id=resume_session_id,
             allowed_tools=allowed_tools,
         )
+        if disallowed_tools and getattr(runtime_cls, "provider", "") == "claude":
+            args += ["--disallowedTools", " ".join(disallowed_tools)]
 
         runtime_env = dict(env_extra or {})
         if mcp_config_json:
