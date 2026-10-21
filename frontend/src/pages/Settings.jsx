@@ -7,6 +7,7 @@ import { Bot, Key, Lock, Trash2, Plus, Shield, Copy, Check, User, ChevronRight, 
 import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 import { UserAvatar } from '../components/UserAvatar';
 import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
+import { NotificationSettings } from '../components/settings/NotificationSettings';
 import { McpServersPanel } from '../components/settings/McpServersPanel';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
@@ -696,6 +697,7 @@ export function Settings() {
                     <NavItem active={activeTab === 'profile'} onClick={() => setActiveTab('profile')}>My profile</NavItem>
                     <NavItem active={activeTab === 'security'} onClick={() => setActiveTab('security')}>Security</NavItem>
                     <NavItem active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')}>Appearance</NavItem>
+                    <NavItem active={activeTab === 'notifications'} onClick={() => setActiveTab('notifications')}>Notifications</NavItem>
                     <NavItem active={activeTab === 'connections'} onClick={() => setActiveTab('connections')}>Connections</NavItem>
                 </NavSection>
 
@@ -821,6 +823,7 @@ export function Settings() {
 
                 {/* ── Appearance ─────────────────────────────────────────── */}
                 {activeTab === 'appearance' && <AppearanceSettings />}
+                {activeTab === 'notifications' && <NotificationSettings />}
 
                 {/* ── Connections ────────────────────────────────────────── */}
                 {activeTab === 'connections' && (

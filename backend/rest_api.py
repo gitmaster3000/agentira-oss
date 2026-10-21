@@ -18,6 +18,8 @@ from google.auth.transport import requests as google_requests
 
 from backend import email_sender
 from backend import invites
+from backend import notify_dispatch
+from backend.repos import notification_prefs as notification_prefs_repo
 from backend import services
 from backend import task_batch
 from backend import task_graph
@@ -1790,6 +1792,67 @@ def api_mark_notification_read(notification_id: str, actor: str = Depends(get_cu
         actor_profile_id = prof.id if prof else None
     if not services.mark_notification_read(notification_id, actor_profile_id=actor_profile_id):
         raise HTTPException(404, "Notification not found or not yours")
+    return {"ok": True}
+
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeBody(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+class PushUnsubscribeBody(BaseModel):
+    endpoint: str
+
+
+def _me(db, actor: str):
+    prof = services._get_profile_by_name(db, actor)
+    if not prof:
+        raise HTTPException(404, "Profile not found")
+    return prof
+
+
+@notifications.get("/preferences")
+def api_get_notification_prefs(actor: str = Depends(get_current_user)):
+    with services._session() as db:
+        return notify_dispatch.load_prefs(db, _me(db, actor).id)
+
+
+@notifications.put("/preferences")
+def api_set_notification_prefs(body: dict[str, dict[str, bool]], actor: str = Depends(get_current_user)):
+    with services._session() as db:
+        prof = _me(db, actor)
+        try:
+            prefs = notify_dispatch.save_prefs(db, prof.id, body, org_id=prof.org_id)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        db.commit()
+        return prefs
+
+
+@notifications.get("/push/public-key")
+def api_push_public_key():
+    return {"key": os.getenv("VAPID_PUBLIC_KEY", "")}
+
+
+@notifications.post("/push/subscribe")
+def api_push_subscribe(body: PushSubscribeBody, actor: str = Depends(get_current_user)):
+    with services._session() as db:
+        notification_prefs_repo.upsert_subscription(
+            db, _me(db, actor), body.endpoint, body.keys.p256dh, body.keys.auth)
+        db.commit()
+    return {"ok": True}
+
+
+@notifications.post("/push/unsubscribe")
+def api_push_unsubscribe(body: PushUnsubscribeBody, actor: str = Depends(get_current_user)):
+    with services._session() as db:
+        notification_prefs_repo.delete_subscription(db, body.endpoint, _me(db, actor).id)
+        db.commit()
     return {"ok": True}
 
 

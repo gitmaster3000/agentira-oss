@@ -19,6 +19,7 @@ dependencies = [
     "APScheduler>=3.10.0",
     "PyYAML>=6.0",
     "bcrypt>=4.0.0",
+    "pywebpush>=2.0.0",
 ]
 
 [project.optional-dependencies]

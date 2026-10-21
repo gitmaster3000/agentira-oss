@@ -26,6 +26,8 @@ function studioLink(link) {
     if (!link) return null;
     const task = link.match(/^\/tasks\/(.+)$/);
     if (task) return `/studio/tasks/${task[1]}`;
+    const epic = link.match(/^\/epics\/(.+)$/);
+    if (epic) return `/studio/epics/${epic[1]}`;
     const proj = link.match(/^\/projects\/(.+)$/);
     if (proj) return `/studio/project/${proj[1]}/overview`;
     return link;

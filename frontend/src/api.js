@@ -569,6 +569,11 @@ export const api = {
     // Notifications
     getNotifications: (unreadOnly = true) => request(`/notifications?unread_only=${unreadOnly}`),
     markNotificationRead: (id) => request(`/notifications/${id}/read`, { method: 'PATCH' }),
+    getNotificationPrefs: () => request('/notifications/preferences'),
+    setNotificationPrefs: (patch) => request('/notifications/preferences', { method: 'PUT', body: JSON.stringify(patch) }),
+    getPushPublicKey: () => request('/notifications/push/public-key'),
+    pushSubscribe: (sub) => request('/notifications/push/subscribe', { method: 'POST', body: JSON.stringify(sub) }),
+    pushUnsubscribe: (endpoint) => request('/notifications/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
 
     // Global search
     search: (q) => request(`/search?q=${encodeURIComponent(q)}`),

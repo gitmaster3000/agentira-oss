@@ -329,6 +329,29 @@ class Notification(Base):
     profile: Mapped["Profile"] = relationship(back_populates="notifications")
 
 
+class NotificationPref(Base):
+    """Per-user delivery choices for creation events: JSON {event: {channel: bool}}.
+    Missing keys fall back to backend.notify_dispatch.DEFAULTS."""
+    __tablename__ = "notification_prefs"
+
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    prefs: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+
+
+class PushSubscription(Base):
+    """A browser/phone Web Push endpoint registered by a user."""
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    profile_id: Mapped[str] = mapped_column(ForeignKey("profiles.id"), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
