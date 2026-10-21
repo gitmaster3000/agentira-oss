@@ -17,7 +17,8 @@ from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor as _conductor
 from backend.forge import concierge as _concierge
-from backend.forge.models import ForgeRuntime, RuntimeStatus
+from backend.forge.models import (Conversation, ForgeRuntime, QueuedMessage,
+                                  RuntimeStatus, WebhookLog)
 
 
 @pytest.fixture(autouse=True)
@@ -82,6 +83,21 @@ def test_normal_agent_can_be_deleted(test_db):
                                         runtime_id=rt_id)
     assert forge_services.delete_agent(agent["id"]) is True
     assert forge_services.get_agent(agent["id"]) is None
+
+
+def test_agent_with_chat_history_can_be_deleted(test_db):
+    rt_id = _seed_runtime(test_db)
+    agent = forge_services.create_agent(name="worker", executor_type="cli",
+                                        runtime_id=rt_id)
+    aid = agent["id"]
+    db = bdb.SessionLocal()
+    db.add_all([Conversation(agent_id=aid, scope_key="chat:x"),
+                QueuedMessage(agent_id=aid, scope_key="chat:x", content="hi"),
+                WebhookLog(agent_id=aid)])
+    db.commit()
+    db.close()
+    assert forge_services.delete_agent(aid) is True
+    assert forge_services.get_agent(aid) is None
 
 
 # ── conductor cadence config ───────────────────────────────────────────
