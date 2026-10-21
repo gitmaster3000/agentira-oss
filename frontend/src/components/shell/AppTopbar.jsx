@@ -7,6 +7,7 @@ import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
 import { ThemeToggle } from '../ThemeToggle';
 import { AppSwitcher } from './AppSwitcher';
+import { useCrumbs } from './crumbs';
 import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
 // Top bar per home-dashboard.html: logo, Work | Build, spacer, search, New,
@@ -43,6 +44,7 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
     const bellRef = useRef(null);
     const userRef = useRef(null);
 
+    const crumbs = useCrumbs();
     const unread = notifs.filter((n) => !n.read).length;
 
     useEffect(() => {
@@ -120,6 +122,19 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                 <button onClick={() => navigate('/studio')} aria-pressed={!isBuild} style={SWITCH_BTN(!isBuild)}>Work</button>
                 <button onClick={() => navigate('/forge')} aria-pressed={isBuild} style={SWITCH_BTN(isBuild)}>Build</button>
             </div>
+
+            {crumbs.length > 0 && (
+                <nav aria-label="Breadcrumb" className="shell-hide-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                    {crumbs.map((c, i) => (
+                        <React.Fragment key={i}>
+                            {i > 0 && <span aria-hidden="true">›</span>}
+                            {i === crumbs.length - 1 || !c.to
+                                ? <span title={c.label} style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.label}</span>
+                                : <a href={c.to} title={c.label} onClick={(e) => { e.preventDefault(); navigate(c.to); }} style={{ color: 'inherit', textDecoration: 'none', whiteSpace: 'nowrap' }}>{c.label}</a>}
+                        </React.Fragment>
+                    ))}
+                </nav>
+            )}
 
             <div style={{ flex: 1 }} />
 

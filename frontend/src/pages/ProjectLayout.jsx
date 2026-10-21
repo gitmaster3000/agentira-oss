@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Outlet, useLocation, useNavigate, NavLink } from 'react-router-dom';
 import { api } from '../api';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
 import { CreateTaskModal } from '../components/CreateTaskModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { X, ChevronDown, Users, Plus } from 'lucide-react';
 import { CreateEpicModal } from '../components/CreateEpicModal';
+import { Breadcrumbs } from '../components/Breadcrumbs';
 import { ROUTES } from '../routes';
 import { setCurrentProjectId } from '../currentProject';
 import { UserAvatar } from '../components/UserAvatar';
@@ -349,11 +350,7 @@ export function ProjectLayout() {
         <div className={`flex flex-row h-full ${isDeployView ? '' : 'overflow-hidden'} w-full relative`}>
             <div className={`flex flex-col flex-1 ${isDeployView ? '' : 'overflow-hidden'} min-w-0`}>
                 <header className="shrink-0 border-b">
-                    <nav aria-label="Breadcrumb" className="px-4 pt-3 flex items-center gap-2 text-[13px] text-text-tertiary">
-                        <Link to={ROUTES.STUDIO} className="hover:text-accent-primary">Home</Link>
-                        <span>/</span>
-                        <span className="truncate">{board.project.name}</span>
-                    </nav>
+                    <Breadcrumbs items={[{ label: 'Work', to: ROUTES.STUDIO }, { label: board.project.name }]} />
                     <div className="px-4 pt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <span className="text-[11px] font-bold tracking-wider rounded-md px-2 py-1 bg-bg-app border text-text-secondary" style={{ fontFamily: 'ui-monospace,monospace' }}>{board.project.key_prefix || 'PROJ'}</span>
                         <h2 className="text-title-lg font-medium truncate min-w-0">{board.project.name}</h2>

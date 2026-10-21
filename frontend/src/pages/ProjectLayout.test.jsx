@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import { getSnapshot } from '../components/shell/crumbs';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ProjectLayout } from './ProjectLayout';
 import { api } from '../api';
@@ -48,7 +49,6 @@ describe('ProjectLayout header', () => {
         mount('/studio/project/p1/board');
         expect(await screen.findByText('ATL')).toBeInTheDocument();
         expect(screen.getByRole('heading', { name: 'Atlas' })).toBeInTheDocument();
-        expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Home')).toBeInTheDocument();
         expect(screen.getByText('Members')).toBeInTheDocument();
         const nav = screen.getByRole('navigation', { name: 'Project sections' });
         expect(nav.querySelectorAll('a, [aria-disabled]')).toHaveLength(10);
@@ -63,12 +63,12 @@ describe('ProjectLayout header', () => {
         expect(screen.queryByPlaceholderText('Search board')).not.toBeInTheDocument();
     });
 
-    it('shows a Home / project breadcrumb on Overview only, and the description moves to the page', async () => {
+    it('publishes a Work / project path to the top bar and moves the description to the page', async () => {
         api.getBoard.mockResolvedValue({ project: { id: 'p1', name: 'Atlas', key_prefix: 'ATL', description: 'Maps for everyone' }, columns: {} });
         mount('/studio/project/p1/overview');
-        const crumb = await screen.findByRole('navigation', { name: 'Breadcrumb' });
-        expect(crumb).toHaveTextContent('Home');
-        expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/studio');
+        await screen.findByText('ATL');
+        expect(JSON.parse(getSnapshot())).toEqual([{ label: 'Work', to: '/studio' }, { label: 'Atlas' }]);
+        expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
         expect(screen.queryByText('Maps for everyone')).not.toBeInTheDocument();
     });
 
