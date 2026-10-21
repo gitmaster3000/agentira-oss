@@ -1239,6 +1239,7 @@ def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
 def delete_agent(agent_id: str) -> bool:
     """Delete an agent. System agents (Conductor, Concierge) are protected
     — they're seeded by Agentira and the workspace depends on them."""
+    from backend.forge.repos import agents as agents_repo
     with _session() as db:
         a = db.query(Agent).filter(Agent.id == agent_id).first()
         if not a:
@@ -1248,7 +1249,7 @@ def delete_agent(agent_id: str) -> bool:
             raise ValueError(
                 f"{a.name} is a system agent and cannot be deleted."
             )
-        db.delete(a)
+        agents_repo.delete_agent_rows(db, a)
         db.commit()
         return True
 
