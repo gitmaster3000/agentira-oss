@@ -5,11 +5,9 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.forge import mcp_probe
 from backend.forge.mcp_registry import build_mcp_config
 from backend.rest_api import app
 
@@ -69,58 +67,6 @@ def test_tool_allow_accepts_json_string_and_ignores_unlisted_servers():
 def test_no_allow_list_means_all_tools_and_no_key():
     assert "agentiraDisallowedTools" not in _cfg()
     assert "agentiraDisallowedTools" not in _cfg(tool_allow="not json")
-
-
-# ── probe ────────────────────────────────────────────────────────────────
-
-def _probe_with(handler, **kw):
-    real = httpx.Client
-    with patch.object(mcp_probe.httpx, "Client",
-                      lambda **k: real(transport=httpx.MockTransport(handler), **k)):
-        return mcp_probe.probe_tools("https://x.test/mcp", **kw)
-
-
-def _rpc(result, sse=False):
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": result})
-    if sse:
-        return httpx.Response(200, text=f"event: message\ndata: {body}\n\n",
-                              headers={"content-type": "text/event-stream"})
-    return httpx.Response(200, json=json.loads(body))
-
-
-@pytest.mark.parametrize("sse", [False, True])
-def test_probe_lists_tools(sse):
-    seen = []
-
-    def handler(req):
-        method = json.loads(req.content)["method"]
-        seen.append((method, req.headers.get("authorization")))
-        if method == "tools/list":
-            return _rpc({"tools": [
-                {"name": "get_doc", "description": "Read a doc",
-                 "annotations": {"readOnlyHint": True}},
-                {"name": "update_node"}]}, sse)
-        return _rpc({}, sse) if method == "initialize" else httpx.Response(202)
-
-    out = _probe_with(handler, bearer="tok")
-    assert out == {"ok": True, "tools": [
-        {"name": "get_doc", "description": "Read a doc", "read_only": True},
-        {"name": "update_node", "description": "", "read_only": False}]}
-    assert [m for m, _ in seen] == ["initialize", "notifications/initialized", "tools/list"]
-    assert all(a == "Bearer tok" for _, a in seen)
-
-
-def test_probe_reports_rejected_credentials_in_plain_words():
-    out = _probe_with(lambda req: httpx.Response(401))
-    assert out["ok"] is False and "rejected the credentials" in out["error"]
-
-
-def test_probe_reports_unreachable_server():
-    def boom(req):
-        raise httpx.ConnectError("nope")
-
-    out = _probe_with(boom)
-    assert out["ok"] is False and "Could not reach" in out["error"]
 
 
 # ── REST ─────────────────────────────────────────────────────────────────

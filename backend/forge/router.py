@@ -367,6 +367,13 @@ def list_mcp_registry():
     return mcp_servers.list_view()
 
 
+@router.get("/mcp-registry/host", dependencies=[Depends(require_admin)])
+def list_host_mcp_servers():
+    """MCP servers in the daemon host's own config, checked from the host."""
+    from backend.forge import daemon_probe
+    return daemon_probe.host_servers()
+
+
 @router.post("/mcp-registry", status_code=201, dependencies=[Depends(require_admin)])
 def add_mcp_server(body: McpServerCreate, request: Request):
     try:

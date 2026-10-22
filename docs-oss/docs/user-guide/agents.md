@@ -53,11 +53,13 @@ See the [MCP tool reference](../technical/mcp-tools.md).
 
 ### Connecting other apps (MCP servers)
 
-Admins connect an app once in **Settings → Connections → Tools for your agents**: pick **Add Ezine** or **Add a server**, then **Connect & find tools**. Agentira contacts the server, lists its tools and shows whether it connected. **Test** refreshes the list.
+Admins connect an app once in **Build → MCP Servers**: pick **Add Ezine** or **Add a server**, then **Connect & find tools**. Your daemon contacts the server from your machine (the same place agents run), lists its tools and shows whether it connected, so the status matches what agents will actually get. If no daemon is online the page says so instead of guessing. **Test** refreshes the list. The same page lists apps already set up on your machine under **On this machine**, with the same check.
+
+A connected server with the same name as one on your machine replaces it for agents; the page warns when that happens.
 
 Each server signs in one of three ways: the agent's own Agentira login (Ezine uses this, so no secret is stored), a token you paste (stored encrypted, never shown again), or no login.
 
-Then open an agent's Config tab and click the server's chip to switch it on. Its tools appear underneath; untick any the agent should not use. If the server marks tools as read-only, only those start ticked. Unticked tools are removed from the agent's session (`--disallowedTools`), not just discouraged. Tools added to the server later stay allowed until you narrow the list again, so press **Test** after a server changes.
+Tick an agent's name under a server on that page (or click the server's chip in the agent's Config tab) to switch it on for that agent. Its tools appear underneath; untick any the agent should not use. If the server marks tools as read-only, only those start ticked. Unticked tools are removed from the agent's session (`--disallowedTools`), not just discouraged. Tools added to the server later stay allowed until you narrow the list again, so press **Test** after a server changes.
 
 Only remote (HTTP) servers can be added here. Local command-line servers can still be set through the agent's advanced JSON override.
 

@@ -41,9 +41,11 @@ DISPATCH_REDELIVER_TTL_S = float(os.environ.get("FORGE_DISPATCH_REDELIVER_TTL_S"
 
 
 class DaemonConnection:
-    def __init__(self, ws: "WebSocket", daemon_id: str, runtime_ids: list[str]) -> None:
+    def __init__(self, ws: "WebSocket", daemon_id: str, runtime_ids: list[str],
+                 org_id: str | None = None) -> None:
         self.ws = ws
         self.daemon_id = daemon_id
+        self.org_id = org_id
         self.runtime_ids: set[str] = set(runtime_ids)
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=_SEND_BUF)
         self._seen: deque = deque(maxlen=_DEDUP_RING)
@@ -74,8 +76,12 @@ class WsHub:
     def __init__(self) -> None:
         self._conns: dict[str, DaemonConnection] = {}  # daemon_id → conn
         self._lock = asyncio.Lock()
+        # Request/reply over the daemon socket (MCP probes): request_id → future.
+        self._pending: dict[str, asyncio.Future] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def connect(self, conn: DaemonConnection) -> None:
+        self._loop = asyncio.get_running_loop()
         async with self._lock:
             old = self._conns.get(conn.daemon_id)
             self._conns[conn.daemon_id] = conn
@@ -330,6 +336,41 @@ class WsHub:
             logger.info("Dispatched cancel trace=%s run=%s → daemon=%s",
                         trace_id or "-", run_id or "-", conn.daemon_id[:8])
 
+    async def request(self, frame: dict, *, org_id: str | None, timeout: float = 15.0) -> dict | None:
+        """Send `frame` to one of `org_id`'s daemons and wait for its reply.
+        None when no such daemon is online or it doesn't answer in time."""
+        import uuid
+        async with self._lock:
+            conn = next((c for c in self._conns.values() if c.org_id == org_id), None)
+        if conn is None:
+            return None
+        rid = uuid.uuid4().hex
+        fut = asyncio.get_running_loop().create_future()
+        self._pending[rid] = fut
+        try:
+            await conn.send(rid, {**frame, "request_id": rid})
+            return await asyncio.wait_for(fut, timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._pending.pop(rid, None)
+
+    def resolve(self, reply: dict) -> None:
+        fut = self._pending.get(reply.get("request_id", ""))
+        if fut is not None and not fut.done():
+            fut.set_result(reply)
+
+    def request_sync(self, frame: dict, *, org_id: str | None, timeout: float = 15.0) -> dict | None:
+        """`request` for sync callers (threadpool routes)."""
+        if self._loop is None:
+            return None
+        fut = asyncio.run_coroutine_threadsafe(
+            self.request(frame, org_id=org_id, timeout=timeout), self._loop)
+        try:
+            return fut.result(timeout + 2)
+        except Exception:  # noqa: BLE001 — loop gone / cancelled
+            return None
+
     def connected_daemon_ids(self) -> list[str]:
         return list(self._conns.keys())
 
@@ -557,7 +598,7 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
         logger.warning("daemon ws: dropped %d unowned runtime_ids for org %s",
                        len(dropped), org_id)
 
-    conn = DaemonConnection(ws, daemon_id, runtime_ids)
+    conn = DaemonConnection(ws, daemon_id, runtime_ids, org_id=org_id)
     await hub.connect(conn)
 
     # ADR 009 / B5: ack the registration as the first frame so the daemon
@@ -598,6 +639,8 @@ async def handle_daemon_ws(ws: "WebSocket") -> None:
                 frame = None
             if isinstance(frame, dict) and frame.get("type") == "ping":
                 await ws.send_json({"type": "pong"})
+            elif isinstance(frame, dict) and frame.get("type") == "reply":
+                hub.resolve(frame)
     except (WebSocketDisconnect, Exception):
         pass
     finally:

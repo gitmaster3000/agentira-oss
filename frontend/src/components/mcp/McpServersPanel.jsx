@@ -15,7 +15,7 @@ const primary = { ...btn, background: 'var(--accent-primary)', color: 'var(--acc
 const statusText = (s) => (s.status === 'ok' ? `Connected · ${s.tools.length} tools` : s.status === 'error' ? s.status_detail || 'Could not connect' : 'Not tested yet');
 const statusColor = (s) => (s.status === 'ok' ? '#2ecc71' : s.status === 'error' ? '#f87171' : 'var(--text-muted)');
 
-function ServerRow({ server, onChange }) {
+function ServerRow({ server, onChange, agents, onToggleAgent, clash }) {
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const run = async (fn) => {
@@ -35,6 +35,23 @@ function ServerRow({ server, onChange }) {
             <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
                 {server.description || server.url} · Signs in with {AUTH_LABELS[server.auth_mode].toLowerCase()}
             </div>
+            {clash && (
+                <div style={{ fontSize: 11.5, color: '#f59e0b', marginTop: 4 }}>
+                    This has the same name as a server on this machine. Agents get this one, so rename one of them.
+                </div>
+            )}
+            {server.enabled && agents.length > 0 && (
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 8 }}>
+                    {agents.map((a) => (
+                        <label key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                            <input type="checkbox" aria-label={`${a.name} can use ${server.name}`}
+                                checked={(a.mcp_servers || []).includes(server.name)}
+                                onChange={() => onToggleAgent(a, server)} />
+                            {a.name}
+                        </label>
+                    ))}
+                </div>
+            )}
             {server.tools.length > 0 && (
                 <>
                     <button style={{ ...btn, border: 'none', padding: '6px 0 0', color: 'var(--accent-primary)' }} onClick={() => setOpen(!open)}>
@@ -52,14 +69,61 @@ function ServerRow({ server, onChange }) {
     );
 }
 
+const hostStatus = (h) => (h.ok === null ? 'Runs on your machine' : h.ok ? `Connected · ${h.tools.length} tools` : h.error || 'Could not connect');
+const hostColor = (h) => (h.ok === null ? 'var(--text-muted)' : h.ok ? '#2ecc71' : '#f87171');
+
+function HostSection({ host }) {
+    return (
+        <div style={{ marginTop: 28 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px', color: 'var(--text-primary)' }}>On this machine</h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                Apps already set up on the computer your agents run on. Checked from that computer.
+            </p>
+            {host && !host.checked && (
+                <div style={{ fontSize: 12.5, color: '#f59e0b' }}>No daemon is online, so this machine could not be checked. Start the daemon and reload.</div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {host?.servers.map((h) => (
+                    <div key={h.name} style={{ ...box, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 4, background: hostColor(h) }} />
+                        <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{h.name}</strong>
+                        <span style={{ fontSize: 12, color: hostColor(h), flex: 1 }}>{hostStatus(h)}</span>
+                        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{h.url || h.command}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
 export function McpServersPanel({ ezineUrl }) {
     const [servers, setServers] = useState(null);
     const [form, setForm] = useState(null);
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
+    const [host, setHost] = useState(null);
+    const [agents, setAgents] = useState([]);
 
-    const load = useCallback(() => api.forge.listMcpRegistry().then(setServers).catch((e) => setErr(e.message)), []);
+    const load = useCallback(() => {
+        api.forge.listMcpHost().then(setHost).catch(() => setHost({ checked: false, servers: [] }));
+        api.forge.listAgents().then(setAgents).catch(() => setAgents([]));
+        return api.forge.listMcpRegistry().then(setServers).catch((e) => setErr(e.message));
+    }, []);
     useEffect(() => { load(); }, [load]);
+
+    const toggleAgent = async (agent, server) => {
+        const has = (agent.mcp_servers || []).includes(server.name);
+        const mcp_servers = has ? agent.mcp_servers.filter((n) => n !== server.name) : [...(agent.mcp_servers || []), server.name];
+        const patch = { mcp_servers };
+        // Turning on starts read-only when the server says which tools are safe.
+        const readOnly = server.tools.filter((t) => t.read_only).map((t) => t.name);
+        if (!has && readOnly.length) patch.mcp_tool_allow = { ...(agent.mcp_tool_allow || {}), [server.name]: readOnly };
+        try {
+            await api.forge.updateAgent(agent.id, patch);
+            setAgents((cur) => cur.map((a) => (a.id === agent.id ? { ...a, ...patch } : a)));
+        } catch (e) { setErr(e.message); }
+    };
+    const hostNames = new Set((host?.servers || []).map((h) => h.name));
 
     const upsert = (row, id) => setServers((cur) => (row ? cur.map((s) => (s.id === id ? row : s)) : cur.filter((s) => s.id !== id)));
 
@@ -75,7 +139,7 @@ export function McpServersPanel({ ezineUrl }) {
     const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
     return (
-        <div style={{ marginTop: 32 }}>
+        <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px', color: 'var(--text-primary)' }}>Tools for your agents</h3>
             <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: '0 0 14px' }}>
                 Connect an app once, then switch it on per agent. Agents can only use the tools you allow.
@@ -84,7 +148,7 @@ export function McpServersPanel({ ezineUrl }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {servers === null && <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Loading…</div>}
                 {servers?.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic' }}>Nothing connected yet.</div>}
-                {servers?.map((s) => <ServerRow key={s.id} server={s} onChange={(row) => upsert(row, s.id)} />)}
+                {servers?.map((s) => <ServerRow key={s.id} server={s} agents={agents} onToggleAgent={toggleAgent} clash={hostNames.has(s.name)} onChange={(row) => upsert(row, s.id)} />)}
             </div>
 
             {form ? (
@@ -109,6 +173,7 @@ export function McpServersPanel({ ezineUrl }) {
                     )}
                 </div>
             )}
+            <HostSection host={host} />
         </div>
     );
 }

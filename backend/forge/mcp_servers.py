@@ -1,12 +1,12 @@
 """Org-wide MCP server registry: add, test, list. Thin layer over the repo
-and the tool probe; the router calls these and `build_mcp_config` reads the
+and the daemon-side tool probe; the router calls these and `build_mcp_config` reads the
 result at dispatch."""
 from __future__ import annotations
 
 import re
 
 from backend.db import SessionLocal
-from backend.forge.mcp_probe import probe_tools
+from backend.forge.daemon_probe import probe_tools
 from backend.forge.mcp_registry import REGISTRY
 from backend.forge.repos import mcp_servers as repo
 
