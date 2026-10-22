@@ -32,6 +32,7 @@ const LAZY_ROUTES = [
     ['./pages/forge/RunDetail', 'RunDetail'],
     ['./pages/forge/ConductorPage', 'ConductorPage'],
     ['./pages/forge/ForgeSettings', 'ForgeSettings'],
+    ['./pages/forge/McpServers', 'McpServers'],
 ];
 
 describe('App.jsx lazy-loaded forge routes', () => {

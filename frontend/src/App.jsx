@@ -39,6 +39,7 @@ const AgentDetail = lazy(() => import('./pages/forge/AgentDetail').then(m => ({ 
 const RunsDashboard = lazy(() => import('./pages/forge/RunsDashboard').then(m => ({ default: m.RunsDashboard })));
 const RunDetail = lazy(() => import('./pages/forge/RunDetail').then(m => ({ default: m.RunDetail })));
 const ConductorPage = lazy(() => import('./pages/forge/ConductorPage').then(m => ({ default: m.ConductorPage })));
+const McpServers = lazy(() => import('./pages/forge/McpServers').then(m => ({ default: m.McpServers })));
 const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m => ({ default: m.ForgeSettings })));
 import { ROUTES } from './routes';
 import { appForUrl, openConnectedApp } from './connectedApps';
@@ -122,7 +123,8 @@ export default function App() {
                             <Route path="epics" element={<ProjectEpics />} />
                             <Route path="workflow" element={<Workflow />} />
                             <Route path="deploy" element={<Deploy />} />
-                            <Route path="settings" element={<ProjectSettings />} />
+                            <Route path="mcp" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><McpServers /></Suspense>} />
+                        <Route path="settings" element={<ProjectSettings />} />
                         </Route>
                         {/* Legacy flat board route — redirect to the new nested form. */}
                         <Route path="board/:projectId" element={<LegacyBoardRedirect />} />

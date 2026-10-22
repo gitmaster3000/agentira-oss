@@ -70,7 +70,7 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
         runs: path.startsWith('/forge/runs'),
         conductor: path.startsWith('/forge/conductor'),
         runtimes: path.startsWith('/forge/runtimes'),
-        mcp: path === '/forge/settings',
+        mcp: path === '/forge/mcp',
     };
 
     const rc = railOpen ? '' : ' rc';
@@ -101,7 +101,7 @@ export function AppSidebar({ open = false, railOpen = true, onToggleRail }) {
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="2" /><path d="M4.93 19.07a10 10 0 0 1 0-14.14M7.76 16.24a6 6 0 0 1 0-8.48M16.24 7.76a6 6 0 0 1 0 8.48M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>} />
                     <NavRow active={is.runtimes} onClick={() => navigate('/forge/runtimes')} label="Agent Runtimes"
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>} />
-                    <NavRow active={is.mcp} onClick={() => navigate('/forge/settings')} label="MCP Servers"
+                    <NavRow active={is.mcp} onClick={() => navigate('/forge/mcp')} label="MCP Servers"
                         icon={<svg className="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2" /><rect x="2" y="14" width="20" height="8" rx="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" /></svg>} />
                 </div>
 

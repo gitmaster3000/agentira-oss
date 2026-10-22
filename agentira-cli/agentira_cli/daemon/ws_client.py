@@ -44,6 +44,14 @@ class DaemonWsClient:
     def stop(self) -> None:
         self._stop.set()
 
+    def _answer_probe(self, ws, msg: dict) -> None:
+        """Probe MCP servers from this host and reply on the same socket."""
+        from agentira_cli.daemon import mcp_probe
+        try:
+            ws.send(json.dumps(mcp_probe.run_frame(msg)))
+        except Exception as exc:  # noqa: BLE001 — socket dropped mid-probe
+            logger.debug("mcp_probe reply failed: %s", exc)
+
     def _ws_url(self) -> str:
         base = self._api_url.replace("https://", "wss://").replace("http://", "ws://")
         return f"{base}/api/forge/daemon/ws"
@@ -131,6 +139,11 @@ class DaemonWsClient:
                     ws.send(json.dumps({"type": "pong"}))
                 elif msg.get("type") == "pong":
                     continue
+                elif msg.get("type") == "mcp_probe":
+                    # Probes can take seconds; answer off-thread so the
+                    # heartbeat in this loop keeps running.
+                    threading.Thread(target=self._answer_probe, args=(ws, msg),
+                                     name="mcp-probe", daemon=True).start()
                 elif msg.get("type") == "trigger":
                     logger.info(
                         "WS trigger received: trace=%s kind=%s agent=%s run=%s",

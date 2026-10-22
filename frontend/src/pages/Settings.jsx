@@ -8,7 +8,6 @@ import { AppearanceSettings } from '../components/settings/AppearanceSettings';
 import { UserAvatar } from '../components/UserAvatar';
 import { AvatarPickerDialog } from '../components/AvatarPickerDialog';
 import { NotificationSettings } from '../components/settings/NotificationSettings';
-import { McpServersPanel } from '../components/settings/McpServersPanel';
 
 // ── RBAC helpers ────────────────────────────────────────────────────────────
 const ALL_ROLES = ['admin', 'member', 'viewer'];
@@ -859,7 +858,6 @@ export function Settings() {
                                 } catch (err) { alert("Failed to copy link: " + err.message); }
                             }}><Copy style={{ width: 12, height: 12 }} /> Copy Agentira MCP link</AccentBtn>
                         </div>
-                        {isAdmin && <McpServersPanel ezineUrl={EZINE_MCP_URL} />}
                     </div>
                 )}
 
