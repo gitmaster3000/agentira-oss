@@ -7,11 +7,12 @@ import { useShellData } from './shellData';
 import { GlobalSearch } from './GlobalSearch';
 import { ThemeToggle } from '../ThemeToggle';
 import { AppSwitcher } from './AppSwitcher';
+import { ProjectSwitcher } from './ProjectSwitcher';
 import { useCrumbs } from './crumbs';
 import { RunNotificationLine, isRunMeta } from '../RunNotification';
 
 // Top bar per home-dashboard.html: logo, Work | Build, spacer, search, New,
-// theme, bell, avatar — the same on every width (shell.css compacts, never hides). Project identity lives in the page header, not here.
+// theme, bell, avatar — the same on every width (shell.css compacts, never hides). The project switcher sits right after Work | Build.
 const NEW_ITEMS = [
     { kind: 'task', title: 'Task', sub: 'File work on the board', tint: 'rgba(128,203,196,.14)', stroke: 'var(--brand-teal)', icon: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></> },
     { kind: 'project', title: 'Project', sub: 'Guided 5-step wizard', tint: 'rgba(201,184,255,.14)', stroke: 'var(--brand-lavender)', icon: <path d="M3 7v13h18V7M3 7l2-3h14l2 3M3 7h18" /> },
@@ -122,6 +123,8 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
                 <button onClick={() => navigate('/studio')} aria-pressed={!isBuild} style={SWITCH_BTN(!isBuild)}>Work</button>
                 <button onClick={() => navigate('/forge')} aria-pressed={isBuild} style={SWITCH_BTN(isBuild)}>Build</button>
             </div>
+
+            <ProjectSwitcher projects={projects} active={activeProject} />
 
             {crumbs.length > 0 && (
                 <nav aria-label="Breadcrumb" className="shell-hide-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, fontSize: '12.5px', color: 'var(--text-muted)' }}>
