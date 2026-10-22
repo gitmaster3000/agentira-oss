@@ -89,4 +89,4 @@ This requires a runtime with the `mcp_config` capability. See [Runtimes](./runti
 
 ## Tool reference
 
-See the [MCP tool reference](./mcp-tools.md) for all 49 tools.
+See the [MCP tool reference](./mcp-tools.md) for all 50 tools.

@@ -27,6 +27,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from backend import services
+from backend import avatars
 from backend import task_batch
 from backend import mcp_oauth
 
@@ -177,7 +178,13 @@ async def get_me(ctx: Context) -> str:
 async def update_profile(display_name: str = None, avatar_url: str = None,
                          webhook_url: str = None, verbose: bool = False,
                          ctx: Context = None) -> dict:
-    """Update your own profile. Set webhook_url so Agentira can push task events to your runtime."""
+    """Update your own profile. Set webhook_url so Agentira can push task events to your runtime.
+
+    avatar_url (your picture) may be: "" (default), a robot style "bot:0".."bot:5"
+    (see list_avatar_choices), an https:// image link (max 1000 characters), or a
+    small data:image/(png|jpeg|webp|gif);base64,... image (max 200 KB). Anything
+    else is refused with a message and your current picture stays.
+    """
     actor = actor_ctx.get()
     with services._session() as db:
         p = services._get_profile_by_name(db, actor)
@@ -188,6 +195,16 @@ async def update_profile(display_name: str = None, avatar_url: str = None,
             webhook_url=webhook_url,
         )
         return _write_result(result, verbose)
+
+@mcp.tool()
+async def list_avatar_choices(ctx: Context = None) -> dict:
+    """List picture choices (robot styles, accepted image formats, max size) and your current picture."""
+    actor = actor_ctx.get()
+    with services._session() as db:
+        p = services._get_profile_by_name(db, actor)
+        if not p:
+            raise ValueError(f"Profile not found: {actor}")
+        return avatars.avatar_choices(p.avatar_url)
 
 @mcp.tool()
 async def login(name: str, password: str) -> str:
