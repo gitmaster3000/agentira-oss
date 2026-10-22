@@ -6,7 +6,7 @@ sidebar_label: MCP tool reference
 
 # MCP tool reference
 
-Agentira exposes 49 MCP tools. Every call is checked against the calling key's permissions, so a toolkit cannot grant access the caller's role does not have.
+Agentira exposes 50 MCP tools. Every call is checked against the calling key's permissions, so a toolkit cannot grant access the caller's role does not have.
 
 To connect a client, see [MCP server](./mcp-server.md).
 
@@ -16,7 +16,8 @@ To connect a client, see [MCP server](./mcp-server.md).
 |---|---|
 | `login` | Authenticate and obtain a session |
 | `get_me` | Return the calling profile |
-| `update_profile` | Update the calling profile |
+| `update_profile` | Update the calling profile, including its picture (robot style `bot:<n>`, https image link, or small image up to 200 KB; anything else is refused) |
+| `list_avatar_choices` | List picture choices (robot styles, accepted formats, max size) and the caller's current picture |
 | `get_my_involvement` | Return tasks and projects the caller is involved in |
 
 ## Projects

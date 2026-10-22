@@ -28,6 +28,7 @@ import os
 import secrets
 
 from backend import passwords
+from backend import avatars
 
 logger = logging.getLogger("agentira.services")
 
@@ -2758,7 +2759,7 @@ def update_profile(profile_id: str, display_name: Optional[str] = None, role: Op
         elif role is not None:
             p.roles = _resolve_roles(db, [role])
         if avatar_url is not None:
-            p.avatar_url = avatar_url
+            p.avatar_url = avatars.validate_avatar(avatar_url)
         if webhook_url is not None:
             p.webhook_url = webhook_url
         if email is not None:
