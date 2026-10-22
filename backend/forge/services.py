@@ -359,7 +359,9 @@ def _sync_bots(db) -> None:
     """
     # Managed agents (agentira_agent) get a backing Agent row; service accounts
     # and humans do not. Keyed on account_type now that the 'bot' role is gone.
-    bots = db.query(Profile).filter(Profile.account_type == "agentira_agent").all()
+    bots = (db.query(Profile)
+              .filter(Profile.account_type == "agentira_agent",
+                      Profile.archived_at.is_(None)).all())
     # Index existing agents by profile_id and by id; same-id is the new
     # invariant but we tolerate old random-id rows during transition.
     existing_by_pid = {a.profile_id: a for a in db.query(Agent).all() if a.profile_id}
@@ -406,6 +408,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
     return {
         "id": a.id,
         "profile_id": a.profile_id,
+        "archived": bool(a.profile and a.profile.archived_at),
         "profile_name": a.profile.name if a.profile else None,
         "display_name": a.profile.display_name if a.profile else None,
         "name": a.name,
@@ -900,15 +903,19 @@ def _refresh_status(db, agents: list[Agent]) -> dict[str, float]:
 
 # ── Agents ───────────────────────────────────────────────────────────────
 
-def list_agents(status: Optional[str] = None) -> list[dict]:
+def list_agents(status: Optional[str] = None, archived: bool = False) -> list[dict]:
     with _session() as db:
         _sync_bots(db)
-        # Forge surfaces only MANAGED agents — bot profiles bound to a
-        # runtime. Service accounts (bot, no runtime) live in Settings
-        # → Service Accounts and never appear here.
-        agents = (db.query(Agent)
-                    .filter(Agent.runtime_id.isnot(None))
-                    .order_by(Agent.created_at.desc()).all())
+        if archived:
+            # Archived ("deleted") agents: hidden everywhere else, listed here.
+            q = (db.query(Agent).join(Profile, Agent.profile_id == Profile.id)
+                   .filter(Profile.archived_at.isnot(None)))
+        else:
+            # Forge surfaces only MANAGED agents — bot profiles bound to a
+            # runtime. Service accounts (bot, no runtime) live in Settings
+            # → Service Accounts and never appear here.
+            q = db.query(Agent).filter(Agent.runtime_id.isnot(None))
+        agents = q.order_by(Agent.created_at.desc()).all()
         live_costs = _refresh_status(db, agents)
         if status:
             agents = [a for a in agents if a.status.value == status]
@@ -1245,7 +1252,8 @@ def list_mcp_servers(*, include_auto: bool = False) -> list[dict]:
 
 
 def delete_agent(agent_id: str) -> bool:
-    """Delete an agent. System agents (Conductor, Concierge) are protected
+    """"Delete" = archive: the agent disappears and goes inert but its runs
+    and chats are kept. System agents (Conductor, Concierge) are protected
     — they're seeded by Agentira and the workspace depends on them."""
     from backend.forge.repos import agents as agents_repo
     with _session() as db:
@@ -1257,17 +1265,10 @@ def delete_agent(agent_id: str) -> bool:
             raise ValueError(
                 f"{a.name} is a system agent and cannot be deleted."
             )
-        backing_profile_id = (
-            prof.id if prof and prof.account_type == "agentira_agent" else None
-        )
-        agents_repo.delete_agent_rows(db, a)
-        db.commit()
-    # list_agents re-syncs an Agent row from every agentira_agent profile,
-    # so the backing profile must go too or the agent reappears.
-    if backing_profile_id:
-        from backend import services as core_services
-        core_services.delete_profile(backing_profile_id)
-    return True
+        if not (prof and prof.archived_at):
+            agents_repo.archive_agent_rows(db, a, prof)
+            db.commit()
+        return True
 
 
 def heartbeat(agent_id: str, status: str = "online") -> dict | None:

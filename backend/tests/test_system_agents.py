@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 import backend.db as bdb
+from backend.models import Profile
 from backend import services as core_services
 from backend.forge import services as forge_services
 from backend.forge import conductor as _conductor
@@ -77,18 +78,26 @@ def test_concierge_cannot_be_deleted(test_db):
         forge_services.delete_agent(conc["id"])
 
 
-def test_normal_agent_can_be_deleted(test_db):
+def _make_agent(test_db, name="worker"):
     rt_id = _seed_runtime(test_db)
-    agent = forge_services.create_agent(name="worker", executor_type="cli",
-                                        runtime_id=rt_id)
+    return forge_services.create_agent(name=name, executor_type="cli",
+                                       runtime_id=rt_id)
+
+
+def _listed_ids():
+    return {a["id"] for a in forge_services.list_agents()}
+
+
+def test_delete_archives_agent_and_hides_it(test_db):
+    agent = _make_agent(test_db)
     assert forge_services.delete_agent(agent["id"]) is True
-    assert forge_services.get_agent(agent["id"]) is None
+    assert agent["id"] not in _listed_ids()
+    # list_agents re-syncs from profiles — it must not come back.
+    assert agent["id"] not in _listed_ids()
 
 
-def test_agent_with_chat_history_can_be_deleted(test_db):
-    rt_id = _seed_runtime(test_db)
-    agent = forge_services.create_agent(name="worker", executor_type="cli",
-                                        runtime_id=rt_id)
+def test_archived_agent_keeps_history(test_db):
+    agent = _make_agent(test_db)
     aid = agent["id"]
     db = bdb.SessionLocal()
     db.add_all([Conversation(agent_id=aid, scope_key="chat:x"),
@@ -97,19 +106,49 @@ def test_agent_with_chat_history_can_be_deleted(test_db):
     db.commit()
     db.close()
     assert forge_services.delete_agent(aid) is True
-    assert forge_services.get_agent(aid) is None
+    db = bdb.SessionLocal()
+    assert db.query(Conversation).filter_by(agent_id=aid).count() == 1
+    assert db.query(QueuedMessage).filter_by(agent_id=aid).count() == 1
+    assert db.query(WebhookLog).filter_by(agent_id=aid).count() == 1
+    db.close()
+    # The agent row itself survives so run history still resolves.
+    assert forge_services.get_agent(aid) is not None
 
 
-def test_deleted_agent_stays_deleted_after_list(test_db):
-    """list_agents re-syncs Agent rows from agentira_agent profiles, so
-    delete must remove the backing profile or the agent comes back."""
-    rt_id = _seed_runtime(test_db)
-    agent = forge_services.create_agent(name="worker", executor_type="cli",
-                                        runtime_id=rt_id)
+def test_archived_agent_is_inert_and_frees_its_name(test_db):
+    agent = _make_agent(test_db, name="worker")
+    aid = agent["id"]
+    forge_services.delete_agent(aid)
+    db = bdb.SessionLocal()
+    prof = db.get(Profile, aid)
+    assert prof.archived_at is not None
+    assert prof.api_key is None
+    assert prof.runtime_id is None
+    assert prof.name != "worker"
+    db.close()
+    assert aid not in {p["id"] for p in core_services.list_profiles()}
+    # Same name is usable again.
+    again = forge_services.create_agent(
+        name="worker", executor_type="cli", runtime_id=agent["runtime_id"])
+    assert again["id"] != aid
+
+
+def test_archived_agents_only_in_archived_listing(test_db):
+    keep = _make_agent(test_db, name="keeper")
+    gone = forge_services.create_agent(
+        name="goner", executor_type="cli", runtime_id=keep["runtime_id"])
+    forge_services.delete_agent(gone["id"])
+    active = {a["id"] for a in forge_services.list_agents()}
+    archived = forge_services.list_agents(archived=True)
+    assert keep["id"] in active and gone["id"] not in active
+    assert [a["id"] for a in archived] == [gone["id"]]
+    assert archived[0]["archived"] is True
+
+
+def test_archive_is_idempotent(test_db):
+    agent = _make_agent(test_db)
     assert forge_services.delete_agent(agent["id"]) is True
-    forge_services.list_agents()
-    assert forge_services.get_agent(agent["id"]) is None
-    assert core_services.get_profile(agent["id"]) is None
+    assert forge_services.delete_agent(agent["id"]) is True
 
 
 # ── conductor cadence config ───────────────────────────────────────────
