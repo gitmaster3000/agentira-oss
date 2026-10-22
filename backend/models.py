@@ -233,6 +233,10 @@ class Profile(Base):
     # System-provided agents (the Conductor, the Concierge) — seeded by
     # Agentira, not user-created. Protected from deletion. Default False.
     is_system: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Set when an agent is "deleted": hidden everywhere and inert, but its
+    # runs, chats and history stay. Never hard-deleted.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None)
     # Conductor cadence config — only meaningful on the Conductor's own
     # profile. conductor_tick_seconds: queue-tick interval; report_time:
     # daily-report time "HH:MM" (UTC). conductor_report_enabled gates the

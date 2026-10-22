@@ -705,6 +705,8 @@ def run_migrations():
             runtime_added |= _ensure_column(conn, "profiles", "max_concurrent_runs", "INTEGER DEFAULT 1 NOT NULL")
             # System agents (Conductor, Concierge) + Conductor cadence config
             runtime_added |= _ensure_column(conn, "profiles", "is_system", "BOOLEAN DEFAULT FALSE NOT NULL")
+            # Archived agents: hidden + inert, history kept.
+            _ensure_column(conn, "profiles", "archived_at", "TIMESTAMP WITH TIME ZONE")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_tick_seconds", "INTEGER DEFAULT 60 NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_time", "VARCHAR(5) DEFAULT '09:00' NOT NULL")
             runtime_added |= _ensure_column(conn, "profiles", "conductor_report_enabled", "BOOLEAN DEFAULT TRUE NOT NULL")

@@ -413,8 +413,8 @@ def delete_mcp_server(server_id: str):
 # ── Agent endpoints ──────────────────────────────────────────────────────
 
 @router.get("/agents")
-def list_agents(status: Optional[str] = None):
-    return services.list_agents(status=status)
+def list_agents(status: Optional[str] = None, archived: bool = False):
+    return services.list_agents(status=status, archived=archived)
 
 
 @router.post("/agents", status_code=201, dependencies=[Depends(require_admin)])

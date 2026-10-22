@@ -584,7 +584,7 @@ export const api = {
     // Forge
     forge: {
         getStats: () => request('/forge/stats'),
-        listAgents: (status) => request(`/forge/agents${status ? `?status=${status}` : ''}`),
+        listAgents: (status, archived) => request(`/forge/agents${archived ? '?archived=true' : status ? `?status=${status}` : ''}`),
         getAgent: (id) => request(`/forge/agents/${id}`),
         // System Concierge agent — powers the floating chat.
         getConcierge: () => request('/forge/concierge'),

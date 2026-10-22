@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus } from 'lucide-react';
 import { api } from '../../api';
 import { CreateAgentModal } from '../../components/CreateAgentModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 const STATUS_STYLES = {
     online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
@@ -16,15 +17,17 @@ export function AgentsDashboard() {
     const [runtimes, setRuntimes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
+    const [deleteId, setDeleteId] = useState(null);
     const [showCreate, setShowCreate] = useState(useLocation().state?.create === 'agent');
 
     const loadAgents = async () => {
         try {
-            const statusParam = filter === 'all' ? undefined : filter;
-            const data = await api.forge.listAgents(statusParam);
+            const archived = filter === 'archived';
+            const statusParam = filter === 'all' || archived ? undefined : filter;
+            const data = await api.forge.listAgents(statusParam, archived);
             // Defensive: Forge only surfaces managed agents (backend already
             // filters, but belt-and-suspenders if any service-account row leaks).
-            setAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id));
+            setAgents((Array.isArray(data) ? data : []).filter(a => a.runtime_id || a.archived));
         } catch (err) {
             console.error('Failed to load agents:', err);
         } finally {
@@ -49,7 +52,7 @@ export function AgentsDashboard() {
     }, [filter]);
 
     const handleDelete = async (id) => {
-        if (!confirm('Delete this agent? All associated runs will also be deleted.')) return;
+        setDeleteId(null);
         try {
             await api.forge.deleteAgent(id);
             loadAgents();
@@ -80,6 +83,7 @@ export function AgentsDashboard() {
                         <option value="online">Online</option>
                         <option value="offline">Offline</option>
                         <option value="busy">Busy</option>
+                        <option value="archived">Archived</option>
                     </select>
                     <button
                         onClick={() => setShowCreate(true)}
@@ -119,7 +123,7 @@ export function AgentsDashboard() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map((agent) => (
-                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} onRefresh={loadAgents} />
+                        <AgentCard key={agent.id} agent={agent} onDelete={() => setDeleteId(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} onRefresh={loadAgents} />
                     ))}
                 </div>
             )}
@@ -128,6 +132,16 @@ export function AgentsDashboard() {
                 <CreateAgentModal
                     onClose={() => setShowCreate(false)}
                     onSuccess={() => { setShowCreate(false); loadAgents(); }}
+                />
+            )}
+
+            {deleteId && (
+                <ConfirmModal
+                    title="Delete agent?"
+                    message="The agent is removed and can no longer work. Its past runs and chats are kept."
+                    confirmText="Delete"
+                    onConfirm={() => handleDelete(deleteId)}
+                    onCancel={() => setDeleteId(null)}
                 />
             )}
         </div>
@@ -184,7 +198,7 @@ function AgentCard({ agent, onDelete, onClick, onRefresh }) {
                     )}
                     {/* System agents (Conductor, Concierge) are seeded by
                         Agentira and can't be deleted — hide the control. */}
-                    {!agent.is_system && (
+                    {!agent.is_system && !agent.archived && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onDelete(); }}
                             className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all"

@@ -2691,7 +2691,8 @@ def authenticate_oauth(provider: str, provider_user_id: str, email: str | None =
 
 def list_profiles(role: Optional[str] = None) -> list[dict]:
     with _session() as db:
-        q = _with_profile_relations(db.query(Profile))
+        q = _with_profile_relations(db.query(Profile)).filter(
+            Profile.archived_at.is_(None))
         if role:
             q = q.filter(Profile.roles.any(Role.name == role))
         return [_profile_to_dict(p) for p in q.order_by(Profile.name).all()]
