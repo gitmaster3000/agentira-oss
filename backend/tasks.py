@@ -21,6 +21,7 @@ from sqlalchemy import literal
 
 from backend import services
 from backend import agent_notifier
+from backend import notify_dispatch
 from backend import task_graph
 from backend.auth import project_ids_for_actor, require_project_access
 from backend.notifications import broker
@@ -224,6 +225,10 @@ class TaskService:
             project_id=project_id, task_id=task.id,
             notify_users=[assignee] if assignee and assignee != actor else []
         )
+        notify_dispatch.notify_created(
+            db, event_name=f"{task.type}.created", project_id=project_id,
+            project_name=project.name, actor=actor, title=f"{task_key} {title}",
+            link=f"/tasks/{task.id}", skip_in_app=(assignee,) if assignee else ())
         return task
 
     # ── read ──────────────────────────────────────────────────────────────

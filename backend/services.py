@@ -18,6 +18,7 @@ from backend.models import (
 from backend.auth import has_permission, project_ids_for_actor, require_project_access
 from backend.notifications import broker
 from backend import agent_notifier
+from backend import notify_dispatch
 from backend.deploy.manager import DeploymentManager
 from backend.deploy.flow import DeployFlow
 
@@ -1147,6 +1148,9 @@ def create_epic(project_id: str, title: str, description: str = "", color: str =
         db.add(epic)
         db.flush()
         _log_activity(db, actor, "epic.create", f"Created epic: {title}", project_id=project_id)
+        notify_dispatch.notify_created(
+            db, event_name="epic.created", project_id=project_id,
+            project_name=project.name, actor=actor, title=title, link=f"/epics/{epic.id}")
         db.commit()
         db.refresh(epic)
         return _epic_to_dict(epic)

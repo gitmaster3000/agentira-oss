@@ -231,6 +231,7 @@ _ORG_SCOPED_TABLES = [
     "activities", "attachments", "profile_permissions",
     "forge_agents", "forge_runtimes", "deploy_credentials",
     "client_debug_sessions", "mcp_servers",
+    "notification_prefs", "push_subscriptions",
 ]
 
 # Default org id used to backfill pre-tenancy rows so org_id can go NOT NULL.
