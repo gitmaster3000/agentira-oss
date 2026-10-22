@@ -261,7 +261,7 @@ const InfoBanner = ({ children }) => (
 );
 
 // ── ProfileDetailsModal ──────────────────────────────────────────────────────
-function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, onCopyLink, onRegenerateKey, onConfigure }) {
+export function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, onCopyLink, onRegenerateKey, onConfigure }) {
     const meta = ACCOUNT_META[profile.account_type] || ACCOUNT_META.human;
     const isHuman = !profile.account_type || profile.account_type === 'human';
     const isService = profile.account_type === 'external_agent';
@@ -274,11 +274,14 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
     const [tempPw, setTempPw] = useState(null);
     const [err, setErr] = useState('');
     const [busy, setBusy] = useState(false);
+    const [avatarDraft, setAvatarDraft] = useState(profile.avatar_url || '');
+    const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
 
     const savedRoles = profile.roles || (profile.role ? [profile.role] : []);
     const patch = {};
     if (displayName !== (profile.display_name || '')) patch.display_name = displayName;
     if (isHuman && email !== (profile.email || '')) patch.email = email;
+    if (!isHuman && avatarDraft !== (profile.avatar_url || '')) patch.avatar_url = avatarDraft;
     if (roles.length !== savedRoles.length || roles.some(r => !savedRoles.includes(r))) patch.roles = roles;
     const dirty = Object.keys(patch).length > 0;
 
@@ -328,6 +331,20 @@ function ProfileDetailsModal({ profile, editable, onClose, onSaved, onDelete, on
 
                 <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
                     {err && <div style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12, color: '#f87171', background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.25)' }}>{err}</div>}
+
+                    {editable && !isHuman && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                            <UserAvatar profile={{ ...profile, avatar_url: avatarDraft }} size={54} radius={12} />
+                            <button type="button" onClick={() => setAvatarPickerOpen(true)}
+                                style={{ fontSize: 12.5, color: 'var(--accent-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                                Change picture
+                            </button>
+                        </div>
+                    )}
+                    {avatarPickerOpen && (
+                        <AvatarPickerDialog kind="bot" value={avatarDraft} onClose={() => setAvatarPickerOpen(false)}
+                            onSelect={(v) => { setAvatarDraft(v); setAvatarPickerOpen(false); }} />
+                    )}
 
                     {/* Display name */}
                     {editable && (
@@ -945,9 +962,7 @@ export function Settings() {
                             </div>
                         ) : botKeys.map(b => (
                             <Row key={b.id} onClick={() => setManaging(b)} style={{ marginBottom: 8 }}>
-                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(118,131,144,.14)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                                    <Key style={{ width: 15, height: 15 }} />
-                                </span>
+                                <UserAvatar profile={b} size={30} radius={8} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{b.display_name || b.name}</div>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>bot key</div>
@@ -968,9 +983,7 @@ export function Settings() {
                             </div>
                         ) : agentiraAgents.map(a => (
                             <Row key={a.id} onClick={() => setManaging(a)} style={{ marginBottom: 8 }}>
-                                <span style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(201,184,255,.14)', color: 'var(--brand-lavender)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>
-                                    {(a.display_name || a.name || '?')[0].toUpperCase()}
-                                </span>
+                                <UserAvatar profile={a} size={30} radius={8} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ fontSize: 12.5, color: 'var(--text-primary)' }}>{a.display_name || a.name}</div>
                                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>agent</div>

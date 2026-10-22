@@ -34,3 +34,18 @@ def test_empty_avatar_resets_to_default(client):
     client.patch(f"/api/profiles/{client.admin_id}", json={"avatar_url": "preset:2"})
     client.patch(f"/api/profiles/{client.admin_id}", json={"avatar_url": ""})
     assert client.get(f"/api/profiles/{client.admin_id}").json()["avatar_url"] == ""
+
+
+@pytest.mark.parametrize("account_type", ["external_agent", "agentira_agent"])
+def test_admin_sets_robot_avatar_on_bot_profiles(client, account_type):
+    from backend import models
+    from backend.db import SessionLocal
+
+    with SessionLocal() as db:
+        p = models.Profile(name=f"bot-{account_type}", display_name="Bot", account_type=account_type)
+        db.add(p)
+        db.commit()
+        pid = p.id
+    r = client.patch(f"/api/profiles/{pid}", json={"avatar_url": "bot:5"})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/profiles/{pid}").json()["avatar_url"] == "bot:5"

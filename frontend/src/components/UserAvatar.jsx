@@ -147,6 +147,97 @@ const CHARACTERS = [
 export const PRESET_COUNT = CHARACTERS.length * 2;
 export const presetValue = (i) => `preset:${i}`;
 
+// Robot avatars for bots and agents: 8 designs x 2 colour variants.
+const ROBOT_COLORS = [
+    { body: '#cdd6e3', dark: '#7a8699', glow: '#5ef2e0' },
+    { body: '#ffd9b0', dark: '#c0703a', glow: '#ff6b81' },
+];
+const Visor = ({ c, y = 24, h = 14 }) => <rect x="17" y={y} width="30" height={h} rx={h / 2} fill={INK} />;
+const Glow = ({ c, y = 31, gap = 7, r = 3.6 }) => (
+    <>
+        <circle cx={32 - gap} cy={y} r={r} fill={c.glow} /><circle cx={32 + gap} cy={y} r={r} fill={c.glow} />
+        <circle cx={32 - gap + 1} cy={y - 1} r={r * 0.3} fill="#fff" /><circle cx={32 + gap + 1} cy={y - 1} r={r * 0.3} fill="#fff" />
+    </>
+);
+const Grille = ({ c, y = 43 }) => (
+    <>
+        <rect x="23" y={y} width="18" height="5" rx="2.5" fill={c.dark} />
+        <path d={`M27 ${y} v5 M32 ${y} v5 M37 ${y} v5`} stroke={c.body} strokeWidth="1.2" />
+    </>
+);
+const ROBOTS = [
+    // classic: antenna + visor
+    (c) => <>
+        <line x1="32" y1="6" x2="32" y2="15" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" /><circle cx="32" cy="6" r="3.4" fill={c.glow} />
+        <rect x="8" y="30" width="5" height="12" rx="2.5" fill={c.dark} /><rect x="51" y="30" width="5" height="12" rx="2.5" fill={c.dark} />
+        <rect x="12" y="15" width="40" height="38" rx="11" fill={c.body} />
+        <Visor c={c} /><Glow c={c} /><Grille c={c} />
+    </>,
+    // boxy: square head, round eyes, smile
+    (c) => <>
+        <rect x="14" y="10" width="36" height="6" rx="3" fill={c.dark} />
+        <rect x="12" y="16" width="40" height="38" rx="4" fill={c.body} />
+        <circle cx="23" cy="30" r="6" fill="#fff" /><circle cx="41" cy="30" r="6" fill="#fff" />
+        <circle cx="23" cy="30" r="3" fill={INK} /><circle cx="41" cy="30" r="3" fill={INK} />
+        <path d="M24 44 q8 7 16 0" stroke={INK} strokeWidth="2.4" fill="none" strokeLinecap="round" />
+        <circle cx="16" cy="48" r="1.6" fill={c.dark} /><circle cx="48" cy="48" r="1.6" fill={c.dark} />
+    </>,
+    // cyclops: one big eye
+    (c) => <>
+        <line x1="22" y1="8" x2="22" y2="16" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" /><circle cx="22" cy="7" r="3" fill={c.glow} />
+        <line x1="42" y1="8" x2="42" y2="16" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" /><circle cx="42" cy="7" r="3" fill={c.glow} />
+        <rect x="10" y="16" width="44" height="38" rx="16" fill={c.body} />
+        <circle cx="32" cy="32" r="11" fill="#fff" stroke={c.dark} strokeWidth="2.4" />
+        <circle cx="32" cy="32" r="6" fill={c.glow} /><circle cx="32" cy="32" r="3" fill={INK} /><circle cx="34" cy="30" r="1.2" fill="#fff" />
+        <path d="M25 47 h14" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" />
+    </>,
+    // headphones
+    (c) => <>
+        <path d="M12 34 Q12 8 32 8 Q52 8 52 34" stroke={c.dark} strokeWidth="3.5" fill="none" strokeLinecap="round" />
+        <rect x="7" y="29" width="8" height="16" rx="4" fill={c.dark} /><rect x="49" y="29" width="8" height="16" rx="4" fill={c.dark} />
+        <rect x="14" y="16" width="36" height="38" rx="12" fill={c.body} />
+        <Visor c={c} y={26} h={12} /><Glow c={c} y={32} gap={7} r={3.2} />
+        <path d="M26 46 q6 4 12 0" stroke={INK} strokeWidth="2" fill="none" strokeLinecap="round" />
+    </>,
+    // round: dome head with ear bolts
+    (c) => <>
+        <circle cx="32" cy="35" r="22" fill={c.body} />
+        <rect x="6" y="30" width="6" height="10" rx="3" fill={c.dark} /><rect x="52" y="30" width="6" height="10" rx="3" fill={c.dark} />
+        <circle cx="32" cy="9" r="3" fill={c.glow} /><path d="M32 12 v6" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" />
+        <Eyes y={33} gap={9} /><Cheeks y={42} gap={14} /><Smile y={42} w={4.5} />
+    </>,
+    // twin antennas, wide screen
+    (c) => <>
+        <path d="M20 16 L14 6 M44 16 L50 6" stroke={c.dark} strokeWidth="2.4" strokeLinecap="round" />
+        <circle cx="14" cy="6" r="2.8" fill={c.glow} /><circle cx="50" cy="6" r="2.8" fill={c.glow} />
+        <rect x="9" y="16" width="46" height="36" rx="9" fill={c.body} />
+        <rect x="14" y="22" width="36" height="20" rx="6" fill={INK} />
+        <path d="M20 32 h5 l3 -5 l4 10 l3 -5 h9" stroke={c.glow} strokeWidth="2.2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="26" y="46" width="12" height="3" rx="1.5" fill={c.dark} />
+    </>,
+    // sleepy: half-closed eyes
+    (c) => <>
+        <rect x="12" y="14" width="40" height="40" rx="14" fill={c.body} />
+        <rect x="8" y="28" width="5" height="12" rx="2.5" fill={c.dark} /><rect x="51" y="28" width="5" height="12" rx="2.5" fill={c.dark} />
+        <path d="M17 32 q6 -7 12 0 M35 32 q6 -7 12 0" stroke={INK} strokeWidth="2.6" fill="none" strokeLinecap="round" />
+        <circle cx="23" cy="34" r="2.2" fill={c.glow} /><circle cx="41" cy="34" r="2.2" fill={c.glow} />
+        <ellipse cx="32" cy="46" rx="4" ry="3" fill={INK} />
+        <circle cx="48" cy="12" r="2" fill={c.glow} /><circle cx="53" cy="7" r="1.4" fill={c.glow} />
+    </>,
+    // mohawk / spiky top
+    (c) => <>
+        <polygon points="22,18 26,6 30,18" fill={c.glow} /><polygon points="30,18 34,4 38,18" fill={c.glow} /><polygon points="38,18 42,6 46,18" fill={c.glow} />
+        <rect x="12" y="17" width="40" height="37" rx="10" fill={c.body} />
+        <rect x="17" y="25" width="30" height="10" rx="3" fill={INK} />
+        <rect x="21" y="28" width="7" height="4" rx="1.5" fill={c.glow} /><rect x="36" y="28" width="7" height="4" rx="1.5" fill={c.glow} />
+        <rect x="20" y="42" width="24" height="7" rx="3" fill={c.dark} />
+        <path d="M26 42 v7 M32 42 v7 M38 42 v7" stroke={c.body} strokeWidth="1.4" />
+    </>,
+];
+
+export const BOT_PRESET_COUNT = ROBOTS.length * ROBOT_COLORS.length;
+export const botPresetValue = (i) => `bot:${i}`;
+
 function hash(str) {
     let h = 0;
     for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
@@ -164,14 +255,30 @@ export function CartoonFace({ index, size }) {
     );
 }
 
+export function RobotFace({ index, size }) {
+    const n = Math.abs(Number(index)) || 0;
+    const Robot = ROBOTS[n % ROBOTS.length];
+    const colors = ROBOT_COLORS[Math.floor(n / ROBOTS.length) % ROBOT_COLORS.length];
+    return (
+        <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" data-robot="true" style={{ display: 'block' }}>
+            <rect width="64" height="64" fill={BGS[(n * 5) % BGS.length]} />
+            <Robot {...colors} />
+        </svg>
+    );
+}
+
+const isBot = (profile) => profile?.account_type === 'agentira_agent' || profile?.account_type === 'external_agent';
+
 // Renders a profile's picture: uploaded image, chosen preset, or a default
 // cartoon derived from the name. `profile` needs avatar_url + name/display_name.
 export function UserAvatar({ profile, name, avatarUrl, size = 28, radius = '50%', title }) {
     const label = name || profile?.display_name || profile?.name || '?';
     const url = avatarUrl ?? profile?.avatar_url ?? '';
     const isPreset = url.startsWith('preset:');
-    const isImage = !isPreset && /^(https?:|data:image\/)/.test(url);
-    const index = isPreset ? Number(url.slice(7)) || 0 : hash(profile?.name || label) % PRESET_COUNT;
+    const isRobot = url.startsWith('bot:') || (!isPreset && !url && isBot(profile));
+    const isImage = !isPreset && !isRobot && /^(https?:|data:image\/)/.test(url);
+    const hashed = hash(profile?.name || label);
+    const index = isPreset ? Number(url.slice(7)) || 0 : url.startsWith('bot:') ? Number(url.slice(4)) || 0 : hashed % (isRobot ? BOT_PRESET_COUNT : PRESET_COUNT);
     return (
         <span
             data-testid="user-avatar"
@@ -180,7 +287,7 @@ export function UserAvatar({ profile, name, avatarUrl, size = 28, radius = '50%'
         >
             {isImage
                 ? <img src={url} alt={label} style={{ width: size, height: size, objectFit: 'cover', display: 'block' }} />
-                : <CartoonFace index={index} size={size} />}
+                : isRobot ? <RobotFace index={index} size={size} /> : <CartoonFace index={index} size={size} />}
         </span>
     );
 }
