@@ -14,23 +14,31 @@ function parse(raw) {
 
 export const CONNECTED_APPS = parse(import.meta.env.VITE_CONNECTED_APPS);
 
+// Connected app that owns `url` (exact origin match), or null. Gate for /sso: a login is only
+// ever handed to an app listed in VITE_CONNECTED_APPS, never to an arbitrary return address.
+export function appForUrl(url, apps = CONNECTED_APPS) {
+    let origin;
+    try { origin = new URL(url).origin; } catch { return null; }
+    return apps.find((a) => new URL(a.url).origin === origin) || null;
+}
+
 // Single sign-on handoff: POST the caller's Agentira token to the app's /auth/handoff
 // (form POST, so the token never lands in a URL, history or Referer). The app validates it
-// against this Agentira, sets its own session and redirects into itself.
-export function openConnectedApp(app, { token = localStorage.getItem('agentira_token'), project = '', doc = document } = {}) {
+// against this Agentira, sets its own session and redirects into itself (or to `returnTo`, a path).
+export function openConnectedApp(app, { token = localStorage.getItem('agentira_token'), project = '', returnTo = '', target = '_blank', doc = document } = {}) {
     if (!token) { window.open(app.url, '_blank', 'noopener'); return; }
     const form = doc.createElement('form');
     form.method = 'POST';
     form.action = `${app.url}/auth/handoff`;
-    form.target = '_blank';
-    const input = doc.createElement('input');
-    input.type = 'hidden'; input.name = 'token'; input.value = token;
-    form.appendChild(input);
-    if (project) { // carry the selected project so the app opens on the same one
-        const p = doc.createElement('input');
-        p.type = 'hidden'; p.name = 'project'; p.value = project;
-        form.appendChild(p);
-    }
+    form.target = target;
+    const add = (name, value) => {
+        const input = doc.createElement('input');
+        input.type = 'hidden'; input.name = name; input.value = value;
+        form.appendChild(input);
+    };
+    add('token', token);
+    if (project) add('project', project); // carry the selected project so the app opens on the same one
+    if (returnTo) add('return', returnTo); // page the user asked for in the app (/sso)
     doc.body.appendChild(form);
     form.submit();
     form.remove();

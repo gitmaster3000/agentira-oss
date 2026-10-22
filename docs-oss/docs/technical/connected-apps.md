@@ -22,7 +22,13 @@ The frontend service builds from `frontend/Dockerfile` (Root Directory `frontend
    - require the request `Origin` to be this Agentira (blocks login-CSRF);
    - validate the token with `GET /api/profiles/me` (a JWT or any Agentira API key works);
    - mint its own session and redirect into itself (e.g. `/?project=<id>`).
-2. **API / MCP auth.** Accept the same Agentira API key as `Authorization: Bearer`, validated via `/api/profiles/me`.
-3. **Projects.** List projects with `GET /api/projects` using the caller's token; scope app data to project membership.
+   - optionally accept `return` (a path in the app, sent by `/sso` below) and redirect there; accept only paths starting with a single `/`.
+2. **Sign-in from the app (`/sso`).** When the app has no session, it sends the browser to `<agentira>/sso?return=<full app URL>`.
+   Agentira hands the login over with the same form POST (plus `return`) and the user lands on the requested page, with no
+   password prompt if they are already logged in to Agentira. Logged out users see the Agentira login once.
+   `return` must be on the exact origin of a configured app, otherwise Agentira never sends the token and goes to its home page.
+   The app should fall back to its own login form if the round trip just failed (no redirect loop) and after the user signs out of it.
+3. **API / MCP auth.** Accept the same Agentira API key as `Authorization: Bearer`, validated via `/api/profiles/me`.
+4. **Projects.** List projects with `GET /api/projects` using the caller's token; scope app data to project membership.
 
-Reference implementation: Ezine (`agentira-auth.mjs`, `POST /auth/handoff`).
+Reference implementation: Ezine (`agentira-auth.mjs`, `POST /auth/handoff`, `showLogin()` in `public/app.js`).

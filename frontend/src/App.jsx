@@ -1,5 +1,5 @@
-import React, { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
+import React, { lazy, Suspense, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { ProjectLayout } from './pages/ProjectLayout';
 import { Board } from './pages/Board';
@@ -41,6 +41,7 @@ const RunDetail = lazy(() => import('./pages/forge/RunDetail').then(m => ({ defa
 const ConductorPage = lazy(() => import('./pages/forge/ConductorPage').then(m => ({ default: m.ConductorPage })));
 const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m => ({ default: m.ForgeSettings })));
 import { ROUTES } from './routes';
+import { appForUrl, openConnectedApp } from './connectedApps';
 import { PreviewBanner } from './components/PreviewBanner';
 
 // Old "Welcome" stub replaced by Home — see pages/Home.jsx
@@ -66,6 +67,24 @@ function RootRedirect() {
     return user ? <Navigate to={ROUTES.STUDIO} replace /> : <Navigate to={ROUTES.WELCOME} replace />;
 }
 
+// /sso?return=<url in a connected app>: a connected app (e.g. Ezine) with no session sends the user
+// here. Logged in → hand the login to that app and land on `return`; logged out → Agentira login first.
+export function SsoRedirect() {
+    const { user, loading } = useAuth();
+    const location = useLocation();
+    const target = new URLSearchParams(location.search).get('return') || '';
+    const app = appForUrl(target);
+    useEffect(() => {
+        if (!user || !app) return;
+        const u = new URL(target);
+        openConnectedApp(app, { returnTo: u.pathname + u.search + u.hash, target: '_self' });
+    }, [user, app, target]);
+    if (loading) return <div>Loading...</div>;
+    if (!app) return <Navigate to={ROUTES.STUDIO} replace />;
+    if (!user) return <Navigate to={ROUTES.LOGIN} state={{ from: location }} replace />;
+    return <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-secondary)' }}>Signing you in to {app.name}…</div>;
+}
+
 // /studio/board/:projectId → /studio/project/:projectId/board (PR #18 route rename)
 function LegacyBoardRedirect() {
     const { projectId } = useParams();
@@ -86,6 +105,7 @@ export default function App() {
                     <Route path={ROUTES.RESET_PASSWORD} element={<ResetPassword />} />
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
                     <Route path="/cli-auth" element={<CliAuth />} />
+                    <Route path="/sso" element={<SsoRedirect />} />
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
