@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { AvatarPickerDialog } from './AvatarPickerDialog';
-import { PRESET_COUNT } from './UserAvatar';
+import { PRESET_COUNT, BOT_PRESET_COUNT } from './UserAvatar';
 
 describe('AvatarPickerDialog', () => {
     it('lists every character and reports the chosen preset', () => {
@@ -27,5 +27,17 @@ describe('AvatarPickerDialog', () => {
         render(<AvatarPickerDialog value="" onSelect={() => {}} onClose={onClose} />);
         fireEvent.keyDown(document, { key: 'Escape' });
         expect(onClose).toHaveBeenCalled();
+    });
+
+    it('bot kind lists 16+ robots and reports bot:<n>', () => {
+        const onSelect = vi.fn();
+        render(<AvatarPickerDialog kind="bot" value="" onSelect={onSelect} onClose={() => {}} />);
+        expect(screen.getByText('Pick a robot, or upload an image.')).toBeTruthy();
+        expect(screen.queryAllByRole('button', { name: /^Character / })).toHaveLength(0);
+        expect(screen.getAllByRole('button', { name: /^Robot / })).toHaveLength(BOT_PRESET_COUNT);
+        expect(BOT_PRESET_COUNT).toBeGreaterThanOrEqual(16);
+        fireEvent.click(screen.getByRole('button', { name: 'Robot 3' }));
+        expect(onSelect).toHaveBeenCalledWith('bot:2');
+        expect(screen.getByText('Upload a photo')).toBeTruthy();
     });
 });
