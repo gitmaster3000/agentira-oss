@@ -1257,9 +1257,17 @@ def delete_agent(agent_id: str) -> bool:
             raise ValueError(
                 f"{a.name} is a system agent and cannot be deleted."
             )
+        backing_profile_id = (
+            prof.id if prof and prof.account_type == "agentira_agent" else None
+        )
         agents_repo.delete_agent_rows(db, a)
         db.commit()
-        return True
+    # list_agents re-syncs an Agent row from every agentira_agent profile,
+    # so the backing profile must go too or the agent reappears.
+    if backing_profile_id:
+        from backend import services as core_services
+        core_services.delete_profile(backing_profile_id)
+    return True
 
 
 def heartbeat(agent_id: str, status: str = "online") -> dict | None:

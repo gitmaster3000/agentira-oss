@@ -100,6 +100,18 @@ def test_agent_with_chat_history_can_be_deleted(test_db):
     assert forge_services.get_agent(aid) is None
 
 
+def test_deleted_agent_stays_deleted_after_list(test_db):
+    """list_agents re-syncs Agent rows from agentira_agent profiles, so
+    delete must remove the backing profile or the agent comes back."""
+    rt_id = _seed_runtime(test_db)
+    agent = forge_services.create_agent(name="worker", executor_type="cli",
+                                        runtime_id=rt_id)
+    assert forge_services.delete_agent(agent["id"]) is True
+    forge_services.list_agents()
+    assert forge_services.get_agent(agent["id"]) is None
+    assert core_services.get_profile(agent["id"]) is None
+
+
 # ── conductor cadence config ───────────────────────────────────────────
 
 def test_conductor_config_defaults(test_db):

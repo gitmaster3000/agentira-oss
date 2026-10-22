@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Bot, RefreshCw, Wifi, WifiOff, Loader, Trash2, Clock, Play, DollarSign, Cpu, Plus } from 'lucide-react';
 import { api } from '../../api';
 import { CreateAgentModal } from '../../components/CreateAgentModal';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 const STATUS_STYLES = {
     online:  { color: '#2ecc71', icon: Wifi, label: 'Online' },
@@ -16,6 +17,7 @@ export function AgentsDashboard() {
     const [runtimes, setRuntimes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
+    const [deleteId, setDeleteId] = useState(null);
     const [showCreate, setShowCreate] = useState(useLocation().state?.create === 'agent');
 
     const loadAgents = async () => {
@@ -49,7 +51,7 @@ export function AgentsDashboard() {
     }, [filter]);
 
     const handleDelete = async (id) => {
-        if (!confirm('Delete this agent? All associated runs will also be deleted.')) return;
+        setDeleteId(null);
         try {
             await api.forge.deleteAgent(id);
             loadAgents();
@@ -119,7 +121,7 @@ export function AgentsDashboard() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map((agent) => (
-                        <AgentCard key={agent.id} agent={agent} onDelete={() => handleDelete(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} onRefresh={loadAgents} />
+                        <AgentCard key={agent.id} agent={agent} onDelete={() => setDeleteId(agent.id)} onClick={() => navigate(`/forge/agents/${agent.id}`)} onRefresh={loadAgents} />
                     ))}
                 </div>
             )}
@@ -128,6 +130,16 @@ export function AgentsDashboard() {
                 <CreateAgentModal
                     onClose={() => setShowCreate(false)}
                     onSuccess={() => { setShowCreate(false); loadAgents(); }}
+                />
+            )}
+
+            {deleteId && (
+                <ConfirmModal
+                    title="Delete agent?"
+                    message="This agent and its run history will be permanently deleted."
+                    confirmText="Delete"
+                    onConfirm={() => handleDelete(deleteId)}
+                    onCancel={() => setDeleteId(null)}
                 />
             )}
         </div>
