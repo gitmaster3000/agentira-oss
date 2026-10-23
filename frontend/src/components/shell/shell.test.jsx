@@ -200,6 +200,18 @@ describe('ShellDataProvider — only fetches what the page shows', () => {
 });
 
 describe('AppTopbar — blended bar', () => {
+    it('exposes the notifications bell as a named button that opens the list', async () => {
+        mountTopbar();
+        await switcher();
+
+        const bell = screen.getByRole('button', { name: 'Notifications' });
+        expect(bell).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(bell);
+
+        expect(bell).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByText("You're all caught up.")).toBeInTheDocument();
+    });
+
     it('renders the logo lockup and the search pill', () => {
         mountTopbar();
         expect(screen.getByText('Agentira')).toBeInTheDocument();
