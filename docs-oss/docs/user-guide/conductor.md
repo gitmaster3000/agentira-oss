@@ -64,6 +64,21 @@ The Conductor reads text that people and agents wrote — task titles, descripti
 
 Every planning turn applies an injection guard, and webhook payloads carry structured fields rather than a pre-composed message, so user content is never passed raw into a prompt.
 
+## Night snapshot
+
+While you are away, the Conductor can send a short summary of recent work and anything that is stuck. It costs no tokens: it is a plain read of your board and runs, not an AI turn.
+
+**Turn it on.** In the Conductor settings, set **Work snapshot every (hours)** — for example `4`. `0` (the default) means off.
+
+**What it says.**
+
+- **Needs you** — questions agents asked that nobody answered, tasks whose automatic retries ran out, and a warning when your agents are offline (for example *"Agents are offline: the daemon has not checked in since 02:14 UTC"*).
+- **Per project** — tasks finished and ready for review, how many agent runs succeeded, failed or got stuck (one line each), and what is running now. Task keys link straight to the task.
+
+**When it speaks.** Only when something happened in the window or something needs you. A quiet night produces no message. It arrives as a notification to workspace admins (in the app, and on your phone if push is set up — see [Notifications](./notifications.md)) and as a plain message in the Conductor's chat.
+
+**Ask for it any time.** Anyone connected over MCP — including the Conductor itself — can call `get_work_snapshot(since_hours=8, project_id=None)` and get the same summary, as text plus structured data. You only see projects you belong to. The last scheduled snapshot also appears as `last_snapshot` on the Conductor status endpoint (`GET /api/forge/conductor`).
+
 ## Monitoring
 
 Watch three things:

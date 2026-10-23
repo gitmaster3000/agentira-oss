@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planSummary } from './ConductorPage';
+import { planSummary, cadenceFormFromConfig } from './ConductorPage';
 
 describe('planSummary', () => {
     it('summarises per-project results honestly', () => {
@@ -13,5 +13,12 @@ describe('planSummary', () => {
     it('keeps the old shapes', () => {
         expect(planSummary(null)).toBe('not run yet');
         expect(planSummary({ skipped: 'conductor_disabled' })).toBe('skipped — conductor_disabled');
+    });
+});
+
+describe('cadenceFormFromConfig', () => {
+    it('carries the snapshot interval, defaulting to off', () => {
+        expect(cadenceFormFromConfig({}).conductor_snapshot_interval_hours).toBe(0);
+        expect(cadenceFormFromConfig({ snapshot_interval_hours: 4 }).conductor_snapshot_interval_hours).toBe(4);
     });
 });

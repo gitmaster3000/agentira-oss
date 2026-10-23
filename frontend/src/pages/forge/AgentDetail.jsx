@@ -1672,6 +1672,7 @@ function ConfigTab({ agent, onSaved }) {
         conductor_report_time: agent.conductor_report_time || '09:00',
         conductor_report_enabled: agent.conductor_report_enabled ?? true,
         conductor_plan_interval_minutes: agent.conductor_plan_interval_minutes ?? 10,
+        conductor_snapshot_interval_hours: agent.conductor_snapshot_interval_hours ?? 0,
         // Whether the Conductor may auto-dispatch work to this worker agent.
         conductor_enabled: agent.conductor_enabled ?? false,
         max_concurrent_runs: agent.max_concurrent_runs ?? 1,
@@ -2217,6 +2218,17 @@ function ConfigTab({ agent, onSaved }) {
                             />
                             <p className="text-xs text-text-tertiary mt-1">
                                 How often the Conductor takes an LLM turn to assign unassigned todo tasks to the best-fit agent.
+                            </p>
+                        </div>
+                        <div>
+                            <label className="block text-xs text-text-tertiary mb-1">Work snapshot every (hours)</label>
+                            <input
+                                type="number" min="0" className="input"
+                                value={form.conductor_snapshot_interval_hours}
+                                onChange={(e) => setForm({ ...form, conductor_snapshot_interval_hours: Number(e.target.value) })}
+                            />
+                            <p className="text-xs text-text-tertiary mt-1">
+                                0 = off. Posts a short summary of recent work and blockers, only when something happened or needs you. Token-free.
                             </p>
                         </div>
                     </div>
