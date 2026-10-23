@@ -25,3 +25,10 @@ def add_question(db, *, agent_id: str, run_id: str, task_id: str,
             "options": [{"label": o} for o in options],
         }]}),
     ))
+
+
+def add_note(db, *, agent_id: str, scope_key: str, content: str) -> None:
+    """Post a plain assistant message into an agent's chat thread without
+    running a turn (no LLM, zero tokens). Caller commits."""
+    db.add(AgentMessage(agent_id=agent_id, scope_key=scope_key, kind="chat",
+                        role=MessageRole.ASSISTANT, content=content))

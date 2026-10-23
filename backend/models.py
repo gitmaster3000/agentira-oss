@@ -249,6 +249,8 @@ class Profile(Base):
     conductor_plan_interval_minutes: Mapped[int] = mapped_column(default=10, nullable=False)
     # Sprint-planning turn (C7b): daily at this UTC time; also fires on
     # queue-dry, but no more than once per sprint_min_interval_hours.
+    # Night snapshot: token-free work/blocker summary every N hours (0 = off).
+    conductor_snapshot_interval_hours: Mapped[int] = mapped_column(default=0, nullable=False)
     conductor_sprint_time: Mapped[str] = mapped_column(String(5), default="07:45", nullable=False)
     conductor_sprint_min_interval_hours: Mapped[int] = mapped_column(default=4, nullable=False)
     # Master on/off for the Conductor (on its own profile). When False the

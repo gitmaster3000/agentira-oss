@@ -65,6 +65,7 @@ class AgentUpdate(BaseModel):
     conductor_report_enabled: Optional[bool] = None
     conductor_plan_interval_minutes: Optional[int] = None
     conductor_sprint_time: Optional[str] = None
+    conductor_snapshot_interval_hours: Optional[int] = None
     conductor_sprint_min_interval_hours: Optional[int] = None
     conductor_active: Optional[bool] = None
     # AP-155: agent's default containment posture (off | cwd | strict | container).
@@ -481,6 +482,7 @@ def update_agent(agent_id: str, body: AgentUpdate):
             or "conductor_plan_interval_minutes" in fields \
             or "conductor_report_time" in fields \
             or "conductor_report_enabled" in fields \
+            or "conductor_snapshot_interval_hours" in fields \
             or "conductor_sprint_time" in fields:
         try:
             from backend.forge.scheduler import scheduler
@@ -750,6 +752,7 @@ def conductor_status():
         "config": _conductor.get_conductor_config(),
         "last_tick": _conductor.get_last_tick(),
         "last_report": _conductor.get_last_report(),
+        "last_snapshot": _conductor.get_last_snapshot(),
         "last_plan": _conductor.get_last_plan(),
         "last_progress_check": _conductor.get_last_progress_check(),
         "last_sprint_review": _conductor.get_last_sprint_review(),

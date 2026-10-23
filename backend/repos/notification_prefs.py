@@ -1,7 +1,8 @@
 """Data access for notification preferences + Web Push subscriptions."""
 from __future__ import annotations
 
-from backend.models import NotificationPref, Profile, ProjectMember, PushSubscription
+from backend.models import (NotificationPref, Profile, ProjectMember,
+                            PushSubscription, Role)
 
 
 def project_human_members(db, project_id: str) -> list[Profile]:
@@ -11,6 +12,14 @@ def project_human_members(db, project_id: str) -> list[Profile]:
         .filter(ProjectMember.project_id == project_id, Profile.account_type == "human")
         .all()
     )
+
+
+def admin_profiles(db) -> list[Profile]:
+    """Human workspace admins (visible in the current org scope)."""
+    return (db.query(Profile)
+            .filter(Profile.account_type == "human",
+                    Profile.roles.any(Role.name == "admin"))
+            .all())
 
 
 def get_prefs_json(db, profile_ids: list[str]) -> dict[str, str]:

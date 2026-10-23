@@ -463,6 +463,7 @@ def _agent_to_dict(a: Agent, runtime_cost: float | None = None) -> dict:
         "conductor_report_time": (a.profile.conductor_report_time if a.profile else "09:00"),
         "conductor_report_enabled": bool(a.profile.conductor_report_enabled) if a.profile else True,
         "conductor_plan_interval_minutes": (a.profile.conductor_plan_interval_minutes if a.profile else 10),
+        "conductor_snapshot_interval_hours": (a.profile.conductor_snapshot_interval_hours if a.profile else 0),
         "conductor_sprint_time": (a.profile.conductor_sprint_time if a.profile else "07:45"),
         "conductor_sprint_min_interval_hours": (a.profile.conductor_sprint_min_interval_hours if a.profile else 4),
         "conductor_active": bool(a.profile.conductor_active) if a.profile else True,
@@ -1010,6 +1011,7 @@ _AGENT_TO_PROFILE_MIRROR = {
     # Conductor cadence config (only meaningful on the Conductor profile).
     "conductor_tick_seconds", "conductor_report_time",
     "conductor_report_enabled", "conductor_plan_interval_minutes",
+    "conductor_snapshot_interval_hours",
     "conductor_sprint_time", "conductor_sprint_min_interval_hours",
     "conductor_active",
     "conductor_redispatch_cooldown_minutes", "conductor_redispatch_max_attempts",
