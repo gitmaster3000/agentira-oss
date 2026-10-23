@@ -1030,6 +1030,63 @@ async def get_run_diagnostics(run_id: str, ctx: Context = None) -> dict:
         return {"error": "forbidden", "detail": str(e)}
 
 
+# ── Agent-to-agent (A2A) ───────────────────────────────────────────────────
+# Thin wrappers over backend.forge.a2a; refusals come back as {"error": ...}.
+
+def _a2a(fn, *args, **kwargs):
+    from backend.forge import a2a
+    try:
+        return fn(actor_ctx.get(), *args, **kwargs)
+    except a2a.A2AError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def list_agents(project_id: str = None, ctx: Context = None) -> list[dict] | dict:
+    """List the agents you can talk to, as cards (same organisation only).
+
+    Each card: name, description, skills, runtime, model, online (its
+    computer is connected), busy (it is mid-run) and projects. Pass
+    `project_id` to see only that project's agents.
+    """
+    from backend.forge import a2a
+    return _a2a(a2a.list_agents, project_id=project_id)
+
+
+@mcp.tool()
+async def ask_agent(agent: str, message: str, task_id: str = None,
+                    thread_id: str = None, ctx: Context = None) -> dict:
+    """Send a message to another agent and wake it. Also how you REPLY.
+
+    Start a conversation with `agent` (its name from list_agents) and
+    `message`; pass `task_id` to tie it to a task (a short line appears on the
+    task feed so people can follow along). To answer a message you received,
+    pass its `thread_id`. The answer comes back to you as a message; or check
+    get_agent_thread. Returns {thread_id, message_id, delivered}. Limits: not
+    yourself, same organisation, 8000 characters, 30 messages per thread per
+    hour.
+    """
+    from backend.forge import a2a
+    return _a2a(a2a.ask, agent, message, task_id=task_id, thread_id=thread_id)
+
+
+@mcp.tool()
+async def get_agent_thread(thread_id: str, ctx: Context = None) -> dict:
+    """Read an agent conversation you take part in: its messages, oldest first
+    ({from, to, kind, body, created_at}). Use it to check for an answer."""
+    from backend.forge import a2a
+    return _a2a(a2a.get_thread, thread_id)
+
+
+@mcp.tool()
+async def hand_off_task(task_id: str, agent: str, note: str,
+                        ctx: Context = None) -> dict:
+    """Pass a task to another agent: reassigns it, posts `note` on the task
+    feed and starts a run for `agent`. Returns {task_id, assignee, run_id}."""
+    from backend.forge import a2a
+    return _a2a(a2a.hand_off_task, task_id, agent, note)
+
+
 # ── Transport: Streamable HTTP ─────────────────────────────────────────────────
 # json_response=True → plain JSON body on POST (simpler, Bruno-compatible).
 # Switch to False when enabling server-push notifications via GET /mcp.

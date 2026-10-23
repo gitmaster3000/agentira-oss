@@ -20,6 +20,9 @@ from backend.forge.models import QueuedMessage, Run
 
 logger = logging.getLogger("agentira.forge.msg_queue")
 
+# Conversation scope of agent-to-agent threads (backend/forge/a2a.py).
+A2A_SCOPE_PREFIX = "a2a:"
+
 
 def enqueue(*, agent_id: str, scope_key: str, content: str,
             user_context: dict | None = None) -> str:
@@ -61,13 +64,23 @@ def dequeue_oldest(*, agent_id: str, scope_key: str) -> dict | None:
         return out
 
 
+def _oldest_scope_with_prefix(agent_id: str, prefix: str) -> str | None:
+    with SessionLocal() as db:
+        qm = (db.query(QueuedMessage)
+                .filter(QueuedMessage.agent_id == agent_id,
+                        QueuedMessage.scope_key.like(f"{prefix}%"))
+                .order_by(QueuedMessage.created_at.asc())
+                .first())
+        return qm.scope_key if qm else None
+
+
 def flush_next(agent_id: str, *, scope_key: str = "",
                run_id: str | None = None) -> bool:
     """Dispatch the oldest queued message for a conversation whose turn just
     reached a terminal state (completed / failed / cancelled). FIFO, one per
     call — the dispatched turn's own completion flushes the next. Queued
-    messages exist only for task scopes, so when scope_key isn't given we
-    derive it from the run's task. Best-effort; never raises. Returns True if a
+    messages exist for task scopes and agent-to-agent (a2a:) scopes; when
+    scope_key isn't given we derive the task scope from the run. Best-effort; never raises. Returns True if a
     message was dispatched."""
     try:
         scope = scope_key
@@ -76,9 +89,12 @@ def flush_next(agent_id: str, *, scope_key: str = "",
                 r = db.query(Run).filter(Run.id == run_id).first()
                 if r and r.task_id:
                     scope = f"task:{r.task_id}"
-        if not scope:
-            return False
-        nxt = dequeue_oldest(agent_id=agent_id, scope_key=scope)
+        nxt = dequeue_oldest(agent_id=agent_id, scope_key=scope) if scope else None
+        if not nxt:
+            # Nothing waiting in this conversation: an agent-to-agent message
+            # (a2a:<thread>) held while the agent was busy goes next.
+            scope = _oldest_scope_with_prefix(agent_id, A2A_SCOPE_PREFIX) or ""
+            nxt = dequeue_oldest(agent_id=agent_id, scope_key=scope) if scope else None
         if not nxt:
             return False
         # Lazy import avoids a cycle with services (which calls us back).

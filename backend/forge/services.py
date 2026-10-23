@@ -4654,6 +4654,22 @@ def send_runtime_message(
     # dispatch its own continuation nudge and double-run. A flag is
     # returned so the UI can show a "Resumed paused run" badge.
     resumed_run_id = None
+    # Agent-to-agent message (backend/forge/a2a.py): never interrupt a working
+    # agent — hold it in the same per-conversation queue; flush_next sends it
+    # once the agent's run reaches a terminal state.
+    from backend.forge import msg_queue
+    if scope_key and scope_key.startswith(msg_queue.A2A_SCOPE_PREFIX):
+        with _session() as db:
+            busy = (db.query(Run.id)
+                      .filter(Run.agent_id == agent_id,
+                              Run.status == RunStatus.RUNNING)
+                      .first()) is not None
+        if busy:
+            queued_id = msg_queue.enqueue(
+                agent_id=agent_id, scope_key=scope_key,
+                content=content, user_context=user_context)
+            return {"ok": True, "queued_id": queued_id,
+                    "note": "queued — the agent is mid-run"}
     if scope_key and scope_key.startswith("task:"):
         task_id = scope_key.split(":", 1)[1]
         with _session() as db:
