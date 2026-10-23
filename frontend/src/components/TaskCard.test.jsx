@@ -44,7 +44,7 @@ describe('TaskCard', () => {
             api.updateTask.mockReturnValue(new Promise(r => { resolve = r; }));
             renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
-            fireEvent.click(await screen.findByRole('menuitem', { name: 'Billing' }));
+            fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Billing' }));
             // Shown before the request settles.
             expect(screen.getByLabelText('Epic')).toHaveTextContent('Billing');
             expect(api.updateTask).toHaveBeenCalledWith('T1', { epic_id: 'E2' });
@@ -56,7 +56,7 @@ describe('TaskCard', () => {
             api.updateTask.mockRejectedValue(new Error('nope'));
             renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
-            fireEvent.click(await screen.findByRole('menuitem', { name: 'Billing' }));
+            fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Billing' }));
             await waitFor(() => expect(screen.getByLabelText('Epic')).toHaveTextContent('Onboarding'));
         });
 
@@ -71,14 +71,49 @@ describe('TaskCard', () => {
             expect(screen.queryByRole('menu')).toBeNull();
         });
 
-        it('No epic clears the epic; Open epic links to it', async () => {
+        it('Remove clears the epic; Open epic links to it', async () => {
             api.updateTask.mockResolvedValue({});
             renderCard(epicTask, epics);
             fireEvent.click(screen.getByLabelText('Epic'));
             expect(screen.getByRole('menuitem', { name: 'Open epic' })).toHaveAttribute('href', expect.stringContaining('E1'));
-            fireEvent.click(await screen.findByRole('menuitem', { name: 'No epic' }));
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
             expect(api.updateTask).toHaveBeenCalledWith('T1', { epic_id: '' });
-            expect(screen.getByLabelText('Epic')).toHaveTextContent('No epic');
+            expect(screen.getByLabelText('Epic')).toHaveTextContent('Add epic');
+        });
+
+        it('hides Open epic and Remove when the task has no epic', () => {
+            renderCard(base, epics);
+            fireEvent.click(screen.getByLabelText('Epic'));
+            expect(screen.queryByRole('menuitem', { name: 'Open epic' })).toBeNull();
+            expect(screen.queryByRole('menuitem', { name: 'Remove' })).toBeNull();
+        });
+
+        it('ticks the current epic; picking it again closes without saving', () => {
+            renderCard(epicTask, epics);
+            fireEvent.click(screen.getByLabelText('Epic'));
+            const current = screen.getByRole('menuitemradio', { name: 'Onboarding' });
+            expect(current).toHaveAttribute('aria-checked', 'true');
+            expect(screen.getByRole('menuitemradio', { name: 'Billing' })).toHaveAttribute('aria-checked', 'false');
+            fireEvent.click(current);
+            expect(screen.queryByRole('menu')).toBeNull();
+            expect(api.updateTask).not.toHaveBeenCalled();
+        });
+
+        it('filters a long epic list by search', () => {
+            const many = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((t, i) => ({ id: `X${i}`, title: t }));
+            renderCard(base, many);
+            fireEvent.click(screen.getByLabelText('Epic'));
+            fireEvent.change(screen.getByPlaceholderText('Find an epic…'), { target: { value: 'ta' } });
+            expect(screen.getAllByRole('menuitemradio').map(el => el.textContent)).toEqual(['Beta', 'Delta', 'Zeta']);
+        });
+
+        it('stays open when the epic list scrolls, closes when the page scrolls', () => {
+            renderCard(epicTask, epics);
+            fireEvent.click(screen.getByLabelText('Epic'));
+            fireEvent.scroll(screen.getByRole('menu'));
+            expect(screen.getByRole('menu')).toBeInTheDocument();
+            fireEvent.scroll(window);
+            expect(screen.queryByRole('menu')).toBeNull();
         });
     });
 });
