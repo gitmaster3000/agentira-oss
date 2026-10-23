@@ -15,7 +15,7 @@ from backend.forge import snapshot as snap
 from backend.forge.models import (Agent, AgentMessage, ForgeRuntime, Run,
                                   RunOutcome, RunStatus, RuntimeStatus)
 from backend.forge.scheduler import ForgeScheduler
-from backend.models import Notification, Profile, Role, Task
+from backend.models import Notification, Org, Profile, Role, Task
 
 NOW = lambda: datetime.now(timezone.utc)  # noqa: E731
 
@@ -25,10 +25,10 @@ def _db(pg):
     yield pg
 
 
-def _admin() -> str:
+def _admin(name: str = "boss") -> str:
     with bdb.SessionLocal() as db:
         role = db.query(Role).filter(Role.name == "admin").first()
-        p = Profile(name="boss", account_type="human", roles=[role], password_hash="")
+        p = Profile(name=name, account_type="human", roles=[role], password_hash="")
         db.add(p)
         db.commit()
         return p.id
@@ -296,3 +296,115 @@ def test_mcp_tool_returns_markdown_and_dict():
     finally:
         mcp_server.actor_ctx.reset(tok)
     assert "markdown" in out and "projects" in out["snapshot"]
+
+
+# ── multi-org isolation ───────────────────────────────────────────────
+
+def _second_org() -> str:
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        org = Org(name="SecondOrg")
+        db.add(org)
+        db.commit()
+        return org.id
+
+
+def _in_org(org_id, fn, *a, **kw):
+    prev = bdb.get_current_org()
+    bdb.set_current_org(org_id)
+    try:
+        return fn(*a, **kw)
+    finally:
+        bdb.set_current_org(prev)
+
+
+def _org_with_activity(org_id, project_name, *, active=True):
+    """An admin plus one project in `org_id`; with `active`, a finished task."""
+    def build():
+        _admin(f"boss-{project_name}")
+        proj = core_services.create_project(project_name, actor="system")
+        if active:
+            _task(proj["id"], f"{project_name} win", "done")
+        return proj["id"]
+    return _in_org(org_id, build)
+
+
+def _notes_by_org() -> dict[str, list]:
+    out: dict[str, list] = {}
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        for n in db.query(Notification).filter(
+                Notification.type == "conductor.snapshot").all():
+            out.setdefault(n.org_id, []).append(n)
+    return out
+
+
+def test_two_orgs_each_admin_gets_only_own_snapshot(pg):
+    org2 = _second_org()
+    cid1 = _conductor_with_interval(4)
+    cond2 = _in_org(org2, _conductor.get_or_create_conductor)["id"]
+    _org_with_activity(pg.org_id, "Alpha")
+    _org_with_activity(org2, "Beta")
+    bdb.set_current_org(None)  # scheduler context: no org
+
+    snap.run_snapshot_job()
+
+    notes = _notes_by_org()
+    assert {o: len(v) for o, v in notes.items()} == {pg.org_id: 1, org2: 1}
+    with bdb.privileged(), bdb.SessionLocal() as db:
+        msgs = db.query(AgentMessage).all()
+    contents = {m.agent_id: m.content for m in msgs}
+    assert len(contents) == 2
+    assert "Alpha" in contents[cid1] and "Beta" not in contents[cid1]
+    assert "Beta" in contents[cond2] and "Alpha" not in contents[cond2]
+    last = snap._LAST_SNAPSHOT
+    assert "Beta" not in last[pg.org_id]["markdown"]
+    assert "Alpha" not in last[org2]["markdown"]
+
+
+def test_quiet_org_gets_nothing_while_other_gets_one(pg):
+    org2 = _second_org()
+    _conductor_with_interval(4)
+    _org_with_activity(pg.org_id, "Alpha", active=False)
+    _org_with_activity(org2, "Beta")
+    bdb.set_current_org(None)
+
+    snap.run_snapshot_job()
+
+    assert {o: len(v) for o, v in _notes_by_org().items()} == {org2: 1}
+    assert snap._LAST_SNAPSHOT[pg.org_id]["reason"] == "quiet"
+
+
+def test_conductor_status_shows_only_callers_snapshot(pg):
+    from fastapi.testclient import TestClient
+    from backend.jwt_auth import create_token
+    from backend.rest_api import app
+    org2 = _second_org()
+    _conductor_with_interval(4)
+    _org_with_activity(pg.org_id, "Alpha")
+    _org_with_activity(org2, "Beta")
+    bdb.set_current_org(None)
+    snap.run_snapshot_job()
+
+    def status_as(org_id):
+        bdb.set_current_org(org_id)
+        admin_id = _admin(f"viewer-{org_id}")
+        tok = create_token("boss", admin_id, ["admin"], org_id=org_id)
+        c = TestClient(app, headers={"Authorization": f"Bearer {tok}"})
+        return c.get("/api/forge/conductor").json()["last_snapshot"]
+
+    a, b = status_as(pg.org_id), status_as(org2)
+    assert "Alpha" in a["markdown"] and "Beta" not in a["markdown"]
+    assert "Beta" in b["markdown"] and "Alpha" not in b["markdown"]
+
+
+def test_mcp_snapshot_limited_to_callers_org(pg):
+    import asyncio
+    from backend import mcp_server
+    org2 = _second_org()
+    _org_with_activity(pg.org_id, "Alpha")
+    _org_with_activity(org2, "Beta")
+    tok = mcp_server.actor_ctx.set("system")
+    try:
+        out = asyncio.run(mcp_server.get_work_snapshot(since_hours=8))
+    finally:
+        mcp_server.actor_ctx.reset(tok)
+    assert "Alpha" in out["markdown"] and "Beta" not in out["markdown"]

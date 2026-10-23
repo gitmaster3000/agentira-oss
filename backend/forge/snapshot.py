@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from backend.db import SessionLocal
+from backend.db import SessionLocal, get_current_org, privileged, set_current_org
 from backend.forge.models import RunOutcome, RunStatus
 from backend.forge.repos import snapshot as repo
 
@@ -20,11 +20,12 @@ logger = logging.getLogger("agentira.forge.snapshot")
 OFFLINE_AFTER = timedelta(minutes=5)
 CHAT_SCOPE = "chat:default"
 _ITEM_CAP = 8
-_LAST_SNAPSHOT: dict | None = None
+# Last job result per org id — a workspace only ever sees its own.
+_LAST_SNAPSHOT: dict[str, dict] = {}
 
 
-def get_last_snapshot() -> dict | None:
-    return _LAST_SNAPSHOT
+def get_last_snapshot(org_id: str | None = None) -> dict | None:
+    return _LAST_SNAPSHOT.get(org_id or get_current_org() or "")
 
 
 def _one_line(text: str | None, n: int = 160) -> str:
@@ -214,30 +215,25 @@ def _headline(snap: dict) -> tuple[str, str]:
     return f"Work snapshot: {body}", body
 
 
-def run_snapshot_job() -> dict:
-    """Scheduled every `conductor_snapshot_interval_hours`. Posts only when
-    something happened in the window or a blocker exists — otherwise silent.
-    The post is a notification to workspace admins plus a plain message in
-    the Conductor's chat; it never starts an LLM turn."""
-    global _LAST_SNAPSHOT
+def _org_ids() -> list[str]:
+    from backend.models import Org
+    with privileged(), SessionLocal() as db:
+        return [o.id for o in db.query(Org).all()]
+
+
+def _snapshot_org(org_id: str, hours: float) -> dict:
+    """One org's snapshot, with that org pinned so every query, the admin
+    list and the Conductor chat stay inside it."""
     from backend import notify_dispatch
     from backend.forge import conductor
     from backend.forge.repos import messages as messages_repo
-
-    hours = conductor.get_conductor_config()["snapshot_interval_hours"]
-    if hours <= 0:
-        return {"skipped": "snapshot_off"}
-    if not conductor._conductor_active():
-        _LAST_SNAPSHOT = {"skipped": "conductor_disabled"}
-        return _LAST_SNAPSHOT
     snap = build_work_snapshot(since_hours=hours)
     at = snap["window"]["until"]
     if not (snap["happened"] or snap["has_blockers"]):
-        _LAST_SNAPSHOT = {"posted": False, "reason": "quiet", "at": at}
-        return _LAST_SNAPSHOT
+        return {"posted": False, "reason": "quiet", "at": at}
     title, body = _headline(snap)
     with SessionLocal() as db:
-        prof = conductor.primary_conductor(db)
+        prof = conductor.conductor_for_org(db, org_id)
         notified = notify_dispatch.notify_admins(
             db, event_name="conductor.snapshot", title=title, body=body,
             link="/forge/conductor")
@@ -245,7 +241,30 @@ def run_snapshot_job() -> dict:
             messages_repo.add_note(db, agent_id=prof.id, scope_key=CHAT_SCOPE,
                                    content=snap["markdown"])
         db.commit()
-    _LAST_SNAPSHOT = {"posted": True, "at": at, "notified": notified,
-                      "summary": body, "markdown": snap["markdown"]}
-    logger.info("Work snapshot posted: %s", body)
-    return _LAST_SNAPSHOT
+    logger.info("Work snapshot posted org=%s: %s", org_id, body)
+    return {"posted": True, "at": at, "notified": notified,
+            "summary": body, "markdown": snap["markdown"]}
+
+
+def run_snapshot_job() -> dict:
+    """Scheduled every `conductor_snapshot_interval_hours`. Runs once per org
+    with that org pinned; an org posts only when something happened in the
+    window or a blocker exists — otherwise silent. The post is a notification
+    to that org's admins plus a plain message in its Conductor's chat; it
+    never starts an LLM turn."""
+    from backend.forge import conductor
+
+    hours = conductor.get_conductor_config()["snapshot_interval_hours"]
+    if hours <= 0:
+        return {"skipped": "snapshot_off"}
+    if not conductor._conductor_active():
+        return {"skipped": "conductor_disabled"}
+    previous = get_current_org()
+    results: dict[str, dict] = {}
+    try:
+        for org_id in _org_ids():
+            set_current_org(org_id)
+            results[org_id] = _LAST_SNAPSHOT[org_id] = _snapshot_org(org_id, hours)
+    finally:
+        set_current_org(previous)
+    return {"posted": any(r["posted"] for r in results.values()), "orgs": results}
