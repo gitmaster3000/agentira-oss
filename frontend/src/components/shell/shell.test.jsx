@@ -208,6 +208,17 @@ describe('AppTopbar — blended bar', () => {
         expect(screen.getByText('⌘K')).toBeInTheDocument();
     });
 
+    it('project switcher sits next to Work | Build, shows the active project and jumps to another board', async () => {
+        mountTopbar();
+        await switcher();
+        const btn = screen.getByRole('button', { name: /Switch project/ });
+        expect(btn).toHaveTextContent('Atlas');
+        fireEvent.click(btn);
+        fireEvent.click(screen.getByRole('menuitem', { name: /Beacon/ }));
+        expect(await screen.findByText('BOARD')).toBeInTheDocument();
+        expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+    });
+
     it('shows the published page path next to Work | Build, links navigate, last item is plain text', async () => {
         mountTopbar();
         await switcher();
@@ -244,10 +255,10 @@ describe('AppTopbar — blended bar', () => {
         expect(await screen.findByText('No matches for “zzzq”.')).toBeInTheDocument();
     });
 
-    it('has no project switcher, breadcrumb, or running chip in the bar', async () => {
+    it('has no breadcrumb or running chip in the bar', async () => {
         mountTopbar();
         await switcher();
-        for (const t of ['PROJECT', 'SWITCH PROJECT', 'Atlas', 'Board']) expect(screen.queryByText(t)).not.toBeInTheDocument();
+        for (const t of ['PROJECT', 'SWITCH PROJECT', 'Board']) expect(screen.queryByText(t)).not.toBeInTheDocument();
         expect(screen.queryByText(/running/)).not.toBeInTheDocument();
     });
 
