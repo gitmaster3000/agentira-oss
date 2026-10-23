@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -12,26 +13,36 @@ _TLS = ssl_context()
 
 
 class AgentiraClient:
-    def __init__(self, base_url: str, api_key: str = "") -> None:
+    def __init__(self, base_url: str, api_key: str = "", auth=None) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self._headers = {"Content-Type": "application/json"}
-        if api_key:
-            self._headers["Authorization"] = f"Bearer {api_key}"
+        # Optional TokenManager: renews the token and retries once on a 401.
+        self._auth = auth
+
+    def _send(self, url: str, data: bytes | None, method: str) -> object:
+        auth = getattr(self, "_auth", None)
+        token = auth.access_token if auth else self.api_key
+        for attempt in (1, 2):
+            headers = {"Content-Type": "application/json"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=30, context=_TLS) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                if exc.code != 401 or not auth or attempt == 2 or not auth.refresh(token):
+                    raise
+                token = auth.access_token
 
     def _get(self, path: str, params: dict | None = None) -> object:
         url = self.base_url + path
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
-        req = urllib.request.Request(url, headers=self._headers, method="GET")
-        with urllib.request.urlopen(req, timeout=30, context=_TLS) as resp:
-            return json.loads(resp.read())
+        return self._send(url, None, "GET")
 
     def _post(self, path: str, body: dict | None = None) -> object:
-        data = json.dumps(body or {}).encode()
-        req = urllib.request.Request(self.base_url + path, data=data, headers=self._headers, method="POST")
-        with urllib.request.urlopen(req, timeout=30, context=_TLS) as resp:
-            return json.loads(resp.read())
+        return self._send(self.base_url + path, json.dumps(body or {}).encode(), "POST")
 
     # ── Runtime registration ─────────────────────────────────────────────
 
