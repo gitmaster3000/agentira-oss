@@ -132,18 +132,6 @@ agentira/
 └── docker-compose*.yml
 ```
 
-## Keep a local stack on `main`
-
-To have `http://localhost:3113` follow `main` automatically (macOS):
-
-```bash
-scripts/auto-deploy-main.sh install
-```
-
-This clones the repo to `~/.agentira-deploy/agentira-oss` and installs a launchd job that checks `origin/main` every two minutes. When `main` moves it rebuilds the backend, MCP and frontend containers from that clone, so your own checkout and branches are never touched. It copies your `.env` and `docker-compose.local.yml` at install time; re-run `install` after changing either. If agent runs are in flight (`~/.agentira/inflight` is not empty) it waits for the next pass. Logs are in `~/.agentira-deploy/logs/`. Remove it with `scripts/auto-deploy-main.sh uninstall`.
-
-The Postgres data volume is shared with the stack you ran before, so nothing is lost on the first switch.
-
 ## Common problems
 
 **Tests fail immediately.** Docker is not running. The suite needs it for Postgres.
