@@ -44,6 +44,7 @@ const ForgeSettings = lazy(() => import('./pages/forge/ForgeSettings').then(m =>
 import { ROUTES } from './routes';
 import { appForUrl, openConnectedApp } from './connectedApps';
 import { PreviewBanner } from './components/PreviewBanner';
+import { McpConnect } from './pages/McpConnect';
 
 // Old "Welcome" stub replaced by Home — see pages/Home.jsx
 
@@ -107,6 +108,7 @@ export default function App() {
                     <Route path={ROUTES.GITHUB_CALLBACK} element={<GitHubCallback />} />
                     <Route path="/cli-auth" element={<CliAuth />} />
                     <Route path="/sso" element={<SsoRedirect />} />
+                    <Route path="/mcp-connect" element={<McpConnect />} />
 
                     {/* Studio routes (authenticated) */}
                     <Route path={ROUTES.STUDIO} element={<RequireAuth><Layout /></RequireAuth>}>
