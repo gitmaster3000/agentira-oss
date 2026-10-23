@@ -24,7 +24,7 @@ pip install -e agentira-cli/
 agentira daemon login --api-url http://localhost:8111
 ```
 
-This opens your browser at the instance's `/cli-auth` page. Approve the daemon while signed in as an administrator. The token is stored in `~/.agentira/credentials.json`.
+This opens your browser at the instance's `/cli-auth` page. Approve the daemon while signed in as an administrator. The sign-in is stored in `~/.agentira/credentials.json` (readable only by you) and renews itself while the daemon runs — see [Staying signed in](./running-agents.md#staying-signed-in).
 
 You never paste an API key.
 
