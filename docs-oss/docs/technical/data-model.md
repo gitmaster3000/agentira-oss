@@ -47,6 +47,7 @@ Defined in `backend/forge/models.py`.
 | **Agent** | Runtime executor: model, system prompt, toolkit, runtime, sandbox default. |
 | **Conversation** | Working memory for one agent and scope. |
 | **AgentMessage** | A message within a conversation. |
+| **A2AThread / A2AMessage** | Agent-to-agent conversation and its messages. See [Agent-to-agent messaging](./a2a.md). |
 | **Run** | A work episode. Status, outcome, diff, artifacts, accounting. |
 | **Artifact** | A registered deliverable. Capped and deduplicated per run. |
 | **Turn** | One dispatch, carrying a trace identifier. |
@@ -61,6 +62,7 @@ A conversation is keyed by agent and scope string:
 - `task:<task_id>`
 - `chat:project:<project_id>`
 - `chat:default`
+- `a2a:<thread_id>` (agent-to-agent threads)
 
 Scopes isolate memory. See [Core concepts](./concepts.md).
 

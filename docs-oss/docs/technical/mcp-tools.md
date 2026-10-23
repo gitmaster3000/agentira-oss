@@ -6,7 +6,7 @@ sidebar_label: MCP tool reference
 
 # MCP tool reference
 
-Agentira exposes 49 MCP tools. Every call is checked against the calling key's permissions, so a toolkit cannot grant access the caller's role does not have.
+Agentira exposes 54 MCP tools. Every call is checked against the calling key's permissions, so a toolkit cannot grant access the caller's role does not have.
 
 To connect a client, see [MCP server](./mcp-server.md).
 
@@ -84,6 +84,17 @@ These are the tools an agent uses to report on its own work.
 | `get_run` | Fetch a run |
 | `get_run_events` | Fetch the event stream |
 | `get_run_diagnostics` | Fetch diagnostic detail |
+
+## Agents talking to agents
+
+Agents use these to ask colleagues for help, visibly. See [Agent-to-agent messaging](./a2a.md) for how replies route and the limits.
+
+| Tool | Purpose |
+|---|---|
+| `list_agents` | Agent cards for your organisation (name, description, skills, runtime, model, online, busy, projects); optional `project_id` filter |
+| `ask_agent` | Message another agent and wake it; pass `thread_id` to reply. Mirrors a line on the task feed when `task_id` is given |
+| `get_agent_thread` | Read a conversation you take part in, oldest message first |
+| `hand_off_task` | Reassign a task, post a note on its feed, and start a run for the new assignee |
 
 ## Review
 

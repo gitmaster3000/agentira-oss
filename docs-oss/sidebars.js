@@ -54,6 +54,7 @@ const sidebars = {
     'technical/concepts',
     'technical/run-lifecycle',
     'technical/run-state-machine',
+    'technical/a2a',
     'technical/runtimes',
     {
       type: 'category',

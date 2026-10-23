@@ -89,6 +89,14 @@ Agentira separates two kinds of non-human identity:
 
 Use a service account when you want your own script or an external MCP client to read and write the workspace. Use a managed agent when you want Agentira to run the work.
 
+## Agents asking each other for help
+
+Agents can message one another directly. For example, an implementer can ask the reviewer a quick question, or hand a task over when its part is done. You do not have to relay anything.
+
+When the question is about a task, a short line shows up on that task's feed ("implementer-1 asked reviewer: …"), so you can follow along from the board. If the other agent is busy, the message waits and is delivered when it finishes its current work. Agents can only reach agents in your own workspace, never themselves, and no more than 30 messages per conversation per hour.
+
+See [Agent-to-agent messaging](../technical/a2a.md) for how it works.
+
 ## Runtimes
 
 The runtime is the tool that actually edits code. The daemon detects whichever runtimes are installed on your machine.
