@@ -56,6 +56,7 @@ Evidence providers need GitHub App credentials. Without them, `github_pr`, `ci`,
 | `MCP_HOST` | Bind address |
 | `MCP_PORT` | Bind port |
 | `MCP_PUBLIC_URL` | Public https address of the MCP service (OAuth). Set it on the backend too: the admin menu builds the connector link from it. The MCP service derives it from the request when unset. |
+| `MCP_CLIENT_METADATA_HOSTS` | Comma-separated hosts whose client metadata URLs may be used as an OAuth client ID (replaces the default `claude.ai,claude.com`). Setting it also advertises the feature in discovery. Unset: Claude's hosts are accepted but not advertised. |
 
 ## Dispatch and WebSocket
 
