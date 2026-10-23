@@ -84,6 +84,15 @@ def has_active_run(db, task_id: str) -> bool:
               .first()) is not None
 
 
+def agent_has_active_run(db, agent_id: str) -> bool:
+    """True while the agent has a run starting (PENDING) or in flight."""
+    from backend.forge.models import RunStatus
+    return (db.query(Run.id)
+              .filter(Run.agent_id == agent_id,
+                      Run.status.in_([RunStatus.PENDING, RunStatus.RUNNING]))
+              .first()) is not None
+
+
 def list_runs(db, *, scope, project_ids=None, agent_id: str | None = None,
               project_id: str | None = None, status: str | None = None,
               outcome: str | None = None, unresolved: bool = False,

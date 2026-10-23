@@ -4660,10 +4660,8 @@ def send_runtime_message(
     from backend.forge import msg_queue
     if scope_key and scope_key.startswith(msg_queue.A2A_SCOPE_PREFIX):
         with _session() as db:
-            busy = (db.query(Run.id)
-                      .filter(Run.agent_id == agent_id,
-                              Run.status == RunStatus.RUNNING)
-                      .first()) is not None
+            from backend.forge.repos import runs as runs_repo
+            busy = runs_repo.agent_has_active_run(db, agent_id)
         if busy:
             queued_id = msg_queue.enqueue(
                 agent_id=agent_id, scope_key=scope_key,

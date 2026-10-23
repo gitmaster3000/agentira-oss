@@ -32,6 +32,10 @@ def agent_for_profile_name(db, name: str) -> tuple[Agent, Profile] | None:
     return (row[0], row[1]) if row else None
 
 
+def profile_by_name(db, name: str) -> Profile | None:
+    return db.query(Profile).filter(Profile.name == name).first()
+
+
 def create_thread(db, *, project_id: str | None, task_id: str | None,
                   subject: str, created_by_agent_id: str,
                   origin_run_id: str | None,

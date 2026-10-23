@@ -24,6 +24,7 @@ test_a2a.py::test_empty_body_rejected PASSED
 test_a2a.py::test_not_an_agent_cannot_ask PASSED
 test_a2a.py::test_undeliverable_target_still_stores_message PASSED
 test_a2a.py::test_a2a_message_to_busy_agent_is_queued_then_flushed PASSED
+test_a2a.py::test_a2a_message_to_pending_agent_is_queued PASSED
 test_a2a.py::test_get_agent_thread_orders_messages PASSED
 test_a2a.py::test_get_agent_thread_unknown_or_foreign PASSED
 test_a2a.py::test_hand_off_reassigns_comments_and_dispatches PASSED
@@ -33,14 +34,14 @@ test_a2a.py::test_hand_off_needs_project_access PASSED
 test_a2a.py::test_list_agents_returns_cards_for_callers_org_only PASSED
 test_a2a.py::test_list_agents_filters_by_project PASSED
 test_a2a.py::test_list_agents_hides_archived PASSED
-============================== 27 passed in 7.22s ==============================
+============================== 28 passed in 10.84s ==============================
 ```
 
 ## 2. Full backend suite
 
 ```
 $ python -m pytest backend/tests/ -q -n 4
-1117 passed, 83 warnings in 70.66s (0:01:10)
+1118 passed, 79 warnings in 54.49s
 ```
 
 ## 3. Lint on the new/changed modules

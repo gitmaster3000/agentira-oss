@@ -198,8 +198,7 @@ def hand_off_task(actor: str, task_id: str, agent: str, note: str) -> dict:
         except PermissionError:
             raise A2AError(f"Task '{task_id}' not found.") from None
         if actor_prof is None:
-            from backend.models import Profile
-            actor_prof = db.query(Profile).filter(Profile.name == actor).first()
+            actor_prof = repo.profile_by_name(db, actor)
         if actor_prof is None:
             raise A2AError("Unknown caller.")
         target, target_prof = _target(db, actor_prof, agent)

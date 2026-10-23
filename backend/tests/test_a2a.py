@@ -281,6 +281,15 @@ def test_a2a_message_to_busy_agent_is_queued_then_flushed(world, monkeypatch):
     assert msg_queue.list_for_scope(agent_id=world["rev"], scope_key=scope) == []
 
 
+@patch("backend.forge.services._dispatch_coro", MagicMock(return_value=None))
+def test_a2a_message_to_pending_agent_is_queued(world):
+    _run(world["rev"], world["task_id"], status=RunStatus.PENDING)
+    out = _call(mcp_server.ask_agent, "impl", "reviewer", "wait for it")
+    queued = msg_queue.list_for_scope(agent_id=world["rev"],
+                                      scope_key=f"a2a:{out['thread_id']}")
+    assert len(queued) == 1
+
+
 # ── get_agent_thread ─────────────────────────────────────────────────────
 
 def test_get_agent_thread_orders_messages(world, sent):
