@@ -157,3 +157,50 @@ def test_non_admin_cannot_connect_as_agent(client):
     assert r.status_code == 403
     r = _authorize(client, cid)  # no link: acts as themselves
     assert _profile_of(client, r) == "alice"
+
+
+CIMD = "https://claude.ai/oauth/claude-code-client-metadata"
+
+
+def _fake_cimd(monkeypatch, doc, status=200):
+    import httpx
+
+    from backend import mcp_oauth
+    mcp_oauth._cimd_cache.clear()
+
+    async def fake_get(self, url, **kw):
+        return httpx.Response(status, json=doc, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+
+def test_client_metadata_document_client_id_is_accepted(client, monkeypatch):
+    _fake_cimd(monkeypatch, {"client_id": CIMD, "redirect_uris": ["http://localhost/callback"]})
+    # Default: Claude's hosts are accepted, but discovery does not advertise the feature (no change for other clients).
+    assert "client_id_metadata_document_supported" not in client.get("/.well-known/oauth-authorization-server").json()
+    r = client.post("/authorize", data={
+        "client_id": CIMD, "redirect_uri": "http://localhost:54907/callback", "state": "xyz",
+        "code_challenge": CHALLENGE, "code_challenge_method": "S256", "response_type": "code",
+        "username": "alice", "password": "s3cret"})
+    assert r.status_code == 302
+    assert r.headers["location"].startswith("http://localhost:54907/callback?code=")
+
+
+def test_client_metadata_document_must_match_and_come_from_claude(client, monkeypatch):
+    _fake_cimd(monkeypatch, {"client_id": "https://claude.ai/other", "redirect_uris": ["http://localhost/callback"]})
+    bad_doc = client.get("/authorize", params={"client_id": CIMD, "redirect_uri": "http://localhost:1/callback",
+                                               "code_challenge": CHALLENGE, "code_challenge_method": "S256"})
+    assert bad_doc.status_code == 400 and "Unknown client" in bad_doc.text
+    elsewhere = client.get("/authorize", params={"client_id": "https://evil.example/meta", "redirect_uri": "http://localhost:1/callback",
+                                                 "code_challenge": CHALLENGE, "code_challenge_method": "S256"})
+    assert elsewhere.status_code == 400 and "Unknown client" in elsewhere.text
+
+
+def test_metadata_hosts_setting_replaces_default_and_advertises(client, monkeypatch):
+    other = "https://vscode.example/oauth/client.json"
+    _fake_cimd(monkeypatch, {"client_id": other, "redirect_uris": ["http://localhost/callback"]})
+    params = {"client_id": other, "redirect_uri": "http://localhost:1/callback",
+              "code_challenge": CHALLENGE, "code_challenge_method": "S256"}
+    assert client.get("/authorize", params=params).status_code == 400  # not approved yet
+    monkeypatch.setenv("MCP_CLIENT_METADATA_HOSTS", "vscode.example")
+    assert client.get("/authorize", params=params).status_code == 200
+    assert client.get("/.well-known/oauth-authorization-server").json()["client_id_metadata_document_supported"] is True

@@ -22,6 +22,7 @@ import os
 import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import httpx
 import jwt
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -112,6 +113,7 @@ async def authorization_server_metadata(request: Request):
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": [SCOPE],
+        **({"client_id_metadata_document_supported": True} if _metadata_hosts_setting() else {}),
     })
 
 
@@ -142,13 +144,64 @@ async def register(request: Request):
 _FIELDS = ("client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "resource")
 
 
-def _validate_authorize(params: dict) -> str | None:
+# Client ID Metadata Documents: newer Claude clients send an https URL as client_id and publish
+# { client_id, redirect_uris } there instead of registering. Only approved hosts, no redirects, 64 KB cap.
+# MCP_CLIENT_METADATA_HOSTS (comma-separated) replaces the default Claude hosts and also makes discovery advertise the
+# feature; left unset, Claude's hosts are accepted but not advertised, so other clients keep registering as before.
+CLAUDE_HOSTS = {"claude.ai", "claude.com"}
+
+
+def _metadata_hosts_setting() -> set[str]:
+    return {h.strip().lower() for h in os.getenv("MCP_CLIENT_METADATA_HOSTS", "").split(",") if h.strip()}
+_cimd_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def _is_loopback(url: str) -> bool:
+    u = urlparse(url)
+    return u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
+
+
+async def _client(client_id: str) -> dict | None:
+    """A client we registered (signed id), or a metadata document served by Claude."""
+    signed = _verify(client_id, "mcp_client")
+    if signed:
+        return signed
+    if not client_id.startswith("https://") or urlparse(client_id).hostname not in (_metadata_hosts_setting() or CLAUDE_HOSTS):
+        return None
+    hit = _cimd_cache.get(client_id)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    client = None
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=5) as http:
+            r = await http.get(client_id, headers={"accept": "application/json"})
+        doc = r.json() if r.status_code == 200 and len(r.content) <= 65536 else {}
+        uris = doc.get("redirect_uris")
+        if doc.get("client_id") == client_id and isinstance(uris, list):
+            client = {"redirect_uris": [u for u in uris if isinstance(u, str)], "loopback_any_port": True}
+    except (httpx.HTTPError, ValueError):
+        pass
+    _cimd_cache[client_id] = (time.time() + (3600 if client else 60), client)
+    if len(_cimd_cache) > 100:
+        _cimd_cache.clear()
+    return client
+
+
+def _redirect_ok(client: dict, uri: str) -> bool:
+    if uri in client["redirect_uris"]:
+        return True
+    # RFC 8252: a native app picks a free port at sign-in time, so loopback redirects match on path only.
+    return bool(client.get("loopback_any_port") and _is_loopback(uri) and any(
+        _is_loopback(r) and urlparse(r).path == urlparse(uri).path for r in client["redirect_uris"]))
+
+
+async def _validate_authorize(params: dict) -> str | None:
     """Return an error message, or None when the request is acceptable.
     Never redirect to an unvalidated redirect_uri."""
-    client = _verify(params.get("client_id", ""), "mcp_client")
+    client = await _client(params.get("client_id", ""))
     if not client:
         return "Unknown client."
-    if params.get("redirect_uri") not in client["redirect_uris"]:
+    if not _redirect_ok(client, params.get("redirect_uri", "")):
         return "Redirect address is not registered for this client."
     if params.get("response_type", "code") != "code":
         return "Unsupported response type."
@@ -234,13 +287,13 @@ def _redirect_with_code(form: dict, profile_id: str) -> RedirectResponse:
 async def authorize(request: Request):
     if request.method == "GET":
         params = dict(request.query_params)
-        error = _validate_authorize(params)
+        error = await _validate_authorize(params)
         if error:
             return HTMLResponse(html.escape(error), status_code=400)
         return _login_page(params)
 
     form = dict(await request.form())
-    error = _validate_authorize(form)
+    error = await _validate_authorize(form)
     if error:
         return HTMLResponse(html.escape(error), status_code=400)
     # Step 2: admin picked an identity on the "Who is connecting?" page.
