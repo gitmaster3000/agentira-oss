@@ -671,6 +671,26 @@ def register_run_artifact(*, run_id: str, url: str, label: str = "",
 
 # ── Runtime serializer ──────────────────────────────────────────────────
 
+_DAEMON_SILENT_AFTER_S = 300  # explain a runtime as signed-out/stopped after 5 min
+
+
+def _offline_reason(r: ForgeRuntime) -> str:
+    """Plain-language reason a runtime reads offline. Liveness is the daemon's
+    WebSocket; the last heartbeat tells us how long it has been gone."""
+    where = r.device_name or "this computer"
+    if r.last_heartbeat:
+        silent_s = (datetime.now(timezone.utc) - _utc(r.last_heartbeat)).total_seconds()
+        if silent_s < _DAEMON_SILENT_AFTER_S:
+            return f"Reconnecting to {where}…"
+        mins = int(silent_s // 60)
+        since = f"for {mins} minutes" if mins < 120 else f"for {mins // 60} hours"
+    else:
+        since = "yet"
+    return (f"Agentira hasn't heard from {where} {since}. Its connector may be "
+            "stopped or signed out — run `agentira daemon login` there, then "
+            "`agentira daemon start`.")
+
+
 def _runtime_to_dict(r: ForgeRuntime) -> dict:
     live = _is_runtime_online(r)
     return {
@@ -681,6 +701,7 @@ def _runtime_to_dict(r: ForgeRuntime) -> dict:
         "binary_path": r.binary_path,
         "version": r.version,
         "status": "online" if live else "offline",
+        "offline_reason": None if live else _offline_reason(r),
         "capabilities": json.loads(r.capabilities) if r.capabilities else [],
         "models": json.loads(r.models) if r.models else [],
         "gateway_url": r.gateway_url or "",

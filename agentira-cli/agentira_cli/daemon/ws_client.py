@@ -19,6 +19,17 @@ logger = logging.getLogger("agentira.daemon.ws")
 _RECONNECT_DELAYS = [1, 2, 5, 10, 30, 60]  # seconds, last value repeated
 
 
+def _is_auth_rejection(exc: BaseException) -> bool:
+    """Did the server refuse our token? Either the handshake answered 401, or
+    it accepted the socket and closed it with the app code 4401."""
+    while exc is not None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status == 401 or getattr(getattr(exc, "rcvd", None), "code", None) == 4401:
+            return True
+        exc = exc.__cause__
+    return False
+
+
 class DaemonWsClient:
     def __init__(
         self,
@@ -28,6 +39,7 @@ class DaemonWsClient:
         runtime_ids: list[str],
         wake_event: threading.Event,
         task_queue: queue.Queue | None = None,
+        auth=None,
     ) -> None:
         self._api_url = api_url.rstrip("/")
         self._api_key = api_key
@@ -35,6 +47,8 @@ class DaemonWsClient:
         self._runtime_ids = runtime_ids
         self._wake = wake_event
         self._task_queue = task_queue
+        self._auth = auth  # TokenManager, or None for static keys
+        self._token_used = api_key
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="daemon-ws", daemon=True)
 
@@ -63,6 +77,8 @@ class DaemonWsClient:
                 self._connect_and_listen()
                 delay_idx = 0  # successful connection — reset backoff
             except Exception as exc:
+                if self._auth and _is_auth_rejection(exc):
+                    self._auth.refresh(self._token_used)
                 delay = _RECONNECT_DELAYS[min(delay_idx, len(_RECONNECT_DELAYS) - 1)]
                 logger.debug("WS disconnected (%s) — reconnect in %ds", exc, delay)
                 delay_idx += 1
@@ -77,7 +93,10 @@ class DaemonWsClient:
             return
 
         url = self._ws_url()
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        if self._auth:
+            self._auth.ensure_fresh()
+        self._token_used = self._auth.access_token if self._auth else self._api_key
+        headers = {"Authorization": f"Bearer {self._token_used}"}
         # certifi-backed TLS for wss:// (macOS python builds lack root CAs).
         ws_ssl = None
         if url.startswith("wss://"):
@@ -100,7 +119,7 @@ class DaemonWsClient:
                 "daemon_id": self._daemon_id,
                 "runtime_ids": self._runtime_ids,
                 # Fallback auth for proxies that strip the Authorization header.
-                "token": self._api_key,
+                "token": self._token_used,
             }))
 
             # ADR 009 / B5: the backend acks registration as the very first
@@ -113,7 +132,7 @@ class DaemonWsClient:
                 ack = json.loads(ws.recv(timeout=10))
             except (TimeoutError, Exception) as exc:
                 raise ConnectionError(
-                    f"no WS registration ack within 10s ({exc}) — reconnecting")
+                    f"no WS registration ack within 10s ({exc}) — reconnecting") from exc
             if ack.get("type") != "registered":
                 raise ConnectionError(
                     f"unexpected first WS frame (want 'registered'): {ack!r}")

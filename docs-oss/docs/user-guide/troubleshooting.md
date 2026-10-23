@@ -37,6 +37,10 @@ Restart the daemon afterwards so it re-detects.
 
 **"Didn't return a usable verification URL"** means the backend has no `FRONTEND_URL` set. The operator must set it to the public frontend address. See [Configuration](../technical/configuration.md).
 
+## Agents went offline and the daemon log says "signed out"
+
+The log line `Agentira daemon is signed out — run `agentira daemon login`` means the daemon could not renew its sign-in. Run `agentira daemon login` and approve it in the browser. A running daemon picks the new sign-in up on its own. See [Staying signed in](./running-agents.md#staying-signed-in).
+
 ## The agent edits the wrong files
 
 Check **Project Settings → General** for the repository path. The worktree is created from it.

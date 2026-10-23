@@ -243,7 +243,15 @@ class AgentiraDaemon:
         self._wake_event = threading.Event()
         self._task_queue: queue.Queue = queue.Queue()
         self._active = threading.Semaphore(_MAX_CONCURRENT_RUNS)
-        self.client = AgentiraClient(base_url=config.api_url, api_key=config.api_key)
+        # Renews the `daemon login` token before it expires / after a 401.
+        # None for static keys and --api-key overrides: those never refresh.
+        from agentira_cli.daemon.auth import TokenManager
+        from agentira_cli.state.paths import CREDENTIALS_FILE
+        self._auth = TokenManager.from_credentials(
+            credentials_file=CREDENTIALS_FILE, api_url=config.api_url,
+            api_key=config.api_key)
+        self.client = AgentiraClient(base_url=config.api_url,
+                                     api_key=config.api_key, auth=self._auth)
         self._daemon_id = _load_or_create_daemon_id()
         self._registered: list[dict] = []
         # Track in-flight executions so a cancel frame can kill the right
@@ -291,6 +299,7 @@ class AgentiraDaemon:
                 runtime_ids=runtime_ids,
                 wake_event=self._wake_event,
                 task_queue=self._task_queue,
+                auth=self._auth,
             )
             self._ws.start()
 
@@ -1388,6 +1397,8 @@ class AgentiraDaemon:
     def _heartbeat(self) -> None:
         if not self._registered:
             return
+        if self._auth:
+            self._auth.ensure_fresh()
         providers = [r.get("provider", "") for r in self._registered if r.get("provider")]
         # ADR 009 / B4: report the live turns from the durable registry so the
         # backend keeps a restart-proof view of what's running per scope.

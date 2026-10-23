@@ -108,6 +108,19 @@ def load_credentials() -> dict | None:
     return None
 
 
+def _device_info() -> dict:
+    """Which machine is signing in — recorded on the refresh token so it can be
+    told apart (and revoked) later."""
+    import socket
+    info = {"device_name": socket.gethostname()}
+    try:
+        from agentira_cli.daemon.core import _load_or_create_daemon_id
+        info["daemon_id"] = _load_or_create_daemon_id()
+    except Exception:  # noqa: BLE001 — optional metadata only
+        info["daemon_id"] = None
+    return info
+
+
 @app.command()
 def login(api_url: str = typer.Option(None, "--api-url",
           help="Server API URL (defaults to AGENTIRA_DAEMON_API_URL/config).")):
@@ -117,7 +130,7 @@ def login(api_url: str = typer.Option(None, "--api-url",
     ensure_home()
     base = (api_url or DaemonConfig().api_url).rstrip("/")
     try:
-        start = _post_json(f"{base}/api/auth/cli/start", {})
+        start = _post_json(f"{base}/api/auth/cli/start", _device_info())
     except Exception as e:  # noqa: BLE001
         typer.echo(f"Could not reach server at {base}: {e}")
         raise typer.Exit(1)
@@ -148,7 +161,7 @@ def login(api_url: str = typer.Option(None, "--api-url",
 
     interval = int(start.get("interval", 2))
     deadline = time.time() + int(start.get("expires_in", 600))
-    token = None
+    token = refresh_token = None
     typer.echo("Waiting for approval…")
     while time.time() < deadline:
         time.sleep(interval)
@@ -158,12 +171,16 @@ def login(api_url: str = typer.Option(None, "--api-url",
             continue
         if r.get("status") == "approved" and r.get("token"):
             token = r["token"]
+            refresh_token = r.get("refresh_token")  # absent on older backends
             break
     if not token:
         typer.echo("Login timed out. Run `agentira daemon login` again.")
         raise typer.Exit(1)
 
-    CREDENTIALS_FILE.write_text(json.dumps({"api_url": base, "token": token}))
+    creds = {"api_url": base, "token": token}
+    if refresh_token:
+        creds["refresh_token"] = refresh_token
+    CREDENTIALS_FILE.write_text(json.dumps(creds))
     try:
         os.chmod(CREDENTIALS_FILE, 0o600)
     except OSError:
@@ -174,6 +191,13 @@ def login(api_url: str = typer.Option(None, "--api-url",
 @app.command()
 def logout():
     """Remove stored daemon credentials."""
+    creds = load_credentials() or {}
+    if creds.get("refresh_token") and creds.get("api_url"):
+        try:  # best effort: kill the device token on the server too
+            _post_json(f"{creds['api_url'].rstrip('/')}/api/auth/cli/revoke",
+                       {"refresh_token": creds["refresh_token"]})
+        except Exception:  # noqa: BLE001
+            typer.echo("(could not reach the server to revoke this device's sign-in)")
     try:
         CREDENTIALS_FILE.unlink()
         typer.echo("Logged out.")

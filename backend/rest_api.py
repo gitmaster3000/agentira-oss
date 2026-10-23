@@ -467,15 +467,20 @@ def _cli_gc():
         _CLI_BY_USER_CODE.pop(uc, None)
 
 @auth.post("/auth/cli/start")
-def api_cli_start():
-    """Daemon → start a browser-login session."""
+def api_cli_start(body: Optional[dict] = None):
+    """Daemon → start a browser-login session. Optional body: `device_name`,
+    `daemon_id` — recorded on the refresh token issued at approval."""
     _cli_gc()
+    body = body or {}
     device_code = _secrets.token_urlsafe(32)
     # Pre-filled in the verification URL, so it can be high-entropy (not a
     # 6-char code an attacker could brute-force against a pending session).
     user_code = _secrets.token_urlsafe(16)
     _CLI_SESSIONS[device_code] = {"user_code": user_code, "status": "pending",
-                                  "token": None, "exp": _time.time() + _CLI_TTL}
+                                  "token": None, "exp": _time.time() + _CLI_TTL,
+                                  "refresh_token": None,
+                                  "device_name": str(body.get("device_name") or "")[:120],
+                                  "daemon_id": str(body.get("daemon_id") or "")[:64]}
     _CLI_BY_USER_CODE[user_code] = device_code
     frontend = (os.getenv("FRONTEND_URL", "") or
                 (os.getenv("CORS_ALLOW_ORIGINS", "").split(",")[0] if os.getenv("CORS_ALLOW_ORIGINS") else "")).rstrip("/")
@@ -495,11 +500,14 @@ def api_cli_poll(body: dict):
     if not s:
         raise HTTPException(404, "expired_or_unknown")
     if s["status"] == "approved":
-        token = s["token"]
+        token, refresh_token = s["token"], s.get("refresh_token")
         # one-time: invalidate after handing the token over
         _CLI_BY_USER_CODE.pop(s["user_code"], None)
         _CLI_SESSIONS.pop(body["device_code"], None)
-        return {"status": "approved", "token": token}
+        res = {"status": "approved", "token": token}
+        if refresh_token:
+            res["refresh_token"] = refresh_token
+        return res
     return {"status": s["status"]}
 
 @auth.post("/auth/cli/approve", dependencies=[Depends(require_admin)])
@@ -516,6 +524,29 @@ def api_cli_approve(body: dict, payload: dict = Depends(get_current_user_payload
     from backend.jwt_auth import payload_roles
     s["token"] = create_token(payload["sub"], payload["profile_id"],
                               payload_roles(payload) or ["admin"], payload.get("org_id"))
+    # Long-lived device credential so the daemon can renew its own access
+    # token (backend/daemon_auth.py). Held here only until the daemon polls.
+    from backend import daemon_auth
+    s["refresh_token"] = daemon_auth.issue(
+        profile_id=payload["profile_id"], org_id=payload["org_id"],
+        device_name=s.get("device_name"), daemon_id=s.get("daemon_id"))
+    return {"ok": True}
+
+@auth.post("/auth/cli/refresh")
+def api_cli_refresh(body: Optional[dict] = None):
+    """Daemon → trade a refresh token for a fresh access token + a rotated
+    refresh token. Unauthenticated: the refresh token is the credential."""
+    from backend import daemon_auth
+    try:
+        return daemon_auth.exchange((body or {}).get("refresh_token", ""))
+    except daemon_auth.RefreshRejected:
+        raise HTTPException(401, "Refresh token invalid or expired — sign in again")
+
+@auth.post("/auth/cli/revoke")
+def api_cli_revoke(body: Optional[dict] = None):
+    """Daemon logout → revoke the refresh token (and its rotated chain)."""
+    from backend import daemon_auth
+    daemon_auth.revoke((body or {}).get("refresh_token", ""))
     return {"ok": True}
 
 @auth.get("/statuses")

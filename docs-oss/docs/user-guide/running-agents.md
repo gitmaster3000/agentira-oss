@@ -82,6 +82,24 @@ Agentira expects processes to die and recovers rather than losing work:
 - **Zombies are reaped.** On startup the daemon kills orphaned processes from earlier runs.
 - **Vanished daemons are reconciled.** A periodic sweep marks runs whose daemon disappeared.
 
+## Staying signed in
+
+The daemon signs in with `agentira daemon login`. That sign-in is renewed automatically, so the daemon does not drop off after a week:
+
+- **Renewed before it runs out.** When less than a day of sign-in is left, the daemon quietly gets a fresh one. Each device also holds a long-lived key that lasts 90 days and resets every time it is used, so a daemon that keeps running stays signed in indefinitely.
+- **Renewed when the server says no.** If the server rejects a request as signed out, the daemon renews and retries once.
+- **Visible when it cannot renew.** If the sign-in cannot be renewed (for example the device was removed, or the daemon was off for more than 90 days), the daemon writes this to its log, at most once every 10 minutes, and keeps retrying with growing pauses:
+
+  ```
+  Agentira daemon is signed out — run `agentira daemon login`
+  ```
+
+  Agents on that computer show as **offline** with a plain reason, such as "Agentira hasn't heard from Ali's Mac for 12 minutes. Its connector may be stopped or signed out."
+- **Fixing it.** Run `agentira daemon login` again. A daemon that is still running picks up the new sign-in on its own; no restart needed.
+- **Signing a device out.** `agentira daemon logout` removes the credentials and cancels the device's long-lived key on the server.
+
+A daemon signed in with an older version keeps working as before until its week runs out; run `agentira daemon login` once more to get automatic renewal.
+
 ## Concurrency
 
 The daemon caps how many runs execute at once. Dispatches beyond the cap queue until a slot frees.
