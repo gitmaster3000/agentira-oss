@@ -1,0 +1,62 @@
+# Isolated stack for the Playwright browser tests (frontend/e2e).
+# Standalone file — do not layer it on docker-compose.yml / the dev override.
+#
+#   docker compose -p ap-e2e -f docker-compose.e2e.yml up -d --build --wait
+#   docker compose -p ap-e2e -f docker-compose.e2e.yml exec backend python scripts/seed_e2e_user.py
+#   ...
+#   docker compose -p ap-e2e -f docker-compose.e2e.yml down -v
+#
+# Only the web app is published to the host, on E2E_WEB_PORT (default 3211, so it
+# never collides with the dev stack on 3111). It is the production nginx image:
+# static bundle + /api proxied to the backend, same shape as a real deployment.
+# Throwaway credentials, fresh database every run — no secrets.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=agentira
+      - POSTGRES_PASSWORD=agentira
+      - POSTGRES_DB=agentira
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentira -d agentira"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - JWT_SECRET=e2e-only-not-a-secret-32-byte-value-1234567890
+      - AGENTIRA_DB_URL=postgresql://agentira:agentira@postgres:5432/agentira
+      - AGENTIRA_ENV=e2e
+      - PORT=8111
+    command: sh -c "python scripts/bootstrap_db.py && uvicorn backend.rest_api:app --host 0.0.0.0 --port 8111"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8111/api/auth/config').read()"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${E2E_WEB_PORT:-3211}:80"
+    volumes:
+      - ./frontend/nginx.local.conf:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/auth/config"]
+      interval: 3s
+      timeout: 5s
+      retries: 20

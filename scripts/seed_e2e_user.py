@@ -9,6 +9,7 @@ overridden with E2E_USER / E2E_PASSWORD / E2E_EMAIL.
 """
 import os
 
+from backend.db import init_db
 from backend.e2e_seed import ensure_e2e_user
 
 NAME = os.environ.get("E2E_USER", "e2e-admin")
@@ -16,5 +17,6 @@ PASSWORD = os.environ.get("E2E_PASSWORD", "e2e-password-1234")
 EMAIL = os.environ.get("E2E_EMAIL", "e2e-admin@example.test")
 
 if __name__ == "__main__":
+    init_db()  # loads every model (forge included) before the first write
     created = ensure_e2e_user(NAME, PASSWORD, EMAIL)
     print(f"{'created' if created else 'already exists'}: {NAME}")
