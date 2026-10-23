@@ -519,3 +519,35 @@ class PlanningTurn(Base):
     # Where the full transcript lives — the Conductor's own conversation.
     conversation_scope_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class A2AThread(Base):
+    """A conversation between agents (A2A inside Agentira).
+
+    `origin_run_id` / `origin_scope_key` remember where the asker was working
+    when it asked, so a reply can land in that live conversation."""
+    __tablename__ = "forge_a2a_threads"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str]         = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    subject: Mapped[str]        = mapped_column(String(200), default="")
+    created_by_agent_id: Mapped[str] = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    origin_run_id: Mapped[str | None] = mapped_column(ForeignKey("forge_runs.id"), nullable=True)
+    origin_scope_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class A2AMessage(Base):
+    """One message in an A2AThread. kind: ask | reply | handoff | note."""
+    __tablename__ = "forge_a2a_messages"
+
+    id: Mapped[str]             = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str]         = mapped_column(ForeignKey("orgs.id"), nullable=False, index=True)
+    thread_id: Mapped[str]      = mapped_column(ForeignKey("forge_a2a_threads.id"), nullable=False, index=True)
+    from_agent_id: Mapped[str]  = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    to_agent_id: Mapped[str]    = mapped_column(ForeignKey("forge_agents.id"), nullable=False)
+    kind: Mapped[str]           = mapped_column(String(10), default="ask")
+    body: Mapped[str]           = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

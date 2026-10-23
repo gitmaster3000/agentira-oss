@@ -231,6 +231,7 @@ _ORG_SCOPED_TABLES = [
     "activities", "attachments", "profile_permissions",
     "forge_agents", "forge_runtimes", "deploy_credentials",
     "client_debug_sessions", "mcp_servers",
+    "forge_a2a_threads", "forge_a2a_messages",
     "notification_prefs", "push_subscriptions",
 ]
 
