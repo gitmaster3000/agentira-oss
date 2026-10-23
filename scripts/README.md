@@ -6,6 +6,7 @@
 | `write_cli_manifest.py` | Writes `backend/static/cli/manifest.json` from the baked CLI wheel (Docker build). | python (auto, in container) |
 | `install-daemon.sh` | Mac / Linux daemon installer. Checks prereqs, pip-installs from instance wheel, writes `~/.agentira/.env`. | `bash` (on a user's machine) |
 | `install-daemon.ps1` | Windows daemon installer. Same shape as `install-daemon.sh`. | PowerShell (on a user's machine) |
+| `auto-deploy-main.sh` | Keeps the local Docker stack at `localhost:3113` on the latest `origin/main`: polls every 2 minutes, rebuilds from its own clone, defers while agent runs are in flight. | `scripts/auto-deploy-main.sh install` (macOS, once) |
 
 ## Sharing the installers
 
