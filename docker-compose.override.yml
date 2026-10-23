@@ -34,6 +34,8 @@ services:
       # Where the backend tells `agentira daemon login` to send the browser.
       # Without it the CLI device flow gets a relative /cli-auth and gives up.
       - FRONTEND_URL=http://localhost:3111
+      # The web app only hands your login to this address (MCP sign-in without a password).
+      - MCP_PUBLIC_URL=http://localhost:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -44,6 +46,10 @@ services:
     environment:
       # Same Postgres as the backend so MCP reads/writes the same data.
       - AGENTIRA_DB_URL=postgresql://agentira:agentira@postgres:5432/agentira
+      # Same secret as the backend: MCP sign-in tokens survive restarts, and the web login handoff can be read.
+      - JWT_SECRET=dev-only-not-for-prod-32-byte-secret-12345678901234
+      # Already signed in to the web app? Skip the MCP password page (see MCP_SSO_FRONTEND_URL in configuration.md).
+      - MCP_SSO_FRONTEND_URL=http://localhost:3111
     volumes:
       - ./backend:/app/backend
       - ./scripts:/app/scripts

@@ -160,50 +160,69 @@ def test_non_admin_cannot_connect_as_agent(client):
 
 
 CIMD = "https://claude.ai/oauth/claude-code-client-metadata"
+PUBLIC_IP = "160.79.104.10"
 
 
-def _fake_cimd(monkeypatch, doc, status=200):
-    import httpx
-
+def _fake_cimd(monkeypatch, doc, ip=PUBLIC_IP):
+    """Metadata document served at the client_id; `ip` is what the host name resolves to (None: not public)."""
     from backend import mcp_oauth
     mcp_oauth._cimd_cache.clear()
+    fetched = []
 
-    async def fake_get(self, url, **kw):
-        return httpx.Response(status, json=doc, request=httpx.Request("GET", url))
-    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    async def public_ip(host):
+        return ip
+
+    async def fetch(url, addr):
+        fetched.append((url, addr))
+        return doc
+    monkeypatch.setattr(mcp_oauth, "_public_ip", public_ip)
+    monkeypatch.setattr(mcp_oauth, "_fetch_metadata", fetch)
+    return fetched
 
 
-def test_client_metadata_document_client_id_is_accepted(client, monkeypatch):
-    _fake_cimd(monkeypatch, {"client_id": CIMD, "redirect_uris": ["http://localhost/callback"]})
-    # Default: Claude's hosts are accepted, but discovery does not advertise the feature (no change for other clients).
+def _authorize_params(client_id, redirect, **extra):
+    return {"client_id": client_id, "redirect_uri": redirect, "code_challenge": CHALLENGE,
+            "code_challenge_method": "S256", **extra}
+
+
+def test_metadata_url_client_id_is_accepted_from_any_host(client, monkeypatch):
+    for cid in (CIMD, "https://chatgpt.com/oauth/client.json", "https://client.example.org/meta"):
+        _fake_cimd(monkeypatch, {"client_id": cid, "redirect_uris": ["http://localhost/callback"]})
+        r = client.post("/authorize", data={**_authorize_params(cid, "http://localhost:54907/callback"), "state": "xyz",
+                                            "response_type": "code", "username": "alice", "password": "s3cret"})
+        assert r.status_code == 302, cid
+        assert r.headers["location"].startswith("http://localhost:54907/callback?code=")
+    # not advertised: clients that register themselves keep doing so
     assert "client_id_metadata_document_supported" not in client.get("/.well-known/oauth-authorization-server").json()
-    r = client.post("/authorize", data={
-        "client_id": CIMD, "redirect_uri": "http://localhost:54907/callback", "state": "xyz",
-        "code_challenge": CHALLENGE, "code_challenge_method": "S256", "response_type": "code",
-        "username": "alice", "password": "s3cret"})
-    assert r.status_code == 302
-    assert r.headers["location"].startswith("http://localhost:54907/callback?code=")
 
 
-def test_client_metadata_document_must_match_and_come_from_claude(client, monkeypatch):
+def test_metadata_url_client_id_must_match_its_document(client, monkeypatch):
     _fake_cimd(monkeypatch, {"client_id": "https://claude.ai/other", "redirect_uris": ["http://localhost/callback"]})
-    bad_doc = client.get("/authorize", params={"client_id": CIMD, "redirect_uri": "http://localhost:1/callback",
-                                               "code_challenge": CHALLENGE, "code_challenge_method": "S256"})
-    assert bad_doc.status_code == 400 and "Unknown client" in bad_doc.text
-    elsewhere = client.get("/authorize", params={"client_id": "https://evil.example/meta", "redirect_uri": "http://localhost:1/callback",
-                                                 "code_challenge": CHALLENGE, "code_challenge_method": "S256"})
-    assert elsewhere.status_code == 400 and "Unknown client" in elsewhere.text
+    r = client.get("/authorize", params=_authorize_params(CIMD, "http://localhost:1/callback"))
+    assert r.status_code == 400 and "Unknown client" in r.text
+    _fake_cimd(monkeypatch, {"client_id": CIMD, "redirect_uris": ["https://elsewhere.example/cb"]})
+    r = client.get("/authorize", params=_authorize_params(CIMD, "https://attacker.example/cb"))
+    assert r.status_code == 400 and "not registered" in r.text
 
 
-def test_metadata_hosts_setting_replaces_default_and_advertises(client, monkeypatch):
-    other = "https://vscode.example/oauth/client.json"
-    _fake_cimd(monkeypatch, {"client_id": other, "redirect_uris": ["http://localhost/callback"]})
-    params = {"client_id": other, "redirect_uri": "http://localhost:1/callback",
-              "code_challenge": CHALLENGE, "code_challenge_method": "S256"}
-    assert client.get("/authorize", params=params).status_code == 400  # not approved yet
-    monkeypatch.setenv("MCP_CLIENT_METADATA_HOSTS", "vscode.example")
-    assert client.get("/authorize", params=params).status_code == 200
-    assert client.get("/.well-known/oauth-authorization-server").json()["client_id_metadata_document_supported"] is True
+def test_metadata_url_is_never_fetched_for_non_public_addresses_or_odd_urls(client, monkeypatch):
+    fetched = _fake_cimd(monkeypatch, {"client_id": CIMD, "redirect_uris": ["http://localhost/callback"]}, ip=None)
+    r = client.get("/authorize", params=_authorize_params(CIMD, "http://localhost:1/callback"))
+    assert r.status_code == 400 and not fetched  # resolves to a private/loopback/link-local address
+    fetched = _fake_cimd(monkeypatch, {"client_id": "x", "redirect_uris": []})
+    for bad in ("http://claude.ai/meta", "https://claude.ai:8443/meta", "https://user:pw@claude.ai/meta", "https://claude.ai/meta#frag", "ftp://x/y"):
+        r = client.get("/authorize", params=_authorize_params(bad, "http://localhost:1/callback"))
+        assert r.status_code == 400
+    assert not fetched
+
+
+def test_public_address_check():
+    from backend import mcp_oauth
+    for ip in ("127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1", "169.254.169.254", "100.64.0.1", "0.0.0.0",
+               "::1", "fe80::1", "fc00::1", "::ffff:10.0.0.1", "224.0.0.1"):
+        assert not mcp_oauth._is_public_ip(ip), ip
+    for ip in ("160.79.104.10", "8.8.8.8", "2606:4700:4700::1111"):
+        assert mcp_oauth._is_public_ip(ip), ip
 
 
 # ── Sign-in handoff from the Agentira web app (MCP_SSO_FRONTEND_URL) ────────
@@ -268,3 +287,27 @@ def test_sso_handoff_bad_token_falls_back_to_the_password_page(client, monkeypat
     assert r.status_code == 303
     assert parse_qs(urlparse(r.headers["location"]).query)["sso"] == ["0"]
     assert "code=" not in r.headers["location"]
+
+
+# ── OpenAI / ChatGPT ────────────────────────────────────────────────────────
+CHATGPT_REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect"
+CHATGPT_CIMD = "https://chatgpt.com/oauth/client.json"
+
+
+def test_chatgpt_registers_itself_and_signs_in_with_iss(client):
+    r = client.post("/register", json={"redirect_uris": [CHATGPT_REDIRECT], "client_name": "ChatGPT"})
+    assert r.status_code == 201
+    r = client.post("/authorize", data={
+        "client_id": r.json()["client_id"], "redirect_uri": CHATGPT_REDIRECT, "state": "xyz",
+        "code_challenge": CHALLENGE, "code_challenge_method": "S256", "response_type": "code",
+        "resource": "https://mcp.example.com/mcp", "username": "alice", "password": "s3cret"})
+    assert r.status_code == 302
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    assert r.headers["location"].startswith(CHATGPT_REDIRECT)
+    # RFC 9207: ChatGPT compares iss with the issuer in discovery, exactly
+    assert q["iss"] == [client.get("/.well-known/oauth-authorization-server").json()["issuer"]]
+    assert q["state"] == ["xyz"]
+
+
+def test_discovery_says_iss_is_returned(client):
+    assert client.get("/.well-known/oauth-authorization-server").json()["authorization_response_iss_parameter_supported"] is True

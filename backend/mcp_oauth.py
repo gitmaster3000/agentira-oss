@@ -15,10 +15,14 @@ Stateless: client ids, authorization codes and tokens are all signed JWTs
 Static API keys keep working unchanged.
 """
 
+import asyncio
 import base64
 import hashlib
 import html
+import ipaddress
+import json
 import os
+import socket
 import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -113,7 +117,7 @@ async def authorization_server_metadata(request: Request):
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": [SCOPE],
-        **({"client_id_metadata_document_supported": True} if _metadata_hosts_setting() else {}),
+        "authorization_response_iss_parameter_supported": True,
     })
 
 
@@ -144,47 +148,78 @@ async def register(request: Request):
 _FIELDS = ("client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "resource")
 
 
-# Client ID Metadata Documents: newer Claude clients send an https URL as client_id and publish
-# { client_id, redirect_uris } there instead of registering. Only approved hosts, no redirects, 64 KB cap.
-# MCP_CLIENT_METADATA_HOSTS (comma-separated) replaces the default Claude hosts and also makes discovery advertise the
-# feature; left unset, Claude's hosts are accepted but not advertised, so other clients keep registering as before.
-CLAUDE_HOSTS = {"claude.ai", "claude.com"}
-
-
-def _metadata_hosts_setting() -> set[str]:
-    return {h.strip().lower() for h in os.getenv("MCP_CLIENT_METADATA_HOSTS", "").split(",") if h.strip()}
+# Client ID Metadata Documents: clients such as Claude Code and ChatGPT may send an https URL as client_id and publish
+# { client_id, redirect_uris } there instead of registering. Any host is allowed, because the safety is in how the
+# document is fetched and in the redirect check, not in a host list: https on port 443 only, a public address only
+# (the address is resolved once, checked, and then connected to directly, so DNS tricks cannot reach internal hosts),
+# no redirects, 5 s, 64 KB, and the document's client_id must equal the URL. Discovery does not advertise this (clients
+# keep registering as before); it is accepted for clients that send it anyway.
 _cimd_cache: dict[str, tuple[float, dict | None]] = {}
 
 
-def _is_loopback(url: str) -> bool:
+def _is_public_ip(ip: str) -> bool:
+    addr = ipaddress.ip_address(ip)
+    addr = getattr(addr, "ipv4_mapped", None) or addr
+    return addr.is_global and not addr.is_multicast
+
+
+async def _public_ip(host: str) -> str | None:
+    """The address to connect to, or None when the name does not resolve or any answer is not public."""
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError:
+        return None
+    ips = sorted({info[4][0] for info in infos})
+    return ips[0] if ips and all(_is_public_ip(ip) for ip in ips) else None
+
+
+async def _fetch_metadata(url: str, ip: str) -> dict | None:
     u = urlparse(url)
-    return u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
+    target = f"https://{'[' + ip + ']' if ':' in ip else ip}{u.path or '/'}{'?' + u.query if u.query else ''}"
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=5) as http:
+            # Connect to the checked address; name it in the Host header and the TLS handshake so the certificate is still verified.
+            async with http.stream("GET", target, headers={"accept": "application/json", "host": u.netloc},
+                                   extensions={"sni_hostname": u.hostname}) as r:
+                if r.status_code != 200:
+                    return None
+                body = b""
+                async for chunk in r.aiter_bytes():
+                    body += chunk
+                    if len(body) > 65536:
+                        return None
+        doc = json.loads(body)
+        return doc if isinstance(doc, dict) else None
+    except (httpx.HTTPError, ValueError):
+        return None
 
 
 async def _client(client_id: str) -> dict | None:
-    """A client we registered (signed id), or a metadata document served by Claude."""
+    """A client we registered (signed id), or one described by a metadata document at its client_id URL."""
     signed = _verify(client_id, "mcp_client")
     if signed:
         return signed
-    if not client_id.startswith("https://") or urlparse(client_id).hostname not in (_metadata_hosts_setting() or CLAUDE_HOSTS):
+    u = urlparse(client_id)
+    if u.scheme != "https" or not u.hostname or u.username or u.password or u.fragment or u.port not in (None, 443):
         return None
     hit = _cimd_cache.get(client_id)
     if hit and hit[0] > time.time():
         return hit[1]
     client = None
-    try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=5) as http:
-            r = await http.get(client_id, headers={"accept": "application/json"})
-        doc = r.json() if r.status_code == 200 and len(r.content) <= 65536 else {}
-        uris = doc.get("redirect_uris")
-        if doc.get("client_id") == client_id and isinstance(uris, list):
-            client = {"redirect_uris": [u for u in uris if isinstance(u, str)], "loopback_any_port": True}
-    except (httpx.HTTPError, ValueError):
-        pass
+    ip = await _public_ip(u.hostname)
+    doc = await _fetch_metadata(client_id, ip) if ip else None
+    uris = doc.get("redirect_uris") if doc else None
+    if doc and doc.get("client_id") == client_id and isinstance(uris, list) and len(uris) <= 20:
+        client = {"redirect_uris": [r for r in uris if isinstance(r, str)], "loopback_any_port": True}
     _cimd_cache[client_id] = (time.time() + (3600 if client else 60), client)
     if len(_cimd_cache) > 100:
         _cimd_cache.clear()
     return client
+
+
+def _is_loopback(url: str) -> bool:
+    u = urlparse(url)
+    return u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")
 
 
 def _redirect_ok(client: dict, uri: str) -> bool:
@@ -280,6 +315,8 @@ def _redirect_with_code(form: dict, profile_id: str) -> RedirectResponse:
     query = {"code": code}
     if form.get("state"):
         query["state"] = form["state"]
+    if form.get("iss"):
+        query["iss"] = form["iss"]  # RFC 9207: must equal the issuer in discovery
     sep = "&" if "?" in form["redirect_uri"] else "?"
     return RedirectResponse(form["redirect_uri"] + sep + urlencode(query), status_code=302)
 
@@ -316,6 +353,7 @@ def _origin_of(url: str) -> str:
 
 async def authorize_sso(request: Request):
     form = dict(await request.form())
+    form["iss"] = issuer(request)
     frontend = _sso_frontend()
     # Origin must be the web app: blocks a third-party page posting someone else's token into the victim's browser.
     if not frontend or request.headers.get("origin") != _origin_of(frontend):
@@ -348,6 +386,7 @@ async def authorize(request: Request):
         return _login_page(params)
 
     form = dict(await request.form())
+    form["iss"] = issuer(request)
     error = await _validate_authorize(form)
     if error:
         return HTMLResponse(html.escape(error), status_code=400)

@@ -105,6 +105,25 @@ agentira runtime list
 
 ## Connect from Claude (custom connector)
 
-An admin opens the agent in Settings and clicks **Copy connector link**. In Claude, add a custom connector and paste that link (it looks like `https://<your-mcp-service>/mcp?as=<agent>`). Leave the client ID and secret empty. Claude opens an Agentira sign-in page; an admin signs in with their normal username or email and password and the connection acts as that agent. Without `?as=`, admins choose who the connection acts as; non-admins always act as themselves. No API key or header needed. Static API keys still work for IDEs and bots. Claude clients that identify themselves with a client metadata URL (for example Claude Code) are accepted too, if the URL is on claude.ai or claude.com. If you are already signed in to Agentira in the same browser, the sign-in page can be skipped (needs `MCP_SSO_FRONTEND_URL`, see Configuration); you go straight to choosing who the connection acts as.
+An admin opens the agent in Settings and clicks **Copy connector link**. In Claude, add a custom connector and paste that link (it looks like `https://<your-mcp-service>/mcp?as=<agent>`). Leave the client ID and secret empty. Claude opens an Agentira sign-in page; an admin signs in with their normal username or email and password and the connection acts as that agent. Without `?as=`, admins choose who the connection acts as; non-admins always act as themselves. No API key or header needed. Static API keys still work for IDEs and bots. Clients that identify themselves with a client metadata URL (for example Claude Code and ChatGPT) are accepted too; see [Clients that use a metadata URL](#clients-that-use-a-metadata-url). If you are already signed in to Agentira in the same browser, the sign-in page can be skipped (needs `MCP_SSO_FRONTEND_URL`, see Configuration); you go straight to choosing who the connection acts as.
 
 The MCP service must share `JWT_SECRET` with the backend. Tokens last one hour and renew automatically.
+
+## Connect from ChatGPT or the OpenAI API
+
+ChatGPT works with the same MCP address. In ChatGPT, add a custom MCP connector (Developer mode), paste the link (`https://<your-mcp-service>/mcp`, or the agent link from **Copy connector link**) and choose OAuth. ChatGPT registers itself, then opens the Agentira sign-in page; sign in and choose who the connection acts as, exactly as with Claude. Leave any client ID and secret empty.
+
+- ChatGPT registers itself like any other client; its return address and the `iss` value it checks on the sign-in response are handled. No setting is needed.
+- ChatGPT cannot use static API keys. For the OpenAI API (Responses API `mcp` tool) or the Agents SDK, pass an Agentira API key as the tool's `authorization` value instead of using OAuth.
+
+### Clients that use a metadata URL
+
+Some clients (Claude Code, ChatGPT) can use a web address as their client ID and publish their return addresses there, instead of registering. The MCP service accepts this from any host, with no list to maintain. Safeguards:
+
+- The address must be `https` on the standard port, with no user name, password or fragment.
+- The host must resolve only to public addresses. Loopback, private, link-local and other internal addresses are refused, and the service connects to the address it checked.
+- No redirects, a 5 second limit, and a 64 KB limit. The document's own `client_id` must equal the address.
+- The sign-in page only returns to an address listed in the document (a `localhost` return address may use any port, since native apps pick a free one).
+- Results are cached for an hour (a failure for a minute). Nothing is stored.
+
+This is accepted but not advertised in discovery, so clients that register themselves keep doing so exactly as before.
