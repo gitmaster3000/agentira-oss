@@ -37,14 +37,7 @@ backend/tests/test_work_snapshot.py::test_mcp_tool_returns_markdown_and_dict PAS
 ```
 
 ## Lint
-`uvx ruff check <changed files>`
-```
-    |
-note: This is an unsafe fix and may change runtime behavior
-
-Found 4 errors.
-[*] 3 fixable with `--fix` (1 unsafe fix available with `--fix --unsafe-fixes`).
-```
+`uvx ruff check <changed files> --output-format concise` → 3 F401 in `backend/forge/scheduler.py` (unused `datetime`, `timezone`, `ForgeRuntime` imports, pre-existing, left alone). New files clean.
 
 ## Not verified
 No isolated live stack was started; the scheduler job, notification rows and

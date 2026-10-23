@@ -180,7 +180,7 @@ def test_markdown_links_tasks():
 
 def test_allowed_project_ids_limits_scope_and_hides_health():
     pid, _ = _world()
-    other = core_services.create_project("Secret", actor="system")
+    core_services.create_project("Secret", actor="system")
     _runtime(heartbeat_ago_min=30)
     s = snap.build_work_snapshot(allowed_project_ids=[pid])
     assert [p["name"] for p in s["projects"]] == ["Acme"]
