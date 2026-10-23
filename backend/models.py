@@ -848,6 +848,28 @@ class TaskDependency(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
 
+class DaemonRefreshToken(Base):
+    """Long-lived, revocable device credential for a local daemon. Exchanged
+    for a fresh access JWT; every exchange rotates it. Only the SHA-256 hash
+    of the token is stored. See backend/daemon_auth.py."""
+    __tablename__ = "daemon_refresh_tokens"
+
+    id: Mapped[str] = mapped_column(String(12), primary_key=True, default=_new_id)
+    org_id: Mapped[str] = mapped_column(String(12), ForeignKey("orgs.id"), nullable=False, index=True)
+    profile_id: Mapped[str] = mapped_column(String(12), ForeignKey("profiles.id"), nullable=False, index=True)
+    # All tokens from one login share a family; reuse of a rotated token
+    # revokes the whole family.
+    family_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    device_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    daemon_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # rotated away
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ClientDebugSession(Base):
     """Debug-level browser telemetry switched on for one user for a while —
     by an admin, or automatically when info-level telemetry shows trouble.
