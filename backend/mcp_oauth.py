@@ -30,7 +30,7 @@ from starlette.routing import Route
 
 from backend import services
 from backend.db import privileged, set_current_org
-from backend.jwt_auth import JWT_ALGORITHM, JWT_SECRET
+from backend.jwt_auth import JWT_ALGORITHM, JWT_SECRET, decode_token
 
 ACCESS_TTL = 3600
 REFRESH_TTL = 30 * 24 * 3600
@@ -284,12 +284,67 @@ def _redirect_with_code(form: dict, profile_id: str) -> RedirectResponse:
     return RedirectResponse(form["redirect_uri"] + sep + urlencode(query), status_code=302)
 
 
+def _after_sign_in(form: dict, profile: dict):
+    """The signed-in user is known (password or web-app handoff): pick who the connection acts as."""
+    agents = _agent_identities(profile)
+
+    # Link copied from the admin menu pins the agent: `.../mcp?as=<agent>`.
+    wanted = _agent_name_from_resource(form.get("resource", ""))
+    if wanted:
+        agent = next((a for a in agents if a["name"] == wanted), None)
+        if not agent:
+            return _login_page(form, "Only an admin can connect as this agent.", status=403)
+        return _redirect_with_code(form, agent["id"])
+    if agents:
+        return _picker_page(form, profile, agents)
+    return _redirect_with_code(form, profile["id"])
+
+
+# ── Sign-in handoff from the Agentira web app ───────────────────────────────
+# A user already signed in to Agentira should not type a password again. With MCP_SSO_FRONTEND_URL set, the
+# authorize page sends them to <frontend>/mcp-connect, which form-POSTs their web login (a JWT) to /authorize/sso.
+# Unset, nothing changes. Any failure falls back to the password page (`sso=0`), so there is no loop.
+
+def _sso_frontend() -> str:
+    return os.getenv("MCP_SSO_FRONTEND_URL", "").strip().rstrip("/")
+
+
+def _origin_of(url: str) -> str:
+    u = urlparse(url)
+    return f"{u.scheme}://{u.netloc}"
+
+
+async def authorize_sso(request: Request):
+    form = dict(await request.form())
+    frontend = _sso_frontend()
+    # Origin must be the web app: blocks a third-party page posting someone else's token into the victim's browser.
+    if not frontend or request.headers.get("origin") != _origin_of(frontend):
+        return HTMLResponse("This sign-in must come from Agentira.", status_code=403)
+    error = await _validate_authorize(form)
+    if error:
+        return HTMLResponse(html.escape(error), status_code=400)
+    profile = None
+    try:
+        profile_id = decode_token(form.get("token", "")).get("profile_id")
+        profile = profile_id and _profile(profile_id)
+    except jwt.InvalidTokenError:
+        pass
+    if not profile:
+        fields = {k: form.get(k, "") for k in _FIELDS + ("response_type",)}
+        return RedirectResponse(f"{issuer(request)}/authorize?{urlencode({**fields, 'sso': '0'})}", status_code=303)
+    return _after_sign_in(form, profile)
+
+
+
 async def authorize(request: Request):
     if request.method == "GET":
         params = dict(request.query_params)
         error = await _validate_authorize(params)
         if error:
             return HTMLResponse(html.escape(error), status_code=400)
+        if _sso_frontend() and params.get("sso") != "0":
+            back = f"{issuer(request)}/authorize?{urlencode(params)}"
+            return RedirectResponse(f"{_sso_frontend()}/mcp-connect?{urlencode({'return': back})}", status_code=302)
         return _login_page(params)
 
     form = dict(await request.form())
@@ -311,18 +366,7 @@ async def authorize(request: Request):
     profile = services.authenticate_user(form.get("username", "").strip(), form.get("password", ""))
     if not profile:
         return _login_page(form, "Wrong username or password.", status=401)
-    agents = _agent_identities(profile)
-
-    # Link copied from the admin menu pins the agent: `.../mcp?as=<agent>`.
-    wanted = _agent_name_from_resource(form.get("resource", ""))
-    if wanted:
-        agent = next((a for a in agents if a["name"] == wanted), None)
-        if not agent:
-            return _login_page(form, "Only an admin can connect as this agent.", status=403)
-        return _redirect_with_code(form, agent["id"])
-    if agents:
-        return _picker_page(form, profile, agents)
-    return _redirect_with_code(form, profile["id"])
+    return _after_sign_in(form, profile)
 
 
 # ── Token endpoint ──────────────────────────────────────────────────────────
@@ -369,6 +413,7 @@ routes = [
     Route("/.well-known/oauth-protected-resource/mcp", protected_resource_metadata),
     Route("/.well-known/oauth-authorization-server", authorization_server_metadata),
     Route("/register", register, methods=["POST"]),
+    Route("/authorize/sso", authorize_sso, methods=["POST"]),
     Route("/authorize", authorize, methods=["GET", "POST"]),
     Route("/token", token, methods=["POST"]),
 ]

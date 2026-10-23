@@ -204,3 +204,67 @@ def test_metadata_hosts_setting_replaces_default_and_advertises(client, monkeypa
     monkeypatch.setenv("MCP_CLIENT_METADATA_HOSTS", "vscode.example")
     assert client.get("/authorize", params=params).status_code == 200
     assert client.get("/.well-known/oauth-authorization-server").json()["client_id_metadata_document_supported"] is True
+
+
+# ── Sign-in handoff from the Agentira web app (MCP_SSO_FRONTEND_URL) ────────
+WEB = "https://app.example.com"
+
+
+def _web_token(name):
+    from backend.jwt_auth import create_token
+    with privileged(), SessionLocal() as db:
+        row = db.query(Profile).filter(Profile.name == name).first()
+        return create_token(row.name, row.id, [r.name for r in row.roles], row.org_id)
+
+
+def _sso_fields(client_id, **extra):
+    return {"client_id": client_id, "redirect_uri": REDIRECT, "state": "xyz", "code_challenge": CHALLENGE,
+            "code_challenge_method": "S256", "response_type": "code", **extra}
+
+
+def test_authorize_sends_signed_in_users_through_the_web_app_when_configured(client, monkeypatch):
+    cid = _register(client)
+    monkeypatch.setenv("MCP_SSO_FRONTEND_URL", WEB + "/")
+    r = client.get("/authorize", params=_sso_fields(cid))
+    assert r.status_code == 302
+    dest = urlparse(r.headers["location"])
+    assert f"{dest.scheme}://{dest.netloc}{dest.path}" == WEB + "/mcp-connect"
+    back = urlparse(parse_qs(dest.query)["return"][0])
+    assert back.path == "/authorize" and parse_qs(back.query)["client_id"] == [cid]
+    # sso=0 (a failed handoff) and an unset setting both show the password page
+    assert client.get("/authorize", params=_sso_fields(cid, sso="0")).status_code == 200
+    monkeypatch.delenv("MCP_SSO_FRONTEND_URL")
+    assert client.get("/authorize", params=_sso_fields(cid)).status_code == 200
+
+
+def test_sso_handoff_skips_the_password(client, monkeypatch):
+    cid = _register(client)
+    monkeypatch.setenv("MCP_SSO_FRONTEND_URL", WEB)
+    r = client.post("/authorize/sso", data=_sso_fields(cid, token=_web_token("alice")), headers={"origin": WEB})
+    assert r.status_code == 302
+    assert _profile_of(client, r) == "alice"
+
+
+def test_sso_handoff_admin_gets_the_identity_picker(client, monkeypatch):
+    cid = _register(client)
+    monkeypatch.setenv("MCP_SSO_FRONTEND_URL", WEB)
+    r = client.post("/authorize/sso", data=_sso_fields(cid, token=_web_token("boss")), headers={"origin": WEB})
+    assert r.status_code == 200 and "bot1" in r.text
+
+
+def test_sso_handoff_rejects_wrong_origin_and_unconfigured(client, monkeypatch):
+    cid = _register(client)
+    data = _sso_fields(cid, token=_web_token("alice"))
+    assert client.post("/authorize/sso", data=data, headers={"origin": WEB}).status_code == 403  # not configured
+    monkeypatch.setenv("MCP_SSO_FRONTEND_URL", WEB)
+    assert client.post("/authorize/sso", data=data, headers={"origin": "https://evil.example"}).status_code == 403
+    assert client.post("/authorize/sso", data=data).status_code == 403  # no Origin header
+
+
+def test_sso_handoff_bad_token_falls_back_to_the_password_page(client, monkeypatch):
+    cid = _register(client)
+    monkeypatch.setenv("MCP_SSO_FRONTEND_URL", WEB)
+    r = client.post("/authorize/sso", data=_sso_fields(cid, token="not-a-jwt"), headers={"origin": WEB})
+    assert r.status_code == 303
+    assert parse_qs(urlparse(r.headers["location"]).query)["sso"] == ["0"]
+    assert "code=" not in r.headers["location"]
