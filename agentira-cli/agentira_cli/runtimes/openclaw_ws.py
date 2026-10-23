@@ -116,6 +116,7 @@ OC_ROLE_ASSISTANT = "assistant"
 OC_RPC_SESSIONS_SUBSCRIBE = "sessions.subscribe"
 OC_RPC_SESSIONS_MESSAGES_SUBSCRIBE = "sessions.messages.subscribe"
 OC_RPC_CHAT_SEND = "chat.send"
+OC_RPC_SESSIONS_PATCH = "sessions.patch"
 OC_RPC_CONNECT = "connect"
 
 # Internal daemon→backend event types (Agentira contract, not OpenClaw wire)
@@ -692,6 +693,40 @@ async def run_openclaw_ws(
                 )
                 ev_queue.put({"_fatal": run_error})
                 return
+            # chat.send has no model param; the Agentira agent's model goes in
+            # as a per-session override. Empty = keep OpenClaw's own setting.
+            if model:
+                ws.send(
+                    json.dumps(
+                        {
+                            "type": "req",
+                            "id": "p1",
+                            "method": OC_RPC_SESSIONS_PATCH,
+                            "params": {"key": turn_key, "model": model},
+                        }
+                    )
+                )
+                patch_err = ""
+                for _ in range(50):
+                    try:
+                        ack = json.loads(ws.recv())
+                    except Exception as exc:
+                        patch_err = f"OpenClaw stopped responding ({exc})"
+                        break
+                    if ack.get("id") != "p1":
+                        continue
+                    if not ack.get("ok", True):
+                        err = ack.get("error")
+                        if isinstance(err, dict):
+                            err = err.get("message")
+                        patch_err = (
+                            f"OpenClaw rejected model {model!r}: "
+                            f"{err or 'not available'}"
+                        )
+                    break
+                if patch_err:
+                    ev_queue.put({"_fatal": patch_err})
+                    return
             send_params: dict = {
                 "sessionKey": turn_key,
                 "message": body,
