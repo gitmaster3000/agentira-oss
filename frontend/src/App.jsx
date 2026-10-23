@@ -123,7 +123,6 @@ export default function App() {
                             <Route path="epics" element={<ProjectEpics />} />
                             <Route path="workflow" element={<Workflow />} />
                             <Route path="deploy" element={<Deploy />} />
-                            <Route path="mcp" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><McpServers /></Suspense>} />
                         <Route path="settings" element={<ProjectSettings />} />
                         </Route>
                         {/* Legacy flat board route — redirect to the new nested form. */}
@@ -155,6 +154,7 @@ export default function App() {
                         <Route path="runtimes" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><RuntimesDashboard /></Suspense>} />
                         <Route path="runs" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading runs…</div>}><RunsDashboard /></Suspense>} />
                         <Route path="runs/:runId" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading run…</div>}><RunDetail /></Suspense>} />
+                        <Route path="mcp" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><McpServers /></Suspense>} />
                         <Route path="settings" element={<Suspense fallback={<div style={{padding:16, textAlign:'center', color:'var(--text-secondary)'}}>Loading…</div>}><ForgeSettings /></Suspense>} />
                     </Route>
 
