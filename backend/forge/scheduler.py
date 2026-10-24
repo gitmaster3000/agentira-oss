@@ -19,6 +19,7 @@ from backend.db import SessionLocal
 from backend.forge import conductor as _conductor
 from backend.forge import concierge as _concierge
 from backend.forge import reconciler as _reconciler
+from backend.forge import snapshot as _snapshot
 from backend.forge import usage_limits as _usage_limits
 from backend.forge.models import Agent, ForgeRuntime, Run, RunStatus
 
@@ -140,6 +141,23 @@ class ForgeScheduler:
             )
             logger.info("Conductor daily report scheduled at %02d:%02d UTC.",
                         hh, mm)
+
+        # Night snapshot — token-free work/blocker summary every N hours.
+        try:
+            self._scheduler.remove_job("conductor_snapshot")
+        except Exception:
+            pass
+        snap_h = int(cfg.get("snapshot_interval_hours") or 0)
+        if snap_h > 0:
+            self._scheduler.add_job(
+                _snapshot.run_snapshot_job,
+                trigger=IntervalTrigger(hours=snap_h),
+                id="conductor_snapshot",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info("Conductor snapshot scheduled every %dh.", snap_h)
 
         # Planning turn — the LLM assigns the unassigned todo backlog,
         # every conductor_plan_interval_minutes. Self-skips (token-free)

@@ -107,12 +107,7 @@ export function ConductorPage() {
         try {
             const d = await api.forge.getConductor();
             setData(d);
-            setForm((prev) => prev || {
-                conductor_tick_seconds: d.config?.tick_seconds ?? 60,
-                conductor_plan_interval_minutes: d.config?.plan_interval_minutes ?? 10,
-                conductor_report_time: d.config?.report_time || '09:00',
-                conductor_report_enabled: d.config?.report_enabled ?? true,
-            });
+            setForm((prev) => prev || cadenceFormFromConfig(d.config));
             if (d.conductor?.id) {
                 api.forge.listMessages(d.conductor.id, {
                     limit: 40, scope_key: 'chat:default',
@@ -275,6 +270,11 @@ export function ConductorPage() {
                             value={form.conductor_report_time}
                             onChange={(e) => setForm({ ...form, conductor_report_time: e.target.value })} />
                     </Field>
+                    <Field label="Work snapshot every (hours)" hint="0 = off. Posts a short summary only when something happened or needs you — token-free.">
+                        <input type="number" min="0" className="input"
+                            value={form.conductor_snapshot_interval_hours}
+                            onChange={(e) => setForm({ ...form, conductor_snapshot_interval_hours: Number(e.target.value) })} />
+                    </Field>
                     <label className="flex items-end gap-2 text-sm text-text-secondary cursor-pointer pb-2">
                         <input type="checkbox" checked={form.conductor_report_enabled}
                             onChange={(e) => setForm({ ...form, conductor_report_enabled: e.target.checked })} />
@@ -424,6 +424,16 @@ function tickSummary(t) {
     if (r) s += `, ${r} reconciled`;
     return s;
 }
+export function cadenceFormFromConfig(config) {
+    return {
+        conductor_tick_seconds: config?.tick_seconds ?? 60,
+        conductor_plan_interval_minutes: config?.plan_interval_minutes ?? 10,
+        conductor_report_time: config?.report_time || '09:00',
+        conductor_report_enabled: config?.report_enabled ?? true,
+        conductor_snapshot_interval_hours: config?.snapshot_interval_hours ?? 0,
+    };
+}
+
 export function planSummary(p) {
     if (!p) return 'not run yet';
     if (p.skipped) return `skipped — ${p.skipped}`;

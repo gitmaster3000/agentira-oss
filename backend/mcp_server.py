@@ -973,6 +973,29 @@ async def register_run_artifact(
 # ── AP-107: Run-investigation tools (read-only, prod-safe) ─────────────────────
 
 @mcp.tool()
+async def get_work_snapshot(since_hours: float = 8, project_id: str = None,
+                            ctx: Context = None) -> dict:
+    """Short, token-free snapshot of recent work and blockers: tasks finished
+    or ready for review, agent run outcomes, what is running now, and what is
+    stuck (unanswered questions, spent retries, offline agents).
+
+    Returns {markdown, snapshot}. RBAC: only projects you belong to (or all
+    with project.view_all); machine health is shown only to read-all callers.
+    """
+    from backend import auth
+    from backend.forge import snapshot as work_snapshot
+    actor = actor_ctx.get()
+    with services._session() as db:
+        if project_id:
+            auth.require_project_access(db, actor, project_id)
+        allowed = auth.project_ids_for_actor(db, actor)
+    snap = work_snapshot.build_work_snapshot(
+        since_hours=since_hours, project_id=project_id,
+        allowed_project_ids=allowed)
+    return {"markdown": snap["markdown"], "snapshot": snap}
+
+
+@mcp.tool()
 async def get_run(run_id: str, ctx: Context = None) -> dict:
     """Look up a specific Forge run by id.
 

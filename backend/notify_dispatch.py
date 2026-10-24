@@ -81,6 +81,26 @@ def notify_created(db, *, event_name: str, project_id: str, project_name: str,
                 jobs.append(("push", s, payload))
 
 
+def notify_admins(db, *, event_name: str, title: str, body: str, link: str) -> int:
+    """One in-app notification per workspace admin, plus a phone push to the
+    admins who registered one. Rows are staged now; push goes out after `db`
+    commits. Returns how many admins were notified."""
+    admins = repo.admin_profiles(db)
+    if not admins:
+        return 0
+    subs = repo.subscriptions_for(db, [a.id for a in admins])
+    jobs = db.info.setdefault("notify_jobs", [])
+    payload = json.dumps({"title": title, "body": body, "url": f"/studio{link}"})
+    for a in admins:
+        db.add(Notification(org_id=a.org_id, profile_id=a.id, type=event_name,
+                            title=title[:255], link=link[:255],
+                            meta=json.dumps({"summary": body})))
+        jobs.append(("wake", a.id, None))
+        for s in subs.get(a.id, []):
+            jobs.append(("push", s, payload))
+    return len(admins)
+
+
 def _spawn(fn) -> None:
     threading.Thread(target=fn, daemon=True).start()
 

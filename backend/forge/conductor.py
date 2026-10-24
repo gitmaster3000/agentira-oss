@@ -195,6 +195,7 @@ def get_conductor_config() -> dict:
             return {"active": True, "tick_seconds": TICK_INTERVAL_S,
                     "report_time": "09:00", "report_enabled": True,
                     "plan_interval_minutes": 10,
+                    "snapshot_interval_hours": 0,
                     "sprint_time": "07:45", "sprint_min_interval_hours": 4,
                     "redispatch_cooldown_minutes": REDISPATCH_COOLDOWN_MINUTES,
                     "redispatch_max_attempts": REDISPATCH_MAX_ATTEMPTS}
@@ -212,6 +213,7 @@ def get_conductor_config() -> dict:
                 "report_time": prof.conductor_report_time or "09:00",
                 "report_enabled": bool(prof.conductor_report_enabled),
                 "plan_interval_minutes": plan,
+                "snapshot_interval_hours": max(0, int(prof.conductor_snapshot_interval_hours or 0)),
                 "sprint_time": prof.conductor_sprint_time or "07:45",
                 "sprint_min_interval_hours": sprint_interval,
                 "redispatch_cooldown_minutes": cooldown,
@@ -685,6 +687,11 @@ _LAST_REPORT: dict | None = None
 
 def get_last_report() -> dict | None:
     return _LAST_REPORT
+
+
+def get_last_snapshot() -> dict | None:
+    from backend.forge import snapshot
+    return snapshot.get_last_snapshot()
 
 
 def gather_report_facts() -> dict:
