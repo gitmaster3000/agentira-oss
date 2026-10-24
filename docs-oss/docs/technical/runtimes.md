@@ -70,6 +70,10 @@ Runtimes solve continuity differently. The Claude CLI resumes by session identif
 
 What makes this work is the stable working directory per agent and task. The worktree inside is recreated per run, but the directory the runtime keys off persists.
 
+## OpenClaw model selection
+
+The model set on an Agentira agent (for example `openrouter/moonshotai/kimi-k2.7-code`) applies to every OpenClaw turn. Before each message the adapter sends the gateway a `sessions.patch` with that model for the turn's session, so changing the model in Agentira takes effect on the next turn with no gateway restart. The message call itself (`chat.send`) has no model field, which is why the override is a separate step. The patch needs only the `operator.write` scope the daemon already holds. If the agent has no model set, nothing is sent and OpenClaw keeps the model it was created with. If OpenClaw rejects the model (for example it is not installed), the run fails with a message naming that model instead of silently running on another.
+
 ## Configuration
 
 Adapters read paths and model lists from the environment:
