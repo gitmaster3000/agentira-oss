@@ -125,7 +125,7 @@ export function EpicPage() {
             {/* AP-183: editing happens inline on the page (not a popup). The Edit
                 button swaps the title + description into editable fields with a
                 color picker, plus Save / Cancel actions. */}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
                 <span
                     className="w-3 h-3 rounded-full flex-shrink-0"
                     style={{ backgroundColor: (editing ? form.color : epic.color) || '#7c4dff' }}
@@ -140,7 +140,7 @@ export function EpicPage() {
                         placeholder="Epic title"
                     />
                 ) : (
-                    <h1 className="text-2xl font-bold text-text-primary truncate flex-1 min-w-0">{epic.title}</h1>
+                    <h1 className="text-2xl font-bold text-text-primary truncate flex-1 min-w-[10rem]">{epic.title}</h1>
                 )}
 
                 {/* Loop v1: which epics the current sprint works on. The

@@ -164,7 +164,10 @@ export function AppTopbar({ isBuild = false, onNewProject, onMenu }) {
 
                 {/* Bell */}
                 <div style={{ position: 'relative' }} ref={bellRef}>
-                    <div className="hovertint" onClick={() => setBellOpen((o) => !o)} style={{ position: 'relative', padding: '7px', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '9px' }}>
+                    <div className="hovertint" role="button" tabIndex={0} aria-label="Notifications" aria-expanded={bellOpen}
+                        onClick={() => setBellOpen((o) => !o)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setBellOpen((o) => !o); } }}
+                        style={{ position: 'relative', padding: '7px', color: 'var(--text-tertiary)', cursor: 'pointer', borderRadius: '9px' }}>
                         <svg className="ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
                         {unread > 0 && <span style={{ position: 'absolute', top: '4px', right: '4px', width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444', border: '2px solid var(--canvas-base)' }} />}
                     </div>

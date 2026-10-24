@@ -66,6 +66,45 @@ cd frontend && npm ci && npx vite build
 
 `tests/` at the repository root is legacy and folds into `backend/tests/` over time.
 
+## End-to-end browser tests
+
+Real-browser tests (Playwright, in `frontend/e2e/`) sign in through the login page and click through the main screens: workspace, projects, tasks (create, edit, comment, move), epics, roadmap, the Build area, notifications, the dark/light toggle, and the phone-width layout. They run on every pull request that touches `frontend/` or `backend/`.
+
+They need a running copy of Agentira with a known test user. The compose file `docker-compose.e2e.yml` builds one that is isolated from your dev stack: its own project name, its own throwaway database, and one published port (`3211` by default).
+
+```bash
+# 1. Start an isolated stack (builds from your working tree)
+docker compose -p ap-e2e -f docker-compose.e2e.yml up -d --build --wait
+
+# 2. Create the test user (e2e-admin, throwaway password)
+docker compose -p ap-e2e -f docker-compose.e2e.yml exec -T backend python scripts/seed_e2e_user.py
+
+# 3. Run the tests (first time only: npx playwright install chromium)
+cd frontend && npm ci
+E2E_BASE_URL=http://localhost:3211 npm run e2e
+
+# 4. Tear down, including the database
+docker compose -p ap-e2e -f docker-compose.e2e.yml down -v
+```
+
+`E2E_BASE_URL` defaults to `http://localhost:3111`. Change the published port with `E2E_WEB_PORT`. Open the last report with `npx playwright show-report`; a trace is recorded for any test that needed a retry.
+
+Two Playwright projects run every spec except `mobile.spec.js`: `desktop` (1440×900) and `mobile` (375×812). `mobile.spec.js` runs on `mobile` only and checks the board and task page do not scroll sideways.
+
+Writing specs:
+
+- Each spec creates its own data with a unique name (`uniqueName()` in `e2e/helpers.js`), so specs can run in parallel and in any order.
+- Find elements the way a person would: `getByRole`, `getByLabel`, `getByText`. Add a `data-testid` only where there is no accessible handle, and prefer giving the element a proper name (as the notifications bell now has).
+- The global setup signs in once and shares the session; the test user is created by `backend/e2e_seed.py` through the normal invite path, in its own organisation.
+
+### How CI runs it
+
+`.github/workflows/e2e.yml` runs on pull requests to `main` and on manual dispatch. It does the same four steps as above on a GitHub-hosted runner, with the compose project named after the run so concurrent runs never share anything. It uses no secrets, so pull requests from forks run too.
+
+If a run fails, the workflow uploads `playwright-report/` and `test-results/` (screenshots, traces) as the `playwright-report` artifact and prints the stack logs. Open a trace with `npx playwright show-trace <trace.zip>`.
+
+The stack is compose with the production web image rather than `vite dev`/`vite preview` on the runner. Both Node servers close idle connections after five seconds, which makes Chrome intermittently fail a request ("Failed to fetch") and flakes the suite; nginx does not.
+
 ## Do not weaken assertions
 
 If a test fails, fix the code. Loosening an assertion to get a green run converts a caught bug into a shipped one.
